@@ -135,7 +135,7 @@ export default function ProjectNew() {
 
             setIsSubmitting(false);
             alert(`Proyek ${newId} berhasil diajukan!`);
-            navigate('/projects');
+            navigate('/track');
         }, 1000);
     };
 
@@ -289,12 +289,12 @@ export default function ProjectNew() {
                                                 className="sr-only peer"
                                             />
                                             <div className={`text-center py-2.5 rounded-lg border transition-all text-xs font-bold ${formData.priority === p
-                                                    ? p === 'Urgent'
-                                                        ? 'bg-red-600 text-white border-red-600'
-                                                        : p === 'Medium'
-                                                            ? 'bg-[#1A56DB] text-white border-[#1A56DB]'
-                                                            : 'bg-gray-200 text-gray-700 border-gray-300'
-                                                    : 'border-gray-200 text-gray-600 hover:bg-gray-50'
+                                                ? p === 'Urgent'
+                                                    ? 'bg-red-600 text-white border-red-600'
+                                                    : p === 'Medium'
+                                                        ? 'bg-[#1A56DB] text-white border-[#1A56DB]'
+                                                        : 'bg-gray-200 text-gray-700 border-gray-300'
+                                                : 'border-gray-200 text-gray-600 hover:bg-gray-50'
                                                 }`}>
                                                 {p}
                                             </div>

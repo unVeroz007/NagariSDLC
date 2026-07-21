@@ -661,5 +661,251 @@ export const taskProjects = [
     },
 ];
 
+export const qaQueue = [
+    {
+        id: 'QA-REQ-2026-0842',
+        projectId: 'PRJ-2026-089',
+        projectName: 'Aplikasi LOS Baru',
+        pm: 'Budi Santoso',
+        submittedAt: '2026-07-19T09:00:00',
+        status: 'Menunggu Disposisi',
+        priority: 'High',
+        stagingUrl: 'https://staging-los.banknagari.co.id',
+        documents: [
+            { name: 'BRD_LOS_v1.2.pdf', size: '2.4 MB', type: 'pdf' },
+            { name: 'FSD_LOS_Final.docx', size: '1.8 MB', type: 'docx' },
+            { name: 'SIT_Report_LOS.xlsx', size: '500 KB', type: 'xlsx' },
+        ],
+        assignedTo: null,
+        targetDate: null,
+        notes: '',
+    },
+    {
+        id: 'QA-REQ-2026-0841',
+        projectId: 'PRJ-2026-088',
+        projectName: 'Integrasi QRIS Mobile',
+        pm: 'Dian Sastro',
+        submittedAt: '2026-07-18T14:30:00',
+        status: 'Menunggu Disposisi',
+        priority: 'Medium',
+        stagingUrl: 'https://staging-qris.banknagari.co.id',
+        documents: [
+            { name: 'BRD_QRIS_v1.0.pdf', size: '1.8 MB', type: 'pdf' },
+            { name: 'FSD_QRIS.docx', size: '2.1 MB', type: 'docx' },
+        ],
+        assignedTo: null,
+        targetDate: null,
+        notes: '',
+    },
+];
+
+// Data dummy untuk tugas QA (My Tasks)
+export const myQaTasks = [
+    {
+        id: 'QA-REQ-2026-0842',
+        projectId: 'PRJ-2026-089',
+        projectName: 'Aplikasi LOS Baru',
+        pm: 'Budi Santoso',
+        assignedBy: 'Anita Rahman',
+        assignedAt: '2026-07-20T10:00:00',
+        targetDate: '2026-07-30',
+        status: 'In Progress',
+        priority: 'High',
+        stagingUrl: 'https://staging-los.banknagari.co.id',
+        documents: [
+            { name: 'BRD_LOS_v1.2.pdf', size: '2.4 MB', type: 'pdf' },
+            { name: 'FSD_LOS_Final.docx', size: '1.8 MB', type: 'docx' },
+            { name: 'SIT_Report_LOS.xlsx', size: '500 KB', type: 'xlsx' },
+        ],
+        instruction: 'Tolong fokus pada stress testing di modul kalkulasi bunga. Pastikan skenario edge-case suku bunga floating tervalidasi dengan data mock terbaru.',
+        qaResult: null,
+        qaNotes: '',
+        attachment: null,
+    },
+    {
+        id: 'QA-REQ-2026-0840',
+        projectId: 'PRJ-2026-087',
+        projectName: 'Modul CRM Retail',
+        pm: 'Fajar H',
+        assignedBy: 'Anita Rahman',
+        assignedAt: '2026-07-18T09:00:00',
+        targetDate: '2026-07-28',
+        status: 'Draft',
+        priority: 'Medium',
+        stagingUrl: 'https://staging-crm.banknagari.co.id',
+        documents: [
+            { name: 'BRD_CRM_v1.0.pdf', size: '1.2 MB', type: 'pdf' },
+        ],
+        instruction: '',
+        qaResult: null,
+        qaNotes: '',
+        attachment: null,
+    },
+];
+
+// Data dummy untuk QA testers (anggota tim)
+export const qaTesters = [
+    { id: 1, name: 'Dimas Anggara', initial: 'DA' },
+    { id: 2, name: 'Siti Rahmawati', initial: 'SR' },
+    { id: 3, name: 'Fajar Setiawan', initial: 'FS' },
+];
+
+export const cyberQueue = [
+    {
+        id: 'CYB-REQ-2026-0312',
+        projectName: 'Aplikasi Loan Origination System (LOS)',
+        requester: 'Anita Rahman',
+        submittedAt: '2 jam lalu',
+        status: 'Menunggu Audit',
+        priority: 'High',
+        description: 'Pengajuan audit keamanan untuk sistem LOS baru sebelum masuk fase UAT dan rilis ke production. Sistem ini menangani data PII nasabah.',
+        stagingUrl: 'https://staging-los.banknagari.co.id',
+        documents: [
+            { name: 'BRD_Final.pdf', size: '2.4 MB', type: 'Requirements' },
+            { name: 'FSD_v2.docx', size: '1.8 MB', type: 'System Design' },
+            { name: 'QA_SignOff_Report.pdf', size: '450 KB', type: 'Passed' },
+        ],
+    },
+    {
+        id: 'CYB-REQ-2026-0310',
+        projectName: 'Update Core Banking API',
+        requester: 'Budi Santoso',
+        submittedAt: '5 jam lalu',
+        status: 'In Progress',
+        priority: 'Medium',
+        description: 'Audit keamanan pada API Core Banking yang baru di-upgrade.',
+        stagingUrl: 'https://staging-core.banknagari.co.id',
+        documents: [
+            { name: 'BRD_Core_v2.pdf', size: '3.1 MB', type: 'Requirements' },
+            { name: 'API_Specs.docx', size: '2.2 MB', type: 'Technical' },
+        ],
+    },
+    {
+        id: 'CYB-REQ-2026-0308',
+        projectName: 'Mobile Banking v4.0',
+        requester: 'Dewi Lestari',
+        submittedAt: '1 hari lalu',
+        status: 'Menunggu Audit',
+        priority: 'High',
+        description: 'Audit keamanan mobile app dan backend API.',
+        stagingUrl: 'https://staging-mobile.banknagari.co.id',
+        documents: [
+            { name: 'BRD_Mobile_v4.pdf', size: '2.8 MB', type: 'Requirements' },
+            { name: 'FSD_Mobile_v4.docx', size: '2.5 MB', type: 'System Design' },
+        ],
+    },
+];
+
+// Data dummy untuk tugas Cyber (Tugas Siber Saya)
+export const cyberTasks = [
+    {
+        id: 'CYB-REQ-2026-0312',
+        projectName: 'Aplikasi Loan Origination System (LOS)',
+        status: 'In Progress',
+        deadline: 'Jumat, 17:00',
+        leadNote: 'Lakukan metode Blackbox testing. Fokus audit pada API Gateway dan validasi otentikasi JWT.',
+        stagingUrl: 'https://staging-los.banknagari.co.id',
+        documents: [
+            { name: 'BRD & FSD Bundle', size: '12.4 MB', type: 'Verified' },
+            { name: 'QA Sign-Off Report', size: '2.1 MB', type: 'QA Passed' },
+            { name: 'Arsitektur & Topologi', size: '4.5 MB', type: 'Draft' },
+        ],
+        hasReport: true,
+        reportName: 'Pentest_Report_LOS_Final.pdf',
+        reportSize: '3.2 MB',
+    },
+];
+
+// Data dummy untuk pentester
+export const pentesters = [
+    { id: 1, name: 'Rizal Pratama', role: 'Senior Pentester' },
+    { id: 2, name: 'Sari Indah', role: 'Security Analyst' },
+    { id: 3, name: 'Budi Santoso', role: 'Junior Pentester' },
+];
+
+// Data dummy untuk Quality Gate
+export const qualityGateQueue = [
+    {
+        id: 'REL-REQ-2026-0015',
+        projectName: 'Aplikasi LOS Baru',
+        requester: 'Divisi Kredit Consumer',
+        schedule: '15 Juli 2026, 23:00 WIB',
+        downtime: '120 Menit',
+        pm: 'Budi Santoso',
+        status: 'Menunggu Approval',
+        priority: 'Mayor Release',
+        documents: [
+            { name: 'Dokumen BRD & FSD', status: 'Lengkap', verified: true },
+            { name: 'Laporan QA & UAT', status: 'Lulus QA', verified: true },
+            { name: 'Security Pentest', status: 'Aman', verified: true },
+            { name: 'Kesiapan Infrastruktur', status: 'Siap', verified: true },
+        ],
+        rollbackPlan: 'Restore database dari backup snapshot terakhir (15/07) dan revert branch ke versi v1.4 pada server Load Balancer.',
+    },
+    {
+        id: 'REL-REQ-2026-0012',
+        projectName: 'Update Core Banking API',
+        requester: 'Divisi TI',
+        schedule: 'TBD',
+        downtime: '60 Menit',
+        pm: 'Dewi Lestari',
+        status: 'Draft',
+        priority: 'Patch Release',
+        documents: [
+            { name: 'Dokumen BRD & FSD', status: 'Lengkap', verified: true },
+            { name: 'Laporan QA & UAT', status: 'Lulus QA', verified: true },
+            { name: 'Security Pentest', status: 'Aman', verified: true },
+            { name: 'Kesiapan Infrastruktur', status: 'Siap', verified: true },
+        ],
+        rollbackPlan: 'Rollback ke versi sebelumnya melalui CI/CD pipeline.',
+    },
+];
+
+// Data dummy untuk Manajemen User
+export const users = [
+    { id: 'USR-001', name: 'Budi Santoso', email: 'budi.santoso@banknagari.co.id', role: 'Project Manager', department: 'Divisi TI', status: 'Aktif', initial: 'BS', avatarBg: 'bg-tertiary-container/20' },
+    { id: 'USR-002', name: 'Citra Kirana', email: 'citra.kirana@banknagari.co.id', role: 'System Analyst', department: 'Divisi TI', status: 'Aktif', initial: 'CK', avatarBg: 'bg-secondary-container/20' },
+    { id: 'USR-003', name: 'Dimas Anggara', email: 'dimas.anggara@banknagari.co.id', role: 'QA Tester', department: 'Divisi TI', status: 'Aktif', initial: 'DA', avatarBg: 'bg-error-container/20' },
+    { id: 'USR-004', name: 'Rizal Pratama', email: 'rizal.pratama@banknagari.co.id', role: 'Pentester', department: 'Divisi Kepatuhan', status: 'Aktif', initial: 'RP', avatarBg: 'bg-primary-container/20' },
+    { id: 'USR-005', name: 'Siti Rahmawati', email: 'siti.rahmawati@banknagari.co.id', role: 'QA Automation', department: 'Divisi TI', status: 'Non-Aktif', initial: 'SR', avatarBg: 'bg-surface-variant' },
+];
+
+// Data dummy untuk Audit Trail
+export const auditLogs = [
+    { id: 1, time: '12 Okt 2023, 14:30', user: 'Hendra Setiawan', action: 'Approve Go-Live', project: 'Aplikasi LOS Baru', ip: '192.168.1.50', status: 'Success', statusColor: 'bg-emerald-100 text-emerald-700 border-emerald-200' },
+    { id: 2, time: '12 Okt 2023, 13:15', user: 'Rizal Pratama', action: 'Upload Pentest Report', project: 'Aplikasi LOS Baru', ip: '192.168.1.12', status: 'Info', statusColor: 'bg-blue-100 text-blue-700 border-blue-200' },
+    { id: 3, time: '12 Okt 2023, 11:45', user: 'Citra Kirana', action: 'Reject Deployment', project: 'Dashboard HRIS', ip: '192.168.1.22', status: 'Warning', statusColor: 'bg-red-100 text-red-700 border-red-200' },
+    { id: 4, time: '12 Okt 2023, 10:20', user: 'Budi Santoso', action: 'Update Kanban Task', project: 'Aplikasi LOS Baru', ip: '192.168.1.45', status: 'Success', statusColor: 'bg-emerald-100 text-emerald-700 border-emerald-200' },
+    { id: 5, time: '12 Okt 2023, 09:00', user: 'Sistem', action: 'Auto-Lock Column', project: 'Aplikasi LOS Baru', ip: 'System', status: 'System', statusColor: 'bg-purple-100 text-purple-700 border-purple-200' },
+    { id: 6, time: '12 Okt 2023, 08:15', user: 'Ahmad Fauzi', action: 'User Login', project: 'Dashboard Utama', ip: '192.168.1.1', status: 'Success', statusColor: 'bg-emerald-100 text-emerald-700 border-emerald-200' },
+];
+
+// Data dummy untuk Analitik SDLC
+export const analyticsData = {
+    avgCycleTime: { value: 32, change: -5, unit: 'Hari' },
+    successRate: { value: 94.5, change: 2, unit: '%' },
+    bugDensity: { value: 0.4, unit: '/ modul' },
+    velocity: { value: 85, unit: '%' },
+    divisions: [
+        { name: 'Kredit', value: 24, percentage: 80 },
+        { name: 'Teknologi Informasi', value: 18, percentage: 60 },
+        { name: 'Dana & Jasa', value: 12, percentage: 40 },
+        { name: 'SDM', value: 8, percentage: 25 },
+    ],
+    delays: [
+        { rank: 1, reason: 'Development (Coding)', percentage: 45 },
+        { rank: 2, reason: 'QA Testing (Bug Fixes)', percentage: 30 },
+        { rank: 3, reason: 'Audit Cyber Security', percentage: 15 },
+        { rank: 4, reason: 'UAT User', percentage: 10 },
+    ],
+    releaseTrend: [
+        { month: 'Jan', value: 4 },
+        { month: 'Feb', value: 6 },
+        { month: 'Mar', value: 10 },
+        { month: 'Apr', value: 8 },
+        { month: 'Mei', value: 15 },
+        { month: 'Jun', value: 18 },
+    ],
+};
 
 export default mockProjects;

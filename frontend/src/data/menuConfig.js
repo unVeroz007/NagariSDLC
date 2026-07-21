@@ -11,9 +11,10 @@ export const menuSections = {
         {
             label: 'Fase 1 (Inisiasi & Review)',
             items: [
-                { label: 'Inisiasi Proyek Baru', path: '/projects/new', icon: 'PlusCircle' }, // ← ubah dari /newProject
-                { label: 'Disposisi Analis', path: '/workspace/lead', icon: 'UserCheck' },
-                { label: 'Antrean Review', path: '/workspace/analyst', icon: 'Clock' },
+                { label: 'Inisiasi Proyek Baru', path: '/projects/new', icon: 'PlusCircle' },
+                { label: 'Antrean Review', path: '/queue', icon: 'Clock' },
+                { label: 'Workspace Lead', path: '/workspace/lead', icon: 'UserCheck' },
+                { label: 'Workspace Analyst', path: '/workspace/analyst', icon: 'FileText' },
             ],
         },
         {
@@ -64,7 +65,7 @@ export const menuSections = {
         {
             label: 'Fase 1 (Inisiasi & Review)',
             items: [
-                { label: 'Disposisi Analis', path: '/workspace/lead', icon: 'UserCheck' },
+                { label: 'Workspace Lead', path: '/workspace/lead', icon: 'UserCheck' },
                 { label: 'Antrean Review', path: '/queue', icon: 'Clock' },
             ],
         },

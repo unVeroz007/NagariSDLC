@@ -235,15 +235,9 @@ export default function MainLayout() {
                         <div className="w-px h-6 bg-gray-200" />
 
                         {/* Avatar */}
-                        <div className="flex items-center gap-2.5 cursor-pointer group">
-                            <div className="w-9 h-9 rounded-full bg-gradient-to-br from-[#D4A017] to-[#b8861a] text-[#001838] flex items-center justify-center font-bold text-sm shadow-sm group-hover:shadow-md transition-shadow">
-                                {user?.name?.charAt(0) || 'U'}
-                            </div>
-                            <div className="hidden lg:block">
-                                <div className="text-sm font-semibold text-gray-800 leading-tight">{user?.name}</div>
-                                <div className="text-[11px] text-gray-400 capitalize">{user?.role?.replace(/_/g, ' ')}</div>
-                            </div>
-                        </div>
+                        <NavLink to="/profile" className="w-9 h-9 rounded-full bg-[#D4A017] text-[#001838] flex items-center justify-center font-bold text-sm cursor-pointer hover:ring-2 hover:ring-blue-500/30 transition-all">
+                            {user?.name?.charAt(0) || 'U'}
+                        </NavLink>
                     </div>
                 </header>
 
