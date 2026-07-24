@@ -380,7 +380,7 @@ export default function Settings() {
     ];
 
     return (
-        <div className="flex-1 overflow-y-auto p-6 md:p-8 bg-[#f8f9fb]">
+        <div className="flex-1 overflow-y-auto px-6 py-4 md:px-8 md:py-5 bg-[#f8f9fb]">
             <div className="max-w-6xl mx-auto space-y-6">
                 {/* Page Header */}
                 <div className="mb-6">

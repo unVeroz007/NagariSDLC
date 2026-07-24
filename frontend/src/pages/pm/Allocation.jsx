@@ -1,4 +1,6 @@
+import RBBBadge from '../../components/RBBBadge';
 import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import {
     Users,
@@ -23,11 +25,25 @@ import {
     Archive,
     ArrowRight,
 } from 'lucide-react';
-import { allocationProjects, pmCandidates, teamMembers } from '../../data/mockData';
+import { pmCandidates, teamMembers } from '../../data/mockData';
+import { useProjects } from '../../contexts/ProjectContext';
+import { useNotifications } from '../../contexts/NotificationContext';
+import LoadingSpinner from '../../components/LoadingSpinner';
+import EmptyState from '../../components/EmptyState';
+import toast from 'react-hot-toast';
 
 export default function Allocation() {
     const { user } = useAuth();
-    const [selectedProject, setSelectedProject] = useState(allocationProjects[0]);
+    const navigate = useNavigate();
+    const { addNotification } = useNotifications();
+    const { projects, updateProject, isLoading } = useProjects();
+    // Filter projects from context
+    const allocationProjects = projects.filter(p => p.status === 'IN_DEVELOPMENT');
+    const [selectedProject, setSelectedProject] = useState(null);
+
+    if (!selectedProject && allocationProjects.length > 0) {
+        setSelectedProject(allocationProjects[0]);
+    }
     const [selectedPM, setSelectedPM] = useState(null);
     const [selectedTeam, setSelectedTeam] = useState([]);
     const [isSubmitting, setIsSubmitting] = useState(false);
@@ -95,7 +111,7 @@ export default function Allocation() {
 
     if (!selectedProject) {
         return (
-            <div className="flex-1 overflow-y-auto p-6 md:p-8 bg-[#f8f9fb] flex items-center justify-center">
+            <div className="flex-1 overflow-y-auto px-6 py-4 md:px-8 md:py-5 bg-[#f8f9fb] flex items-center justify-center">
                 <div className="text-center py-20 animate-scale-in">
                     <div className="w-24 h-24 rounded-3xl bg-emerald-100 text-emerald-600 flex items-center justify-center mx-auto mb-6 shadow-sm">
                         <CheckCircle size={48} />
@@ -156,6 +172,7 @@ export default function Allocation() {
                                 </span>
                                 <span className="text-xs text-gray-500">Hari ini</span>
                             </div>
+                            <div className="mb-2"><RBBBadge type={project.type} deadline={project.rbbDeadline} /></div>
                             <h4 className="text-lg font-bold text-gray-800 mb-1">{project.name}</h4>
                             <p className="text-sm text-gray-500 flex items-center gap-1.5 mb-3">
                                 <Building size={16} />
@@ -180,6 +197,7 @@ export default function Allocation() {
                         {/* Project Header */}
                         <div className="flex items-start justify-between mb-6">
                             <div>
+                                <div className="mb-2"><RBBBadge type={selectedProject.type} deadline={selectedProject.rbbDeadline} /></div>
                                 <h3 className="text-3xl font-bold text-gray-800">{selectedProject.name}</h3>
                                 <p className="text-sm text-gray-500 mt-1">
                                     {selectedProject.id} • Prioritas {selectedProject.priority}

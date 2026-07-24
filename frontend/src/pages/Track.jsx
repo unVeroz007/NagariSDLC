@@ -225,7 +225,7 @@ export default function Track() {
 
     if (!selectedProject) {
         return (
-            <div className="flex-1 overflow-y-auto p-6 md:p-8 bg-[#f8f9fb]">
+            <div className="flex-1 overflow-y-auto px-6 py-4 md:px-8 md:py-5 bg-[#f8f9fb]">
                 <div className="max-w-4xl mx-auto text-center py-20">
                     <div className="w-20 h-20 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center mx-auto mb-4">
                         <FileText size={40} />
@@ -238,30 +238,7 @@ export default function Track() {
     }
 
     return (
-        <div className="flex-1 flex flex-col h-screen bg-[#f8f9fb] overflow-hidden">
-            {/* Top App Bar */}
-            <header className="h-16 bg-white shadow-sm flex justify-between items-center px-6 shrink-0 z-10 border-b border-gray-200">
-                <div className="flex items-center text-sm text-gray-500">
-                    <span className="hover:text-[#1A56DB] cursor-pointer">Beranda</span>
-                    <ChevronRight size={16} className="mx-2 text-gray-300" />
-                    <span className="font-semibold text-gray-800">Lacak Pengajuan</span>
-                </div>
-                <div className="flex items-center gap-4">
-                    <button className="p-2 rounded-full text-gray-500 hover:bg-gray-100 transition-colors relative">
-                        <Bell size={20} />
-                        <span className="absolute top-1.5 right-1.5 w-2.5 h-2.5 bg-red-500 rounded-full border-2 border-white"></span>
-                    </button>
-                    <div className="h-8 w-px bg-gray-200"></div>
-                    <div className="flex items-center gap-3 cursor-pointer">
-                        <span className="font-semibold text-sm hidden sm:block">{user?.name || 'Siti Aminah'}</span>
-                        <div className="w-8 h-8 rounded-full bg-[#003a73] text-white flex items-center justify-center font-bold text-sm">
-                            {user?.name?.charAt(0) || 'S'}
-                        </div>
-                    </div>
-                </div>
-            </header>
-
-            {/* Split Panel Layout */}
+        <div className="flex-1 flex flex-col h-screen bg-[#f8f9fb] overflow-hidden">{/* Split Panel Layout */}
             <div className="flex-1 flex overflow-hidden">
                 {/* Left Panel (List) */}
                 <div className="w-1/3 min-w-[320px] max-w-[400px] bg-white border-r border-gray-200 flex flex-col shadow-[4px_0_12px_rgba(0,0,0,0.03)]">
@@ -311,7 +288,14 @@ export default function Track() {
                                     )}
                                     <div className="p-4 pl-5">
                                         <div className="flex justify-between items-start mb-2">
-                                            <span className="text-xs font-semibold text-gray-500">{project.id}</span>
+                                            <div className="flex flex-col gap-1">
+                                                <span className="text-xs font-semibold text-gray-500">{project.id}</span>
+                                                {project.type && (
+                                                    <span className={`inline-flex self-start px-1.5 py-0.5 rounded text-[10px] font-semibold border ${project.type === 'RBB' ? 'bg-red-50 text-red-700 border-red-200' : 'bg-gray-50 text-gray-600 border-gray-200'}`}>
+                                                        {project.type === 'RBB' ? '🔴 RBB' : '⚪ Non-RBB'}
+                                                    </span>
+                                                )}
+                                            </div>
                                             <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold ${getStatusBadge(project.status)}`}>
                                                 {project.status}
                                             </span>
@@ -336,7 +320,7 @@ export default function Track() {
 
                 {/* Right Panel (Details) */}
                 <div className="flex-1 flex flex-col bg-gray-50/30 overflow-hidden">
-                    <div className="flex-1 overflow-y-auto p-6 md:p-8 lg:p-10">
+                    <div className="flex-1 overflow-y-auto px-6 py-4 md:px-8 md:py-5 lg:p-10">
                         <div className="max-w-4xl mx-auto">
                             {/* Detail Header */}
                             <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-200 mb-6 flex flex-col sm:flex-row justify-between items-start gap-4">
@@ -345,6 +329,11 @@ export default function Track() {
                                         <span className="px-2.5 py-1 bg-gray-100 rounded-md text-xs font-semibold text-gray-600 border border-gray-200">
                                             {selectedProject.id}
                                         </span>
+                                        {selectedProject.type && (
+                                            <span className={`px-2.5 py-1 rounded-md text-xs font-semibold border ${selectedProject.type === 'RBB' ? 'bg-red-50 text-red-700 border-red-200' : 'bg-gray-50 text-gray-600 border-gray-200'}`}>
+                                                {selectedProject.type === 'RBB' ? '🔴 RBB (Wajib Selesai)' : '⚪ Non-RBB (Fleksibel)'}
+                                            </span>
+                                        )}
                                         <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-bold ${getStatusBadge(selectedProject.status)}`}>
                                             <span className={`w-1.5 h-1.5 rounded-full mr-1.5 ${selectedProject.status === 'IN DEVELOPMENT' ? 'bg-blue-500 animate-pulse' : 'bg-current'
                                                 }`}></span>

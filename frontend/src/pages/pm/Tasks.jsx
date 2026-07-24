@@ -51,7 +51,7 @@ export default function Tasks() {
     };
 
     return (
-        <div className="flex-1 overflow-y-auto p-6 md:p-8 bg-[#f8f9fb] animate-slide-up">
+        <div className="flex-1 overflow-y-auto px-6 py-4 md:px-8 md:py-5 bg-[#f8f9fb] animate-slide-up">
             {/* Header */}
             <div className="mb-6">
                 <h2 className="text-2xl font-extrabold text-gray-800">Manajemen Task</h2>

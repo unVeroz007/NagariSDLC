@@ -15,6 +15,7 @@ export const menuSections = {
                 { label: 'Antrean Review', path: '/queue', icon: 'Clock' },
                 { label: 'Workspace Lead', path: '/workspace/lead', icon: 'UserCheck' },
                 { label: 'Workspace Analyst', path: '/workspace/analyst', icon: 'FileText' },
+                { label: 'Workspace Development', path: '/workspace/dev-lead', icon: 'Users' },
             ],
         },
         {
@@ -47,7 +48,7 @@ export const menuSections = {
             label: 'Administrasi',
             items: [
                 { label: 'Manajemen User', path: '/admin/users', icon: 'Users' },
-                { label: 'Audit Trail', path: '/admin/audit', icon: 'History' },
+                { label: 'Activity Log', path: '/admin/activity-log', icon: 'Activity' },
                 { label: 'Analitik SDLC', path: '/analytics', icon: 'BarChart' },
                 { label: 'Pengaturan Sistem', path: '/admin/settings', icon: 'Settings' },
             ],
@@ -82,6 +83,15 @@ export const menuSections = {
             label: 'Fase 1 (Inisiasi & Review)',
             items: [
                 { label: 'Workspace Analyst', path: '/workspace/analyst', icon: 'FileText' },
+            ],
+        },
+    ],
+    development_lead: [
+        {
+            label: 'UTAMA',
+            items: [
+                { label: 'Dashboard Utama', path: '/dashboard', icon: 'LayoutDashboard' },
+                { label: 'Workspace Development', path: '/workspace/dev-lead', icon: 'Users' },
             ],
         },
     ],

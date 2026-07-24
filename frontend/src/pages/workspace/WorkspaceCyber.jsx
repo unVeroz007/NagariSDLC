@@ -1,5 +1,7 @@
+import RBBBadge from '../../components/RBBBadge';
 import { useState } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
+import { useNotifications } from '../../contexts/NotificationContext';
 import {
     Shield,
     FolderOpen,
@@ -81,6 +83,7 @@ const pentesters = [
 
 export default function WorkspaceCyber() {
     const { user } = useAuth();
+    const { addNotification } = useNotifications();
     const [selectedProject, setSelectedProject] = useState(cyberQueue[0]);
     const [selectedPentester, setSelectedPentester] = useState('');
     const [targetDate, setTargetDate] = useState('');
@@ -94,6 +97,12 @@ export default function WorkspaceCyber() {
         }
         setIsSubmitting(true);
         setTimeout(() => {
+            addNotification(
+                'Tugas Cyber Ditugaskan',
+                `${selectedPentester} ditugaskan untuk audit ${selectedProject?.projectName}.`,
+                'success',
+                '/my-tasks/cyber'
+            );
             alert(`Pengajuan cyber untuk ${selectedProject?.projectName} berhasil ditugaskan ke ${selectedPentester}`);
             setIsSubmitting(false);
             // Remove from queue
@@ -138,6 +147,9 @@ export default function WorkspaceCyber() {
                         {status}
                     </span>
                 );
+            case 'ANALYSIS_APPROVED': return 'bg-emerald-100 text-emerald-700 border-emerald-200';
+            case 'READY_FOR_DEVELOPMENT': return 'bg-cyan-100 text-cyan-700 border-cyan-200';
+            case 'IN_DEVELOPMENT': return 'bg-indigo-100 text-indigo-700 border-indigo-200';
             default:
                 return (
                     <span className="bg-gray-100 text-gray-600 px-2 py-1 rounded text-[10px] font-bold uppercase tracking-wider">
@@ -151,6 +163,9 @@ export default function WorkspaceCyber() {
         switch (type) {
             case 'pdf': return <FileText size={20} className="text-red-500" />;
             case 'docx': return <File size={20} className="text-blue-500" />;
+            case 'ANALYSIS_APPROVED': return 'bg-emerald-100 text-emerald-700 border-emerald-200';
+            case 'READY_FOR_DEVELOPMENT': return 'bg-cyan-100 text-cyan-700 border-cyan-200';
+            case 'IN_DEVELOPMENT': return 'bg-indigo-100 text-indigo-700 border-indigo-200';
             default: return <File size={20} className="text-gray-400" />;
         }
     };
@@ -159,13 +174,16 @@ export default function WorkspaceCyber() {
         switch (type) {
             case 'pdf': return 'bg-red-100 text-red-500';
             case 'docx': return 'bg-blue-100 text-blue-600';
+            case 'ANALYSIS_APPROVED': return 'bg-emerald-100 text-emerald-700 border-emerald-200';
+            case 'READY_FOR_DEVELOPMENT': return 'bg-cyan-100 text-cyan-700 border-cyan-200';
+            case 'IN_DEVELOPMENT': return 'bg-indigo-100 text-indigo-700 border-indigo-200';
             default: return 'bg-gray-100 text-gray-500';
         }
     };
 
     if (!selectedProject) {
         return (
-            <div className="flex-1 overflow-y-auto p-6 md:p-8 bg-[#f8f9fb]">
+            <div className="flex-1 overflow-y-auto px-6 py-4 md:px-8 md:py-5 bg-[#f8f9fb]">
                 <div className="max-w-4xl mx-auto text-center py-20">
                     <div className="w-20 h-20 rounded-full bg-green-100 text-green-600 flex items-center justify-center mx-auto mb-4">
                         <Shield size={40} />
@@ -180,20 +198,11 @@ export default function WorkspaceCyber() {
     return (
         <div className="flex-1 flex flex-col h-full bg-[#f8f9fb] overflow-hidden">
             {/* Header */}
-            <div className="px-6 py-4 bg-white border-b border-gray-200 shrink-0">
-                <div className="flex items-center gap-2 text-sm text-gray-500">
-                    <span className="hover:text-[#1A56DB] cursor-pointer">Beranda</span>
-                    <ChevronRight size={16} className="text-gray-300" />
-                    <span>Fase 3</span>
-                    <ChevronRight size={16} className="text-gray-300" />
-                    <span className="text-[#1A56DB] font-semibold">Workspace Cyber</span>
-                </div>
-                <div className="mt-1">
-                    <h2 className="text-2xl font-bold text-gray-800">Workspace Keamanan Siber (Cyber)</h2>
-                    <p className="text-sm text-gray-500 mt-0.5">
-                        Tinjau antrean audit keamanan dan disposisi pentester.
-                    </p>
-                </div>
+            <div className="mb-6 px-6 pt-6">
+                <h2 className="text-2xl font-extrabold text-gray-800">Workspace Keamanan Siber (Cyber)</h2>
+                <p className="text-sm text-gray-500 mt-1">
+                    Tinjau antrean audit keamanan dan disposisi pentester.
+                </p>
             </div>
 
             {/* Split Layout */}
@@ -231,6 +240,7 @@ export default function WorkspaceCyber() {
                                     <span className="text-xs font-bold text-[#1A56DB]">{project.id}</span>
                                     {getStatusBadge(project.status)}
                                 </div>
+                                <div className="mb-2"><RBBBadge type={project.type} deadline={project.rbbDeadline} /></div>
                                 <h4 className="font-semibold text-gray-800 mb-1">{project.projectName}</h4>
                                 <div className="flex items-center text-xs text-gray-500 mt-3">
                                     <User size={14} className="mr-1" />
@@ -254,6 +264,7 @@ export default function WorkspaceCyber() {
                             </span>
                             {getStatusBadge(selectedProject.status)}
                         </div>
+                        <div className="mb-2"><RBBBadge type={selectedProject.type} deadline={selectedProject.rbbDeadline} /></div>
                         <h3 className="text-xl font-bold text-gray-800">{selectedProject.projectName}</h3>
                         <p className="text-sm text-gray-500 mt-2 max-w-2xl">
                             {selectedProject.projectDesc}

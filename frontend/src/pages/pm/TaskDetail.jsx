@@ -1,4 +1,6 @@
+import RBBBadge from '../../components/RBBBadge';
 import { useState } from 'react';
+import toast from 'react-hot-toast';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import {
@@ -10,7 +12,6 @@ import {
     MoreVertical,
     User,
     Calendar,
-    DollarSign,
     Clock,
     CheckCircle,
     AlertCircle,
@@ -30,6 +31,7 @@ import {
     Paperclip,
     Link,
     Trash2,
+    X,
 } from 'lucide-react';
 import { taskProjects } from '../../data/mockData';
 
@@ -42,7 +44,7 @@ export default function TaskDetail() {
 
     if (!project) {
         return (
-            <div className="flex-1 overflow-y-auto p-6 md:p-8 bg-[#f8f9fb] flex items-center justify-center">
+            <div className="flex-1 overflow-y-auto px-6 py-4 md:px-8 md:py-5 bg-[#f8f9fb] flex items-center justify-center">
                 <div className="text-center py-20 animate-scale-in">
                     <div className="w-24 h-24 rounded-3xl bg-gray-100 flex items-center justify-center mx-auto mb-6">
                         <Briefcase size={44} className="text-gray-400" />
@@ -62,8 +64,47 @@ export default function TaskDetail() {
 
     const [activeTab, setActiveTab] = useState('tasks'); // tasks, documents, activity
     const [searchTask, setSearchTask] = useState('');
+    const [tasks, setTasks] = useState(project ? project.tasks : []);
+    
+    const [isAddTaskModalOpen, setIsAddTaskModalOpen] = useState(false);
+    const [newTask, setNewTask] = useState({
+        title: '',
+        assignee: '',
+        deadline: '',
+        priority: 'Medium',
+        description: '',
+    });
 
-    const filteredTasks = project.tasks.filter((task) =>
+    const handleAddTask = (e) => {
+        e.preventDefault();
+
+        if (!newTask.title.trim()) {
+            toast.error('Nama task wajib diisi!');
+            return;
+        }
+
+        const task = {
+            id: tasks.length + 1,
+            name: newTask.title,
+            description: newTask.description || '',
+            assignee: newTask.assignee || null,
+            deadline: newTask.deadline || new Date().toISOString().split('T')[0],
+            priority: newTask.priority || 'Medium',
+            status: 'Belum Mulai',
+            statusColor: 'bg-gray-100 text-gray-600 border-gray-200'
+        };
+
+        // Mutate in-memory mock data
+        project.tasks.push(task);
+        // Update local state
+        setTasks([...tasks, task]);
+
+        toast.success(`Task "${task.name}" berhasil ditambahkan!`);
+        setIsAddTaskModalOpen(false);
+        setNewTask({ title: '', assignee: '', deadline: '', priority: 'Medium', description: '' });
+    };
+
+    const filteredTasks = tasks.filter((task) =>
         task.name.toLowerCase().includes(searchTask.toLowerCase())
     );
 
@@ -82,16 +123,19 @@ export default function TaskDetail() {
                 return <CheckCircle size={14} className="text-emerald-600" />;
             case 'Sedang Dikerjakan':
                 return <Clock size={14} className="text-amber-600" />;
+            case 'ANALYSIS_APPROVED': return 'bg-emerald-100 text-emerald-700 border-emerald-200';
+            case 'READY_FOR_DEVELOPMENT': return 'bg-cyan-100 text-cyan-700 border-cyan-200';
+            case 'IN_DEVELOPMENT': return 'bg-indigo-100 text-indigo-700 border-indigo-200';
             default:
                 return <AlertCircle size={14} className="text-gray-400" />;
         }
     };
 
-    const completedTasks = project.tasks.filter((t) => t.status === 'Selesai').length;
-    const progress = Math.round((completedTasks / project.tasks.length) * 100);
+    const completedTasks = tasks.filter((t) => t.status === 'Selesai').length;
+    const progress = Math.round((completedTasks / tasks.length) * 100);
 
     return (
-        <div className="flex-1 overflow-y-auto p-6 md:p-8 bg-[#f8f9fb]">
+        <div className="flex-1 overflow-y-auto px-6 py-4 md:px-8 md:py-5 bg-[#f8f9fb]">
             <div className="max-w-7xl mx-auto w-full flex flex-col gap-6">
                 {/* Back Button */}
                 <button
@@ -145,7 +189,7 @@ export default function TaskDetail() {
                             </div>
                             <div className="text-right">
                                 <span className="text-2xl font-bold text-[#1A56DB] block">{progress}%</span>
-                                <span className="text-xs text-gray-500">{completedTasks} dari {project.tasks.length} Task Selesai</span>
+                                <span className="text-xs text-gray-500">{completedTasks} dari {tasks.length} Task Selesai</span>
                             </div>
                         </div>
                         <div className="w-full h-4 bg-gray-100 rounded-full overflow-hidden">
@@ -184,15 +228,7 @@ export default function TaskDetail() {
                                     <span className="block text-sm font-semibold text-gray-800">{project.pm}</span>
                                 </div>
                             </div>
-                            <div className="flex items-start gap-3">
-                                <div className="p-2 rounded-lg bg-gray-100 text-gray-500">
-                                    <DollarSign size={18} />
-                                </div>
-                                <div>
-                                    <span className="block text-xs text-gray-500 font-semibold">ALOKASI BUDGET</span>
-                                    <span className="block text-sm font-semibold text-gray-800">{project.budget}</span>
-                                </div>
-                            </div>
+
                         </div>
                     </div>
                 </div>
@@ -251,7 +287,7 @@ export default function TaskDetail() {
                                         <span className="hidden sm:inline">Filter</span>
                                     </button>
                                 </div>
-                                <button className="px-4 py-2 rounded-lg bg-[#1A56DB] text-white hover:bg-[#1346b3] transition-colors text-sm font-semibold flex items-center gap-2 shadow-sm whitespace-nowrap">
+                                <button onClick={() => setIsAddTaskModalOpen(true)} className="px-4 py-2 rounded-lg bg-[#1A56DB] text-white hover:bg-[#1346b3] transition-colors text-sm font-semibold flex items-center gap-2 shadow-sm whitespace-nowrap">
                                     <Plus size={16} />
                                     Tambah Task
                                 </button>
@@ -350,6 +386,134 @@ export default function TaskDetail() {
                     )}
                 </div>
             </div>
+
+            {/* Modal Tambah Task */}
+            {isAddTaskModalOpen && (
+                <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-fadeIn">
+                    <div className="bg-white rounded-xl shadow-xl max-w-lg w-full max-h-[90vh] overflow-hidden">
+                        {/* Header */}
+                        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200 bg-gray-50/50">
+                            <h3 className="text-lg font-semibold text-gray-800">Tambah Task Baru</h3>
+                            <button
+                                onClick={() => setIsAddTaskModalOpen(false)}
+                                className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
+                            >
+                                <X size={20} />
+                            </button>
+                        </div>
+
+                        {/* Body */}
+                        <div className="p-6 overflow-y-auto max-h-[calc(90vh-140px)]">
+                            <form onSubmit={handleAddTask} className="space-y-4">
+                                {/* Nama Task */}
+                                <div>
+                                    <label className="block text-sm font-semibold text-gray-700 mb-1">
+                                        Nama Task <span className="text-red-500">*</span>
+                                    </label>
+                                    <input
+                                        type="text"
+                                        value={newTask.title}
+                                        onChange={(e) => setNewTask({...newTask, title: e.target.value})}
+                                        placeholder="Masukkan nama task..."
+                                        className="w-full px-4 py-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-[#1A56DB] focus:border-[#1A56DB] outline-none"
+                                        required
+                                    />
+                                </div>
+
+                                {/* Deskripsi */}
+                                <div>
+                                    <label className="block text-sm font-semibold text-gray-700 mb-1">
+                                        Deskripsi
+                                    </label>
+                                    <textarea
+                                        value={newTask.description}
+                                        onChange={(e) => setNewTask({...newTask, description: e.target.value})}
+                                        placeholder="Masukkan deskripsi task..."
+                                        rows={3}
+                                        className="w-full px-4 py-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-[#1A56DB] focus:border-[#1A56DB] outline-none resize-none"
+                                    />
+                                </div>
+
+                                {/* Assignee & Deadline */}
+                                <div className="grid grid-cols-2 gap-4">
+                                    <div>
+                                        <label className="block text-sm font-semibold text-gray-700 mb-1">
+                                            Assignee
+                                        </label>
+                                        <select
+                                            value={newTask.assignee}
+                                            onChange={(e) => setNewTask({...newTask, assignee: e.target.value})}
+                                            className="w-full px-4 py-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-[#1A56DB] focus:border-[#1A56DB] outline-none"
+                                        >
+                                            <option value="">Pilih assignee...</option>
+                                            <option value="Budi Santoso">Budi Santoso</option>
+                                            <option value="Citra Kirana">Citra Kirana</option>
+                                            <option value="Dimas Anggara">Dimas Anggara</option>
+                                            <option value="Eka Putri">Eka Putri</option>
+                                            <option value="Fani Wijaya">Fani Wijaya</option>
+                                        </select>
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm font-semibold text-gray-700 mb-1">
+                                            Deadline
+                                        </label>
+                                        <input
+                                            type="date"
+                                            value={newTask.deadline}
+                                            onChange={(e) => setNewTask({...newTask, deadline: e.target.value})}
+                                            className="w-full px-4 py-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-[#1A56DB] focus:border-[#1A56DB] outline-none"
+                                        />
+                                    </div>
+                                </div>
+
+                                {/* Priority */}
+                                <div>
+                                    <label className="block text-sm font-semibold text-gray-700 mb-1">
+                                        Prioritas
+                                    </label>
+                                    <div className="flex gap-3">
+                                        {['High', 'Medium', 'Low'].map((p) => (
+                                            <label key={p} className="flex items-center gap-2 cursor-pointer">
+                                                <input
+                                                    type="radio"
+                                                    name="priority"
+                                                    value={p}
+                                                    checked={newTask.priority === p}
+                                                    onChange={(e) => setNewTask({...newTask, priority: e.target.value})}
+                                                    className="w-4 h-4 text-[#1A56DB]"
+                                                />
+                                                <span className={`text-sm font-medium ${
+                                                    p === 'High' ? 'text-red-600' : p === 'Medium' ? 'text-amber-600' : 'text-blue-600'
+                                                }`}>
+                                                    {p}
+                                                </span>
+                                            </label>
+                                        ))}
+                                    </div>
+                                </div>
+
+                                {/* Actions */}
+                                <div className="flex justify-end gap-3 pt-4 border-t border-gray-200">
+                                    <button
+                                        type="button"
+                                        onClick={() => setIsAddTaskModalOpen(false)}
+                                        className="px-4 py-2 border border-gray-300 text-gray-700 rounded-lg font-medium hover:bg-gray-50 transition-colors"
+                                    >
+                                        Batal
+                                    </button>
+                                    <button
+                                        type="submit"
+                                        className="px-4 py-2 bg-[#003a73] text-white rounded-lg font-medium hover:bg-[#002a5a] transition-colors flex items-center gap-2"
+                                    >
+                                        <Plus size={16} />
+                                        Tambah Task
+                                    </button>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 }

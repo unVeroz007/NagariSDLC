@@ -1,3 +1,4 @@
+import RBBBadge from '../../components/RBBBadge';
 import { useState } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import {

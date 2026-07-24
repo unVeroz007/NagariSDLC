@@ -40,7 +40,9 @@ import {
     Settings,
 } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
-import { mockDocuments } from '../../data/mockData';
+import { useProjects } from '../../contexts/ProjectContext';
+import LoadingSpinner from '../../components/LoadingSpinner';
+import EmptyState from '../../components/EmptyState';
 
 const mapDocTypeToCategory = (type) => {
     switch (type) {
@@ -52,26 +54,6 @@ const mapDocTypeToCategory = (type) => {
         default: return { category: 'Umum', color: 'bg-surface-variant text-on-surface-variant' };
     }
 };
-
-const initialDocuments = mockDocuments.map(doc => {
-    const typeInfo = mapDocTypeToCategory(doc.doc_type);
-    
-    let icon = 'pdf';
-    if (doc.file_name.endsWith('.docx')) icon = 'word';
-    else if (doc.file_name.endsWith('.xlsx')) icon = 'excel';
-
-    return {
-        id: doc.id,
-        name: doc.file_name,
-        size: doc.file_size,
-        project: doc.project_name,
-        category: typeInfo.category,
-        categoryColor: typeInfo.color,
-        uploadedBy: doc.uploaded_by,
-        date: new Date(doc.created_at).toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' }),
-        icon: icon,
-    };
-});
 
 // Statistik ringkasan
 const summaryData = [
@@ -90,6 +72,7 @@ const iconMap = {
 
 export default function Documents() {
     const { user } = useAuth();
+    const { documents: ctxDocs, isLoading } = useProjects();
     const [searchTerm, setSearchTerm] = useState('');
     const [activeTab, setActiveTab] = useState('Semua File');
     const [selectedDocs, setSelectedDocs] = useState([]);
@@ -97,9 +80,29 @@ export default function Documents() {
 
     const tabs = ['Semua File', 'Kebutuhan (BRD/FSD)', 'Teknis & UAT', 'Kontrak/Legal'];
 
+    // Map context documents
+    const mappedDocs = useMemo(() => (ctxDocs || []).map(doc => {
+        const typeInfo = mapDocTypeToCategory(doc.doc_type);
+        let icon = 'pdf';
+        if (doc.file_name?.endsWith('.docx')) icon = 'word';
+        else if (doc.file_name?.endsWith('.xlsx')) icon = 'excel';
+        
+        return {
+            id: doc.id,
+            name: doc.file_name,
+            size: doc.file_size,
+            project: doc.project_name,
+            category: typeInfo.category,
+            categoryColor: typeInfo.color,
+            uploadedBy: doc.uploaded_by,
+            date: new Date(doc.created_at).toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' }),
+            icon: icon,
+        };
+    }), [ctxDocs]);
+
     // Filter dokumen
     const filteredDocs = useMemo(() => {
-        let result = [...initialDocuments];
+        let result = [...mappedDocs];
 
         // Search
         if (searchTerm) {
@@ -122,7 +125,7 @@ export default function Documents() {
         }
 
         return result;
-    }, [searchTerm, activeTab]);
+    }, [searchTerm, activeTab, mappedDocs]);
 
     // Handle checkbox
     const toggleSelectAll = () => {

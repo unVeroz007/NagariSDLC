@@ -1,5 +1,9 @@
 import { useState, useMemo } from 'react';
+import RBBBadge from '../../components/RBBBadge';
 import { useNavigate } from 'react-router-dom';
+import { useProjects } from '../../contexts/ProjectContext';
+import LoadingSpinner from '../../components/LoadingSpinner';
+import EmptyState from '../../components/EmptyState';
 import {
     Search,
     Download,
@@ -20,14 +24,15 @@ import { mockProjects, getProjectStats } from '../../data/mockData';
 
 export default function ProjectList() {
     const navigate = useNavigate();
+    const { projects, isLoading } = useProjects();
     const [searchTerm, setSearchTerm] = useState('');
     const [divisionFilter, setDivisionFilter] = useState('');
     const [statusFilter, setStatusFilter] = useState('');
+    const [typeFilter, setTypeFilter] = useState('');
     const [sortBy, setSortBy] = useState('newest');
     const [currentPage, setCurrentPage] = useState(1);
     const itemsPerPage = 5;
 
-    const projects = mockProjects;
     const stats = getProjectStats(projects);
 
     const filteredProjects = useMemo(() => {
@@ -42,6 +47,7 @@ export default function ProjectList() {
         }
         if (divisionFilter) result = result.filter(p => p.division === divisionFilter);
         if (statusFilter) result = result.filter(p => p.status.includes(statusFilter));
+        if (typeFilter) result = result.filter(p => p.type === typeFilter);
         switch (sortBy) {
             case 'newest': result.sort((a, b) => b.id.localeCompare(a.id)); break;
             case 'oldest': result.sort((a, b) => a.id.localeCompare(b.id)); break;
@@ -49,7 +55,7 @@ export default function ProjectList() {
             default: break;
         }
         return result;
-    }, [projects, searchTerm, divisionFilter, statusFilter, sortBy]);
+    }, [projects, searchTerm, divisionFilter, statusFilter, typeFilter, sortBy]);
 
     const totalPages = Math.ceil(filteredProjects.length / itemsPerPage);
     const currentProjects = filteredProjects.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
@@ -64,8 +70,15 @@ export default function ProjectList() {
         { label: 'Selesai', value: stats.completed, icon: CheckCircle, iconBg: 'bg-emerald-50', iconColor: 'text-emerald-600', border: 'border-emerald-100' },
     ];
 
+    if (isLoading) return <LoadingSpinner text="Memuat daftar proyek..." />;
+    if (projects.length === 0) return (
+        <div className="px-6 py-4 md:px-8 md:py-5">
+            <EmptyState title="Belum Ada Proyek" description="Belum ada proyek yang terdaftar." actionText="Buat Proyek Baru" onAction={() => navigate('/projects/new')} />
+        </div>
+    );
+
     return (
-        <div className="p-6 md:p-8 animate-slide-up">
+        <div className="px-6 py-4 md:px-8 md:py-5 animate-slide-up">
             <div className="max-w-7xl mx-auto space-y-6">
 
                 {/* Page Header */}
@@ -131,6 +144,15 @@ export default function ProjectList() {
                             >
                                 <option value="">Semua Divisi</option>
                                 {uniqueDivisions.map(div => <option key={div} value={div}>{div}</option>)}
+                            </select>
+                            <select
+                                value={typeFilter}
+                                onChange={(e) => { setTypeFilter(e.target.value); setCurrentPage(1); }}
+                                className="px-3 py-2.5 bg-white border border-gray-200 rounded-xl text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-[#1A56DB]/20 focus:border-[#1A56DB] shadow-sm"
+                            >
+                                <option value="">Semua Tipe</option>
+                                <option value="RBB">RBB (Wajib Selesai)</option>
+                                <option value="NON_RBB">Non-RBB (Fleksibel)</option>
                             </select>
                             <select
                                 value={statusFilter}
@@ -201,10 +223,16 @@ export default function ProjectList() {
                                                 )}
                                             </td>
                                             <td className="px-5 py-4">
-                                                <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold border ${project.statusColor}`}>
-                                                    <span className="w-1.5 h-1.5 rounded-full bg-current" />
-                                                    {project.status}
-                                                </span>
+                                                <div className="flex flex-col gap-1.5 items-start">
+                                                    <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-semibold border ${project.type === 'RBB' ? 'bg-red-50 text-red-700 border-red-200' : 'bg-gray-50 text-gray-600 border-gray-200'}`}>
+                                                        {project.type === 'RBB' ? '🔴 RBB' : '⚪ Non-RBB'}
+                                                    </span>
+                                                    <RBBBadge type={project.type} deadline={project.rbbDeadline} />
+                                                    <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-semibold border ${project.statusColor}`}>
+                                                        <span className="w-1 h-1 rounded-full bg-current" />
+                                                        {project.status}
+                                                    </span>
+                                                </div>
                                             </td>
                                             <td className="px-5 py-4 text-gray-500 text-sm">{project.targetDate}</td>
                                             <td className="px-5 py-4 text-center">

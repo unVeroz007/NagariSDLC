@@ -1,5 +1,11 @@
 import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
+import { useNotifications } from '../../contexts/NotificationContext';
+import { useProjects } from '../../contexts/ProjectContext';
+import LoadingSpinner from '../../components/LoadingSpinner';
+import EmptyState from '../../components/EmptyState';
+import toast from 'react-hot-toast';
 import {
     Rocket,
     ChevronRight,
@@ -28,6 +34,10 @@ import { mockProjects } from '../../data/mockData';
 
 export default function ReleaseRequest() {
     const { user } = useAuth();
+    const navigate = useNavigate();
+    const { addNotification } = useNotifications();
+    const { projects, updateProject, isLoading } = useProjects();
+    const readyProjects = projects.filter(p => p.status === 'Passed Security' || p.status === 'Ready for Release' || p.phase === 'Fase 3: Pengujian');
     const [formData, setFormData] = useState({
         projectId: '',
         releaseDate: '',
@@ -81,24 +91,31 @@ export default function ReleaseRequest() {
     const handleSubmit = (e) => {
         e.preventDefault();
         if (!formData.projectId) {
-            alert('Pilih proyek terlebih dahulu!');
+            toast.error('Pilih proyek terlebih dahulu!');
             return;
         }
         if (!formData.releaseDate) {
-            alert('Tentukan jadwal rilis!');
+            toast.error('Tentukan jadwal rilis!');
             return;
         }
         if (!formData.releaseNotes.trim()) {
-            alert('Masukkan release notes!');
+            toast.error('Masukkan release notes!');
             return;
         }
         if (!formData.rollbackProcedure.trim()) {
-            alert('Masukkan prosedur rollback!');
+            toast.error('Masukkan prosedur rollback!');
             return;
         }
         setIsSubmitting(true);
         setTimeout(() => {
-            alert(`Pengajuan rilis ${ticketNumber} berhasil dikirim ke Quality Gate!`);
+            addNotification(
+                'Rilis Menunggu Approval',
+                `Proyek ${formData.projectId} menunggu approval Quality Gate.`,
+                'warning',
+                '/quality-gate'
+            );
+            toast.error(`Pengajuan rilis ${ticketNumber} berhasil dikirim ke Quality Gate!`);
+            navigate('/quality-gate');
             setIsSubmitting(false);
             // Reset form
             setFormData({
@@ -120,8 +137,10 @@ export default function ReleaseRequest() {
         { id: 'cyber', icon: Shield, label: 'Pentest Report', sub: 'Cyber Security Cleared', verified: true },
     ];
 
+        if (isLoading) return <LoadingSpinner text="Memuat proyek..." />;
+
     return (
-        <div className="flex-1 overflow-y-auto p-6 md:p-8 bg-[#f8f9fb]">
+        <div className="flex-1 overflow-y-auto px-6 py-4 md:px-8 md:py-5 bg-[#f8f9fb]">
             <div className="max-w-5xl mx-auto space-y-6">
                 {/* Page Header */}
                 <div className="mb-6">
@@ -164,7 +183,7 @@ export default function ReleaseRequest() {
                                     <option value="">Pilih proyek...</option>
                                     {mockProjects.map((project) => (
                                         <option key={project.id} value={project.id}>
-                                            {project.name} ({project.id})
+                                            {project.type === 'RBB' ? '🔴 [RBB] ' : ''}{project.name} ({project.id})
                                         </option>
                                     ))}
                                 </select>

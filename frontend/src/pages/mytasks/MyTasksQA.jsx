@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
+import { useNotifications } from '../../contexts/NotificationContext';
 import {
     Search,
     Bell,
@@ -31,6 +32,7 @@ import { myQaTasks } from '../../data/mockData';
 
 export default function MyTasksQA() {
     const { user } = useAuth();
+    const { addNotification } = useNotifications();
     const [selectedTask, setSelectedTask] = useState(myQaTasks[0]);
     const [qaResult, setQaResult] = useState('');
     const [qaNotes, setQaNotes] = useState('');
@@ -47,6 +49,12 @@ export default function MyTasksQA() {
         }
         setIsSubmitting(true);
         setTimeout(() => {
+            addNotification(
+                'Hasil QA Selesai',
+                `Pengujian QA untuk ${selectedTask?.projectName} selesai dengan hasil: ${qaResult}.`,
+                qaResult.includes('Passed') ? 'success' : 'danger',
+                '/pm/cyber-request'
+            );
             alert(`Hasil pengujian untuk ${selectedTask?.projectName} berhasil dikirim!\nStatus: ${qaResult}`);
             setIsSubmitting(false);
             // Remove from tasks
@@ -67,6 +75,9 @@ export default function MyTasksQA() {
             case 'High': return 'bg-red-500/10 text-red-600 border-red-200';
             case 'Medium': return 'bg-yellow-500/10 text-yellow-600 border-yellow-200';
             case 'Low': return 'bg-green-500/10 text-green-600 border-green-200';
+            case 'ANALYSIS_APPROVED': return 'bg-emerald-100 text-emerald-700 border-emerald-200';
+            case 'READY_FOR_DEVELOPMENT': return 'bg-cyan-100 text-cyan-700 border-cyan-200';
+            case 'IN_DEVELOPMENT': return 'bg-indigo-100 text-indigo-700 border-indigo-200';
             default: return 'bg-gray-100 text-gray-600';
         }
     };
@@ -79,6 +90,9 @@ export default function MyTasksQA() {
                 return 'bg-gray-100 text-gray-500 border-gray-200';
             case 'Selesai':
                 return 'bg-green-500/20 text-green-600 border-green-200';
+            case 'ANALYSIS_APPROVED': return 'bg-emerald-100 text-emerald-700 border-emerald-200';
+            case 'READY_FOR_DEVELOPMENT': return 'bg-cyan-100 text-cyan-700 border-cyan-200';
+            case 'IN_DEVELOPMENT': return 'bg-indigo-100 text-indigo-700 border-indigo-200';
             default:
                 return 'bg-gray-100 text-gray-600';
         }
@@ -89,13 +103,16 @@ export default function MyTasksQA() {
             case 'pdf': return { icon: FileText, color: 'text-red-600' };
             case 'docx': return { icon: FileText, color: 'text-blue-600' };
             case 'xlsx': return { icon: Table, color: 'text-green-600' };
+            case 'ANALYSIS_APPROVED': return 'bg-emerald-100 text-emerald-700 border-emerald-200';
+            case 'READY_FOR_DEVELOPMENT': return 'bg-cyan-100 text-cyan-700 border-cyan-200';
+            case 'IN_DEVELOPMENT': return 'bg-indigo-100 text-indigo-700 border-indigo-200';
             default: return { icon: File, color: 'text-gray-600' };
         }
     };
 
     if (!selectedTask) {
         return (
-            <div className="flex-1 overflow-y-auto p-6 md:p-8 bg-[#f8f9fb]">
+            <div className="flex-1 overflow-y-auto px-6 py-4 md:px-8 md:py-5 bg-[#f8f9fb]">
                 <div className="max-w-4xl mx-auto text-center py-20">
                     <div className="w-20 h-20 rounded-full bg-green-100 text-green-600 flex items-center justify-center mx-auto mb-4">
                         <CheckCircle size={40} />
@@ -109,33 +126,6 @@ export default function MyTasksQA() {
 
     return (
         <div className="flex-1 flex flex-col bg-[#f8f9fb] overflow-hidden">
-            {/* Topbar */}
-            <header className="h-16 bg-white border-b border-gray-200 shadow-sm flex items-center justify-between px-6 shrink-0 z-10">
-                <div className="flex items-center gap-2 text-sm text-gray-500">
-                    <span>Beranda</span>
-                    <ChevronRight size={16} />
-                    <span>Fase 3</span>
-                    <ChevronRight size={16} />
-                    <span className="text-[#1A56DB] font-semibold">Tugas QA Saya</span>
-                </div>
-                <div className="flex items-center gap-4">
-                    <div className="relative">
-                        <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-                        <input
-                            type="text"
-                            placeholder="Cari tiket..."
-                            className="pl-10 pr-4 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:border-[#1A56DB] focus:ring-1 focus:ring-[#1A56DB] w-64 bg-gray-50"
-                        />
-                    </div>
-                    <button className="p-2 text-gray-500 hover:text-[#1A56DB] transition-colors relative rounded-full hover:bg-gray-100">
-                        <Bell size={20} />
-                        <span className="absolute top-1.5 right-1.5 w-2.5 h-2.5 bg-red-500 rounded-full border-2 border-white"></span>
-                    </button>
-                    <div className="w-9 h-9 rounded-full bg-[#D4A017] text-white flex items-center justify-center font-bold text-sm cursor-pointer">
-                        {user?.name?.charAt(0) || 'U'}
-                    </div>
-                </div>
-            </header>
 
             {/* Content */}
             <div className="flex-1 overflow-y-auto p-6 flex flex-col gap-6">

@@ -7,6 +7,7 @@ import ProjectNew from '../pages/projects/ProjectNew';
 import Documents from '../pages/projects/Documents';
 import WorkspaceLead from '../pages/workspace/WorkspaceLead';
 import WorkspaceAnalyst from '../pages/workspace/WorkspaceAnalyst';
+import WorkspaceDevLead from '../pages/workspace/WorkspaceDevLead';
 import Allocation from '../pages/pm/Allocation';
 import Kanban from '../pages/pm/Kanban';
 import Task from '../pages/pm/Tasks';
@@ -20,17 +21,17 @@ import CyberRequest from '../pages/pm/CyberRequest';
 import ReleaseRequest from '../pages/pm/ReleaseRequest';
 import QualityGate from '../pages/QualityGate';
 import Users from '../pages/admin/Users';
-import AuditTrail from '../pages/admin/AuditTrail';
 import Analytics from '../pages/admin/Analytics';
 import Settings from '../pages/admin/settings';
 import Track from '../pages/Track';
 import Queue from '../pages/Queue';
 import Profile from '../pages/Profile';
+import ActivityLog from '../pages/admin/ActivityLog';
 
 
 const router = createBrowserRouter([
     {
-        path: '/login',
+        path: '/',
         element: <Login />,
     },
     {
@@ -53,14 +54,10 @@ const router = createBrowserRouter([
                 path: '/Documents',
                 element: <Documents />,
             },
-            {
-                path: '/workspace/lead',
-                element: <WorkspaceLead />,
-            },
-            {
-                path: '/workspace/analyst',
-                element: <WorkspaceAnalyst />,
-            },
+            { path: '/workspace/lead', element: <WorkspaceLead /> },
+            { path: '/workspace/analyst', element: <WorkspaceAnalyst /> },
+            { path: '/workspace/dev-lead', element: <WorkspaceDevLead /> },
+            { path: '/workspace/cyber', element: <WorkspaceCyber /> },
             {
                 path: '/pm/allocation',
                 element: <Allocation />,
@@ -119,7 +116,7 @@ const router = createBrowserRouter([
             },
             {
                 path: '/admin/audit',
-                element: <AuditTrail />
+                element: <Navigate to="/admin/activity-log" replace />
             },
             {
                 path: '/analytics',
@@ -140,7 +137,12 @@ const router = createBrowserRouter([
             {
                 path: '/profile',
                 element: <Profile />
-            }
+            },
+            {
+                path: '/admin/activity-log',
+                element: <ActivityLog />
+            },
+
             // Tambahkan route lain nanti
         ],
     },

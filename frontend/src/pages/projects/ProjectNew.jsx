@@ -1,6 +1,7 @@
 import { useState, useRef } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import { useNavigate } from 'react-router-dom';
+import { useNotifications } from '../../contexts/NotificationContext';
 import {
     User,
     Info,
@@ -18,6 +19,7 @@ import { mockProjects, dispositionQueue } from '../../data/mockData';
 export default function ProjectNew() {
     const { user } = useAuth();
     const navigate = useNavigate();
+    const { addNotification } = useNotifications();
     const fileInputRef = useRef(null);
 
     // Form state
@@ -125,13 +127,19 @@ export default function ProjectNew() {
                 division: formData.division || 'Divisi TI',
                 priority: formData.priority === 'Urgent' ? 'High' : formData.priority,
                 submittedAt: new Date().toISOString(),
-                budget: 'Menunggu Estimasi',
                 targetDate: formData.targetDate || 'TBD',
                 status: 'Menunggu Analis',
                 documents: uploadedFiles.map(f => ({ name: f.name, size: f.size, type: f.type })),
                 assignedAnalyst: null,
             };
             dispositionQueue.unshift(newDisposition); // Gunakan unshift agar muncul di urutan teratas
+
+            addNotification(
+                'Proyek Baru Diajukan',
+                `${formData.projectName} menunggu disposisi dari Lead Group.`,
+                'info',
+                '/queue'
+            );
 
             setIsSubmitting(false);
             alert(`Proyek ${newId} berhasil diajukan!`);
@@ -179,7 +187,7 @@ export default function ProjectNew() {
     const priorities = ['Rendah', 'Medium', 'Urgent'];
 
     return (
-        <div className="flex-1 overflow-y-auto p-6 md:p-8 relative bg-[#f8f9fb]">
+        <div className="flex-1 overflow-y-auto px-6 py-4 md:px-8 md:py-5 relative bg-[#f8f9fb]">
             {/* Background effect */}
             <div className="absolute top-0 right-0 w-[600px] h-[400px] bg-blue-500/5 blur-[100px] rounded-full pointer-events-none -z-10 transform translate-x-1/3 -translate-y-1/4"></div>
 

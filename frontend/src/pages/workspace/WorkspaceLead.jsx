@@ -1,3 +1,4 @@
+import RBBBadge from '../../components/RBBBadge';
 import { useState } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import {
@@ -19,51 +20,94 @@ import {
     FolderOpen,
     List,
 } from 'lucide-react';
-import { dispositionQueue, analysts, reviewQueue } from '../../data/mockData';
+import { analysts } from '../../data/mockData';
+import { useProjects } from '../../contexts/ProjectContext';
+import { useNavigate } from 'react-router-dom';
+import { useNotifications } from '../../contexts/NotificationContext';
+import LoadingSpinner from '../../components/LoadingSpinner';
+import EmptyState from '../../components/EmptyState';
+import toast from 'react-hot-toast';
 
 export default function WorkspaceLead() {
     const { user } = useAuth();
-    const [selectedProject, setSelectedProject] = useState(dispositionQueue[0]);
+    const navigate = useNavigate();
+    const { addNotification } = useNotifications();
+    const { projects, updateProject, isLoading } = useProjects();
+    const dispositionQueue = projects.filter(p => p.status === 'PENDING');
+    const verificationQueue = projects.filter(p => p.status === 'ANALYSIS_APPROVED');
+    const [activeTab, setActiveTab] = useState('disposition'); // 'disposition' or 'verification'
+    
+    // Switch queue based on tab
+    const activeQueue = activeTab === 'disposition' ? dispositionQueue : verificationQueue;
+    const [selectedProject, setSelectedProject] = useState(null);
+    
+    if (!selectedProject && activeQueue.length > 0) {
+        setSelectedProject(activeQueue[0]);
+    }
     const [selectedAnalyst, setSelectedAnalyst] = useState('');
     const [deadline, setDeadline] = useState('');
     const [notes, setNotes] = useState('');
     const [isSubmitting, setIsSubmitting] = useState(false);
 
+    const handleVerify = () => {
+        setIsSubmitting(true);
+        updateProject(selectedProject.id, {
+            status: 'READY_FOR_DEVELOPMENT',
+            statusColor: 'bg-cyan-100 text-cyan-700 border-cyan-200',
+        });
+
+        addNotification(
+            'Analisis Disetujui',
+            `Hasil analisis untuk ${selectedProject?.name} telah disetujui Lead.`,
+            'success',
+            '/pm/allocation'
+        );
+        
+        toast.success(`Proyek ${selectedProject?.name} dilanjutkan ke tahap Pengembangan`);
+        setIsSubmitting(false);
+
+        const nextQueue = verificationQueue.filter(p => p.id !== selectedProject.id);
+        if (nextQueue.length > 0) {
+            setSelectedProject(nextQueue[0]);
+        } else {
+            setSelectedProject(null);
+        }
+    };
+
     const handleAssign = () => {
         if (!selectedAnalyst) {
-            alert('Pilih analyst terlebih dahulu!');
+            toast.error('Pilih analyst terlebih dahulu!');
             return;
         }
         setIsSubmitting(true);
-        setTimeout(() => {
-            alert(`Proyek ${selectedProject?.name} berhasil ditugaskan ke ${selectedAnalyst}`);
-            setIsSubmitting(false);
-            // Tambahkan ke reviewQueue agar muncul di Workspace Analyst
-            const newReviewTask = {
-                ...selectedProject,
-                status: 'New',
-                deadline: deadline || new Date().toISOString(),
-                leadNote: notes,
-                analyst: selectedAnalyst,
-                statusReview: 'pending',
-            };
-            reviewQueue.unshift(newReviewTask);
+        
+        updateProject(selectedProject.id, {
+            analyst: selectedAnalyst,
+            status: 'IN_REVIEW',
+            deadline: deadline || new Date().toISOString(),
+            leadNote: notes
+        });
 
-            // Reset form
+        addNotification(
+            'Disposisi Berhasil',
+            `Proyek ${selectedProject.name} telah ditugaskan ke ${selectedAnalyst}`,
+            'info',
+            '/workspace/analyst'
+        );
+        
+        toast.success(`Proyek ${selectedProject?.name} berhasil ditugaskan ke ${selectedAnalyst}`);
+        navigate('/queue');
+        setIsSubmitting(false);
+
+        const nextQueue = dispositionQueue.filter(p => p.id !== selectedProject.id);
+        if (nextQueue.length > 0) {
+            setSelectedProject(nextQueue[0]);
             setSelectedAnalyst('');
-            setDeadline('');
             setNotes('');
-            // Remove from queue (simulasi)
-            const index = dispositionQueue.indexOf(selectedProject);
-            if (index > -1) dispositionQueue.splice(index, 1);
-            if (dispositionQueue.length > 0) {
-                setSelectedProject(dispositionQueue[0]);
-            } else {
-                setSelectedProject(null);
-            }
-        }, 1000);
+        } else {
+            setSelectedProject(null);
+        }
     };
-
     const getPriorityColor = (priority) => {
         switch (priority) {
             case 'High': return 'bg-red-500/10 text-red-600 border-red-200';
@@ -89,7 +133,7 @@ export default function WorkspaceLead() {
 
     if (!selectedProject) {
         return (
-            <div className="flex-1 overflow-y-auto p-6 md:p-8 bg-[#f8f9fb] flex items-center justify-center">
+            <div className="flex-1 overflow-y-auto px-6 py-4 md:px-8 md:py-5 bg-[#f8f9fb] flex items-center justify-center">
                 <div className="text-center py-20 animate-scale-in">
                     <div className="w-24 h-24 rounded-3xl bg-emerald-100 text-emerald-600 flex items-center justify-center mx-auto mb-6 shadow-sm">
                         <Check size={48} />
@@ -105,13 +149,36 @@ export default function WorkspaceLead() {
     }
 
     return (
-        <div className="flex-1 overflow-auto p-6 md:p-8 bg-[#f8f9fb] animate-slide-up">
+        <div className="flex-1 overflow-auto px-6 py-4 md:px-8 md:py-5 bg-[#f8f9fb] animate-slide-up">
             {/* Header */}
             <div className="mb-6">
-                <h1 className="text-2xl font-extrabold text-gray-800">Disposisi System Analyst</h1>
-                <p className="text-gray-500 mt-1 text-sm">
-                    Tugaskan Analis Sistem untuk meninjau proyek baru dan menyusun dokumen analisis persyaratan teknis.
-                </p>
+                <div className="flex flex-col md:flex-row md:items-end justify-between gap-4">
+                    <div>
+                        <h1 className="text-2xl font-extrabold text-gray-800">Workspace Lead</h1>
+                        <p className="text-gray-500 mt-1 text-sm">
+                            Kelola disposisi proyek baru ke analis atau verifikasi hasil analisis.
+                        </p>
+                    </div>
+                    <div className="flex bg-white p-1 rounded-xl border border-gray-200 shadow-sm">
+                        <button
+                            onClick={() => { setActiveTab('disposition'); setSelectedProject(null); }}
+                            className={`px-4 py-2 rounded-lg text-sm font-semibold transition-all ${activeTab === 'disposition' ? 'bg-[#1A56DB] text-white shadow-md' : 'text-gray-500 hover:text-gray-700 hover:bg-gray-50'}`}
+                        >
+                            Disposisi Proyek Baru
+                        </button>
+                        <button
+                            onClick={() => { setActiveTab('verification'); setSelectedProject(null); }}
+                            className={`px-4 py-2 rounded-lg text-sm font-semibold transition-all ${activeTab === 'verification' ? 'bg-[#1A56DB] text-white shadow-md' : 'text-gray-500 hover:text-gray-700 hover:bg-gray-50'}`}
+                        >
+                            Verifikasi Hasil Analisis
+                            {verificationQueue.length > 0 && (
+                                <span className="ml-2 bg-red-500 text-white px-2 py-0.5 rounded-full text-xs">
+                                    {verificationQueue.length}
+                                </span>
+                            )}
+                        </button>
+                    </div>
+                </div>
             </div>
 
             {/* Split Layout */}
@@ -120,15 +187,15 @@ export default function WorkspaceLead() {
                 <div className="w-full lg:w-1/3 flex flex-col bg-white border border-gray-100 rounded-2xl shadow-sm overflow-hidden">
                     <div className="p-4 border-b border-gray-100 flex justify-between items-center shrink-0">
                         <div>
-                            <h2 className="text-base font-bold text-gray-800">Antrean Proyek</h2>
-                            <p className="text-xs text-gray-400 mt-0.5">{dispositionQueue.length} menunggu disposisi</p>
+                            <h2 className="text-base font-bold text-gray-800">{activeTab === 'disposition' ? 'Antrean Disposisi' : 'Antrean Verifikasi'}</h2>
+                            <p className="text-xs text-gray-400 mt-0.5">{activeQueue.length} menunggu</p>
                         </div>
                         <button className="p-2 text-gray-400 hover:text-[#1A56DB] hover:bg-blue-50 rounded-lg transition-colors">
                             <Filter size={16} />
                         </button>
                     </div>
                     <div className="flex-1 overflow-y-auto p-3 space-y-2.5 bg-gray-50/40">
-                        {dispositionQueue.map((project) => (
+                        {activeQueue.map((project) => (
                             <div
                                 key={project.id}
                                 onClick={() => setSelectedProject(project)}
@@ -149,6 +216,7 @@ export default function WorkspaceLead() {
                                         {new Date(project.submittedAt).toLocaleDateString('id-ID', { day: 'numeric', month: 'short' })}
                                     </span>
                                 </div>
+                                <div className="mb-2"><RBBBadge type={project.type} deadline={project.rbbDeadline} /></div>
                                 <h3 className="font-semibold text-gray-800 text-sm mb-1 group-hover:text-[#1A56DB] transition-colors">{project.name}</h3>
                                 <div className="flex items-center gap-1 text-xs text-gray-500">
                                     <Users size={13} />
@@ -175,6 +243,7 @@ export default function WorkspaceLead() {
                                     </span>
                                     <span className="text-xs font-bold text-gray-400 bg-gray-100 px-2 py-0.5 rounded">{selectedProject.id}</span>
                                 </div>
+                                <div className="mb-2"><RBBBadge type={selectedProject.type} deadline={selectedProject.rbbDeadline} /></div>
                                 <h2 className="text-2xl font-extrabold text-gray-800">{selectedProject.name}</h2>
                                 <div className="flex items-center gap-2 text-gray-500 text-sm mt-1">
                                     <Users size={15} />
@@ -186,11 +255,7 @@ export default function WorkspaceLead() {
                             </button>
                         </div>
 
-                        <div className="grid grid-cols-3 gap-3">
-                            <div className="bg-blue-50/50 p-3.5 rounded-xl border border-blue-100">
-                                <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1">Budget Estimasi</p>
-                                <p className="text-base font-extrabold text-gray-800">{selectedProject.budget}</p>
-                            </div>
+                        <div className="grid grid-cols-2 gap-3">
                             <div className="bg-purple-50/50 p-3.5 rounded-xl border border-purple-100">
                                 <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1">Target Selesai</p>
                                 <p className="text-base font-extrabold text-gray-800">{selectedProject.targetDate}</p>
@@ -234,77 +299,85 @@ export default function WorkspaceLead() {
 
                         <hr className="border-gray-200 mb-6" />
 
-                        {/* Assignment Form */}
-                        <div className="bg-gray-50 rounded-xl p-6 border border-gray-200">
-                            <h3 className="text-lg font-semibold text-gray-800 mb-4 flex items-center gap-2">
-                                <User size={20} className="text-[#1A56DB]" />
-                                Form Penugasan Analis
-                            </h3>
-
-                            <div className="space-y-4">
-                                <div>
-                                    <label className="block text-sm font-semibold text-gray-700 mb-1.5">
-                                        Pilih System Analyst <span className="text-red-500">*</span>
-                                    </label>
-                                    <select
-                                        value={selectedAnalyst}
-                                        onChange={(e) => setSelectedAnalyst(e.target.value)}
-                                        className="w-full px-4 py-2.5 bg-white border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#1A56DB] focus:border-[#1A56DB] appearance-none transition-all cursor-pointer"
-                                    >
-                                        <option value="">Pilih analis yang tersedia...</option>
-                                        {analysts.map((a) => (
-                                            <option key={a.id} value={a.name}>
-                                                {a.name} (Beban: {a.load})
-                                            </option>
-                                        ))}
-                                    </select>
-                                </div>
-
-                                <div>
-                                    <label className="block text-sm font-semibold text-gray-700 mb-1.5">
-                                        Batas Waktu Analisis (SLA) <span className="text-red-500">*</span>
-                                    </label>
-                                    <input
-                                        type="date"
-                                        value={deadline}
-                                        onChange={(e) => setDeadline(e.target.value)}
-                                        className="w-full px-4 py-2.5 bg-white border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#1A56DB] focus:border-[#1A56DB] transition-all"
-                                    />
-                                </div>
-
-                                <div>
-                                    <label className="block text-sm font-semibold text-gray-700 mb-1.5">
-                                        Catatan Khusus untuk Analis
-                                    </label>
-                                    <textarea
-                                        value={notes}
-                                        onChange={(e) => setNotes(e.target.value)}
-                                        placeholder="Tambahkan instruksi spesifik, poin perhatian, atau konteks tambahan..."
-                                        rows={3}
-                                        className="w-full px-4 py-2.5 bg-white border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#1A56DB] focus:border-[#1A56DB] transition-all resize-none"
-                                    />
+                        {/* Action Form (Assignment / Verification) */}
+                        {activeTab === 'disposition' ? (
+                            <div className="bg-gray-50 rounded-xl p-6 border border-gray-200">
+                                <h3 className="text-lg font-semibold text-gray-800 mb-4 flex items-center gap-2">
+                                    <User size={20} className="text-[#1A56DB]" />
+                                    Form Penugasan Analis
+                                </h3>
+                                <div className="space-y-4">
+                                    <div>
+                                        <label className="block text-sm font-semibold text-gray-700 mb-1.5">Pilih System Analyst <span className="text-red-500">*</span></label>
+                                        <select
+                                            value={selectedAnalyst}
+                                            onChange={(e) => setSelectedAnalyst(e.target.value)}
+                                            className="w-full px-4 py-2.5 rounded-xl border border-gray-200 focus:border-[#1A56DB] focus:ring-2 focus:ring-blue-50 outline-none transition-all bg-white"
+                                        >
+                                            <option value="">-- Pilih Analyst --</option>
+                                            {analysts.map((a, i) => (
+                                                <option key={i} value={a.name}>{a.name} ({a.load} Proyek Aktif)</option>
+                                            ))}
+                                        </select>
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm font-semibold text-gray-700 mb-1.5">Target Selesai Analisis (Opsional)</label>
+                                        <input
+                                            type="date"
+                                            value={deadline}
+                                            onChange={(e) => setDeadline(e.target.value)}
+                                            className="w-full px-4 py-2.5 rounded-xl border border-gray-200 focus:border-[#1A56DB] focus:ring-2 focus:ring-blue-50 outline-none transition-all bg-white"
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm font-semibold text-gray-700 mb-1.5">Catatan untuk Analis (Opsional)</label>
+                                        <textarea
+                                            value={notes}
+                                            onChange={(e) => setNotes(e.target.value)}
+                                            placeholder="Berikan instruksi khusus atau fokus analisis..."
+                                            className="w-full px-4 py-2.5 rounded-xl border border-gray-200 focus:border-[#1A56DB] focus:ring-2 focus:ring-blue-50 outline-none transition-all min-h-[80px] resize-y bg-white text-sm"
+                                        ></textarea>
+                                    </div>
+                                    <div className="pt-2">
+                                        <button
+                                            onClick={handleAssign}
+                                            disabled={isSubmitting || !selectedAnalyst}
+                                            className="w-full bg-[#1A56DB] hover:bg-blue-700 text-white font-bold py-3 px-4 rounded-xl transition-all shadow-md hover:shadow-lg flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                                        >
+                                            {isSubmitting ? <LoadingSpinner size="sm" color="white" /> : <Send size={18} />}
+                                            Kirim Tugasan Analisis
+                                        </button>
+                                    </div>
                                 </div>
                             </div>
-                        </div>
-                    </div>
-
-                    {/* Actions Footer */}
-                    <div className="p-4 border-t border-gray-100 shrink-0 flex justify-end gap-3 bg-gray-50/30">
-                        <button className="px-5 py-2.5 bg-white border border-red-200 text-red-500 rounded-xl font-semibold hover:bg-red-50 hover:border-red-300 transition-all flex items-center gap-2 text-sm">
-                            <X size={16} />
-                            Kembalikan
-                        </button>
-                        <button
-                            onClick={handleAssign}
-                            disabled={isSubmitting}
-                            className="px-6 py-2.5 bg-[#003a73] text-white rounded-xl font-bold hover:bg-[#002a5a] transition-all flex items-center gap-2 shadow-md shadow-[#003a73]/20 text-sm btn-shimmer disabled:opacity-70 disabled:cursor-not-allowed"
-                        >
-                            {isSubmitting ? (
-                                <><div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> Memproses...</>
-                            ) : (
-                                <><User size={16} /> Tugaskan Analis</>
-                            )}
-                        </button>
+                        ) : (
+                            <div className="bg-emerald-50 rounded-xl p-6 border border-emerald-200">
+                                <h3 className="text-lg font-semibold text-emerald-800 mb-4 flex items-center gap-2">
+                                    <Check size={20} />
+                                    Verifikasi Hasil Analisis
+                                </h3>
+                                <div className="space-y-4">
+                                    <div className="bg-white p-4 rounded-lg border border-emerald-100 shadow-sm">
+                                        <p className="text-xs font-bold text-gray-500 uppercase mb-1">Keputusan Analis</p>
+                                        <p className="font-semibold text-gray-800">{selectedProject.analystResult?.decision || 'Disetujui'}</p>
+                                    </div>
+                                    <div className="bg-white p-4 rounded-lg border border-emerald-100 shadow-sm">
+                                        <p className="text-xs font-bold text-gray-500 uppercase mb-1">Catatan Analis</p>
+                                        <p className="text-gray-700 text-sm">{selectedProject.analystResult?.notes || 'Tidak ada catatan.'}</p>
+                                    </div>
+                                    <div className="pt-2">
+                                        <button
+                                            onClick={handleVerify}
+                                            disabled={isSubmitting}
+                                            className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-3 px-4 rounded-xl transition-all shadow-md hover:shadow-lg flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                                        >
+                                            {isSubmitting ? <LoadingSpinner size="sm" color="white" /> : <Send size={18} />}
+                                            Lanjutkan ke Pengembangan (Alokasi Tim)
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
                     </div>
                 </div>
             </div>

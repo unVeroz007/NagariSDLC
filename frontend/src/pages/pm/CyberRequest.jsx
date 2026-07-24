@@ -25,7 +25,7 @@ import {
 export default function CyberRequest() {
     const { user } = useAuth();
     const [formData, setFormData] = useState({
-        projectId: 'Aplikasi Loan Origination System (LOS)',
+        projectId: '🔴 [RBB] Aplikasi Loan Origination System (LOS)',
         targetUrl: 'https://staging-los.banknagari.co.id',
         notes: '',
     });

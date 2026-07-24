@@ -1,5 +1,8 @@
+import RBBBadge from '../../components/RBBBadge';
 import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
+import { useNotifications } from '../../contexts/NotificationContext';
 import {
     Download,
     Eye,
@@ -20,41 +23,72 @@ import {
     File,
     Edit3,
 } from 'lucide-react';
-import { reviewQueue } from '../../data/mockData';
+import { useProjects } from '../../contexts/ProjectContext';
+import LoadingSpinner from '../../components/LoadingSpinner';
+import EmptyState from '../../components/EmptyState';
+import toast from 'react-hot-toast';
 
 export default function WorkspaceAnalyst() {
     const { user } = useAuth();
-    const [selectedProject, setSelectedProject] = useState(reviewQueue[0]);
+    const { projects, updateProject, isLoading } = useProjects();
+    const navigate = useNavigate();
+    const { addNotification } = useNotifications();
+    // Ambil queue review analis
+    const reviewQueue = projects.filter(p => p.status === 'Review Analis');
+    const [selectedProject, setSelectedProject] = useState(null);
+
+    if (!selectedProject && reviewQueue.length > 0) {
+        setSelectedProject(reviewQueue[0]);
+    }
     const [decision, setDecision] = useState('');
+    const [projectType, setProjectType] = useState('NON_RBB');
     const [notes, setNotes] = useState('');
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [uploadedFile, setUploadedFile] = useState(null);
 
     const handleSubmit = () => {
         if (!decision) {
-            alert('Pilih keputusan terlebih dahulu!');
+            toast.error('Pilih keputusan review!');
             return;
         }
         if (!notes.trim()) {
-            alert('Masukkan catatan analisis!');
+            toast.error('Masukkan catatan analisis!');
             return;
         }
         setIsSubmitting(true);
-        setTimeout(() => {
-            alert(`Proyek ${selectedProject?.name} berhasil di-review dengan keputusan: ${decision}`);
-            setIsSubmitting(false);
-            // Remove from queue
-            const index = reviewQueue.indexOf(selectedProject);
-            if (index > -1) reviewQueue.splice(index, 1);
-            if (reviewQueue.length > 0) {
-                setSelectedProject(reviewQueue[0]);
-                setDecision('');
-                setNotes('');
-                setUploadedFile(null);
-            } else {
-                setSelectedProject(null);
-            }
-        }, 1000);
+        
+        // Update project status based on decision
+        const isApproved = decision.includes('Disetujui');
+        updateProject(selectedProject.id, {
+            status: isApproved ? 'ANALYSIS_APPROVED' : 'Review Ditolak',
+            statusColor: isApproved ? 'bg-emerald-100 text-emerald-700 border-emerald-200' : 'bg-red-100 text-red-700 border-red-200',
+            analystDecision: decision,
+            analystNotes: notes,
+            analystResult: { decision, notes }, // Simpan hasil review untuk Lead Group
+            type: projectType,
+            typeLabel: projectType === 'RBB' ? 'RBB (Wajib Selesai)' : 'Non-RBB (Fleksibel)'
+        });
+
+        addNotification(
+            'Review Proyek Selesai',
+            `${selectedProject?.name} telah direview oleh ${user?.name || 'Analyst'} dengan keputusan: ${decision}.`,
+            isApproved ? 'success' : 'warning',
+            '/workspace/lead'
+        );
+        toast.success(`Proyek ${selectedProject?.name} berhasil di-review dengan keputusan: ${decision}`);
+        navigate('/workspace/lead');
+        setIsSubmitting(false);
+        
+        const nextQueue = reviewQueue.filter(p => p.id !== selectedProject.id);
+        if (nextQueue.length > 0) {
+            setSelectedProject(nextQueue[0]);
+            setDecision('');
+            setProjectType('NON_RBB');
+            setNotes('');
+            setUploadedFile(null);
+        } else {
+            setSelectedProject(null);
+        }
     };
 
     const getPriorityColor = (priority) => {
@@ -62,6 +96,9 @@ export default function WorkspaceAnalyst() {
             case 'High': return 'bg-red-500/10 text-red-600 border-red-200';
             case 'Medium': return 'bg-yellow-500/10 text-yellow-600 border-yellow-200';
             case 'Low': return 'bg-green-500/10 text-green-600 border-green-200';
+            case 'ANALYSIS_APPROVED': return 'bg-emerald-100 text-emerald-700 border-emerald-200';
+            case 'READY_FOR_DEVELOPMENT': return 'bg-cyan-100 text-cyan-700 border-cyan-200';
+            case 'IN_DEVELOPMENT': return 'bg-indigo-100 text-indigo-700 border-indigo-200';
             default: return 'bg-gray-100 text-gray-600';
         }
     };
@@ -72,6 +109,9 @@ export default function WorkspaceAnalyst() {
                 return 'bg-blue-100 text-blue-700 border-blue-200';
             case 'New':
                 return 'bg-gray-100 text-gray-600 border-gray-200';
+            case 'ANALYSIS_APPROVED': return 'bg-emerald-100 text-emerald-700 border-emerald-200';
+            case 'READY_FOR_DEVELOPMENT': return 'bg-cyan-100 text-cyan-700 border-cyan-200';
+            case 'IN_DEVELOPMENT': return 'bg-indigo-100 text-indigo-700 border-indigo-200';
             default:
                 return 'bg-gray-100 text-gray-600';
         }
@@ -93,7 +133,7 @@ export default function WorkspaceAnalyst() {
 
     if (!selectedProject) {
         return (
-            <div className="flex-1 overflow-y-auto p-6 md:p-8 bg-[#f8f9fb] flex items-center justify-center">
+            <div className="flex-1 overflow-y-auto px-6 py-4 md:px-8 md:py-5 bg-[#f8f9fb] flex items-center justify-center">
                 <div className="text-center py-20 animate-scale-in">
                     <div className="w-24 h-24 rounded-3xl bg-emerald-100 text-emerald-600 flex items-center justify-center mx-auto mb-6 shadow-sm">
                         <CheckCircle size={48} />
@@ -109,7 +149,7 @@ export default function WorkspaceAnalyst() {
     }
 
     return (
-        <div className="flex-1 overflow-auto p-6 md:p-8 bg-[#f8f9fb] animate-slide-up">
+        <div className="flex-1 overflow-auto px-6 py-4 md:px-8 md:py-5 bg-[#f8f9fb] animate-slide-up">
             {/* Header */}
             <div className="mb-6">
                 <h1 className="text-2xl font-extrabold text-gray-800">Workspace System Analyst</h1>
@@ -154,6 +194,7 @@ export default function WorkspaceAnalyst() {
                                         {new Date(project.deadline).toLocaleDateString('id-ID', { day: 'numeric', month: 'short' })}
                                     </span>
                                 </div>
+                                <div className="mb-2"><RBBBadge type={project.type} deadline={project.rbbDeadline} /></div>
                                 <h4 className="font-semibold text-gray-800 text-sm mb-1 group-hover:text-[#1A56DB] transition-colors">{project.name}</h4>
                                 <p className="text-xs text-gray-500 mb-2.5">Peminta: {project.division}</p>
                                 {project.leadNote && (
@@ -232,6 +273,39 @@ export default function WorkspaceAnalyst() {
                                         <option value="Disetujui dengan Penyesuaian">Disetujui dengan Penyesuaian</option>
                                         <option value="Ditolak">Ditolak</option>
                                     </select>
+                                </div>
+
+                                {/* Tipe Proyek */}
+                                <div className="space-y-2">
+                                    <label className="block text-sm font-semibold text-gray-700">
+                                        Tipe Proyek <span className="text-red-500">*</span>
+                                    </label>
+                                    <div className="flex flex-col sm:flex-row gap-4">
+                                        <label className="flex items-center gap-2 cursor-pointer">
+                                            <input
+                                                type="radio"
+                                                name="projectType"
+                                                value="RBB"
+                                                checked={projectType === 'RBB'}
+                                                onChange={(e) => setProjectType(e.target.value)}
+                                                className="w-4 h-4 text-[#1A56DB] focus:ring-[#1A56DB]"
+                                            />
+                                            <span className="font-medium text-red-600">RBB (Wajib Selesai)</span>
+                                            <span className="text-xs text-gray-400">— Target rigid, prioritas tinggi</span>
+                                        </label>
+                                        <label className="flex items-center gap-2 cursor-pointer">
+                                            <input
+                                                type="radio"
+                                                name="projectType"
+                                                value="NON_RBB"
+                                                checked={projectType === 'NON_RBB'}
+                                                onChange={(e) => setProjectType(e.target.value)}
+                                                className="w-4 h-4 text-[#1A56DB] focus:ring-[#1A56DB]"
+                                            />
+                                            <span className="font-medium text-gray-600">Non-RBB (Fleksibel)</span>
+                                            <span className="text-xs text-gray-400">— Deadline fleksibel</span>
+                                        </label>
+                                    </div>
                                 </div>
 
                                 <div>

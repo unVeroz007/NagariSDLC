@@ -138,7 +138,7 @@ export default function QualityGate() {
 
     if (!selectedRelease) {
         return (
-            <div className="flex-1 overflow-y-auto p-6 md:p-8 bg-[#f8f9fb]">
+            <div className="flex-1 overflow-y-auto px-6 py-4 md:px-8 md:py-5 bg-[#f8f9fb]">
                 <div className="max-w-4xl mx-auto text-center py-20">
                     <div className="w-20 h-20 rounded-full bg-green-100 text-green-600 flex items-center justify-center mx-auto mb-4">
                         <CheckCircle size={40} />
@@ -151,7 +151,7 @@ export default function QualityGate() {
     }
 
     return (
-        <div className="flex-1 overflow-y-auto p-6 md:p-8 bg-[#f8f9fb]">
+        <div className="flex-1 overflow-y-auto px-6 py-4 md:px-8 md:py-5 bg-[#f8f9fb]">
             {/* Page Header */}
             <div className="mb-6">
                 <h1 className="text-2xl font-bold text-gray-800">Quality Gate &amp; Approval Rilis</h1>
@@ -184,9 +184,11 @@ export default function QualityGate() {
                             </div>
                             <h4 className="text-lg font-bold text-[#1A56DB] mb-1">{release.projectName}</h4>
                             <div className="flex items-center gap-2 mb-3">
-                                <span className="bg-gray-100 text-gray-600 px-2 py-0.5 rounded text-[10px] font-bold">
-                                    {release.type}
-                                </span>
+                                {release.type && (
+                                    <span className={`px-2 py-0.5 rounded text-[10px] font-bold border ${release.type === 'RBB' ? 'bg-red-50 text-red-700 border-red-200' : 'bg-gray-50 text-gray-600 border-gray-200'}`}>
+                                        {release.type === 'RBB' ? '🔴 RBB' : '⚪ Non-RBB'}
+                                    </span>
+                                )}
                             </div>
                             <div className="text-xs text-gray-500 flex items-center border-t border-gray-100 pt-2">
                                 <Calendar size={14} className="mr-1" />
@@ -208,6 +210,13 @@ export default function QualityGate() {
                                 <p className="text-sm text-gray-500">
                                     Requested by: {selectedRelease.division}
                                 </p>
+                                {selectedRelease.type && (
+                                    <div className="mt-2">
+                                        <span className={`px-2.5 py-1 rounded-md text-xs font-semibold border ${selectedRelease.type === 'RBB' ? 'bg-red-50 text-red-700 border-red-200' : 'bg-gray-50 text-gray-600 border-gray-200'}`}>
+                                            {selectedRelease.type === 'RBB' ? '🔴 RBB (Wajib Selesai)' : '⚪ Non-RBB (Fleksibel)'}
+                                        </span>
+                                    </div>
+                                )}
                             </div>
                             <button className="text-[#1A56DB] hover:text-[#1A56DB]/70">
                                 <ExternalLink size={20} />

@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
+import { useNotifications } from '../../contexts/NotificationContext';
 import {
     Shield,
     ChevronRight,
@@ -34,6 +35,7 @@ import { cyberTasks } from '../../data/mockData';
 
 export default function MyTasksCyber() {
     const { user } = useAuth();
+    const { addNotification } = useNotifications();
     const [selectedTask, setSelectedTask] = useState(cyberTasks[0]);
     const [securityStatus, setSecurityStatus] = useState('');
     const [notes, setNotes] = useState('');
@@ -50,6 +52,12 @@ export default function MyTasksCyber() {
         }
         setIsSubmitting(true);
         setTimeout(() => {
+            addNotification(
+                'Hasil Audit Cyber Selesai',
+                `Audit keamanan untuk ${selectedTask?.projectName} selesai.`,
+                securityStatus === 'aman' ? 'success' : 'danger',
+                '/pm/release-request'
+            );
             alert(`Hasil audit keamanan untuk ${selectedTask?.projectName} berhasil dikirim!`);
             setIsSubmitting(false);
             const index = cyberTasks.indexOf(selectedTask);
@@ -124,7 +132,7 @@ export default function MyTasksCyber() {
 
     if (!selectedTask) {
         return (
-            <div className="flex-1 overflow-y-auto p-6 md:p-8 bg-[#f8f9fb]">
+            <div className="flex-1 overflow-y-auto px-6 py-4 md:px-8 md:py-5 bg-[#f8f9fb]">
                 <div className="max-w-4xl mx-auto text-center py-20">
                     <div className="w-20 h-20 rounded-full bg-green-100 text-green-600 flex items-center justify-center mx-auto mb-4">
                         <CheckCircle size={40} />
@@ -138,33 +146,6 @@ export default function MyTasksCyber() {
 
     return (
         <div className="flex-1 flex flex-col h-full bg-[#f8f9fb] overflow-hidden">
-            {/* Topbar */}
-            <header className="h-16 bg-white shadow-sm border-b border-gray-200 flex justify-between items-center px-6 shrink-0 z-10">
-                <div className="flex items-center text-sm font-medium text-gray-500">
-                    <span className="hover:text-[#1A56DB] cursor-pointer">Beranda</span>
-                    <ChevronRight size={16} className="mx-2 text-gray-300" />
-                    <span>Fase 3</span>
-                    <ChevronRight size={16} className="mx-2 text-gray-300" />
-                    <span className="text-gray-800 font-semibold">Tugas Siber Saya</span>
-                </div>
-                <div className="flex items-center gap-4">
-                    <div className="relative hidden md:block">
-                        <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-                        <input
-                            type="text"
-                            placeholder="Cari tugas..."
-                            className="pl-10 pr-4 py-2 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-[#1A56DB] focus:border-[#1A56DB] outline-none w-64 bg-gray-50 transition-all"
-                        />
-                    </div>
-                    <button className="relative p-2 text-gray-500 hover:text-[#1A56DB] transition-colors rounded-full hover:bg-gray-100">
-                        <Bell size={20} />
-                        <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-red-500 rounded-full"></span>
-                    </button>
-                    <div className="w-9 h-9 rounded-full bg-[#1A56DB] text-white flex items-center justify-center font-bold text-sm shadow-sm ml-2 border border-gray-200 cursor-pointer hover:opacity-90 transition-opacity">
-                        {user?.name?.charAt(0) || 'R'}
-                    </div>
-                </div>
-            </header>
 
             {/* Content Area */}
             <div className="flex-1 overflow-y-auto p-6 flex flex-col gap-4">

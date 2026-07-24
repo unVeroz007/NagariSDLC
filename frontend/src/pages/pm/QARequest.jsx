@@ -1,5 +1,7 @@
 import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
+import { useNotifications } from '../../contexts/NotificationContext';
 import {
     FileText,
     FolderOpen,
@@ -22,10 +24,16 @@ import {
     FileCheck,
     AlertCircle,
 } from 'lucide-react';
-import { mockProjects } from '../../data/mockData';
+import { useProjects } from '../../contexts/ProjectContext';
+import LoadingSpinner from '../../components/LoadingSpinner';
+import EmptyState from '../../components/EmptyState';
+import toast from 'react-hot-toast';
 
 export default function QARequest() {
     const { user } = useAuth();
+    const navigate = useNavigate();
+    const { addNotification } = useNotifications();
+    const { projects, updateProject, isLoading } = useProjects();
     const [formData, setFormData] = useState({
         projectId: '',
         targetDate: '',
@@ -36,7 +44,7 @@ export default function QARequest() {
     const [isSubmitting, setIsSubmitting] = useState(false);
 
     // Daftar proyek yang siap QA (status sudah selesai development)
-    const readyProjects = mockProjects.filter(
+    const readyProjects = projects.filter(
         (p) => p.status === 'Development' || p.status === 'Ready for QA'
     );
 
@@ -88,7 +96,14 @@ export default function QARequest() {
         }
         setIsSubmitting(true);
         setTimeout(() => {
+            addNotification(
+                'Pengajuan QA Siap',
+                `Proyek ${formData.projectId} siap untuk pengujian QA.`,
+                'info',
+                '/workspace/qa'
+            );
             alert(`Pengajuan QA untuk proyek ${formData.projectId} berhasil dikirim!`);
+            navigate('/pm/qa-request');
             setIsSubmitting(false);
             // Reset form
             setFormData({ projectId: '', targetDate: '', stagingUrl: '', technicalNotes: '' });
@@ -97,7 +112,7 @@ export default function QARequest() {
     };
 
     return (
-        <div className="flex-1 overflow-y-auto p-6 md:p-8 bg-[#f8f9fb]">
+        <div className="flex-1 overflow-y-auto px-6 py-4 md:px-8 md:py-5 bg-[#f8f9fb]">
             <div className="max-w-4xl mx-auto">
                 {/* Header */}
                 <div className="mb-6">
@@ -141,7 +156,7 @@ export default function QARequest() {
                                     <option value="">Pilih proyek...</option>
                                     {readyProjects.map((project) => (
                                         <option key={project.id} value={project.id}>
-                                            {project.name} ({project.id})
+                                            {project.type === 'RBB' ? '🔴 [RBB] ' : ''}{project.name} ({project.id})
                                         </option>
                                     ))}
                                 </select>

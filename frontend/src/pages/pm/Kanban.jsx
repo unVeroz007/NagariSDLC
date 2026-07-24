@@ -1,5 +1,7 @@
 import { useState } from 'react';
+import RBBBadge from '../../components/RBBBadge';
 import { useAuth } from '../../contexts/AuthContext';
+import { useNavigate } from 'react-router-dom';
 import {
     Plus,
     Search,
@@ -47,6 +49,7 @@ const getPriorityColor = (priority) => {
 
 export default function Kanban() {
     const { user } = useAuth();
+    const navigate = useNavigate();
     const [tasks, setTasks] = useState(kanbanTasks);
     const [filter, setFilter] = useState('active');
     const [searchTerm, setSearchTerm] = useState('');
@@ -106,6 +109,7 @@ export default function Kanban() {
                 key={task.id}
                 draggable={!isLocked}
                 onDragStart={() => handleDragStart(task.id)}
+                onClick={() => navigate(`/pm/tasks/${task.projectId}`)}
                 className={`p-4 rounded-xl border shadow-sm hover:shadow-md transition-shadow cursor-grab active:cursor-grabbing relative group ${isRework
                     ? 'bg-red-50/50 border-2 border-red-500/50'
                     : isLocked
@@ -120,7 +124,8 @@ export default function Kanban() {
                     </div>
                 )}
 
-                <div className="flex justify-between items-start mb-2">
+                {task.type && <div className="mb-2"><RBBBadge type={task.type} deadline={task.rbbDeadline} /></div>}
+            <div className="flex justify-between items-start mb-2">
                     <span className={`text-xs font-bold px-2 py-1 rounded border ${isRework
                         ? 'text-red-600 bg-white border-red-200'
                         : 'text-[#1A56DB] bg-blue-50 border-blue-200'
