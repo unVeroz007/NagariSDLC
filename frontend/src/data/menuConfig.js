@@ -5,6 +5,7 @@ export const menuSections = {
             items: [
                 { label: 'Dashboard Utama', path: '/dashboard', icon: 'LayoutDashboard' },
                 { label: 'Daftar Semua Proyek', path: '/projects', icon: 'List' },
+                { label: 'Lacak Status Proyek', path: '/pm/tracker', icon: 'MapPin' },
                 { label: 'Manajemen Dokumen', path: '/documents', icon: 'Folders' },
             ],
         },
@@ -99,8 +100,9 @@ export const menuSections = {
         {
             label: 'UTAMA',
             items: [
-                { label: 'Dashboard Utama', path: '/dashboard', icon: 'LayoutDashboard' },
+                { label: 'PM Workspace', path: '/pm/workspace', icon: 'Briefcase' },
                 { label: 'Daftar Semua Proyek', path: '/projects', icon: 'List' },
+                { label: 'Lacak Status Proyek', path: '/pm/tracker', icon: 'MapPin' },
                 { label: 'Manajemen Dokumen', path: '/documents', icon: 'Folders' },
             ],
         },

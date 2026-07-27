@@ -1,149 +1,329 @@
 import { createBrowserRouter, Navigate } from 'react-router-dom';
 import MainLayout from '../layouts/MainLayout';
+import ProtectedRoute from '../components/ProtectedRoute';
+
+// Auth pages (public)
 import Login from '../pages/Login';
+import Register from '../pages/Register';
+import ForgotPassword from '../pages/ForgotPassword';
+import ResetPassword from '../pages/ResetPassword';
+import Unauthorized from '../pages/Unauthorized';
+import NotFound from '../pages/NotFound';
+
+// Main pages
 import Dashboard from '../pages/Dashboard';
+import Profile from '../pages/Profile';
+import Track from '../pages/Track';
+import Queue from '../pages/Queue';
+
+// Project pages
 import ProjectList from '../pages/projects/ProjectList';
 import ProjectNew from '../pages/projects/ProjectNew';
 import Documents from '../pages/projects/Documents';
+
+// Workspace pages
 import WorkspaceLead from '../pages/workspace/WorkspaceLead';
 import WorkspaceAnalyst from '../pages/workspace/WorkspaceAnalyst';
 import WorkspaceDevLead from '../pages/workspace/WorkspaceDevLead';
+import WorkspaceQA from '../pages/workspace/WorkspaceQA';
+import WorkspaceCyber from '../pages/workspace/WorkspaceCyber';
+
+// PM pages
+import PMWorkspace from '../pages/pm/PMWorkspace';
+import ProjectTracker from '../pages/pm/ProjectTracker';
 import Allocation from '../pages/pm/Allocation';
 import Kanban from '../pages/pm/Kanban';
 import Task from '../pages/pm/Tasks';
 import TaskDetail from '../pages/pm/TaskDetail';
 import QARequest from '../pages/pm/QARequest';
-import WorkspaceQA from '../pages/workspace/WorkspaceQA';
-import MyTasksQA from '../pages/mytasks/MyTasksQA';
-import MyTasksCyber from '../pages/mytasks/MyTasksCyber';
-import WorkspaceCyber from '../pages/workspace/WorkspaceCyber';
 import CyberRequest from '../pages/pm/CyberRequest';
 import ReleaseRequest from '../pages/pm/ReleaseRequest';
-import QualityGate from '../pages/QualityGate';
+
+// My Tasks pages
+import MyTasksQA from '../pages/mytasks/MyTasksQA';
+import MyTasksCyber from '../pages/mytasks/MyTasksCyber';
+
+// Admin pages
 import Users from '../pages/admin/Users';
 import Analytics from '../pages/admin/Analytics';
 import Settings from '../pages/admin/settings';
-import Track from '../pages/Track';
-import Queue from '../pages/Queue';
-import Profile from '../pages/Profile';
 import ActivityLog from '../pages/admin/ActivityLog';
 
+// Other pages
+import QualityGate from '../pages/QualityGate';
+
+// Role constants
+const ALL_ROLES = ['super_admin', 'lead_group', 'analyst', 'development_lead', 'project_manager', 'qa_lead', 'qa_tester', 'cyber_team'];
+const PM_ROLES = ['super_admin', 'project_manager'];
+const LEAD_ROLES = ['super_admin', 'lead_group'];
+const ANALYST_ROLES = ['super_admin', 'analyst'];
+const DEV_ROLES = ['super_admin', 'development_lead'];
+const QA_ROLES = ['super_admin', 'qa_lead', 'qa_tester'];
+const CYBER_ROLES = ['super_admin', 'cyber_team'];
+const ADMIN_ROLES = ['super_admin'];
 
 const router = createBrowserRouter([
+    // ─────────────────────────────────────────────
+    // Halaman publik (tidak perlu login)
+    // ─────────────────────────────────────────────
     {
         path: '/',
+        element: <Navigate to="/login" replace />,
+    },
+    {
+        path: '/login',
         element: <Login />,
     },
     {
-        element: <MainLayout />,
+        path: '/register',
+        element: <Register />,
+    },
+    {
+        path: '/forgot-password',
+        element: <ForgotPassword />,
+    },
+    {
+        path: '/reset-password',
+        element: <ResetPassword />,
+    },
+    {
+        path: '/unauthorized',
+        element: <Unauthorized />,
+    },
+    {
+        path: '*',
+        element: <NotFound />,
+    },
+
+    // ─────────────────────────────────────────────
+    // Halaman yang memerlukan login (semua role)
+    // ─────────────────────────────────────────────
+    {
+        element: (
+            <ProtectedRoute allowedRoles={ALL_ROLES}>
+                <MainLayout />
+            </ProtectedRoute>
+        ),
         children: [
+            // UTAMA
             {
-                // index: true,
-                path: '/Dashboard',
+                path: '/dashboard',
                 element: <Dashboard />,
+            },
+            {
+                path: '/Dashboard', // backward compat
+                element: <Navigate to="/dashboard" replace />,
+            },
+            {
+                path: '/profile',
+                element: <Profile />,
             },
             {
                 path: '/projects',
                 element: <ProjectList />,
             },
             {
-                path: '/projects/new',
-                element: <ProjectNew />,
-            },
-            {
                 path: '/Documents',
                 element: <Documents />,
             },
-            { path: '/workspace/lead', element: <WorkspaceLead /> },
-            { path: '/workspace/analyst', element: <WorkspaceAnalyst /> },
-            { path: '/workspace/dev-lead', element: <WorkspaceDevLead /> },
-            { path: '/workspace/cyber', element: <WorkspaceCyber /> },
             {
-                path: '/pm/allocation',
-                element: <Allocation />,
+                path: '/documents',
+                element: <Documents />,
             },
             {
-                path: '/pm/kanban',
-                element: <Kanban />,
+                path: '/Track',
+                element: <Track />,
+            },
+            {
+                path: '/Queue',
+                element: <Queue />,
+            },
+            {
+                path: '/queue',
+                element: <Queue />,
+            },
+
+            // FASE 1 – Inisiasi & Review
+            {
+                path: '/projects/new',
+                element: <ProjectNew />,
             },
             {
                 path: '/newProject',
                 element: <Navigate to="/projects/new" replace />,
             },
             {
+                path: '/workspace/lead',
+                element: (
+                    <ProtectedRoute allowedRoles={LEAD_ROLES}>
+                        <WorkspaceLead />
+                    </ProtectedRoute>
+                ),
+            },
+            {
+                path: '/workspace/analyst',
+                element: (
+                    <ProtectedRoute allowedRoles={ANALYST_ROLES}>
+                        <WorkspaceAnalyst />
+                    </ProtectedRoute>
+                ),
+            },
+            {
+                path: '/workspace/dev-lead',
+                element: (
+                    <ProtectedRoute allowedRoles={DEV_ROLES}>
+                        <WorkspaceDevLead />
+                    </ProtectedRoute>
+                ),
+            },
+
+            // FASE 2 – Pengembangan
+            {
+                path: '/pm/workspace',
+                element: (
+                    <ProtectedRoute allowedRoles={PM_ROLES}>
+                        <PMWorkspace />
+                    </ProtectedRoute>
+                ),
+            },
+            {
+                path: '/pm/tracker',
+                element: (
+                    <ProtectedRoute allowedRoles={[...PM_ROLES, 'super_admin']}>
+                        <ProjectTracker />
+                    </ProtectedRoute>
+                ),
+            },
+            {
+                path: '/pm/allocation',
+                element: (
+                    <ProtectedRoute allowedRoles={PM_ROLES}>
+                        <Allocation />
+                    </ProtectedRoute>
+                ),
+            },
+            {
+                path: '/pm/kanban',
+                element: (
+                    <ProtectedRoute allowedRoles={PM_ROLES}>
+                        <Kanban />
+                    </ProtectedRoute>
+                ),
+            },
+            {
                 path: '/pm/tasks',
-                element: <Task />,
+                element: (
+                    <ProtectedRoute allowedRoles={PM_ROLES}>
+                        <Task />
+                    </ProtectedRoute>
+                ),
             },
             {
                 path: '/pm/tasks/:id',
-                element: <TaskDetail />,
+                element: (
+                    <ProtectedRoute allowedRoles={PM_ROLES}>
+                        <TaskDetail />
+                    </ProtectedRoute>
+                ),
             },
+
+            // FASE 3 – Pengujian
             {
                 path: '/pm/qa-request',
-                element: <QARequest />,
+                element: (
+                    <ProtectedRoute allowedRoles={PM_ROLES}>
+                        <QARequest />
+                    </ProtectedRoute>
+                ),
             },
             {
                 path: '/workspace/qa',
-                element: <WorkspaceQA />,
+                element: (
+                    <ProtectedRoute allowedRoles={QA_ROLES}>
+                        <WorkspaceQA />
+                    </ProtectedRoute>
+                ),
             },
             {
                 path: '/my-tasks/qa',
-                element: <MyTasksQA />
+                element: (
+                    <ProtectedRoute allowedRoles={QA_ROLES}>
+                        <MyTasksQA />
+                    </ProtectedRoute>
+                ),
             },
             {
                 path: '/pm/cyber-request',
-                element: <CyberRequest />
-            },
-            {
-                path: '/my-tasks/cyber',
-                element: <MyTasksCyber />
+                element: (
+                    <ProtectedRoute allowedRoles={PM_ROLES}>
+                        <CyberRequest />
+                    </ProtectedRoute>
+                ),
             },
             {
                 path: '/workspace/cyber',
-                element: <WorkspaceCyber />
+                element: (
+                    <ProtectedRoute allowedRoles={CYBER_ROLES}>
+                        <WorkspaceCyber />
+                    </ProtectedRoute>
+                ),
             },
             {
-                path: 'pm/release-request',
-                element: <ReleaseRequest />
+                path: '/my-tasks/cyber',
+                element: (
+                    <ProtectedRoute allowedRoles={CYBER_ROLES}>
+                        <MyTasksCyber />
+                    </ProtectedRoute>
+                ),
+            },
+
+            // FASE 4 – Rilis & Kepatuhan
+            {
+                path: '/pm/release-request',
+                element: (
+                    <ProtectedRoute allowedRoles={PM_ROLES}>
+                        <ReleaseRequest />
+                    </ProtectedRoute>
+                ),
+            },
+            {
+                path: 'pm/release-request', // backward compat (tanpa slash awal)
+                element: <Navigate to="/pm/release-request" replace />,
             },
             {
                 path: '/quality-gate',
-                element: <QualityGate />
+                element: <QualityGate />,
             },
+
+            // ADMINISTRASI
             {
                 path: '/admin/users',
-                element: <Users />
-            },
-            {
-                path: '/admin/audit',
-                element: <Navigate to="/admin/activity-log" replace />
-            },
-            {
-                path: '/analytics',
-                element: <Analytics />
-            },
-            {
-                path: '/admin/settings',
-                element: <Settings />
-            },
-            {
-                path: '/Track',
-                element: <Track />
-            },
-            {
-                path: '/Queue',
-                element: <Queue />
-            },
-            {
-                path: '/profile',
-                element: <Profile />
+                element: (
+                    <ProtectedRoute allowedRoles={ADMIN_ROLES}>
+                        <Users />
+                    </ProtectedRoute>
+                ),
             },
             {
                 path: '/admin/activity-log',
-                element: <ActivityLog />
+                element: (
+                    <ProtectedRoute allowedRoles={ADMIN_ROLES}>
+                        <ActivityLog />
+                    </ProtectedRoute>
+                ),
             },
-
-            // Tambahkan route lain nanti
+            {
+                path: '/admin/audit',
+                element: <Navigate to="/admin/activity-log" replace />,
+            },
+            {
+                path: '/analytics',
+                element: <Analytics />,
+            },
+            {
+                path: '/admin/settings',
+                element: <Settings />,
+            },
         ],
     },
 ]);

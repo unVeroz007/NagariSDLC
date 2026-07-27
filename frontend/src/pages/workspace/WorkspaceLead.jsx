@@ -131,22 +131,7 @@ export default function WorkspaceLead() {
         return labels[type] || type.toUpperCase();
     };
 
-    if (!selectedProject) {
-        return (
-            <div className="flex-1 overflow-y-auto px-6 py-4 md:px-8 md:py-5 bg-[#f8f9fb] flex items-center justify-center">
-                <div className="text-center py-20 animate-scale-in">
-                    <div className="w-24 h-24 rounded-3xl bg-emerald-100 text-emerald-600 flex items-center justify-center mx-auto mb-6 shadow-sm">
-                        <Check size={48} />
-                    </div>
-                    <h2 className="text-2xl font-bold text-gray-800 mb-2">Semua Proyek Sudah Ditugaskan</h2>
-                    <p className="text-gray-500">Tidak ada antrean proyek baru yang perlu disposisi.</p>
-                    <div className="mt-6 bg-emerald-50 border border-emerald-200 rounded-xl px-6 py-3 inline-block text-emerald-700 text-sm font-medium">
-                        Inbox kosong — Kerja bagus! 🎉
-                    </div>
-                </div>
-            </div>
-        );
-    }
+    // Hapus full-screen empty state return
 
     return (
         <div className="flex-1 overflow-auto px-6 py-4 md:px-8 md:py-5 bg-[#f8f9fb] animate-slide-up">
@@ -233,6 +218,21 @@ export default function WorkspaceLead() {
 
                 {/* RIGHT PANEL: Detail & Form */}
                 <div className="w-full lg:w-2/3 bg-white border border-gray-100 rounded-2xl shadow-sm overflow-hidden flex flex-col">
+                    {!selectedProject ? (
+                        <div className="flex-1 flex flex-col items-center justify-center p-8 text-center animate-scale-in">
+                            <div className="w-24 h-24 rounded-3xl bg-emerald-100 text-emerald-600 flex items-center justify-center mb-6 shadow-sm">
+                                <Check size={48} />
+                            </div>
+                            <h2 className="text-2xl font-bold text-gray-800 mb-2">Semua Proyek Selesai Diproses</h2>
+                            <p className="text-gray-500 max-w-md mx-auto">
+                                Tidak ada antrean proyek baru yang perlu didisposisi atau diverifikasi saat ini.
+                            </p>
+                            <div className="mt-6 bg-emerald-50 border border-emerald-200 rounded-xl px-6 py-3 inline-block text-emerald-700 text-sm font-medium">
+                                Antrean kosong — Kerja bagus! 🎉
+                            </div>
+                        </div>
+                    ) : (
+                        <>
                     {/* Header Info */}
                     <div className="p-6 border-b border-gray-100 shrink-0">
                         <div className="flex justify-between items-start mb-5">
@@ -379,6 +379,8 @@ export default function WorkspaceLead() {
                             </div>
                         )}
                     </div>
+                        </>
+                    )}
                 </div>
             </div>
         </div>

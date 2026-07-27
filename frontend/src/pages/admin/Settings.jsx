@@ -1,448 +1,619 @@
-import { useState } from 'react';
+// src/pages/admin/Settings.jsx
+import { useState, useMemo } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
+import { useProjects } from '../../contexts/ProjectContext';
 import {
-    User,
-    Shield,
-    Bell,
-    Palette,
-    ChevronRight,
-    Search,
-    Settings as SettingsIcon,
-    HelpCircle,
-    LogOut,
-    CheckCircle,
-    Eye,
-    EyeOff,
     Save,
+    X,
+    CheckCircle,
+    AlertCircle,
+    User,
     Mail,
     Phone,
-    UserCog,
+    Building,
+    Shield,
+    Bell,
+    Moon,
+    Sun,
+    Laptop,
     Globe,
+    Lock,
+    Key,
+    Database,
+    RefreshCw,
+    Clock,
+    Calendar,
+    FileText,
+    Users,
+    Settings as SettingsIcon,
+    ChevronRight,
+    Search,
+    Activity,
+    LogOut,
+    Eye,
+    EyeOff,
+    Palette,
+    Smartphone,
+    Monitor,
 } from 'lucide-react';
+import toast from 'react-hot-toast';
 
-export default function Settings() {
-    const { user } = useAuth();
-    const [activeTab, setActiveTab] = useState('profile');
+// Sub-komponen untuk setiap tab
+const ProfileSettings = ({ user, profile, setProfile, handleSave }) => {
+    const [isEditing, setIsEditing] = useState(false);
+    const [formData, setFormData] = useState(profile);
 
-    // State untuk form
-    const [profile, setProfile] = useState({
-        name: user?.name || 'Ahmad Fauzi',
-        email: user?.email || 'ahmad.fauzi@banknagari.co.id',
-        role: 'Super Admin',
-        phone: '+62 812 3456 7890',
-    });
-
-    const [password, setPassword] = useState({
-        current: '',
-        new: '',
-        confirm: '',
-    });
-
-    const [notifications, setNotifications] = useState([
-        { id: 'project', title: 'Update Proyek (Project Updates)', desc: 'Pemberitahuan saat ada perubahan status pada proyek SDLC.', active: true },
-        { id: 'security', title: 'Peringatan Keamanan (Security Alerts)', desc: 'Notifikasi instan jika ditemukan kerentanan berisiko tinggi.', active: true },
-        { id: 'tasks', title: 'Tugas (Assignments)', desc: 'Pemberitahuan jika ada tugas baru yang diberikan.', active: true },
-        { id: 'weekly', title: 'Laporan Mingguan (Weekly Reports)', desc: 'Ringkasan aktivitas dan metrik performa setiap hari Senin.', active: false },
-        { id: 'system', title: 'Pesan Sistem (System Messages)', desc: 'Informasi pemeliharaan terjadwal dan update sistem.', active: true },
-    ]);
-
-    const [theme, setTheme] = useState('light');
-
-    // Toggle notifikasi
-    const toggleNotification = (id) => {
-        setNotifications(prev =>
-            prev.map(item =>
-                item.id === id ? { ...item, active: !item.active } : item
-            )
-        );
-    };
-
-    // Handle profile change
-    const handleProfileChange = (e) => {
+    const handleChange = (e) => {
         const { name, value } = e.target;
-        setProfile(prev => ({ ...prev, [name]: value }));
+        setFormData(prev => ({ ...prev, [name]: value }));
     };
 
-    // Handle password change
+    const handleSubmit = () => {
+        setProfile(formData);
+        setIsEditing(false);
+        handleSave('Profil berhasil diperbarui!');
+    };
+
+    return (
+        <div className="space-y-6">
+            <div className="flex items-center justify-between">
+                <div>
+                    <h3 className="text-lg font-semibold text-gray-800">Informasi Akun</h3>
+                    <p className="text-sm text-gray-500">Kelola data pribadi dan informasi akun Anda.</p>
+                </div>
+                {!isEditing ? (
+                    <button
+                        onClick={() => setIsEditing(true)}
+                        className="px-4 py-2 bg-[#1A56DB] text-white rounded-lg text-sm font-medium hover:bg-[#1349c2] transition-colors"
+                    >
+                        Edit Profil
+                    </button>
+                ) : (
+                    <div className="flex gap-2">
+                        <button
+                            onClick={() => { setIsEditing(false); setFormData(profile); }}
+                            className="px-4 py-2 border border-gray-300 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-50 transition-colors"
+                        >
+                            Batal
+                        </button>
+                        <button
+                            onClick={handleSubmit}
+                            className="px-4 py-2 bg-[#003a73] text-white rounded-lg text-sm font-medium hover:bg-[#002a5a] transition-colors"
+                        >
+                            Simpan
+                        </button>
+                    </div>
+                )}
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div>
+                    <label className="block text-sm font-semibold text-gray-700 mb-1">Foto Profil</label>
+                    <div className="flex items-center gap-4">
+                        <div className="w-20 h-20 rounded-full bg-[#003a73] text-white flex items-center justify-center text-2xl font-bold">
+                            {formData.name?.charAt(0) || 'U'}
+                        </div>
+                        <button className="px-3 py-1.5 text-sm border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors">
+                            Upload Foto
+                        </button>
+                    </div>
+                </div>
+                <div>
+                    <label className="block text-sm font-semibold text-gray-700 mb-1">Nama Lengkap</label>
+                    {isEditing ? (
+                        <input
+                            type="text"
+                            name="name"
+                            value={formData.name}
+                            onChange={handleChange}
+                            className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#1A56DB] focus:border-transparent"
+                        />
+                    ) : (
+                        <p className="px-4 py-2 bg-gray-50 rounded-lg border border-gray-200 text-gray-700">{formData.name}</p>
+                    )}
+                </div>
+                <div>
+                    <label className="block text-sm font-semibold text-gray-700 mb-1">Email</label>
+                    <p className="px-4 py-2 bg-gray-50 rounded-lg border border-gray-200 text-gray-500">{formData.email}</p>
+                </div>
+                <div>
+                    <label className="block text-sm font-semibold text-gray-700 mb-1">No. Handphone</label>
+                    {isEditing ? (
+                        <input
+                            type="tel"
+                            name="phone"
+                            value={formData.phone}
+                            onChange={handleChange}
+                            className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#1A56DB] focus:border-transparent"
+                        />
+                    ) : (
+                        <p className="px-4 py-2 bg-gray-50 rounded-lg border border-gray-200 text-gray-700">{formData.phone}</p>
+                    )}
+                </div>
+                <div>
+                    <label className="block text-sm font-semibold text-gray-700 mb-1">Divisi / Departemen</label>
+                    <p className="px-4 py-2 bg-gray-50 rounded-lg border border-gray-200 text-gray-500">{formData.department}</p>
+                </div>
+                <div>
+                    <label className="block text-sm font-semibold text-gray-700 mb-1">Role</label>
+                    <p className="px-4 py-2 bg-gray-50 rounded-lg border border-gray-200 text-gray-500">{formData.role}</p>
+                </div>
+            </div>
+
+            <div className="pt-4 border-t border-gray-200">
+                <p className="text-xs text-gray-400">
+                    <span className="font-semibold">ID User:</span> {user?.id || 'USR-001'} &nbsp;•&nbsp;
+                    <span className="font-semibold">Bergabung:</span> {new Date().toLocaleDateString('id-ID')}
+                </p>
+            </div>
+        </div>
+    );
+};
+
+const SecuritySettings = () => {
+    const [password, setPassword] = useState({ current: '', new: '', confirm: '' });
+    const [showPasswords, setShowPasswords] = useState({ current: false, new: false, confirm: false });
+    const [twoFA, setTwoFA] = useState(false);
+
     const handlePasswordChange = (e) => {
         const { name, value } = e.target;
         setPassword(prev => ({ ...prev, [name]: value }));
     };
 
-    // Submit handlers
-    const handleProfileSubmit = (e) => {
-        e.preventDefault();
-        alert('Profil berhasil diperbarui!');
-    };
-
     const handlePasswordSubmit = (e) => {
         e.preventDefault();
         if (password.new !== password.confirm) {
-            alert('Konfirmasi sandi baru tidak cocok!');
+            toast.error('Konfirmasi password tidak cocok!');
             return;
         }
-        alert('Sandi berhasil diperbarui!');
+        if (password.new.length < 8) {
+            toast.error('Password minimal 8 karakter!');
+            return;
+        }
+        toast.success('Password berhasil diperbarui!');
         setPassword({ current: '', new: '', confirm: '' });
     };
 
-    const handleNotificationSubmit = (e) => {
-        e.preventDefault();
-        alert('Preferensi notifikasi berhasil disimpan!');
+    const togglePassword = (field) => {
+        setShowPasswords(prev => ({ ...prev, [field]: !prev[field] }));
     };
+
+    return (
+        <div className="space-y-8">
+            <div>
+                <h3 className="text-lg font-semibold text-gray-800 mb-2">Keamanan Akun</h3>
+                <p className="text-sm text-gray-500">Kelola password dan pengaturan keamanan akun Anda.</p>
+            </div>
+
+            {/* Change Password */}
+            <form onSubmit={handlePasswordSubmit} className="space-y-4 max-w-md">
+                <h4 className="font-semibold text-gray-700">Ubah Password</h4>
+                <div>
+                    <label className="block text-sm font-semibold text-gray-700 mb-1">Password Saat Ini</label>
+                    <div className="relative">
+                        <input
+                            type={showPasswords.current ? 'text' : 'password'}
+                            name="current"
+                            value={password.current}
+                            onChange={handlePasswordChange}
+                            className="w-full px-4 py-2 pr-10 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#1A56DB] focus:border-transparent"
+                            required
+                        />
+                        <button
+                            type="button"
+                            className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                            onClick={() => togglePassword('current')}
+                        >
+                            {showPasswords.current ? <EyeOff size={18} /> : <Eye size={18} />}
+                        </button>
+                    </div>
+                </div>
+                <div>
+                    <label className="block text-sm font-semibold text-gray-700 mb-1">Password Baru</label>
+                    <div className="relative">
+                        <input
+                            type={showPasswords.new ? 'text' : 'password'}
+                            name="new"
+                            value={password.new}
+                            onChange={handlePasswordChange}
+                            className="w-full px-4 py-2 pr-10 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#1A56DB] focus:border-transparent"
+                            required
+                            minLength="8"
+                        />
+                        <button
+                            type="button"
+                            className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                            onClick={() => togglePassword('new')}
+                        >
+                            {showPasswords.new ? <EyeOff size={18} /> : <Eye size={18} />}
+                        </button>
+                    </div>
+                    <p className="text-xs text-gray-400 mt-1">Minimal 8 karakter, kombinasi huruf dan angka.</p>
+                </div>
+                <div>
+                    <label className="block text-sm font-semibold text-gray-700 mb-1">Konfirmasi Password Baru</label>
+                    <div className="relative">
+                        <input
+                            type={showPasswords.confirm ? 'text' : 'password'}
+                            name="confirm"
+                            value={password.confirm}
+                            onChange={handlePasswordChange}
+                            className="w-full px-4 py-2 pr-10 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#1A56DB] focus:border-transparent"
+                            required
+                        />
+                        <button
+                            type="button"
+                            className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                            onClick={() => togglePassword('confirm')}
+                        >
+                            {showPasswords.confirm ? <EyeOff size={18} /> : <Eye size={18} />}
+                        </button>
+                    </div>
+                </div>
+                <button
+                    type="submit"
+                    className="px-4 py-2 bg-[#003a73] text-white rounded-lg font-medium hover:bg-[#002a5a] transition-colors"
+                >
+                    Perbarui Password
+                </button>
+            </form>
+
+            {/* 2FA */}
+            <div className="pt-4 border-t border-gray-200 max-w-md">
+                <h4 className="font-semibold text-gray-700 mb-4">Autentikasi Dua Faktor (2FA)</h4>
+                <div className="flex items-center justify-between p-4 bg-gray-50 rounded-lg border border-gray-200">
+                    <div>
+                        <p className="font-semibold text-gray-800">Aplikasi Authenticator</p>
+                        <p className="text-sm text-gray-500">Google Authenticator atau aplikasi sejenis.</p>
+                    </div>
+                    <label className="relative inline-flex items-center cursor-pointer">
+                        <input
+                            type="checkbox"
+                            checked={twoFA}
+                            onChange={() => setTwoFA(!twoFA)}
+                            className="sr-only peer"
+                        />
+                        <div className="w-11 h-6 bg-gray-200 rounded-full peer peer-checked:bg-emerald-500 transition-colors relative">
+                            <div className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full transition-transform ${twoFA ? 'translate-x-5' : ''}`} />
+                        </div>
+                    </label>
+                </div>
+            </div>
+
+            {/* Session Management */}
+            <div className="pt-4 border-t border-gray-200 max-w-md">
+                <h4 className="font-semibold text-gray-700 mb-4">Sesi Aktif</h4>
+                <div className="space-y-3">
+                    <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg border border-gray-200">
+                        <div>
+                            <p className="font-medium text-gray-800">Perangkat Ini</p>
+                            <p className="text-xs text-gray-500">Chrome • Windows • IP 192.168.1.1</p>
+                        </div>
+                        <span className="text-xs text-emerald-600 font-medium">Aktif</span>
+                    </div>
+                    <button className="text-sm text-red-500 hover:text-red-600 font-medium">
+                        Keluar dari Semua Perangkat
+                    </button>
+                </div>
+            </div>
+        </div>
+    );
+};
+
+const NotificationSettings = () => {
+    const [notifications, setNotifications] = useState([
+        { id: 'project', label: 'Update Proyek', desc: 'Notifikasi perubahan status proyek', enabled: true },
+        { id: 'task', label: 'Tugas', desc: 'Notifikasi tugas baru atau perubahan', enabled: true },
+        { id: 'qa', label: 'Pengajuan QA', desc: 'Notifikasi saat ada pengajuan QA', enabled: true },
+        { id: 'cyber', label: 'Pengajuan Cyber', desc: 'Notifikasi saat ada pengajuan Cyber', enabled: true },
+        { id: 'release', label: 'Pengajuan Rilis', desc: 'Notifikasi saat ada pengajuan rilis', enabled: true },
+        { id: 'approval', label: 'Persetujuan', desc: 'Notifikasi saat ada permintaan approval', enabled: true },
+        { id: 'weekly', label: 'Laporan Mingguan', desc: 'Ringkasan aktivitas mingguan', enabled: false },
+        { id: 'system', label: 'Pesan Sistem', desc: 'Notifikasi pemeliharaan & update sistem', enabled: true },
+    ]);
+
+    const toggleNotification = (id) => {
+        setNotifications(prev =>
+            prev.map(n => n.id === id ? { ...n, enabled: !n.enabled } : n)
+        );
+    };
+
+    const handleSave = () => {
+        toast.success('Preferensi notifikasi berhasil disimpan!');
+    };
+
+    return (
+        <div className="space-y-6">
+            <div>
+                <h3 className="text-lg font-semibold text-gray-800 mb-2">Preferensi Notifikasi</h3>
+                <p className="text-sm text-gray-500">Aktifkan atau nonaktifkan notifikasi untuk setiap jenis event.</p>
+            </div>
+
+            <div className="space-y-3 max-w-2xl">
+                {notifications.map((item) => (
+                    <div key={item.id} className="flex items-center justify-between p-4 bg-gray-50 rounded-lg border border-gray-200 hover:bg-gray-100 transition-colors">
+                        <div>
+                            <p className="font-semibold text-gray-800">{item.label}</p>
+                            <p className="text-sm text-gray-500">{item.desc}</p>
+                        </div>
+                        <label className="relative inline-flex items-center cursor-pointer">
+                            <input
+                                type="checkbox"
+                                checked={item.enabled}
+                                onChange={() => toggleNotification(item.id)}
+                                className="sr-only peer"
+                            />
+                            <div className="w-11 h-6 bg-gray-200 rounded-full peer peer-checked:bg-emerald-500 transition-colors relative">
+                                <div className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full transition-transform ${item.enabled ? 'translate-x-5' : ''}`} />
+                            </div>
+                        </label>
+                    </div>
+                ))}
+            </div>
+
+            <button
+                onClick={handleSave}
+                className="px-4 py-2 bg-[#003a73] text-white rounded-lg font-medium hover:bg-[#002a5a] transition-colors"
+            >
+                Simpan Preferensi
+            </button>
+        </div>
+    );
+};
+
+const AppearanceSettings = () => {
+    const [theme, setTheme] = useState('light');
+
+    return (
+        <div className="space-y-6">
+            <div>
+                <h3 className="text-lg font-semibold text-gray-800 mb-2">Tampilan & Tema</h3>
+                <p className="text-sm text-gray-500">Sesuaikan tampilan antarmuka sesuai preferensi Anda.</p>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 max-w-2xl">
+                {/* Light Theme */}
+                <div
+                    className={`border-2 rounded-xl p-4 cursor-pointer transition-all ${theme === 'light' ? 'border-[#1A56DB] shadow-md' : 'border-gray-200 hover:border-gray-300'
+                        }`}
+                    onClick={() => setTheme('light')}
+                >
+                    {theme === 'light' && (
+                        <div className="text-[#1A56DB] float-right">
+                            <CheckCircle size={20} />
+                        </div>
+                    )}
+                    <div className="h-20 bg-gray-100 rounded-lg p-2 flex flex-col gap-1">
+                        <div className="h-3 w-full bg-white rounded"></div>
+                        <div className="flex gap-1">
+                            <div className="w-1/3 h-10 bg-white rounded"></div>
+                            <div className="w-2/3 h-10 bg-white rounded"></div>
+                        </div>
+                    </div>
+                    <p className="text-center font-medium text-gray-800 mt-2">Terang</p>
+                </div>
+
+                {/* Dark Theme */}
+                <div
+                    className={`border-2 rounded-xl p-4 cursor-pointer transition-all ${theme === 'dark' ? 'border-[#1A56DB] shadow-md' : 'border-gray-200 hover:border-gray-300'
+                        }`}
+                    onClick={() => setTheme('dark')}
+                >
+                    <div className="h-20 bg-gray-800 rounded-lg p-2 flex flex-col gap-1">
+                        <div className="h-3 w-full bg-gray-700 rounded"></div>
+                        <div className="flex gap-1">
+                            <div className="w-1/3 h-10 bg-gray-700 rounded"></div>
+                            <div className="w-2/3 h-10 bg-gray-700 rounded"></div>
+                        </div>
+                    </div>
+                    <p className="text-center font-medium text-gray-800 mt-2">Gelap</p>
+                </div>
+
+                {/* System Theme */}
+                <div
+                    className={`border-2 rounded-xl p-4 cursor-pointer transition-all ${theme === 'system' ? 'border-[#1A56DB] shadow-md' : 'border-gray-200 hover:border-gray-300'
+                        }`}
+                    onClick={() => setTheme('system')}
+                >
+                    <div className="h-20 flex rounded-lg overflow-hidden">
+                        <div className="w-1/2 bg-gray-100 p-2 flex flex-col gap-1">
+                            <div className="h-3 w-full bg-white rounded"></div>
+                            <div className="w-full h-8 bg-white rounded"></div>
+                        </div>
+                        <div className="w-1/2 bg-gray-800 p-2 flex flex-col gap-1">
+                            <div className="h-3 w-full bg-gray-700 rounded"></div>
+                            <div className="w-full h-8 bg-gray-700 rounded"></div>
+                        </div>
+                    </div>
+                    <p className="text-center font-medium text-gray-800 mt-2">Ikuti Sistem</p>
+                </div>
+            </div>
+
+            <div className="pt-4 border-t border-gray-200 max-w-2xl">
+                <h4 className="font-semibold text-gray-700 mb-3">Preferensi Lainnya</h4>
+                <div className="space-y-3">
+                    <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg border border-gray-200">
+                        <span className="text-gray-700">Tampilkan animasi</span>
+                        <label className="relative inline-flex items-center cursor-pointer">
+                            <input type="checkbox" className="sr-only peer" defaultChecked />
+                            <div className="w-11 h-6 bg-gray-200 rounded-full peer-checked:bg-emerald-500 transition-colors relative">
+                                <div className="absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full transition-transform peer-checked:translate-x-5"></div>
+                            </div>
+                        </label>
+                    </div>
+                    <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg border border-gray-200">
+                        <span className="text-gray-700">Compact mode (lebih padat)</span>
+                        <label className="relative inline-flex items-center cursor-pointer">
+                            <input type="checkbox" className="sr-only peer" />
+                            <div className="w-11 h-6 bg-gray-200 rounded-full peer-checked:bg-emerald-500 transition-colors relative">
+                                <div className="absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full transition-transform peer-checked:translate-x-5"></div>
+                            </div>
+                        </label>
+                    </div>
+                </div>
+            </div>
+        </div>
+    );
+};
+
+const SystemSettings = () => {
+    const { projects } = useProjects();
+
+    return (
+        <div className="space-y-6">
+            <div>
+                <h3 className="text-lg font-semibold text-gray-800 mb-2">Pengaturan Sistem</h3>
+                <p className="text-sm text-gray-500">Konfigurasi umum sistem dan informasi aplikasi.</p>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 max-w-3xl">
+                <div className="p-4 bg-gray-50 rounded-lg border border-gray-200">
+                    <div className="flex items-center gap-3">
+                        <Database size={20} className="text-[#1A56DB]" />
+                        <div>
+                            <p className="font-semibold text-gray-800">Total Proyek</p>
+                            <p className="text-2xl font-bold text-gray-800">{projects.length}</p>
+                        </div>
+                    </div>
+                </div>
+                <div className="p-4 bg-gray-50 rounded-lg border border-gray-200">
+                    <div className="flex items-center gap-3">
+                        <Users size={20} className="text-[#1A56DB]" />
+                        <div>
+                            <p className="font-semibold text-gray-800">Total Pengguna</p>
+                            <p className="text-2xl font-bold text-gray-800">47</p>
+                        </div>
+                    </div>
+                </div>
+                <div className="p-4 bg-gray-50 rounded-lg border border-gray-200">
+                    <div className="flex items-center gap-3">
+                        <Clock size={20} className="text-[#1A56DB]" />
+                        <div>
+                            <p className="font-semibold text-gray-800">Uptime Sistem</p>
+                            <p className="text-2xl font-bold text-gray-800">99.8%</p>
+                        </div>
+                    </div>
+                </div>
+                <div className="p-4 bg-gray-50 rounded-lg border border-gray-200">
+                    <div className="flex items-center gap-3">
+                        <Calendar size={20} className="text-[#1A56DB]" />
+                        <div>
+                            <p className="font-semibold text-gray-800">Versi Aplikasi</p>
+                            <p className="text-2xl font-bold text-gray-800">v2.4.0</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div className="pt-4 border-t border-gray-200 max-w-3xl">
+                <h4 className="font-semibold text-gray-700 mb-3">Tindakan Sistem</h4>
+                <div className="space-y-3">
+                    <button className="flex items-center gap-2 px-4 py-2 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors text-gray-700">
+                        <RefreshCw size={16} />
+                        Clear Cache
+                    </button>
+                    <button className="flex items-center gap-2 px-4 py-2 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors text-gray-700">
+                        <FileText size={16} />
+                        Export Log Sistem
+                    </button>
+                    <button className="flex items-center gap-2 px-4 py-2 bg-white border border-red-300 rounded-lg hover:bg-red-50 transition-colors text-red-500">
+                        <AlertCircle size={16} />
+                        Reset Konfigurasi ke Default
+                    </button>
+                </div>
+            </div>
+        </div>
+    );
+};
+
+// Main Settings Component
+export default function Settings() {
+    const { user } = useAuth();
+    const [activeTab, setActiveTab] = useState('profile');
+    const [profile, setProfile] = useState({
+        name: user?.name || 'Ahmad Fauzi',
+        email: user?.email || 'ahmad.fauzi@banknagari.co.id',
+        phone: '+62 812 3456 7890',
+        department: user?.department || 'IT',
+        role: user?.role || 'Super Admin',
+    });
+
+    const handleSave = (message = 'Perubahan berhasil disimpan!') => {
+        toast.success(message);
+    };
+
+    const tabs = [
+        { id: 'profile', label: 'Profil', icon: User },
+        { id: 'security', label: 'Keamanan', icon: Shield },
+        { id: 'notifications', label: 'Notifikasi', icon: Bell },
+        { id: 'appearance', label: 'Tampilan', icon: Palette },
+        { id: 'system', label: 'Sistem', icon: SettingsIcon },
+    ];
 
     const renderContent = () => {
         switch (activeTab) {
             case 'profile':
-                return (
-                    <div className="p-6 animate-[fadeIn_0.3s_ease-in-out]">
-                        <h3 className="text-lg font-semibold text-gray-800 border-b border-gray-200 pb-4 mb-4">
-                            Informasi Pribadi
-                        </h3>
-
-                        <div className="flex flex-col sm:flex-row items-start sm:items-center gap-6 mb-6">
-                            <div className="w-24 h-24 rounded-full bg-[#003a73] text-white flex items-center justify-center text-4xl font-bold">
-                                {user?.name?.charAt(0) || 'A'}
-                            </div>
-                            <div>
-                                <button className="px-4 py-2 bg-white hover:bg-gray-50 text-gray-700 font-semibold text-sm rounded-lg transition-colors border border-gray-300 mb-2">
-                                    Ubah Foto
-                                </button>
-                                <p className="text-sm text-gray-500">Format JPG, GIF atau PNG. Maksimal 2MB.</p>
-                            </div>
-                        </div>
-
-                        <form onSubmit={handleProfileSubmit} className="space-y-4 max-w-2xl">
-                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                                <div className="space-y-2">
-                                    <label className="block text-sm font-semibold text-gray-700">Nama Lengkap</label>
-                                    <input
-                                        type="text"
-                                        name="name"
-                                        value={profile.name}
-                                        onChange={handleProfileChange}
-                                        className="w-full bg-white px-4 py-2.5 rounded-lg border border-gray-300 focus:ring-2 focus:ring-[#1A56DB] focus:border-transparent text-sm"
-                                    />
-                                </div>
-                                <div className="space-y-2">
-                                    <label className="block text-sm font-semibold text-gray-700">Email Bank</label>
-                                    <input
-                                        type="email"
-                                        name="email"
-                                        value={profile.email}
-                                        onChange={handleProfileChange}
-                                        className="w-full bg-gray-50 px-4 py-2.5 rounded-lg border border-gray-200 text-gray-500 cursor-not-allowed"
-                                        disabled
-                                    />
-                                </div>
-                            </div>
-                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                                <div className="space-y-2">
-                                    <label className="block text-sm font-semibold text-gray-700">Peran / Role</label>
-                                    <input
-                                        type="text"
-                                        name="role"
-                                        value={profile.role}
-                                        className="w-full bg-gray-50 px-4 py-2.5 rounded-lg border border-gray-200 text-gray-500 cursor-not-allowed"
-                                        disabled
-                                    />
-                                </div>
-                                <div className="space-y-2">
-                                    <label className="block text-sm font-semibold text-gray-700">No. Handphone</label>
-                                    <input
-                                        type="tel"
-                                        name="phone"
-                                        value={profile.phone}
-                                        onChange={handleProfileChange}
-                                        className="w-full bg-white px-4 py-2.5 rounded-lg border border-gray-300 focus:ring-2 focus:ring-[#1A56DB] focus:border-transparent text-sm"
-                                    />
-                                </div>
-                            </div>
-                            <div className="pt-4 border-t border-gray-200">
-                                <button
-                                    type="submit"
-                                    className="px-6 py-2.5 bg-[#003a73] hover:bg-[#002a5a] text-white font-semibold rounded-lg shadow-sm hover:shadow-md transition-all"
-                                >
-                                    Simpan Perubahan
-                                </button>
-                            </div>
-                        </form>
-                    </div>
-                );
-
+                return <ProfileSettings user={user} profile={profile} setProfile={setProfile} handleSave={handleSave} />;
             case 'security':
-                return (
-                    <div className="p-6 animate-[fadeIn_0.3s_ease-in-out]">
-                        <h3 className="text-lg font-semibold text-gray-800 border-b border-gray-200 pb-4 mb-4">
-                            Keamanan & Sandi
-                        </h3>
-
-                        <div className="space-y-6 max-w-2xl">
-                            <form onSubmit={handlePasswordSubmit} className="space-y-4">
-                                <h4 className="font-semibold text-gray-800">Ubah Sandi</h4>
-                                <div className="space-y-2">
-                                    <label className="block text-sm font-semibold text-gray-700">Sandi Saat Ini</label>
-                                    <input
-                                        type="password"
-                                        name="current"
-                                        value={password.current}
-                                        onChange={handlePasswordChange}
-                                        className="w-full bg-white px-4 py-2.5 rounded-lg border border-gray-300 focus:ring-2 focus:ring-[#1A56DB] focus:border-transparent text-sm"
-                                        required
-                                    />
-                                </div>
-                                <div className="space-y-2">
-                                    <label className="block text-sm font-semibold text-gray-700">Sandi Baru</label>
-                                    <input
-                                        type="password"
-                                        name="new"
-                                        value={password.new}
-                                        onChange={handlePasswordChange}
-                                        className="w-full bg-white px-4 py-2.5 rounded-lg border border-gray-300 focus:ring-2 focus:ring-[#1A56DB] focus:border-transparent text-sm"
-                                        required
-                                    />
-                                </div>
-                                <div className="space-y-2">
-                                    <label className="block text-sm font-semibold text-gray-700">Konfirmasi Sandi Baru</label>
-                                    <input
-                                        type="password"
-                                        name="confirm"
-                                        value={password.confirm}
-                                        onChange={handlePasswordChange}
-                                        className="w-full bg-white px-4 py-2.5 rounded-lg border border-gray-300 focus:ring-2 focus:ring-[#1A56DB] focus:border-transparent text-sm"
-                                        required
-                                    />
-                                </div>
-                                <div className="pt-2">
-                                    <button
-                                        type="submit"
-                                        className="px-6 py-2.5 bg-[#003a73] hover:bg-[#002a5a] text-white font-semibold rounded-lg shadow-sm hover:shadow-md transition-all"
-                                    >
-                                        Perbarui Sandi
-                                    </button>
-                                </div>
-                            </form>
-
-                            <div className="border-t border-gray-200 pt-6">
-                                <h4 className="font-semibold text-gray-800 mb-4">Autentikasi Dua Faktor (2FA)</h4>
-                                <div className="flex items-center justify-between p-4 bg-gray-50 rounded-lg border border-gray-200">
-                                    <div>
-                                        <p className="font-semibold text-gray-800">Aplikasi Authenticator</p>
-                                        <p className="text-sm text-gray-500 mt-1">Gunakan aplikasi seperti Google Authenticator untuk keamanan ekstra.</p>
-                                    </div>
-                                    <div className="relative inline-block w-12 align-middle select-none">
-                                        <input
-                                            type="checkbox"
-                                            id="2fa-toggle"
-                                            className="toggle-checkbox absolute block w-6 h-6 rounded-full bg-white border-4 appearance-none cursor-pointer border-gray-300 transition-all duration-300 checked:right-0 checked:border-emerald-500"
-                                        />
-                                        <label
-                                            htmlFor="2fa-toggle"
-                                            className="toggle-label block overflow-hidden h-6 rounded-full bg-gray-300 cursor-pointer transition-colors duration-300 checked:bg-emerald-500"
-                                        ></label>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                );
-
+                return <SecuritySettings />;
             case 'notifications':
-                return (
-                    <div className="p-6 animate-[fadeIn_0.3s_ease-in-out]">
-                        <h3 className="text-lg font-semibold text-gray-800 border-b border-gray-200 pb-4 mb-4">
-                            Preferensi Notifikasi
-                        </h3>
-
-                        <form onSubmit={handleNotificationSubmit} className="space-y-4 max-w-2xl">
-                            {notifications.map((item) => (
-                                <div
-                                    key={item.id}
-                                    className="flex items-start justify-between p-4 bg-gray-50 rounded-lg border border-gray-200"
-                                >
-                                    <div>
-                                        <p className="font-semibold text-gray-800">{item.title}</p>
-                                        <p className="text-sm text-gray-500 mt-1">{item.desc}</p>
-                                    </div>
-                                    <div className="relative inline-block w-12 align-middle select-none mt-1">
-                                        <input
-                                            type="checkbox"
-                                            id={`notif-${item.id}`}
-                                            checked={item.active}
-                                            onChange={() => toggleNotification(item.id)}
-                                            className="toggle-checkbox absolute block w-6 h-6 rounded-full bg-white border-4 appearance-none cursor-pointer border-gray-300 transition-all duration-300 checked:right-0 checked:border-emerald-500"
-                                        />
-                                        <label
-                                            htmlFor={`notif-${item.id}`}
-                                            className={`toggle-label block overflow-hidden h-6 rounded-full cursor-pointer transition-colors duration-300 ${item.active ? 'bg-emerald-500' : 'bg-gray-300'
-                                                }`}
-                                        ></label>
-                                    </div>
-                                </div>
-                            ))}
-                            <div className="pt-4 border-t border-gray-200">
-                                <button
-                                    type="submit"
-                                    className="px-6 py-2.5 bg-[#003a73] hover:bg-[#002a5a] text-white font-semibold rounded-lg shadow-sm hover:shadow-md transition-all"
-                                >
-                                    Simpan Preferensi
-                                </button>
-                            </div>
-                        </form>
-                    </div>
-                );
-
+                return <NotificationSettings />;
             case 'appearance':
-                return (
-                    <div className="p-6 animate-[fadeIn_0.3s_ease-in-out]">
-                        <h3 className="text-lg font-semibold text-gray-800 border-b border-gray-200 pb-4 mb-4">
-                            Tampilan & Tema
-                        </h3>
-
-                        <div className="space-y-6 max-w-2xl">
-                            <h4 className="font-semibold text-gray-800 mb-2">Tema Aplikasi</h4>
-                            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                                {/* Light Theme */}
-                                <div
-                                    className={`border-2 rounded-xl p-4 cursor-pointer bg-white transition-all ${theme === 'light'
-                                        ? 'border-[#1A56DB] shadow-md'
-                                        : 'border-gray-200 hover:border-gray-300'
-                                        }`}
-                                    onClick={() => setTheme('light')}
-                                >
-                                    {theme === 'light' && (
-                                        <div className="absolute top-2 right-2 text-[#1A56DB]">
-                                            <CheckCircle size={20} />
-                                        </div>
-                                    )}
-                                    <div className="h-24 bg-gray-100 rounded-lg mb-3 flex flex-col gap-2 p-2 relative">
-                                        <div className="h-4 w-full bg-white rounded"></div>
-                                        <div className="flex gap-2">
-                                            <div className="w-1/3 h-12 bg-white rounded"></div>
-                                            <div className="w-2/3 h-12 bg-white rounded"></div>
-                                        </div>
-                                    </div>
-                                    <p className="font-semibold text-center text-gray-800">Terang (Light)</p>
-                                </div>
-
-                                {/* Dark Theme */}
-                                <div
-                                    className={`border-2 rounded-xl p-4 cursor-pointer bg-white transition-all ${theme === 'dark'
-                                        ? 'border-[#1A56DB] shadow-md'
-                                        : 'border-gray-200 hover:border-gray-300'
-                                        }`}
-                                    onClick={() => setTheme('dark')}
-                                >
-                                    <div className="h-24 bg-gray-800 rounded-lg mb-3 flex flex-col gap-2 p-2">
-                                        <div className="h-4 w-full bg-gray-700 rounded"></div>
-                                        <div className="flex gap-2">
-                                            <div className="w-1/3 h-12 bg-gray-700 rounded"></div>
-                                            <div className="w-2/3 h-12 bg-gray-700 rounded"></div>
-                                        </div>
-                                    </div>
-                                    <p className="font-semibold text-center text-gray-800">Gelap (Dark)</p>
-                                </div>
-
-                                {/* System Theme */}
-                                <div
-                                    className={`border-2 rounded-xl p-4 cursor-pointer bg-white transition-all ${theme === 'system'
-                                        ? 'border-[#1A56DB] shadow-md'
-                                        : 'border-gray-200 hover:border-gray-300'
-                                        }`}
-                                    onClick={() => setTheme('system')}
-                                >
-                                    <div className="h-24 flex rounded-lg mb-3 overflow-hidden">
-                                        <div className="w-1/2 bg-gray-100 h-full flex flex-col gap-2 p-2">
-                                            <div className="h-4 w-full bg-white rounded"></div>
-                                            <div className="w-full h-12 bg-white rounded"></div>
-                                        </div>
-                                        <div className="w-1/2 bg-gray-800 h-full flex flex-col gap-2 p-2">
-                                            <div className="h-4 w-full bg-gray-700 rounded"></div>
-                                            <div className="w-full h-12 bg-gray-700 rounded"></div>
-                                        </div>
-                                    </div>
-                                    <p className="font-semibold text-center text-gray-800">Ikuti Sistem</p>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                );
-
+                return <AppearanceSettings />;
+            case 'system':
+                return <SystemSettings />;
             default:
                 return null;
         }
     };
 
-    const tabs = [
-        { id: 'profile', label: 'Profil Saya', icon: User },
-        { id: 'security', label: 'Keamanan & Sandi', icon: Shield },
-        { id: 'notifications', label: 'Preferensi Notifikasi', icon: Bell },
-        { id: 'appearance', label: 'Tampilan & Tema', icon: Palette },
-    ];
-
     return (
-        <div className="flex-1 overflow-y-auto px-6 py-4 md:px-8 md:py-5 bg-[#f8f9fb]">
+        <div className="flex-1 overflow-y-auto p-6 md:p-8 bg-[#f8f9fb]">
             <div className="max-w-6xl mx-auto space-y-6">
-                {/* Page Header */}
-                <div className="mb-6">
-                    <h2 className="text-2xl font-bold text-gray-800">Pengaturan Sistem</h2>
-                    <p className="text-sm text-gray-500 mt-1">
-                        Kelola preferensi akun, keamanan, notifikasi, dan tampilan antarmuka Anda.
-                    </p>
+                {/* Header */}
+                <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+                    <div>
+                        <h1 className="text-2xl font-bold text-gray-800 flex items-center gap-2">
+                            <SettingsIcon size={24} className="text-[#1A56DB]" />
+                            Pengaturan Sistem
+                        </h1>
+                        <p className="text-sm text-gray-500 mt-1">
+                            Kelola profil, keamanan, notifikasi, tampilan, dan konfigurasi sistem.
+                        </p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                        <span className="text-xs text-gray-400 bg-gray-100 px-3 py-1 rounded-full">
+                            v2.4.0
+                        </span>
+                    </div>
                 </div>
 
-                {/* Settings Layout */}
-                <div className="grid grid-cols-1 md:grid-cols-12 gap-6 items-start">
-                    {/* Left Navigation */}
-                    <div className="md:col-span-3 space-y-1">
-                        {tabs.map((tab) => {
-                            const Icon = tab.icon;
-                            const isActive = activeTab === tab.id;
-                            return (
-                                <button
-                                    key={tab.id}
-                                    onClick={() => setActiveTab(tab.id)}
-                                    className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg font-semibold text-sm transition-colors text-left ${isActive
-                                        ? 'bg-blue-50 text-[#1A56DB]'
-                                        : 'text-gray-500 hover:bg-gray-50 hover:text-gray-700'
-                                        }`}
-                                >
-                                    <Icon size={20} className={isActive ? 'text-[#1A56DB]' : 'text-gray-400'} />
-                                    {tab.label}
-                                </button>
-                            );
-                        })}
-                    </div>
+                {/* Tabs Navigation */}
+                <div className="flex overflow-x-auto border-b border-gray-200 bg-white rounded-t-xl shadow-sm">
+                    {tabs.map((tab) => {
+                        const Icon = tab.icon;
+                        const isActive = activeTab === tab.id;
+                        return (
+                            <button
+                                key={tab.id}
+                                onClick={() => setActiveTab(tab.id)}
+                                className={`px-6 py-3 text-sm font-medium border-b-2 transition-colors whitespace-nowrap flex items-center gap-2 ${isActive
+                                    ? 'border-[#1A56DB] text-[#1A56DB]'
+                                    : 'border-transparent text-gray-500 hover:text-gray-700'
+                                    }`}
+                            >
+                                <Icon size={16} />
+                                {tab.label}
+                            </button>
+                        );
+                    })}
+                </div>
 
-                    {/* Right Content */}
-                    <div className="md:col-span-9 bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden min-h-[500px]">
-                        {renderContent()}
-                    </div>
+                {/* Content */}
+                <div className="bg-white rounded-b-xl shadow-sm border border-gray-200 p-6 min-h-[500px]">
+                    {renderContent()}
                 </div>
             </div>
-
-            {/* Custom toggle CSS (inline) */}
-            <style>{`
-        .toggle-checkbox:checked {
-          right: 0;
-          border-color: #10b981;
-        }
-        .toggle-checkbox:checked + .toggle-label {
-          background-color: #10b981;
-        }
-        .toggle-checkbox:checked + .toggle-label:after {
-          transform: translateX(100%);
-          border-color: white;
-        }
-        .toggle-checkbox {
-          right: 50%;
-        }
-        .toggle-checkbox:checked {
-          right: 0;
-        }
-        .toggle-checkbox + .toggle-label {
-          background-color: #d1d5db;
-        }
-      `}</style>
         </div>
     );
 }

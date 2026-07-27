@@ -1,371 +1,308 @@
-import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+// src/pages/pm/QARequest.jsx
+import { useState, useMemo, useEffect } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
-import { useNotifications } from '../../contexts/NotificationContext';
-import {
-    FileText,
-    FolderOpen,
-    Upload,
-    CloudUpload,
-    Calendar,
-    Link as LinkIcon,
-    Send,
-    X,
-    CheckCircle,
-    ChevronRight,
-    Bell,
-    Search,
-    LayoutGrid,
-    Download,
-    LogOut,
-    User,
-    Briefcase,
-    Clock,
-    FileCheck,
-    AlertCircle,
-} from 'lucide-react';
 import { useProjects } from '../../contexts/ProjectContext';
+import { useNotifications } from '../../contexts/NotificationContext';
 import LoadingSpinner from '../../components/LoadingSpinner';
 import EmptyState from '../../components/EmptyState';
 import toast from 'react-hot-toast';
+import { useNavigate } from 'react-router-dom';
+import RBBBadge from '../../components/RBBBadge';
+import {
+  FileText,
+  CloudUpload,
+  Calendar,
+  Link as LinkIcon,
+  Send,
+  X,
+  FolderOpen,
+} from 'lucide-react';
+import { PROJECT_STATUS } from '../../constants/projectStatus';
 
 export default function QARequest() {
-    const { user } = useAuth();
-    const navigate = useNavigate();
-    const { addNotification } = useNotifications();
-    const { projects, updateProject, isLoading } = useProjects();
-    const [formData, setFormData] = useState({
-        projectId: '',
-        targetDate: '',
-        stagingUrl: '',
-        technicalNotes: '',
-    });
-    const [uploadedFiles, setUploadedFiles] = useState([]);
-    const [isSubmitting, setIsSubmitting] = useState(false);
+  const { user } = useAuth();
+  const { projects, isLoading, updateProject } = useProjects();
+  const { addNotification } = useNotifications();
+  const navigate = useNavigate();
 
-    // Daftar proyek yang siap QA (status sudah selesai development)
-    const readyProjects = projects.filter(
-        (p) => p.status === 'Development' || p.status === 'Ready for QA'
+  const [selectedProject, setSelectedProject] = useState(null);
+  
+  // Form state
+  const [formData, setFormData] = useState({
+    targetDate: '',
+    stagingUrl: '',
+    technicalNotes: '',
+  });
+  const [uploadedFiles, setUploadedFiles] = useState([]);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // Filter projects ready for QA — status READY_FOR_QA atau IN_DEVELOPMENT
+  const readyProjects = useMemo(() => {
+    return projects.filter(
+      p => p.status === PROJECT_STATUS.READY_FOR_QA || p.status === PROJECT_STATUS.IN_DEVELOPMENT
     );
+  }, [projects]);
 
-    // Handle form change
-    const handleChange = (e) => {
-        const { name, value } = e.target;
-        setFormData((prev) => ({ ...prev, [name]: value }));
-    };
+  const handleChange = (e) => {
+    const { name, value } = e.target;
+    setFormData(prev => ({ ...prev, [name]: value }));
+  };
 
-    // Handle file upload
-    const handleFileUpload = (e) => {
-        const files = Array.from(e.target.files);
-        const newFiles = files.map((file) => ({
-            name: file.name,
-            size: (file.size / 1024 / 1024).toFixed(1) + ' MB',
-            type: file.type,
-        }));
-        setUploadedFiles((prev) => [...prev, ...newFiles]);
-        if (e.target) e.target.value = '';
-    };
+  const handleFileUpload = (e) => {
+    const files = Array.from(e.target.files);
+    const newFiles = files.map((file) => ({
+      name: file.name,
+      size: (file.size / 1024 / 1024).toFixed(1) + ' MB',
+      type: file.type,
+    }));
+    setUploadedFiles(prev => [...prev, ...newFiles]);
+    if (e.target) e.target.value = '';
+  };
 
-    // Handle drag & drop
-    const handleDrop = (e) => {
-        e.preventDefault();
-        const files = Array.from(e.dataTransfer.files);
-        const newFiles = files.map((file) => ({
-            name: file.name,
-            size: (file.size / 1024 / 1024).toFixed(1) + ' MB',
-            type: file.type,
-        }));
-        setUploadedFiles((prev) => [...prev, ...newFiles]);
-    };
+  const handleRemoveFile = (index) => {
+    setUploadedFiles(prev => prev.filter((_, i) => i !== index));
+  };
 
-    const handleDragOver = (e) => {
-        e.preventDefault();
-    };
+  const handleDrop = (e) => {
+    e.preventDefault();
+    const files = Array.from(e.dataTransfer.files);
+    const newFiles = files.map((file) => ({
+      name: file.name,
+      size: (file.size / 1024 / 1024).toFixed(1) + ' MB',
+      type: file.type,
+    }));
+    setUploadedFiles(prev => [...prev, ...newFiles]);
+  };
 
-    // Handle remove file
-    const handleRemoveFile = (index) => {
-        setUploadedFiles((prev) => prev.filter((_, i) => i !== index));
-    };
+  const handleDragOver = (e) => {
+    e.preventDefault();
+  };
 
-    // Handle submit
-    const handleSubmit = (e) => {
-        e.preventDefault();
-        if (!formData.projectId) {
-            alert('Pilih proyek terlebih dahulu!');
-            return;
-        }
-        setIsSubmitting(true);
-        setTimeout(() => {
-            addNotification(
-                'Pengajuan QA Siap',
-                `Proyek ${formData.projectId} siap untuk pengujian QA.`,
-                'info',
-                '/workspace/qa'
-            );
-            alert(`Pengajuan QA untuk proyek ${formData.projectId} berhasil dikirim!`);
-            navigate('/pm/qa-request');
-            setIsSubmitting(false);
-            // Reset form
-            setFormData({ projectId: '', targetDate: '', stagingUrl: '', technicalNotes: '' });
-            setUploadedFiles([]);
-        }, 1500);
-    };
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    if (!selectedProject) {
+      toast.error('Pilih proyek terlebih dahulu!');
+      return;
+    }
+    setIsSubmitting(true);
+    setTimeout(() => {
+      // Update status proyek agar Workspace QA bisa menerima proyek ini
+      updateProject(selectedProject.id, { status: PROJECT_STATUS.READY_FOR_QA });
 
-    return (
-        <div className="flex-1 overflow-y-auto px-6 py-4 md:px-8 md:py-5 bg-[#f8f9fb]">
-            <div className="max-w-4xl mx-auto">
-                {/* Header */}
-                <div className="mb-6">
-                    <h2 className="text-2xl font-bold text-gray-800 mb-1">
-                        Form Pengajuan Quality Assurance (QA)
-                    </h2>
-                    <p className="text-gray-500 text-sm">
-                        Lengkapi detail di bawah untuk menyerahkan proyek ke tahap pengujian (SIT &amp; UIT).
-                    </p>
+      addNotification(
+        'Pengajuan QA Berhasil',
+        `Proyek ${selectedProject.name} telah diajukan ke antrean QA.`,
+        'success'
+      );
+      toast.success(`Pengajuan QA untuk ${selectedProject.id} berhasil dikirim!`);
+      setIsSubmitting(false);
+
+      // Reset form dan kembali ke PM Workspace
+      setSelectedProject(null);
+      setFormData({ targetDate: '', stagingUrl: '', technicalNotes: '' });
+      setUploadedFiles([]);
+      navigate('/pm/workspace');
+    }, 1500);
+  };
+
+  if (isLoading) {
+    return <LoadingSpinner text="Memuat data proyek..." />;
+  }
+
+  return (
+    <div className="flex-1 flex flex-col h-full bg-[#f8f9fb] overflow-hidden">
+      {/* Content Split Panel */}
+      <div className="flex-1 flex overflow-hidden">
+        {/* Left Panel: Daftar Proyek */}
+        <div className="w-1/3 border-r border-gray-200 bg-white overflow-y-auto p-4 flex flex-col gap-3">
+          <h3 className="font-semibold text-gray-800 mb-2 flex items-center gap-2 px-2">
+            <FolderOpen size={18} className="text-[#1A56DB]" />
+            Proyek Siap QA
+            <span className="bg-blue-100 text-[#1A56DB] text-xs px-2 py-0.5 rounded-full ml-auto">
+              {readyProjects.length}
+            </span>
+          </h3>
+          {readyProjects.length > 0 ? (
+            readyProjects.map(project => (
+              <div
+                key={project.id}
+                onClick={() => {
+                  setSelectedProject(project);
+                  setFormData({ targetDate: '', stagingUrl: project.stagingUrl || '', technicalNotes: '' });
+                  setUploadedFiles([]);
+                }}
+                className={`p-4 rounded-xl cursor-pointer transition-all ${
+                  selectedProject?.id === project.id
+                    ? 'bg-blue-50 border-2 border-[#1A56DB] shadow-sm'
+                    : 'bg-white border border-gray-200 hover:border-[#1A56DB] hover:shadow-sm'
+                }`}
+              >
+                <div className="flex justify-between items-start mb-2">
+                  <span className="font-bold text-gray-800 leading-tight pr-2">{project.name}</span>
+                  <div className="shrink-0">
+                    <RBBBadge type={project.type} />
+                  </div>
                 </div>
-
-                <form className="space-y-6" onSubmit={handleSubmit}>
-                    {/* 1. Detail Pengajuan */}
-                    <section className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-                        <h3 className="text-lg font-semibold text-gray-800 mb-4 flex items-center gap-2 border-b border-gray-200 pb-4">
-                            <div className="w-8 h-8 rounded-lg bg-blue-50 text-[#1A56DB] flex items-center justify-center">
-                                <FileText size={18} />
-                            </div>
-                            1. Detail Pengajuan
-                        </h3>
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                            <div>
-                                <label className="block text-sm font-semibold text-gray-600 mb-2">
-                                    No. Tiket QA (Auto-generated)
-                                </label>
-                                <div className="px-4 py-2.5 bg-blue-50/50 border border-blue-200 rounded-lg font-mono text-[#1A56DB] font-semibold">
-                                    QA-REQ-2026-0842
-                                </div>
-                            </div>
-                            <div>
-                                <label className="block text-sm font-semibold text-gray-600 mb-2">
-                                    Pilih Proyek Selesai <span className="text-red-500">*</span>
-                                </label>
-                                <select
-                                    name="projectId"
-                                    value={formData.projectId}
-                                    onChange={handleChange}
-                                    className="w-full px-4 py-2.5 bg-white border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#1A56DB] focus:border-[#1A56DB]"
-                                    required
-                                >
-                                    <option value="">Pilih proyek...</option>
-                                    {readyProjects.map((project) => (
-                                        <option key={project.id} value={project.id}>
-                                            {project.type === 'RBB' ? '🔴 [RBB] ' : ''}{project.name} ({project.id})
-                                        </option>
-                                    ))}
-                                </select>
-                            </div>
-                            <div>
-                                <label className="block text-sm font-semibold text-gray-600 mb-2">
-                                    Project Manager
-                                </label>
-                                <input
-                                    type="text"
-                                    value={user?.name || 'Budi Santoso'}
-                                    disabled
-                                    className="w-full px-4 py-2.5 bg-gray-50 border border-gray-200 rounded-lg text-sm text-gray-500 cursor-not-allowed"
-                                />
-                            </div>
-                            <div>
-                                <label className="block text-sm font-semibold text-gray-600 mb-2">
-                                    Target Selesai QA <span className="text-red-500">*</span>
-                                </label>
-                                <div className="relative">
-                                    <Calendar
-                                        size={18}
-                                        className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"
-                                    />
-                                    <input
-                                        type="date"
-                                        name="targetDate"
-                                        value={formData.targetDate}
-                                        onChange={handleChange}
-                                        className="w-full pl-10 pr-4 py-2.5 bg-white border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#1A56DB] focus:border-[#1A56DB]"
-                                        required
-                                    />
-                                </div>
-                            </div>
-                        </div>
-                    </section>
-
-                    {/* 2. Brankas Dokumen Proyek */}
-                    <section className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-                        <h3 className="text-lg font-semibold text-gray-800 mb-4 flex items-center gap-2 border-b border-gray-200 pb-4">
-                            <div className="w-8 h-8 rounded-lg bg-blue-50 text-[#1A56DB] flex items-center justify-center">
-                                <FolderOpen size={18} />
-                            </div>
-                            2. Brankas Dokumen Proyek
-                        </h3>
-                        <p className="text-sm text-gray-500 mb-4">
-                            Dokumen pendukung dari tahap inisiasi dan desain telah ditarik secara otomatis.
-                        </p>
-
-                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
-                            {/* BRD */}
-                            <div className="border border-gray-200 rounded-lg p-4 flex items-start gap-3 bg-gray-50">
-                                <CheckCircle size={20} className="text-emerald-500 mt-0.5" />
-                                <div>
-                                    <h4 className="font-semibold text-gray-800 text-sm">BRD Final</h4>
-                                    <p className="text-xs text-gray-500 mt-1">v2.1 • 2.4 MB</p>
-                                    <a href="#" className="text-xs text-[#1A56DB] hover:underline mt-2 inline-block">
-                                        Lihat Dokumen
-                                    </a>
-                                </div>
-                            </div>
-                            {/* FSD */}
-                            <div className="border border-gray-200 rounded-lg p-4 flex items-start gap-3 bg-gray-50">
-                                <CheckCircle size={20} className="text-emerald-500 mt-0.5" />
-                                <div>
-                                    <h4 className="font-semibold text-gray-800 text-sm">FSD &amp; Technical Spec</h4>
-                                    <p className="text-xs text-gray-500 mt-1">v1.0 • 4.1 MB</p>
-                                    <a href="#" className="text-xs text-[#1A56DB] hover:underline mt-2 inline-block">
-                                        Lihat Dokumen
-                                    </a>
-                                </div>
-                            </div>
-                            {/* Upload Hasil Unit Test */}
-                            <div className="border-2 border-dashed border-gray-300 rounded-lg p-4 flex flex-col items-center justify-center text-center hover:border-[#1A56DB] transition-colors cursor-pointer group">
-                                <Upload
-                                    size={28}
-                                    className="text-gray-400 group-hover:text-[#1A56DB] mb-2 transition-colors"
-                                />
-                                <h4 className="text-sm font-semibold text-gray-700 group-hover:text-[#1A56DB]">
-                                    Hasil Unit Test <span className="text-red-500">*</span>
-                                </h4>
-                                <p className="text-xs text-gray-400 mt-1">PDF/Zip (Max 10MB)</p>
-                                <input
-                                    type="file"
-                                    accept=".pdf,.zip,.rar"
-                                    className="hidden"
-                                    id="unit-test-upload"
-                                    onChange={handleFileUpload}
-                                />
-                                <label
-                                    htmlFor="unit-test-upload"
-                                    className="mt-2 px-3 py-1 text-xs font-medium text-[#1A56DB] border border-[#1A56DB] rounded-lg cursor-pointer hover:bg-blue-50 transition-colors"
-                                >
-                                    Pilih File
-                                </label>
-                            </div>
-                        </div>
-
-                        {/* Dropzone */}
-                        <div
-                            className="border-2 border-dashed border-gray-300 rounded-lg p-8 flex flex-col items-center justify-center text-center hover:bg-gray-50 transition-colors cursor-pointer"
-                            onDrop={handleDrop}
-                            onDragOver={handleDragOver}
-                            onClick={() => document.getElementById('additional-upload')?.click()}
-                        >
-                            <CloudUpload size={32} className="text-gray-400 mb-3" />
-                            <h4 className="font-semibold text-gray-700 mb-1">Tarik &amp; Lepas Dokumen Tambahan</h4>
-                            <p className="text-sm text-gray-500">atau klik untuk memilih file dari komputer Anda</p>
-                            <input
-                                type="file"
-                                multiple
-                                className="hidden"
-                                id="additional-upload"
-                                onChange={handleFileUpload}
-                            />
-                        </div>
-
-                        {/* Uploaded Files List */}
-                        {uploadedFiles.length > 0 && (
-                            <div className="mt-4 space-y-2">
-                                <h4 className="text-sm font-semibold text-gray-700">File Terupload:</h4>
-                                {uploadedFiles.map((file, idx) => (
-                                    <div
-                                        key={idx}
-                                        className="flex items-center justify-between p-3 bg-gray-50 border border-gray-200 rounded-lg"
-                                    >
-                                        <div className="flex items-center gap-3">
-                                            <FileCheck size={18} className="text-emerald-500" />
-                                            <div>
-                                                <p className="text-sm font-medium text-gray-800">{file.name}</p>
-                                                <p className="text-xs text-gray-500">{file.size}</p>
-                                            </div>
-                                        </div>
-                                        <button
-                                            type="button"
-                                            onClick={() => handleRemoveFile(idx)}
-                                            className="p-1 text-gray-400 hover:text-red-500 transition-colors"
-                                        >
-                                            <X size={18} />
-                                        </button>
-                                    </div>
-                                ))}
-                            </div>
-                        )}
-                    </section>
-
-                    {/* 3. Lingkungan & Akses Testing */}
-                    <section className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-                        <h3 className="text-lg font-semibold text-gray-800 mb-4 flex items-center gap-2 border-b border-gray-200 pb-4">
-                            <div className="w-8 h-8 rounded-lg bg-blue-50 text-[#1A56DB] flex items-center justify-center">
-                                <LinkIcon size={18} />
-                            </div>
-                            3. Lingkungan &amp; Akses Testing
-                        </h3>
-                        <div className="space-y-4">
-                            <div>
-                                <label className="block text-sm font-semibold text-gray-600 mb-2">
-                                    URL Staging / Testing Environment
-                                </label>
-                                <div className="relative">
-                                    <LinkIcon
-                                        size={18}
-                                        className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"
-                                    />
-                                    <input
-                                        type="url"
-                                        name="stagingUrl"
-                                        value={formData.stagingUrl}
-                                        onChange={handleChange}
-                                        placeholder="https://staging.banknagari.co.id/los-v2"
-                                        className="w-full pl-10 pr-4 py-2.5 bg-white border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#1A56DB] focus:border-[#1A56DB]"
-                                    />
-                                </div>
-                            </div>
-                            <div>
-                                <label className="block text-sm font-semibold text-gray-600 mb-2">
-                                    Catatan Teknis untuk Tim QA
-                                </label>
-                                <textarea
-                                    name="technicalNotes"
-                                    value={formData.technicalNotes}
-                                    onChange={handleChange}
-                                    rows={4}
-                                    placeholder="Mohon perhatikan khusus pada modul kalkulasi bunga anuitas dan integrasi API dengan sistem OJK SLIK..."
-                                    className="w-full px-4 py-3 bg-white border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#1A56DB] focus:border-[#1A56DB] resize-y"
-                                />
-                            </div>
-                        </div>
-                    </section>
-
-                    {/* Actions */}
-                    <div className="flex items-center justify-end gap-4 pt-4">
-                        <button
-                            type="button"
-                            className="px-6 py-2.5 border border-gray-300 bg-white rounded-lg font-semibold text-gray-700 hover:bg-gray-50 transition-colors"
-                        >
-                            Batal
-                        </button>
-                        <button
-                            type="submit"
-                            disabled={isSubmitting}
-                            className="px-6 py-2.5 bg-[#003a73] text-white rounded-lg font-semibold flex items-center gap-2 hover:bg-[#002a5a] shadow-sm hover:shadow-md transition-all disabled:opacity-70 disabled:cursor-not-allowed"
-                        >
-                            <Send size={18} />
-                            {isSubmitting ? 'Memproses...' : 'Kirim ke Antrean QA'}
-                        </button>
-                    </div>
-                </form>
+                <p className="text-xs font-semibold text-[#1A56DB] mb-1">{project.id}</p>
+                <p className="text-xs text-gray-500">Status: <span className="font-medium text-gray-700">{project.status}</span></p>
+                <p className="text-xs text-gray-500 mt-1">Divisi: {project.division || 'Umum'}</p>
+              </div>
+            ))
+          ) : (
+            <div className="text-center py-10 px-4">
+              <FolderOpen size={40} className="text-gray-300 mx-auto mb-3" />
+              <p className="text-gray-500 text-sm">Tidak ada proyek yang siap diajukan QA saat ini.</p>
             </div>
+          )}
         </div>
-    );
+
+        {/* Right Panel: Form Pengajuan */}
+        <div className="w-2/3 overflow-y-auto p-8 bg-[#f8f9fb]">
+          {selectedProject ? (
+            <div className="max-w-3xl mx-auto">
+              <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden animate-fadeIn">
+                <div className="p-6 border-b border-gray-100 bg-gradient-to-r from-blue-50/50 to-white">
+                  <h2 className="text-xl font-bold text-gray-800 mb-1">Form Pengajuan QA</h2>
+                  <p className="text-sm text-gray-500">Silakan lengkapi detail pengajuan untuk proyek <span className="font-semibold text-gray-700">{selectedProject.name}</span>.</p>
+                </div>
+                
+                <form onSubmit={handleSubmit} className="p-6 space-y-6">
+                  {/* Read-only Project Info */}
+                  <div className="grid grid-cols-2 gap-4 mb-2">
+                    <div>
+                      <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1.5">ID Proyek</label>
+                      <input type="text" value={selectedProject.id} disabled className="w-full px-4 py-2.5 bg-gray-100 border border-gray-200 rounded-xl text-sm text-gray-600 font-medium cursor-not-allowed"/>
+                    </div>
+                    <div>
+                      <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1.5">Nama Proyek</label>
+                      <input type="text" value={selectedProject.name} disabled className="w-full px-4 py-2.5 bg-gray-100 border border-gray-200 rounded-xl text-sm text-gray-600 font-medium cursor-not-allowed"/>
+                    </div>
+                  </div>
+
+                  {/* Target Date */}
+                  <div>
+                    <label className="block text-sm font-semibold text-gray-700 mb-1.5">
+                      Target Selesai QA <span className="text-red-500">*</span>
+                    </label>
+                    <div className="relative">
+                      <Calendar size={18} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400" />
+                      <input
+                        type="date"
+                        name="targetDate"
+                        value={formData.targetDate}
+                        onChange={handleChange}
+                        className="w-full pl-11 pr-4 py-3 bg-white border border-gray-300 rounded-xl text-sm focus:ring-2 focus:ring-[#1A56DB] focus:border-[#1A56DB] outline-none transition-all shadow-sm"
+                        required
+                      />
+                    </div>
+                  </div>
+
+                  {/* Staging URL */}
+                  <div>
+                    <label className="block text-sm font-semibold text-gray-700 mb-1.5">
+                      URL Staging
+                    </label>
+                    <div className="relative">
+                      <LinkIcon size={18} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400" />
+                      <input
+                        type="url"
+                        name="stagingUrl"
+                        value={formData.stagingUrl}
+                        onChange={handleChange}
+                        placeholder="https://staging.banknagari.co.id/..."
+                        className="w-full pl-11 pr-4 py-3 bg-white border border-gray-300 rounded-xl text-sm focus:ring-2 focus:ring-[#1A56DB] focus:border-[#1A56DB] outline-none transition-all shadow-sm"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Technical Notes */}
+                  <div>
+                    <label className="block text-sm font-semibold text-gray-700 mb-1.5">
+                      Catatan Teknis <span className="text-gray-400 font-normal">(Opsional)</span>
+                    </label>
+                    <textarea
+                      name="technicalNotes"
+                      value={formData.technicalNotes}
+                      onChange={handleChange}
+                      rows={4}
+                      placeholder="Sebutkan modul yang perlu diperhatikan atau kredensial tes..."
+                      className="w-full px-4 py-3 bg-white border border-gray-300 rounded-xl text-sm focus:ring-2 focus:ring-[#1A56DB] focus:border-[#1A56DB] outline-none resize-none transition-all shadow-sm"
+                    />
+                  </div>
+
+                  {/* Upload Dropzone */}
+                  <div>
+                    <label className="block text-sm font-semibold text-gray-700 mb-1.5">
+                      Dokumen Pendukung <span className="text-gray-400 font-normal">(BRD, FSD, Test Scenario)</span>
+                    </label>
+                    <div
+                      className="border-2 border-dashed border-gray-300 rounded-xl p-8 text-center hover:bg-blue-50 hover:border-[#1A56DB] transition-all cursor-pointer group bg-gray-50"
+                      onDrop={handleDrop}
+                      onDragOver={handleDragOver}
+                      onClick={() => document.getElementById('qa-upload')?.click()}
+                    >
+                      <CloudUpload size={40} className="text-gray-300 mx-auto mb-3 group-hover:text-[#1A56DB] transition-colors" />
+                      <p className="text-sm font-medium text-gray-700">Tarik &amp; lepas file di sini, atau klik untuk unggah</p>
+                      <p className="text-xs text-gray-500 mt-1">Mendukung PDF, DOCX, XLSX (Max 10MB)</p>
+                      <input
+                        type="file"
+                        id="qa-upload"
+                        className="hidden"
+                        multiple
+                        onChange={handleFileUpload}
+                      />
+                    </div>
+                    {uploadedFiles.length > 0 && (
+                      <div className="mt-4 grid grid-cols-1 gap-2">
+                        {uploadedFiles.map((file, idx) => (
+                          <div key={idx} className="flex items-center justify-between p-3 bg-blue-50/50 border border-blue-100 rounded-xl">
+                            <div className="flex items-center gap-3">
+                              <div className="p-2 bg-white rounded-lg shadow-sm">
+                                  <FileText size={16} className="text-[#1A56DB]" />
+                              </div>
+                              <div>
+                                <p className="text-sm font-semibold text-gray-700 leading-none">{file.name}</p>
+                                <p className="text-xs text-gray-500 mt-1">{file.size}</p>
+                              </div>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => handleRemoveFile(idx)}
+                              className="p-1.5 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"
+                            >
+                              <X size={18} />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Actions */}
+                  <div className="flex justify-end pt-4">
+                    <button
+                      type="submit"
+                      disabled={isSubmitting}
+                      className="px-8 py-3.5 bg-[#003a73] text-white rounded-xl font-bold hover:bg-[#002a5a] transition-all flex items-center gap-2 shadow-lg shadow-[#003a73]/20 hover:shadow-xl disabled:opacity-70 disabled:cursor-not-allowed w-full sm:w-auto justify-center"
+                    >
+                      <Send size={18} />
+                      {isSubmitting ? 'Memproses...' : 'Kirim ke Antrean QA'}
+                    </button>
+                  </div>
+                </form>
+              </div>
+            </div>
+          ) : (
+            <div className="h-full flex items-center justify-center animate-fadeIn">
+              <EmptyState 
+                title="Pilih Proyek" 
+                description="Silakan pilih proyek dari daftar di sebelah kiri untuk mengisi form pengajuan QA." 
+                icon={FolderOpen}
+              />
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
 }

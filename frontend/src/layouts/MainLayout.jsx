@@ -1,4 +1,4 @@
-import { Outlet, NavLink, useLocation } from 'react-router-dom';
+import { Outlet, NavLink, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { menuSections } from '../data/menuConfig';
 import NotificationBell from '../components/NotificationBell';
@@ -25,7 +25,8 @@ import {
     Settings,
     Search,
     ChevronRight,
-    FileText
+    FileText,
+    LogOut
 } from 'lucide-react';
 
 // Map ikon untuk sidebar
@@ -64,8 +65,14 @@ const sectionBadgeColor = {
 };
 
 export default function MainLayout() {
-    const { user } = useAuth();
+    const { user, logout } = useAuth();
     const location = useLocation();
+    const navigate = useNavigate();
+    
+    const handleLogout = () => {
+        logout();
+        navigate('/login');
+    };
     const sections = user ? menuSections[user.role] || [] : [];
 
     // Cari section dan item yang aktif berdasarkan URL saat ini
@@ -133,14 +140,23 @@ export default function MainLayout() {
 
                 {/* User Profile Footer */}
                 <div className="p-4 bg-white/5 border-t border-white/10 mt-auto shrink-0">
-                    <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 rounded-full bg-[#D4A017] text-[#001838] flex items-center justify-center font-bold">
-                            {user?.name?.charAt(0) || 'U'}
+                    <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-3">
+                            <div className="w-10 h-10 rounded-full bg-[#D4A017] text-[#001838] flex items-center justify-center font-bold">
+                                {user?.name?.charAt(0) || 'U'}
+                            </div>
+                            <div>
+                                <div className="text-white font-medium text-sm truncate max-w-[120px]">{user?.name}</div>
+                                <div className="text-white/60 text-xs">{user?.role}</div>
+                            </div>
                         </div>
-                        <div>
-                            <div className="text-white font-medium text-sm">{user?.name}</div>
-                            <div className="text-white/60 text-xs">{user?.role}</div>
-                        </div>
+                        <button 
+                            onClick={handleLogout}
+                            className="p-2 text-white/50 hover:text-red-400 hover:bg-white/5 rounded-lg transition-colors"
+                            title="Keluar"
+                        >
+                            <LogOut size={20} />
+                        </button>
                     </div>
                 </div>
             </aside>

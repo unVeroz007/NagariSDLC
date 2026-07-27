@@ -11,7 +11,6 @@ import {
     Bug,
     Verified,
     MoreVertical,
-    UserPlus,
     FileText,
     CheckCircle,
     PlusCircle,
@@ -23,8 +22,16 @@ import {
     Clock,
     AlertTriangle,
     Inbox,
+    MapPin,
+    Flag,
+    Rocket,
+    ShieldCheck,
+    Send,
+    Users,
+    CalendarDays,
 } from 'lucide-react';
 import { useEffect, useMemo } from 'react';
+import { PROJECT_STATUS, PROJECT_STATUS_LABEL, PROJECT_STATUS_COLOR } from '../constants/projectStatus';
 
 export default function Dashboard() {
     const { user } = useAuth();
@@ -32,28 +39,34 @@ export default function Dashboard() {
     const { notifications, unreadCount } = useNotifications();
     const navigate = useNavigate();
 
-    // 📊 Hitung metrics dari data proyek
+    // 📊 Hitung metrics dari data proyek pakai PROJECT_STATUS constants
     const metrics = useMemo(() => {
-    const rbbCount = projects.filter(p => p.type === 'RBB').length;
-    const nonRbbCount = projects.filter(p => p.type === 'NON_RBB').length;
-    const rbbOnTrack = projects.filter(p => p.type === 'RBB' && p.status !== 'LIVE_PRODUCTION').length;
-
         const total = projects.length;
-        const inisiasi = projects.filter(p => p.status === 'PENDING' || p.status === 'IN_REVIEW' || p.status === 'ANALYSIS_APPROVED').length;
-        const pengujian = projects.filter(p => p.status === 'QA_IN_PROGRESS' || p.status === 'CYBER_IN_PROGRESS' || p.status === 'READY_FOR_QA').length;
-        const siapRilis = projects.filter(p => p.status === 'PENDING_GOLIVE' || p.status === 'UAT_PASSED').length;
+        const inisiasi = projects.filter(p =>
+            [PROJECT_STATUS.PENDING, PROJECT_STATUS.LEAD_REVIEW,
+             PROJECT_STATUS.ANALYST_REVIEW, PROJECT_STATUS.ANALYSIS_APPROVED].includes(p.status)
+        ).length;
+        const pengujian = projects.filter(p =>
+            [PROJECT_STATUS.QA_TESTING, PROJECT_STATUS.READY_FOR_QA,
+             PROJECT_STATUS.CYBER_TESTING, PROJECT_STATUS.READY_FOR_CYBER].includes(p.status)
+        ).length;
+        const siapRilis = projects.filter(p =>
+            [PROJECT_STATUS.READY_FOR_RELEASE, PROJECT_STATUS.UAT,
+             PROJECT_STATUS.UAT_PASSED, PROJECT_STATUS.QUALITY_GATE].includes(p.status)
+        ).length;
 
         return [
             {
                 label: 'Total Proyek Aktif',
                 value: total,
-                trend: total > 20 ? '+3' : '+1',
+                trend: '+1',
                 trendUp: true,
                 icon: Briefcase,
                 iconBg: 'bg-blue-50',
                 iconColor: 'text-[#1A56DB]',
                 accentColor: 'from-[#1A56DB]/10 to-transparent',
                 borderColor: 'border-blue-100',
+                onClick: () => navigate('/projects'),
             },
             {
                 label: 'Tahap Inisiasi',
@@ -65,20 +78,22 @@ export default function Dashboard() {
                 iconColor: 'text-amber-600',
                 accentColor: 'from-amber-500/10 to-transparent',
                 borderColor: 'border-amber-100',
+                onClick: () => navigate('/projects'),
             },
             {
                 label: 'Pengujian QA & Siber',
                 value: pengujian,
-                trend: pengujian > 3 ? '+1' : '-1',
-                trendUp: pengujian > 3,
+                trend: pengujian > 3 ? '+1' : '0',
+                trendUp: pengujian > 0,
                 icon: Bug,
                 iconBg: 'bg-purple-50',
                 iconColor: 'text-purple-600',
                 accentColor: 'from-purple-500/10 to-transparent',
                 borderColor: 'border-purple-100',
+                onClick: () => navigate('/workspace/qa'),
             },
             {
-                label: 'Siap Rilis',
+                label: 'Siap Rilis / Quality Gate',
                 value: siapRilis,
                 trend: siapRilis > 1 ? '+2' : '0',
                 trendUp: true,
@@ -87,25 +102,29 @@ export default function Dashboard() {
                 iconColor: 'text-emerald-600',
                 accentColor: 'from-emerald-500/10 to-transparent',
                 borderColor: 'border-emerald-100',
+                onClick: () => navigate('/quality-gate'),
             },
         ];
-    }, [projects]);
+    }, [projects, navigate]);
 
-    // 📊 Distribusi fase
+    // 📊 Distribusi fase — pakai PROJECT_STATUS constants
     const phases = useMemo(() => {
         const total = projects.length || 1;
         const phaseMap = {
             'Fase 1: Inisiasi & Analisis': projects.filter(p =>
-                ['PENDING', 'IN_REVIEW', 'ANALYSIS_APPROVED', 'REJECTED'].includes(p.status)
+                [PROJECT_STATUS.PENDING, PROJECT_STATUS.LEAD_REVIEW,
+                 PROJECT_STATUS.ANALYST_REVIEW, PROJECT_STATUS.ANALYSIS_APPROVED].includes(p.status)
             ).length,
             'Fase 2: Pengembangan': projects.filter(p =>
-                ['IN_DEVELOPMENT', 'READY_FOR_QA'].includes(p.status)
+                [PROJECT_STATUS.READY_FOR_DEVELOPMENT, PROJECT_STATUS.IN_DEVELOPMENT].includes(p.status)
             ).length,
             'Fase 3: Pengujian QA & Cyber': projects.filter(p =>
-                ['QA_IN_PROGRESS', 'CYBER_IN_PROGRESS', 'QA_PASSED', 'CYBER_PASSED', 'RETURN_TO_DEV'].includes(p.status)
+                [PROJECT_STATUS.READY_FOR_QA, PROJECT_STATUS.QA_TESTING, PROJECT_STATUS.QA_PASSED,
+                 PROJECT_STATUS.READY_FOR_CYBER, PROJECT_STATUS.CYBER_TESTING, PROJECT_STATUS.CYBER_PASSED].includes(p.status)
             ).length,
             'Fase 4: Rilis & Quality Gate': projects.filter(p =>
-                ['READY_FOR_UAT', 'UAT_PASSED', 'PENDING_GOLIVE', 'LIVE_PRODUCTION'].includes(p.status)
+                [PROJECT_STATUS.READY_FOR_RELEASE, PROJECT_STATUS.UAT, PROJECT_STATUS.UAT_PASSED,
+                 PROJECT_STATUS.QUALITY_GATE, PROJECT_STATUS.COMPLETED].includes(p.status)
             ).length,
         };
 
@@ -121,12 +140,19 @@ export default function Dashboard() {
         }));
     }, [projects]);
 
-    // 📊 Analisis risiko (simulasi berdasarkan status)
+    // 📊 Analisis risiko pakai PROJECT_STATUS constants
     const risks = useMemo(() => {
         const total = projects.length || 1;
-        const high = projects.filter(p => p.status === 'RETURN_TO_DEV' || p.status === 'REJECTED').length;
-        const medium = projects.filter(p => p.status === 'IN_REVIEW' || p.status === 'QA_IN_PROGRESS').length;
-        const low = projects.filter(p => p.status === 'LIVE_PRODUCTION' || p.status === 'ANALYSIS_APPROVED').length;
+        const high = projects.filter(p =>
+            p.status === PROJECT_STATUS.REJECTED ||
+            (p.type === 'RBB' && p.rbbDeadline && new Date(p.rbbDeadline) < new Date(Date.now() + 7 * 86400000))
+        ).length;
+        const medium = projects.filter(p =>
+            [PROJECT_STATUS.ANALYST_REVIEW, PROJECT_STATUS.LEAD_REVIEW, PROJECT_STATUS.QA_TESTING].includes(p.status)
+        ).length;
+        const low = projects.filter(p =>
+            [PROJECT_STATUS.COMPLETED, PROJECT_STATUS.ANALYSIS_APPROVED, PROJECT_STATUS.IN_DEVELOPMENT].includes(p.status)
+        ).length;
 
         return [
             { label: 'Risiko Tinggi', count: high, pct: Math.round((high / total) * 100), color: 'bg-red-500', textColor: 'text-red-600', dot: 'bg-red-500' },
@@ -135,16 +161,79 @@ export default function Dashboard() {
         ];
     }, [projects]);
 
-    // 📋 Daftar proyek prioritas (ambil 4 proyek teratas)
+    // 📋 Proyek prioritas — diurutkan berdasarkan kedekatan status kritis
     const priorityProjects = useMemo(() => {
-        const priorityOrder = ['RETURN_TO_DEV', 'REJECTED', 'IN_REVIEW', 'PENDING_GOLIVE', 'QA_IN_PROGRESS'];
+        const priorityOrder = [
+            PROJECT_STATUS.REJECTED,
+            PROJECT_STATUS.QUALITY_GATE,
+            PROJECT_STATUS.UAT_PASSED,
+            PROJECT_STATUS.ANALYST_REVIEW,
+            PROJECT_STATUS.QA_TESTING,
+        ];
         const sorted = [...projects].sort((a, b) => {
             const aIdx = priorityOrder.indexOf(a.status);
             const bIdx = priorityOrder.indexOf(b.status);
             return (aIdx === -1 ? 999 : aIdx) - (bIdx === -1 ? 999 : bIdx);
         });
-        return sorted.slice(0, 4);
+        return sorted.slice(0, 5);
     }, [projects]);
+
+    // 📅 Proyek RBB mendekati deadline (dalam 30 hari)
+    const rbbUrgentProjects = useMemo(() => {
+        const now = new Date();
+        const thirtyDays = new Date(now.getTime() + 30 * 86400000);
+        return projects
+            .filter(p => p.type === 'RBB' && p.rbbDeadline && new Date(p.rbbDeadline) <= thirtyDays
+                && p.status !== PROJECT_STATUS.COMPLETED)
+            .sort((a, b) => new Date(a.rbbDeadline) - new Date(b.rbbDeadline))
+            .slice(0, 3);
+    }, [projects]);
+
+    // 🎯 Quick actions berdasarkan role
+    const quickActions = useMemo(() => {
+        const role = user?.role;
+        if (role === 'project_manager') return [
+            { label: 'PM Workspace', icon: Briefcase, path: '/pm/workspace', color: 'bg-blue-600' },
+            { label: 'Lacak Proyek', icon: MapPin, path: '/pm/tracker', color: 'bg-indigo-600' },
+            { label: 'Ajukan QA', icon: Bug, path: '/pm/qa-request', color: 'bg-purple-600' },
+            { label: 'Ajukan Rilis', icon: Rocket, path: '/pm/release-request', color: 'bg-emerald-600' },
+        ];
+        if (role === 'lead_group') return [
+            { label: 'Workspace Lead', icon: Verified, path: '/workspace/lead', color: 'bg-amber-600' },
+            { label: 'Antrean Review', icon: Clock, path: '/queue', color: 'bg-blue-600' },
+        ];
+        if (role === 'analyst') return [
+            { label: 'Workspace Analyst', icon: FileEdit, path: '/workspace/analyst', color: 'bg-blue-600' },
+        ];
+        if (role === 'qa_lead') return [
+            { label: 'Workspace QA', icon: Bug, path: '/workspace/qa', color: 'bg-purple-600' },
+            { label: 'Tugas QA Saya', icon: CheckCircle, path: '/my-tasks/qa', color: 'bg-indigo-600' },
+        ];
+        if (role === 'cyber_team') return [
+            { label: 'Workspace Cyber', icon: ShieldCheck, path: '/workspace/cyber', color: 'bg-orange-600' },
+            { label: 'Tugas Siber Saya', icon: ShieldCheck, path: '/my-tasks/cyber', color: 'bg-red-600' },
+        ];
+        // super_admin
+        return [
+            { label: 'Buat Proyek', icon: PlusCircle, path: '/projects/new', color: 'bg-blue-600' },
+            { label: 'Lacak Proyek', icon: MapPin, path: '/pm/tracker', color: 'bg-indigo-600' },
+            { label: 'Manajemen User', icon: Users, path: '/admin/users', color: 'bg-gray-700' },
+            { label: 'Quality Gate', icon: Verified, path: '/quality-gate', color: 'bg-emerald-600' },
+        ];
+    }, [user]);
+
+    // Helper untuk format waktu
+    const formatTimeAgo = (timestamp) => {
+        const date = new Date(timestamp);
+        const diffMs = Date.now() - date.getTime();
+        const diffMin = Math.floor(diffMs / 60000);
+
+        if (diffMin < 1) return 'Baru saja';
+        if (diffMin < 60) return `${diffMin} menit yang lalu`;
+        if (diffMin < 1440) return `${Math.floor(diffMin / 60)} jam yang lalu`;
+        const diffDays = Math.floor(diffMin / 1440);
+        return `${diffDays} hari yang lalu`;
+    };
 
     // 🕐 Aktivitas terkini (dari notifikasi)
     const activities = useMemo(() => {
@@ -158,7 +247,7 @@ export default function Dashboard() {
                     n.type === 'danger' ? 'bg-red-50 text-red-500' :
                         'bg-blue-50 text-[#1A56DB]',
             text: <><span className="font-semibold">{n.title}</span> {n.message}</>,
-            time: `${Math.floor((Date.now() - new Date(n.createdAt).getTime()) / 60000)} menit yang lalu`,
+            time: formatTimeAgo(n.createdAt),
             dot: n.type === 'success' ? 'bg-emerald-500' :
                 n.type === 'warning' ? 'bg-amber-500' :
                     n.type === 'danger' ? 'bg-red-500' :
@@ -265,7 +354,11 @@ export default function Dashboard() {
             {/* Metrics Grid */}
             <section className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
                 {metrics.map((m, i) => (
-                    <div key={i} className={`bg-white rounded-xl p-5 shadow-sm border ${m.borderColor} card-hover relative overflow-hidden animate-slide-up-${i + 1}`}>
+                    <div
+                        key={i}
+                        onClick={m.onClick}
+                        className={`bg-white rounded-xl p-5 shadow-sm border ${m.borderColor} card-hover relative overflow-hidden animate-slide-up-${i + 1} ${m.onClick ? 'cursor-pointer hover:-translate-y-0.5 active:scale-[0.98]' : ''} transition-all`}
+                    >
                         <div className={`absolute top-0 left-0 w-full h-1 bg-gradient-to-r ${m.accentColor}`} />
 
                         <div className="flex items-start justify-between mb-4">
@@ -281,6 +374,63 @@ export default function Dashboard() {
                         <div className="text-gray-500 text-sm font-medium">{m.label}</div>
                     </div>
                 ))}
+            </section>
+
+            {/* Quick Actions + RBB Deadline Row */}
+            <section className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                {/* Quick Actions */}
+                <div className="bg-white rounded-xl p-5 shadow-sm border border-gray-100">
+                    <h3 className="text-sm font-bold text-gray-800 mb-4 flex items-center gap-2">
+                        <Zap size={16} className="text-[#D4A017]" /> Aksi Cepat
+                    </h3>
+                    <div className="grid grid-cols-2 gap-3">
+                        {quickActions.map((a, i) => (
+                            <button
+                                key={i}
+                                onClick={() => navigate(a.path)}
+                                className={`flex items-center gap-3 p-3 ${a.color} text-white rounded-xl text-sm font-semibold hover:opacity-90 active:scale-[0.97] transition-all shadow-sm`}
+                            >
+                                <a.icon size={18} />
+                                <span className="leading-tight text-left">{a.label}</span>
+                            </button>
+                        ))}
+                    </div>
+                </div>
+
+                {/* RBB Deadline */}
+                <div className="bg-white rounded-xl p-5 shadow-sm border border-gray-100">
+                    <h3 className="text-sm font-bold text-gray-800 mb-4 flex items-center gap-2">
+                        <Flag size={16} className="text-red-500" /> Deadline RBB Mendekat
+                        <span className="ml-auto text-xs text-gray-400 font-normal">30 hari ke depan</span>
+                    </h3>
+                    {rbbUrgentProjects.length > 0 ? (
+                        <div className="space-y-3">
+                            {rbbUrgentProjects.map((p, i) => {
+                                const daysLeft = Math.ceil((new Date(p.rbbDeadline) - new Date()) / 86400000);
+                                return (
+                                    <div key={i} className="flex items-center gap-3 p-3 bg-red-50 rounded-xl border border-red-100 hover:bg-red-100/50 transition-colors cursor-pointer" onClick={() => navigate('/pm/tracker')}>
+                                        <div className="w-9 h-9 bg-red-100 rounded-xl flex items-center justify-center shrink-0">
+                                            <Flag size={16} className="text-red-600" />
+                                        </div>
+                                        <div className="flex-1 min-w-0">
+                                            <p className="text-sm font-semibold text-gray-800 truncate">{p.name}</p>
+                                            <p className="text-xs text-gray-500">{p.id} · {p.division}</p>
+                                        </div>
+                                        <div className="text-right shrink-0">
+                                            <p className={`text-sm font-bold ${daysLeft <= 7 ? 'text-red-600' : 'text-amber-600'}`}>{daysLeft}h</p>
+                                            <p className="text-[10px] text-gray-400">tersisa</p>
+                                        </div>
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    ) : (
+                        <div className="flex flex-col items-center justify-center py-6 text-center">
+                            <CheckCircle size={32} className="text-emerald-400 mb-2" />
+                            <p className="text-sm text-gray-500">Tidak ada RBB mendekati deadline.</p>
+                        </div>
+                    )}
+                </div>
             </section>
 
             {/* Charts Row */}
@@ -352,62 +502,38 @@ export default function Dashboard() {
                             <tr className="text-xs font-semibold text-gray-400 uppercase tracking-wider bg-gray-50/60">
                                 <th className="py-3 px-5">Nama Proyek</th>
                                 <th className="py-3 px-5">Divisi</th>
-                                <th className="py-3 px-5">Fase</th>
+                                <th className="py-3 px-5">PM</th>
                                 <th className="py-3 px-5">Status</th>
                                 <th className="py-3 px-5 text-center">Aksi</th>
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-gray-50 text-sm">
-                            {priorityProjects.map((proj, idx) => {
-                                const statusColorMap = {
-                                    'IN_DEVELOPMENT': 'bg-indigo-100 text-indigo-700 border-indigo-200',
-                                    'READY_FOR_DEVELOPMENT': 'bg-cyan-100 text-cyan-700 border-cyan-200',
-                                    'ANALYSIS_APPROVED': 'bg-emerald-100 text-emerald-700 border-emerald-200',
-                                    'PENDING': 'bg-gray-100 text-gray-700 border-gray-200',
-                                    'RETURN_TO_DEV': 'bg-red-50 text-red-700 border-red-200',
-                                    'REJECTED': 'bg-red-50 text-red-700 border-red-200',
-                                    'IN_REVIEW': 'bg-blue-50 text-blue-700 border-blue-200',
-                                    'PENDING_GOLIVE': 'bg-amber-50 text-amber-700 border-amber-200',
-                                    'QA_IN_PROGRESS': 'bg-purple-50 text-purple-700 border-purple-200',
-                                    'DEVELOPMENT': 'bg-amber-50 text-amber-700 border-amber-200',
-                                    'LIVE_PRODUCTION': 'bg-emerald-50 text-emerald-700 border-emerald-200',
-                                };
-                                const phaseMap = {
-                                    'PENDING': 'Fase 1: Inisiasi',
-                                    'IN_REVIEW': 'Fase 1: Inisiasi',
-                                    'ANALYSIS_APPROVED': 'Fase 1: Inisiasi',
-                                    'REJECTED': 'Fase 1: Inisiasi',
-                                    'IN_DEVELOPMENT': 'Fase 2: Pengembangan',
-                                    'READY_FOR_QA': 'Fase 2: Pengembangan',
-                                    'QA_IN_PROGRESS': 'Fase 3: Pengujian',
-                                    'CYBER_IN_PROGRESS': 'Fase 3: Pengujian',
-                                    'QA_PASSED': 'Fase 3: Pengujian',
-                                    'CYBER_PASSED': 'Fase 3: Pengujian',
-                                    'RETURN_TO_DEV': 'Fase 3: Pengujian',
-                                    'READY_FOR_UAT': 'Fase 4: Rilis',
-                                    'UAT_PASSED': 'Fase 4: Rilis',
-                                    'PENDING_GOLIVE': 'Fase 4: Rilis',
-                                    'LIVE_PRODUCTION': 'Fase 4: Rilis',
-                                };
-                                return (
-                                    <tr key={idx} className="table-row-hover group">
-                                        <td className="py-4 px-5 font-semibold text-gray-800 group-hover:text-[#1A56DB] transition-colors">{proj.name}</td>
-                                        <td className="py-4 px-5 text-gray-500">{proj.division || 'Divisi TI'}</td>
-                                        <td className="py-4 px-5 text-gray-500 text-xs">{phaseMap[proj.status] || 'Fase 1: Inisiasi'}</td>
-                                        <td className="py-4 px-5">
-                                            <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold border ${statusColorMap[proj.status] || 'bg-gray-50 text-gray-700 border-gray-200'}`}>
-                                                <span className="w-1.5 h-1.5 rounded-full bg-current" />
-                                                {proj.status || 'PENDING'}
-                                            </span>
-                                        </td>
-                                        <td className="py-4 px-5 text-center">
-                                            <button className="text-gray-300 hover:text-[#1A56DB] hover:bg-blue-50 p-1.5 rounded-lg transition-all opacity-0 group-hover:opacity-100">
-                                                <MoreVertical size={18} />
-                                            </button>
-                                        </td>
-                                    </tr>
-                                );
-                            })}
+                            {priorityProjects.map((proj, idx) => (
+                                <tr key={idx} className="table-row-hover group">
+                                    <td className="py-4 px-5">
+                                        <p className="font-semibold text-gray-800 group-hover:text-[#1A56DB] transition-colors">{proj.name}</p>
+                                        <p className="text-xs text-gray-400 mt-0.5">{proj.id}</p>
+                                    </td>
+                                    <td className="py-4 px-5 text-gray-500 text-sm">{proj.division || 'Divisi TI'}</td>
+                                    <td className="py-4 px-5 text-gray-500 text-sm">{proj.pm?.name || '—'}</td>
+                                    <td className="py-4 px-5">
+                                        <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold border ${
+                                            PROJECT_STATUS_COLOR[proj.status] || 'bg-gray-50 text-gray-700 border-gray-200'
+                                        }`}>
+                                            <span className="w-1.5 h-1.5 rounded-full bg-current" />
+                                            {PROJECT_STATUS_LABEL[proj.status] || proj.status}
+                                        </span>
+                                    </td>
+                                    <td className="py-4 px-5 text-center">
+                                        <button
+                                            onClick={() => navigate('/pm/tracker')}
+                                            className="text-xs font-semibold text-[#1A56DB] hover:bg-blue-50 px-3 py-1.5 rounded-lg border border-[#1A56DB]/20 transition-all opacity-0 group-hover:opacity-100"
+                                        >
+                                            Lacak
+                                        </button>
+                                    </td>
+                                </tr>
+                            ))}
                             {priorityProjects.length === 0 && (
                                 <tr>
                                     <td colSpan="5" className="py-8 text-center text-gray-400 text-sm">

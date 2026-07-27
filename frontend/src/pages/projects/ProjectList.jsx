@@ -224,9 +224,6 @@ export default function ProjectList() {
                                             </td>
                                             <td className="px-5 py-4">
                                                 <div className="flex flex-col gap-1.5 items-start">
-                                                    <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-semibold border ${project.type === 'RBB' ? 'bg-red-50 text-red-700 border-red-200' : 'bg-gray-50 text-gray-600 border-gray-200'}`}>
-                                                        {project.type === 'RBB' ? '🔴 RBB' : '⚪ Non-RBB'}
-                                                    </span>
                                                     <RBBBadge type={project.type} deadline={project.rbbDeadline} />
                                                     <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-semibold border ${project.statusColor}`}>
                                                         <span className="w-1 h-1 rounded-full bg-current" />

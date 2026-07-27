@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import {
     CheckCircle,
@@ -13,6 +13,7 @@ import {
     BarChart2,
     Users,
     FileCheck,
+    UserPlus,
 } from 'lucide-react';
 
 export default function Login() {
@@ -24,15 +25,23 @@ export default function Login() {
     const [rememberMe, setRememberMe] = useState(false);
     const [isLoading, setIsLoading] = useState(false);
 
+    const [error, setError] = useState('');
+
     const handleSubmit = (e) => {
         e.preventDefault();
+        setError('');
         setIsLoading(true);
         setTimeout(() => {
-            login(username, password);
+            const result = login(username, password);
             setIsLoading(false);
-            navigate('/Dashboard');
+            if (result.success) {
+                navigate('/dashboard');
+            } else {
+                setError(result.message || 'Login gagal. Periksa kembali email dan password Anda.');
+            }
         }, 500);
     };
+
 
     const features = [
         { icon: Shield, label: 'Keamanan Terenkripsi', desc: 'Data terlindungi enkripsi 256-bit' },
@@ -215,7 +224,25 @@ export default function Login() {
                             </label>
                         </div>
 
+                        <div className="flex items-center justify-between text-sm">
+                            <Link to="/register" className="text-[#1A56DB] hover:underline">
+                                <UserPlus size={14} className="inline mr-1" />
+                                Daftar Akun Baru
+                            </Link>
+                            <Link to="/forgot-password" className="text-[#1A56DB] hover:underline">
+                                Lupa password?
+                            </Link>
+                        </div>
                         {/* Submit */}
+                        {/* Error message */}
+                        {error && (
+                            <div className="flex items-center gap-2 p-3 bg-red-50 border border-red-200 rounded-xl">
+                                <div className="w-4 h-4 rounded-full bg-red-500 flex items-center justify-center shrink-0">
+                                    <span className="text-white text-[10px] font-bold">!</span>
+                                </div>
+                                <p className="text-sm text-red-700 font-medium">{error}</p>
+                            </div>
+                        )}
                         <button
                             type="submit"
                             disabled={isLoading}
@@ -231,27 +258,8 @@ export default function Login() {
                         </button>
                     </form>
 
-                    {/* Divider */}
-                    <div className="my-6 flex items-center gap-4">
-                        <div className="flex-1 h-px bg-gray-200" />
-                        <span className="text-gray-400 text-xs font-semibold uppercase tracking-wider">atau</span>
-                        <div className="flex-1 h-px bg-gray-200" />
-                    </div>
 
-                    {/* SSO Button */}
-                    <button
-                        type="button"
-                        className="w-full flex justify-center items-center gap-3 py-3.5 px-4 border border-gray-200 rounded-xl bg-white hover:bg-gray-50 hover:border-gray-300 transition-all text-sm font-semibold text-gray-700 shadow-sm"
-                        onClick={() => {
-                            login('sso@banknagari.com', 'sso');
-                            navigate('/');
-                        }}
-                    >
-                        <div className="w-6 h-6 bg-[#003a73] rounded-md flex items-center justify-center">
-                            <KeyRound size={14} className="text-[#D4A017]" />
-                        </div>
-                        Gunakan SSO Bank Nagari
-                    </button>
+
 
                     {/* Footer */}
                     <div className="mt-10 text-center">

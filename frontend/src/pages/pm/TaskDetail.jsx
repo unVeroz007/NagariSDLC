@@ -75,6 +75,16 @@ export default function TaskDetail() {
         description: '',
     });
 
+    const [isEditTaskModalOpen, setIsEditTaskModalOpen] = useState(false);
+    const [editingTask, setEditingTask] = useState(null);
+    
+    const [isProjectChatOpen, setIsProjectChatOpen] = useState(false);
+    const [newChatMessage, setNewChatMessage] = useState('');
+    const [chatMessages, setChatMessages] = useState([
+        { id: 1, sender: 'Budi Santoso', time: '10:00', text: 'Tolong pastikan dokumentasi sudah lengkap.' },
+        { id: 2, sender: 'Anda', time: '10:05', text: 'Baik, sedang saya siapkan.' },
+    ]);
+
     const handleAddTask = (e) => {
         e.preventDefault();
 
@@ -94,14 +104,62 @@ export default function TaskDetail() {
             statusColor: 'bg-gray-100 text-gray-600 border-gray-200'
         };
 
+        const newTasks = [...tasks, task];
+        setTasks(newTasks);
+        
         // Mutate in-memory mock data
-        project.tasks.push(task);
-        // Update local state
-        setTasks([...tasks, task]);
+        project.tasks = newTasks;
 
         toast.success(`Task "${task.name}" berhasil ditambahkan!`);
         setIsAddTaskModalOpen(false);
         setNewTask({ title: '', assignee: '', deadline: '', priority: 'Medium', description: '' });
+    };
+
+    const handleEditTask = (e) => {
+        e.preventDefault();
+        
+        if (!editingTask.name.trim()) {
+            toast.error('Nama task wajib diisi!');
+            return;
+        }
+
+        const updatedTasks = tasks.map(t => t.id === editingTask.id ? editingTask : t);
+        setTasks(updatedTasks);
+        
+        // Mutate in-memory mock data
+        const projTaskIndex = project.tasks.findIndex(t => t.id === editingTask.id);
+        if(projTaskIndex !== -1) project.tasks[projTaskIndex] = editingTask;
+
+        toast.success(`Task "${editingTask.name}" berhasil diperbarui!`);
+        setIsEditTaskModalOpen(false);
+    };
+
+    const handleDeleteTask = (task) => {
+        if(window.confirm(`Apakah Anda yakin ingin menghapus task "${task.name}"?`)) {
+            const updatedTasks = tasks.filter(t => t.id !== task.id);
+            setTasks(updatedTasks);
+            
+            // Mutate in-memory mock data
+            const projTaskIndex = project.tasks.findIndex(t => t.id === task.id);
+            if(projTaskIndex !== -1) project.tasks.splice(projTaskIndex, 1);
+            
+            toast.success(`Task "${task.name}" berhasil dihapus!`);
+        }
+    };
+
+    const handleSendMessage = (e) => {
+        e.preventDefault();
+        if(!newChatMessage.trim()) return;
+
+        const newMessage = {
+            id: chatMessages.length + 1,
+            sender: 'Anda',
+            time: new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }),
+            text: newChatMessage
+        };
+
+        setChatMessages([...chatMessages, newMessage]);
+        setNewChatMessage('');
     };
 
     const filteredTasks = tasks.filter((task) =>
@@ -167,11 +225,21 @@ export default function TaskDetail() {
                         </div>
                     </div>
                     <div className="flex gap-3">
-                        <button className="px-4 py-2 rounded-lg border border-gray-200 bg-white text-gray-700 hover:bg-gray-50 transition-colors text-sm font-semibold flex items-center gap-2">
+                        <button 
+                            onClick={() => setIsProjectChatOpen(true)}
+                            className="px-4 py-2 rounded-lg border border-gray-200 bg-white text-gray-700 hover:bg-blue-50 hover:text-[#1A56DB] hover:border-blue-200 transition-colors text-sm font-semibold flex items-center gap-2 shadow-sm"
+                        >
+                            <MessageSquare size={16} />
+                            Diskusi Proyek
+                        </button>
+                        <button className="px-4 py-2 rounded-lg border border-gray-200 bg-white text-gray-700 hover:bg-gray-50 transition-colors text-sm font-semibold flex items-center gap-2 shadow-sm">
                             <Share size={16} />
                             Bagikan
                         </button>
-                        <button className="px-4 py-2 rounded-lg bg-[#1A56DB] text-white hover:bg-[#1346b3] transition-colors text-sm font-semibold flex items-center gap-2 shadow-sm">
+                        <button 
+                            onClick={() => toast('Fitur Edit Proyek akan segera hadir di pembaruan berikutnya!', { icon: '🚧' })}
+                            className="px-4 py-2 rounded-lg bg-[#1A56DB] text-white hover:bg-[#1346b3] transition-colors text-sm font-semibold flex items-center gap-2 shadow-sm"
+                        >
                             <Edit size={16} />
                             Edit Proyek
                         </button>
@@ -201,8 +269,13 @@ export default function TaskDetail() {
                     </div>
 
                     {/* Project Info Summary */}
-                    <div className="col-span-1 bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-                        <h3 className="text-lg font-semibold text-gray-800 mb-4">Informasi Utama</h3>
+                    <div className="col-span-1 bg-white rounded-xl shadow-sm border border-gray-200 p-6 flex flex-col justify-between">
+                        <div>
+                            <h3 className="text-lg font-semibold text-gray-800 mb-4">Informasi Utama</h3>
+                            <p className="text-sm text-gray-600 mb-6 leading-relaxed">
+                                {project.description || "Proyek ini difokuskan pada peningkatan kualitas, penambahan fitur strategis, serta memastikan sistem berjalan sesuai dengan standar keamanan dan performa Bank Nagari."}
+                            </p>
+                        </div>
                         <div className="flex flex-col gap-4">
                             <div className="flex items-start gap-3">
                                 <div className="p-2 rounded-lg bg-gray-100 text-gray-500">
@@ -228,7 +301,6 @@ export default function TaskDetail() {
                                     <span className="block text-sm font-semibold text-gray-800">{project.pm}</span>
                                 </div>
                             </div>
-
                         </div>
                     </div>
                 </div>
@@ -340,9 +412,22 @@ export default function TaskDetail() {
                                                     </span>
                                                 </td>
                                                 <td className="py-4 px-4 text-right">
-                                                    <button className="text-gray-400 hover:text-[#1A56DB] p-1 rounded transition-colors opacity-0 group-hover:opacity-100">
-                                                        <MoreVertical size={18} />
-                                                    </button>
+                                                    <div className="flex justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                                                        <button 
+                                                            onClick={() => { setEditingTask(task); setIsEditTaskModalOpen(true); }}
+                                                            className="text-gray-400 hover:text-amber-500 p-1.5 rounded-lg hover:bg-amber-50 transition-colors"
+                                                            title="Edit Task"
+                                                        >
+                                                            <Edit size={18} />
+                                                        </button>
+                                                        <button 
+                                                            onClick={() => handleDeleteTask(task)}
+                                                            className="text-gray-400 hover:text-red-500 p-1.5 rounded-lg hover:bg-red-50 transition-colors"
+                                                            title="Hapus Task"
+                                                        >
+                                                            <Trash2 size={18} />
+                                                        </button>
+                                                    </div>
                                                 </td>
                                             </tr>
                                         ))}
@@ -367,12 +452,54 @@ export default function TaskDetail() {
                         </>
                     )}
 
-                    {/* Dokumen Tab (placeholder) */}
+                    {/* Dokumen Tab */}
                     {activeTab === 'documents' && (
-                        <div className="p-8 text-center text-gray-500">
-                            <FolderOpen size={48} className="mx-auto text-gray-300 mb-4" />
-                            <p className="text-lg font-medium">Belum ada dokumen yang diunggah</p>
-                            <p className="text-sm">Dokumen akan muncul di sini setelah diunggah.</p>
+                        <div className="p-6">
+                            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6 border-b border-gray-100 pb-4">
+                                <div>
+                                    <h3 className="text-lg font-semibold text-gray-800">Dokumen Proyek</h3>
+                                    <p className="text-sm text-gray-500">Kelola dan lihat dokumen terkait proyek ini.</p>
+                                </div>
+                                <button className="px-4 py-2 bg-[#1A56DB] text-white rounded-lg text-sm font-semibold flex items-center gap-2 shadow-sm hover:bg-[#1346b3] transition-colors">
+                                    <Plus size={16} />
+                                    Unggah Dokumen
+                                </button>
+                            </div>
+                            
+                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                                {[
+                                    { name: 'BRD_Final_v2.pdf', type: 'PDF', date: '10 Ags 2026', size: '2.4 MB', uploader: 'Budi Santoso' },
+                                    { name: 'FSD_Draft_Rev.docx', type: 'DOCX', date: '12 Ags 2026', size: '1.1 MB', uploader: 'Citra Kirana' },
+                                    { name: 'API_Documentation.pdf', type: 'PDF', date: '15 Ags 2026', size: '3.5 MB', uploader: 'Dimas Anggara' },
+                                    { name: 'UI_Mockups.fig', type: 'FIG', date: '16 Ags 2026', size: '12.8 MB', uploader: 'Fani Wijaya' },
+                                    { name: 'Security_Audit.pdf', type: 'PDF', date: '18 Ags 2026', size: '1.9 MB', uploader: 'Eka Putri' },
+                                ].map((doc, i) => (
+                                    <div key={i} className="flex items-start gap-4 p-4 border border-gray-200 rounded-xl hover:border-[#1A56DB] hover:shadow-md transition-all cursor-pointer group bg-white">
+                                        <div className={`w-12 h-12 rounded-lg flex items-center justify-center shrink-0 ${
+                                            doc.type === 'PDF' ? 'bg-red-50 text-red-500' :
+                                            doc.type === 'DOCX' ? 'bg-blue-50 text-blue-500' :
+                                            doc.type === 'FIG' ? 'bg-purple-50 text-purple-500' :
+                                            'bg-gray-50 text-gray-500'
+                                        }`}>
+                                            <FileText size={24} />
+                                        </div>
+                                        <div className="flex-1 min-w-0">
+                                            <p className="text-sm font-semibold text-gray-800 truncate group-hover:text-[#1A56DB] transition-colors">{doc.name}</p>
+                                            <div className="flex items-center gap-2 mt-1 text-xs text-gray-500">
+                                                <span>{doc.size}</span>
+                                                <span>•</span>
+                                                <span>{doc.date}</span>
+                                            </div>
+                                            <p className="text-[10px] text-gray-400 mt-1 flex items-center gap-1">
+                                                <User size={10} /> {doc.uploader}
+                                            </p>
+                                        </div>
+                                        <button className="text-gray-400 hover:text-[#1A56DB] p-1.5 rounded hover:bg-blue-50 opacity-0 group-hover:opacity-100 transition-all">
+                                            <MoreVertical size={16} />
+                                        </button>
+                                    </div>
+                                ))}
+                            </div>
                         </div>
                     )}
 
@@ -509,6 +636,148 @@ export default function TaskDetail() {
                                         Tambah Task
                                     </button>
                                 </div>
+                            </form>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Modal Edit Task */}
+            {isEditTaskModalOpen && editingTask && (
+                <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-fadeIn">
+                    <div className="bg-white rounded-xl shadow-xl max-w-lg w-full max-h-[90vh] overflow-hidden">
+                        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200 bg-gray-50/50">
+                            <h3 className="text-lg font-semibold text-gray-800">Edit Task</h3>
+                            <button
+                                onClick={() => setIsEditTaskModalOpen(false)}
+                                className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
+                            >
+                                <X size={20} />
+                            </button>
+                        </div>
+
+                        <div className="p-6 overflow-y-auto max-h-[calc(90vh-140px)]">
+                            <form onSubmit={handleEditTask} className="space-y-4">
+                                <div>
+                                    <label className="block text-sm font-semibold text-gray-700 mb-1">
+                                        Nama Task <span className="text-red-500">*</span>
+                                    </label>
+                                    <input
+                                        type="text"
+                                        value={editingTask.name}
+                                        onChange={(e) => setEditingTask({...editingTask, name: e.target.value})}
+                                        className="w-full px-4 py-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-[#1A56DB] focus:border-[#1A56DB] outline-none"
+                                        required
+                                    />
+                                </div>
+
+                                <div className="grid grid-cols-2 gap-4">
+                                    <div>
+                                        <label className="block text-sm font-semibold text-gray-700 mb-1">
+                                            Assignee
+                                        </label>
+                                        <select
+                                            value={editingTask.assignee || ''}
+                                            onChange={(e) => setEditingTask({...editingTask, assignee: e.target.value})}
+                                            className="w-full px-4 py-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-[#1A56DB] focus:border-[#1A56DB] outline-none"
+                                        >
+                                            <option value="">Pilih assignee...</option>
+                                            <option value="Budi Santoso">Budi Santoso</option>
+                                            <option value="Citra Kirana">Citra Kirana</option>
+                                            <option value="Dimas Anggara">Dimas Anggara</option>
+                                            <option value="Eka Putri">Eka Putri</option>
+                                            <option value="Fani Wijaya">Fani Wijaya</option>
+                                        </select>
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm font-semibold text-gray-700 mb-1">
+                                            Status
+                                        </label>
+                                        <select
+                                            value={editingTask.status}
+                                            onChange={(e) => setEditingTask({...editingTask, status: e.target.value})}
+                                            className="w-full px-4 py-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-[#1A56DB] focus:border-[#1A56DB] outline-none"
+                                        >
+                                            <option value="Belum Mulai">Belum Mulai</option>
+                                            <option value="Sedang Dikerjakan">Sedang Dikerjakan</option>
+                                            <option value="Selesai">Selesai</option>
+                                        </select>
+                                    </div>
+                                </div>
+
+                                <div className="flex justify-end gap-3 pt-4 border-t border-gray-200">
+                                    <button
+                                        type="button"
+                                        onClick={() => setIsEditTaskModalOpen(false)}
+                                        className="px-4 py-2 border border-gray-300 text-gray-700 rounded-lg font-medium hover:bg-gray-50 transition-colors"
+                                    >
+                                        Batal
+                                    </button>
+                                    <button
+                                        type="submit"
+                                        className="px-4 py-2 bg-[#1A56DB] text-white rounded-lg font-medium hover:bg-[#1346b3] transition-colors flex items-center gap-2"
+                                    >
+                                        Simpan
+                                    </button>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Modal Chat Proyek */}
+            {isProjectChatOpen && (
+                <div className="fixed inset-0 z-[100] flex items-center justify-end bg-black/30 backdrop-blur-sm animate-fadeIn">
+                    <div className="bg-white shadow-2xl w-full max-w-md h-full flex flex-col animate-slide-in-right">
+                        <div className="flex flex-col px-6 py-4 border-b border-gray-200 bg-white">
+                            <div className="flex items-center justify-between mb-2">
+                                <h3 className="text-lg font-semibold text-gray-800 flex items-center gap-2">
+                                    <MessageSquare size={18} className="text-[#1A56DB]" />
+                                    Diskusi Proyek
+                                </h3>
+                                <button
+                                    onClick={() => setIsProjectChatOpen(false)}
+                                    className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
+                                >
+                                    <X size={20} />
+                                </button>
+                            </div>
+                            <div className="text-sm font-medium text-gray-800 bg-gray-50 p-2 rounded-lg border border-gray-100">
+                                {project.name}
+                            </div>
+                        </div>
+
+                        <div className="flex-1 overflow-y-auto p-6 space-y-4 bg-gray-50/50">
+                            {chatMessages.map(msg => (
+                                <div key={msg.id} className={`flex flex-col ${msg.sender === 'Anda' ? 'items-end' : 'items-start'}`}>
+                                    <div className="flex items-center gap-2 mb-1">
+                                        <span className="text-xs font-semibold text-gray-600">{msg.sender}</span>
+                                        <span className="text-[10px] text-gray-400">{msg.time}</span>
+                                    </div>
+                                    <div className={`px-4 py-2.5 rounded-2xl max-w-[85%] text-sm ${msg.sender === 'Anda' ? 'bg-[#1A56DB] text-white rounded-tr-none' : 'bg-white border border-gray-200 text-gray-700 rounded-tl-none shadow-sm'}`}>
+                                        {msg.text}
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+
+                        <div className="p-4 border-t border-gray-200 bg-white">
+                            <form onSubmit={handleSendMessage} className="flex gap-2">
+                                <input
+                                    type="text"
+                                    value={newChatMessage}
+                                    onChange={(e) => setNewChatMessage(e.target.value)}
+                                    placeholder="Tulis komentar..."
+                                    className="flex-1 px-4 py-2.5 bg-gray-50 border border-gray-200 rounded-full text-sm focus:ring-2 focus:ring-[#1A56DB] focus:border-[#1A56DB] outline-none transition-all"
+                                />
+                                <button 
+                                    type="submit" 
+                                    className="w-10 h-10 rounded-full bg-[#1A56DB] text-white flex items-center justify-center hover:bg-[#1346b3] transition-colors shrink-0 shadow-sm"
+                                    disabled={!newChatMessage.trim()}
+                                >
+                                    <MessageSquare size={16} />
+                                </button>
                             </form>
                         </div>
                     </div>
