@@ -75,6 +75,26 @@ const MOCK_USERS = [
         nip: '199307071234',
         avatar_url: null,
     },
+    {
+        id: 8,
+        name: 'Dimas Anggara',
+        email: 'dimas@banknagari.com',
+        password: 'dev123',
+        role: 'developer',
+        department: 'Divisi TI (Backend)',
+        nip: '199401011234',
+        avatar_url: null,
+    },
+    {
+        id: 9,
+        name: 'Eka Putri',
+        email: 'eka@banknagari.com',
+        password: 'dev123',
+        role: 'developer',
+        department: 'Divisi TI (Frontend)',
+        nip: '199502021234',
+        avatar_url: null,
+    },
 ];
 
 const SESSION_KEY = 'nagari_sdlc_session';

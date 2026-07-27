@@ -49,6 +49,8 @@ export const menuSections = {
             label: 'Administrasi',
             items: [
                 { label: 'Manajemen User', path: '/admin/users', icon: 'Users' },
+                { label: 'Manajemen Divisi', path: '/admin/divisions', icon: 'Building' },
+                { label: 'Manajemen Role', path: '/admin/roles', icon: 'Shield' },
                 { label: 'Activity Log', path: '/admin/activity-log', icon: 'Activity' },
                 { label: 'Analitik SDLC', path: '/analytics', icon: 'BarChart' },
                 { label: 'Pengaturan Sistem', path: '/admin/settings', icon: 'Settings' },
@@ -93,6 +95,21 @@ export const menuSections = {
             items: [
                 { label: 'Dashboard Utama', path: '/dashboard', icon: 'LayoutDashboard' },
                 { label: 'Workspace Development', path: '/workspace/dev-lead', icon: 'Users' },
+            ],
+        },
+    ],
+    developer: [
+        {
+            label: 'UTAMA',
+            items: [
+                { label: 'Dashboard Utama', path: '/dashboard', icon: 'LayoutDashboard' },
+            ],
+        },
+        {
+            label: 'TUGAS SAYA',
+            items: [
+                { label: 'Tugas Developer Saya', path: '/my-tasks/dev', icon: 'Code' },
+                { label: 'Kanban Board', path: '/pm/kanban', icon: 'Kanban' },
             ],
         },
     ],

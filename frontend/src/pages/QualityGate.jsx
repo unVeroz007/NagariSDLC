@@ -1,5 +1,7 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
+import { useProjects } from '../contexts/ProjectContext';
+import toast from 'react-hot-toast';
 import {
     CheckCircle,
     ChevronRight,
@@ -28,8 +30,7 @@ import {
     Timer,
 } from 'lucide-react';
 
-// Mock data untuk antrean Quality Gate
-const qualityGateQueue = [
+const defaultQualityGateQueue = [
     {
         id: 'REL-REQ-2026-0015',
         projectName: 'Aplikasi LOS Baru',
@@ -68,35 +69,74 @@ const qualityGateQueue = [
 
 export default function QualityGate() {
     const { user } = useAuth();
-    const [selectedRelease, setSelectedRelease] = useState(qualityGateQueue[0]);
+    const { projects, updateProject } = useProjects();
+
+    const dynamicQueue = projects
+        .filter(p => p.status === 'QUALITY_GATE' || p.status === 'UAT_PASSED')
+        .map(p => ({
+            id: p.id,
+            projectId: p.id,
+            projectName: p.name,
+            division: p.division || 'Divisi TI',
+            type: p.type === 'RBB' ? 'Mayor Release (RBB)' : 'Minor Release',
+            goLiveDate: p.targetDate || '30 Agustus 2026',
+            downtime: p.downtime || '60 Menit',
+            pm: p.pm || { name: 'Budi Santoso', initial: 'BS' },
+            status: 'Menunggu Approval',
+            documents: {
+                brd: { status: 'Lengkap', icon: FileText, label: 'Dokumen BRD & FSD', desc: 'Business & Functional Requirements' },
+                qa: { status: 'Lulus QA', icon: CheckCircle, label: 'Laporan QA & UAT', desc: 'Sign-off dari bisnis user' },
+                security: { status: 'Aman', icon: Shield, label: 'Security Pentest', desc: 'Tidak ada critical vulnerability' },
+                infra: { status: 'Siap', icon: Server, label: 'Kesiapan Infrastruktur', desc: 'Server Produksi terskalakan' },
+            },
+            rollbackPlan: p.rollbackPlan || 'Restore database snapshot & revert versi deployment.',
+        }));
+
+    const queueList = dynamicQueue.length > 0 ? dynamicQueue : defaultQualityGateQueue;
+    const [selectedRelease, setSelectedRelease] = useState(queueList[0] || null);
     const [isSubmitting, setIsSubmitting] = useState(false);
 
+    useEffect(() => {
+        if (!selectedRelease && queueList.length > 0) {
+            setSelectedRelease(queueList[0]);
+        }
+    }, [projects]);
+
     const handleApprove = () => {
-        if (!confirm(`Setujui rilis ${selectedRelease?.id} untuk produksi?`)) return;
+        if (!selectedRelease) return;
+        if (!confirm(`Setujui rilis ${selectedRelease.projectName} (${selectedRelease.id}) untuk produksi?`)) return;
         setIsSubmitting(true);
         setTimeout(() => {
-            alert(`Rilis ${selectedRelease?.id} berhasil disetujui untuk produksi!`);
-            setIsSubmitting(false);
-            const index = qualityGateQueue.indexOf(selectedRelease);
-            if (index > -1) qualityGateQueue.splice(index, 1);
-            if (qualityGateQueue.length > 0) {
-                setSelectedRelease(qualityGateQueue[0]);
-            } else {
-                setSelectedRelease(null);
+            if (selectedRelease.projectId) {
+                updateProject(selectedRelease.projectId, {
+                    status: 'APPROVED_FOR_RELEASE',
+                    phase: 'Fase 4: Rilis Produksi (Live)',
+                });
             }
-        }, 1500);
+            toast.success(`Rilis ${selectedRelease.projectName} berhasil disetujui untuk produksi!`);
+            setIsSubmitting(false);
+
+            const remaining = queueList.filter(item => item.id !== selectedRelease.id);
+            setSelectedRelease(remaining.length > 0 ? remaining[0] : null);
+        }, 1000);
     };
 
     const handleReject = () => {
-        if (!confirm(`Tolak rilis ${selectedRelease?.id}?`)) return;
-        const index = qualityGateQueue.indexOf(selectedRelease);
-        if (index > -1) qualityGateQueue.splice(index, 1);
-        if (qualityGateQueue.length > 0) {
-            setSelectedRelease(qualityGateQueue[0]);
-        } else {
-            setSelectedRelease(null);
-        }
-        alert(`Rilis ${selectedRelease?.id} ditolak!`);
+        if (!selectedRelease) return;
+        if (!confirm(`Tolak permohonan rilis ${selectedRelease.projectName}?`)) return;
+        setIsSubmitting(true);
+        setTimeout(() => {
+            if (selectedRelease.projectId) {
+                updateProject(selectedRelease.projectId, {
+                    status: 'RELEASE_REJECTED',
+                });
+            }
+            toast.error(`Rilis ${selectedRelease.projectName} ditolak.`);
+            setIsSubmitting(false);
+
+            const remaining = queueList.filter(item => item.id !== selectedRelease.id);
+            setSelectedRelease(remaining.length > 0 ? remaining[0] : null);
+        }, 800);
     };
 
     const getStatusBadge = (status) => {
@@ -151,119 +191,92 @@ export default function QualityGate() {
     }
 
     return (
-        <div className="flex-1 overflow-y-auto px-6 py-4 md:px-8 md:py-5 bg-[#f8f9fb]">
-            {/* Page Header */}
-            <div className="mb-6">
-                <h1 className="text-2xl font-bold text-gray-800">Quality Gate &amp; Approval Rilis</h1>
-                <p className="text-sm text-gray-500 mt-1">
-                    Verifikasi kepatuhan akhir (compliance) dan persetujuan rilis ke lingkungan Produksi.
-                </p>
-            </div>
-
-            {/* Split Layout */}
-            <div className="flex flex-col lg:flex-row gap-6 min-h-0">
-                {/* Left Panel: Inbox */}
-                <div className="w-full lg:w-1/3 flex flex-col space-y-4">
-                    <h3 className="font-semibold text-gray-800 flex items-center gap-2">
-                        <Inbox size={20} />
-                        Menunggu Review
-                    </h3>
-
-                    {qualityGateQueue.map((release) => (
-                        <div
-                            key={release.id}
-                            onClick={() => setSelectedRelease(release)}
-                            className={`bg-white border rounded-xl p-4 shadow-sm cursor-pointer transition-all ${selectedRelease?.id === release.id
-                                    ? 'border-l-4 border-l-amber-500 border-amber-200 shadow-md'
-                                    : 'border-gray-200 hover:shadow-md hover:border-gray-300'
-                                }`}
-                        >
-                            <div className="flex justify-between items-start mb-2">
-                                <span className="text-sm font-bold text-gray-800">{release.id}</span>
-                                {getStatusBadge(release.status)}
-                            </div>
-                            <h4 className="text-lg font-bold text-[#1A56DB] mb-1">{release.projectName}</h4>
-                            <div className="flex items-center gap-2 mb-3">
-                                {release.type && (
-                                    <span className={`px-2 py-0.5 rounded text-[10px] font-bold border ${release.type === 'RBB' ? 'bg-red-50 text-red-700 border-red-200' : 'bg-gray-50 text-gray-600 border-gray-200'}`}>
-                                        {release.type === 'RBB' ? '🔴 RBB' : '⚪ Non-RBB'}
-                                    </span>
-                                )}
-                            </div>
-                            <div className="text-xs text-gray-500 flex items-center border-t border-gray-100 pt-2">
-                                <Calendar size={14} className="mr-1" />
-                                Jadwal Go-Live: {release.goLiveDate}
-                            </div>
+        <div className="flex-1 overflow-y-auto bg-[#f8f9fb] p-6 md:p-8">
+            <div className="max-w-7xl mx-auto space-y-6">
+                {/* Header */}
+                <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-white p-6 rounded-2xl border border-gray-100 shadow-sm">
+                    <div>
+                        <div className="flex items-center gap-3">
+                            <h1 className="text-2xl font-bold text-gray-800">Quality Gate Approval</h1>
+                            <span className="bg-emerald-100 text-emerald-700 text-xs font-bold px-2.5 py-1 rounded-full flex items-center gap-1">
+                                <ListChecks size={14} /> Fase 4 Compliance
+                            </span>
                         </div>
-                    ))}
+                        <p className="text-sm text-gray-500 mt-1">
+                            Portal evaluasi final & persetujuan rilis ke lingkungan produksi Bank Nagari.
+                        </p>
+                    </div>
                 </div>
 
-                {/* Right Panel: Executive Review */}
-                <div className="w-full lg:w-2/3 bg-white rounded-xl shadow-sm border border-gray-200 flex flex-col overflow-hidden">
-                    {/* Review Header */}
-                    <div className="p-6 border-b border-gray-200 bg-gray-50/50">
-                        <div className="flex justify-between items-start mb-4">
-                            <div>
-                                <h2 className="text-xl font-bold text-gray-800">
-                                    {selectedRelease.id} : {selectedRelease.projectName}
-                                </h2>
-                                <p className="text-sm text-gray-500">
-                                    Requested by: {selectedRelease.division}
-                                </p>
-                                {selectedRelease.type && (
-                                    <div className="mt-2">
-                                        <span className={`px-2.5 py-1 rounded-md text-xs font-semibold border ${selectedRelease.type === 'RBB' ? 'bg-red-50 text-red-700 border-red-200' : 'bg-gray-50 text-gray-600 border-gray-200'}`}>
-                                            {selectedRelease.type === 'RBB' ? '🔴 RBB (Wajib Selesai)' : '⚪ Non-RBB (Fleksibel)'}
-                                        </span>
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                    {/* Antrean Rilis */}
+                    <div className="bg-white p-5 rounded-2xl border border-gray-100 shadow-sm space-y-4">
+                        <h2 className="font-bold text-gray-800 text-sm tracking-wide uppercase">
+                            Antrean Permohonan Rilis ({queueList.length})
+                        </h2>
+                        <div className="space-y-3">
+                            {queueList.map((rel) => (
+                                <div
+                                    key={rel.id}
+                                    onClick={() => setSelectedRelease(rel)}
+                                    className={`p-4 rounded-xl border transition-all cursor-pointer ${
+                                        selectedRelease.id === rel.id
+                                            ? 'border-[#1a365d] bg-blue-50/40 ring-2 ring-[#1a365d]/10'
+                                            : 'border-gray-100 hover:border-gray-200 bg-white'
+                                    }`}
+                                >
+                                    <div className="flex items-center justify-between mb-1.5">
+                                        <span className="text-xs font-mono font-bold text-gray-500">{rel.id}</span>
+                                        {getStatusBadge(rel.status)}
                                     </div>
-                                )}
-                            </div>
-                            <button className="text-[#1A56DB] hover:text-[#1A56DB]/70">
-                                <ExternalLink size={20} />
-                            </button>
-                        </div>
-
-                        <div className="grid grid-cols-3 gap-4 mt-4">
-                            <div className="bg-gray-50 p-3 rounded-lg">
-                                <p className="text-xs font-semibold text-gray-500 mb-1">Jadwal Rilis</p>
-                                <p className="font-bold text-gray-800 text-sm">{selectedRelease.goLiveDate}</p>
-                            </div>
-                            <div className="bg-gray-50 p-3 rounded-lg">
-                                <p className="text-xs font-semibold text-gray-500 mb-1">Est. Downtime</p>
-                                <p className="font-bold text-gray-800 text-sm">{selectedRelease.downtime}</p>
-                            </div>
-                            <div className="bg-gray-50 p-3 rounded-lg flex items-center">
-                                <div className="w-8 h-8 rounded-full bg-[#1A56DB] text-white flex items-center justify-center font-bold text-xs mr-2">
-                                    {selectedRelease.pm.initial}
+                                    <h3 className="font-semibold text-gray-800 text-sm line-clamp-1">{rel.projectName}</h3>
+                                    <div className="flex items-center gap-2 mt-2 text-xs text-gray-500">
+                                        <Building size={12} />
+                                        <span>{rel.division}</span>
+                                    </div>
                                 </div>
-                                <div>
-                                    <p className="text-xs font-semibold text-gray-500 mb-0.5">Project Manager</p>
-                                    <p className="font-bold text-gray-800 text-sm">{selectedRelease.pm.name}</p>
-                                </div>
-                            </div>
+                            ))}
                         </div>
                     </div>
 
-                    {/* Review Content */}
-                    <div className="flex-1 overflow-y-auto p-6 space-y-6">
-                        {/* Documents & Compliance */}
-                        <section>
-                            <h3 className="font-semibold text-gray-800 border-b border-gray-200 pb-2 mb-4">
-                                Status Dokumen &amp; Kepatuhan
+                    {/* Detail Checklist 4 Pilar */}
+                    <div className="lg:col-span-2 bg-white p-6 rounded-2xl border border-gray-100 shadow-sm space-y-6">
+                        <div className="border-b border-gray-100 pb-4 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                            <div>
+                                <span className="text-xs font-mono font-bold text-blue-600 bg-blue-50 px-2 py-0.5 rounded">
+                                    {selectedRelease.id}
+                                </span>
+                                <h2 className="text-xl font-bold text-gray-800 mt-1">{selectedRelease.projectName}</h2>
+                                <p className="text-xs text-gray-500">{selectedRelease.division} • {selectedRelease.type}</p>
+                            </div>
+                            <div className="flex items-center gap-3 text-xs bg-gray-50 p-2.5 rounded-xl border border-gray-100">
+                                <div className="flex items-center gap-1.5">
+                                    <User size={14} className="text-gray-400" />
+                                    <span className="font-medium text-gray-700">{selectedRelease.pm.name}</span>
+                                </div>
+                                <span className="text-gray-300">|</span>
+                                <div className="flex items-center gap-1.5">
+                                    <Timer size={14} className="text-gray-400" />
+                                    <span className="font-medium text-gray-700">Downtime: {selectedRelease.downtime}</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* Checklist 4 Pilar */}
+                        <div>
+                            <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3">
+                                Checklist 4 Pilar Kelayakan SDLC
                             </h3>
-                            <div className="space-y-3">
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                                 {Object.entries(selectedRelease.documents).map(([key, doc]) => {
-                                    const Icon = doc.icon;
+                                    const DocIcon = doc.icon;
                                     return (
-                                        <div
-                                            key={key}
-                                            className="flex items-center justify-between p-3 border border-gray-200 rounded-lg bg-gray-50"
-                                        >
-                                            <div className="flex items-center">
+                                        <div key={key} className="p-4 rounded-xl border border-gray-100 bg-gray-50/50 flex items-start justify-between">
+                                            <div className="flex items-start">
                                                 {getDocIcon(doc.status)}
                                                 <div>
-                                                    <p className="font-semibold text-sm text-gray-800">{doc.label}</p>
-                                                    <p className="text-xs text-gray-500">{doc.desc}</p>
+                                                    <h4 className="font-semibold text-gray-800 text-sm">{doc.label}</h4>
+                                                    <p className="text-xs text-gray-500 mt-0.5">{doc.desc}</p>
                                                 </div>
                                             </div>
                                             {getDocStatusBadge(doc.status)}
@@ -271,40 +284,40 @@ export default function QualityGate() {
                                     );
                                 })}
                             </div>
-                        </section>
+                        </div>
 
                         {/* Rollback Plan */}
-                        <section>
-                            <h3 className="font-semibold text-gray-800 border-b border-gray-200 pb-2 mb-4">
-                                Rollback Plan
+                        <div className="bg-amber-50/50 border border-amber-200/60 p-4 rounded-xl">
+                            <h3 className="text-xs font-bold text-amber-800 uppercase tracking-wider flex items-center gap-1.5 mb-1.5">
+                                <AlertTriangle size={14} className="text-amber-600" /> Rencana Rollback (Rollback Plan)
                             </h3>
-                            <div className="bg-red-50/50 border border-red-200 p-4 rounded-lg flex items-start">
-                                <AlertTriangle size={20} className="text-red-500 mr-3 mt-0.5 shrink-0" />
-                                <div>
-                                    <p className="font-bold text-sm text-red-800 mb-1">Prosedur Darurat</p>
-                                    <p className="text-sm text-gray-700">{selectedRelease.rollbackPlan}</p>
-                                </div>
-                            </div>
-                        </section>
-                    </div>
+                            <p className="text-xs text-amber-900 leading-relaxed font-mono">
+                                {selectedRelease.rollbackPlan}
+                            </p>
+                        </div>
 
-                    {/* Footer Actions */}
-                    <div className="p-6 border-t border-gray-200 bg-gray-50/50 flex justify-end space-x-4">
-                        <button
-                            onClick={handleReject}
-                            className="flex items-center gap-2 px-6 py-2.5 rounded-lg border border-red-500 text-red-500 font-bold hover:bg-red-50 transition-colors"
-                        >
-                            <X size={18} />
-                            Tolak Rilis
-                        </button>
-                        <button
-                            onClick={handleApprove}
-                            disabled={isSubmitting}
-                            className="flex items-center gap-2 px-8 py-2.5 rounded-lg bg-emerald-600 text-white font-bold hover:bg-emerald-700 transition-colors shadow-sm disabled:opacity-70 disabled:cursor-not-allowed"
-                        >
-                            <CheckCircle size={18} />
-                            {isSubmitting ? 'Memproses...' : 'Setujui Rilis Produksi'}
-                        </button>
+                        {/* Action Buttons */}
+                        <div className="pt-4 border-t border-gray-100 flex items-center justify-end gap-3">
+                            <button
+                                onClick={handleReject}
+                                disabled={isSubmitting}
+                                className="px-5 py-2.5 rounded-xl border border-red-200 text-red-600 hover:bg-red-50 text-sm font-semibold transition-all flex items-center gap-2"
+                            >
+                                <X size={16} /> Tolak Rilis
+                            </button>
+                            <button
+                                onClick={handleApprove}
+                                disabled={isSubmitting}
+                                className="px-6 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-semibold transition-all shadow-md hover:shadow-lg flex items-center gap-2"
+                            >
+                                {isSubmitting ? (
+                                    <Loader size={16} className="animate-spin" />
+                                ) : (
+                                    <CheckCircle size={16} />
+                                )}
+                                Approve Rilis Produksi
+                            </button>
+                        </div>
                     </div>
                 </div>
             </div>

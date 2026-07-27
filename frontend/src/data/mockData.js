@@ -10,12 +10,14 @@ export const mockProjects = [
         division: 'Divisi Kepatuhan',
         pm: null,
         phase: 'Fase 1: Inisiasi',
-        status: 'READY_FOR_DEVELOPMENT',
-        statusColor: 'bg-cyan-100 text-cyan-700 border-cyan-200',
+        status: 'DEV_ANALYSIS_DONE',
+        statusColor: 'bg-emerald-100 text-emerald-700 border-emerald-200',
         targetDate: '30 Mar 2025',
+        assignedAnalyst: { id: 1, name: 'Citra Kirana' },
         analystResult: {
             decision: 'Disetujui (Lanjut ke IT)',
-            notes: 'BRD sudah sangat jelas dan mencakup semua case pelaporan regulatory. Secara teknis bisa menggunakan arsitektur microservices yang ada.'
+            notes: 'BRD sudah sangat jelas dan mencakup semua case pelaporan regulatory. Secara teknis menggunakan arsitektur microservices.',
+            estimation: '40'
         }
     },
     {
@@ -32,7 +34,8 @@ export const mockProjects = [
         targetDate: '15 Mei 2025',
         analystResult: {
             decision: 'Disetujui',
-            notes: 'Gunakan stack MERN, integrasikan dengan SSO existing.'
+            notes: 'Gunakan stack MERN, integrasikan dengan SSO existing.',
+            estimation: '45'
         },
         pm: { id: 1, name: 'Budi Santoso', department: 'IT Core' },
         team: [
@@ -79,11 +82,12 @@ export const mockProjects = [
         division: 'Divisi SDM',
         pm: null,
         phase: 'Fase 1: Inisiasi',
-        status: 'ANALYST_REVIEW',
+        status: 'DEV_ANALYSIS',
         statusColor: 'bg-amber-100 text-amber-700 border-amber-200',
         targetDate: '15 Jan 2025',
         deadline: '2026-08-01T12:00:00Z',
         leadNote: 'Tolong pastikan arsitektur dashboard mampu handle data besar secara realtime.',
+        assignedAnalyst: { id: 1, name: 'Citra Kirana' },
     },
     {
         id: 'PRJ-2026-093',
@@ -109,10 +113,11 @@ export const mockProjects = [
         division: 'Divisi Kepatuhan',
         pm: null,
         phase: 'Fase 1: Inisiasi',
-        status: 'ANALYST_REVIEW',
+        status: 'DEV_ANALYSIS',
         statusColor: 'bg-amber-100 text-amber-700 border-amber-200',
         targetDate: '20 Feb 2025',
         deadline: '2026-07-28T09:00:00Z',
+        assignedAnalyst: { id: 2, name: 'Fajar Ramadhan' },
     },
     {
         id: 'PRJ-2026-096',
@@ -166,8 +171,8 @@ export const mockProjects = [
         division: 'Divisi Layanan',
         pm: null,
         phase: 'Fase 1: Inisiasi',
-        status: 'PENDING',
-        statusColor: 'bg-gray-100 text-gray-600 border-gray-200',
+        status: 'READY_FOR_DEV',
+        statusColor: 'bg-blue-100 text-blue-700 border-blue-200',
         targetDate: '20 Mei 2025',
         priority: 'High',
         submittedAt: '2026-07-23T10:00:00Z',
@@ -185,14 +190,16 @@ export const mockProjects = [
         division: 'Divisi Kepatuhan',
         pm: null,
         phase: 'Fase 1: Inisiasi',
-        status: 'ANALYSIS_APPROVED',
+        status: 'DEV_ANALYSIS_DONE',
         statusColor: 'bg-emerald-100 text-emerald-700 border-emerald-200',
         targetDate: '15 Des 2026',
         priority: 'High',
         submittedAt: '2026-07-22T08:00:00Z',
+        assignedAnalyst: { id: 2, name: 'Fajar Ramadhan' },
         analystResult: {
-            decision: 'Disetujui',
-            notes: 'Sudah sesuai spesifikasi Dukcapil.'
+            decision: 'Disetujui (Lanjut ke IT)',
+            notes: 'Spesifikasi API Dukcapil telah divalidasi dan aman diintegrasikan.',
+            estimation: '25'
         },
         documents: [
             { name: 'BRD_Dukcapil_v1.pdf', size: '2.5 MB', type: 'pdf' }

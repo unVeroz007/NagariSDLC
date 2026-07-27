@@ -33,8 +33,13 @@ export default function WorkspaceAnalyst() {
     const { projects, updateProject, isLoading } = useProjects();
     const navigate = useNavigate();
     const { addNotification } = useNotifications();
-    // Ambil queue review analis
-    const reviewQueue = projects.filter(p => p.status === 'Review Analis');
+    // Ambil queue review analis dari status DEV_ANALYSIS, ANALYST_REVIEW, atau Review Analis
+    const reviewQueue = projects.filter(p =>
+        p.status === 'DEV_ANALYSIS' ||
+        p.status === 'ANALYST_REVIEW' ||
+        p.status === 'Review Analis' ||
+        p.status === 'Menunggu Analis'
+    );
     const [selectedProject, setSelectedProject] = useState(null);
 
     if (!selectedProject && reviewQueue.length > 0) {
@@ -43,6 +48,7 @@ export default function WorkspaceAnalyst() {
     const [decision, setDecision] = useState('');
     const [projectType, setProjectType] = useState('NON_RBB');
     const [notes, setNotes] = useState('');
+    const [estimationDays, setEstimationDays] = useState('30');
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [uploadedFile, setUploadedFile] = useState(null);
 
@@ -59,24 +65,31 @@ export default function WorkspaceAnalyst() {
         
         // Update project status based on decision
         const isApproved = decision.includes('Disetujui');
+        const finalStatus = isApproved ? 'DEV_ANALYSIS_DONE' : 'DEV_ANALYSIS_REJECTED';
+
         updateProject(selectedProject.id, {
-            status: isApproved ? 'ANALYSIS_APPROVED' : 'Review Ditolak',
+            status: finalStatus,
             statusColor: isApproved ? 'bg-emerald-100 text-emerald-700 border-emerald-200' : 'bg-red-100 text-red-700 border-red-200',
             analystDecision: decision,
             analystNotes: notes,
-            analystResult: { decision, notes }, // Simpan hasil review untuk Lead Group
+            analystResult: {
+                decision,
+                notes,
+                estimation: estimationDays || '30',
+                fsdFile: uploadedFile?.name || 'FSD_Technical_Specification.docx'
+            },
             type: projectType,
             typeLabel: projectType === 'RBB' ? 'RBB (Wajib Selesai)' : 'Non-RBB (Fleksibel)'
         });
 
         addNotification(
-            'Review Proyek Selesai',
-            `${selectedProject?.name} telah direview oleh ${user?.name || 'Analyst'} dengan keputusan: ${decision}.`,
+            'Kajian Analyst Selesai',
+            `Kajian teknis untuk ${selectedProject?.name} telah dirampungkan oleh Analyst (${user?.name || 'Citra Kirana'}) dengan status Siap Tunjuk PM.`,
             isApproved ? 'success' : 'warning',
-            '/workspace/lead'
+            '/workspace/dev-lead'
         );
-        toast.success(`Proyek ${selectedProject?.name} berhasil di-review dengan keputusan: ${decision}`);
-        navigate('/workspace/lead');
+        toast.success(`Kajian teknis ${selectedProject?.name} selesai! Dikirim ke Ketua Grup Pengembangan.`);
+        navigate('/workspace/dev-lead');
         setIsSubmitting(false);
         
         const nextQueue = reviewQueue.filter(p => p.id !== selectedProject.id);

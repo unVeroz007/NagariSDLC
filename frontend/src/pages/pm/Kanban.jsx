@@ -2,6 +2,7 @@ import { useState } from 'react';
 import RBBBadge from '../../components/RBBBadge';
 import { useAuth } from '../../contexts/AuthContext';
 import { useNavigate } from 'react-router-dom';
+import toast from 'react-hot-toast';
 import {
     Plus,
     Search,
@@ -58,6 +59,15 @@ export default function Kanban() {
     const [draggedTaskId, setDraggedTaskId] = useState(null);
 
     const handleDragStart = (taskId) => {
+        const targetTask = tasks.find(t => t.id === taskId);
+        if (user?.role === 'developer' && targetTask?.assignee) {
+            const isOwnTask = targetTask.assignee.toLowerCase().includes(user.name.toLowerCase()) ||
+                             user.name.toLowerCase().includes(targetTask.assignee.toLowerCase());
+            if (!isOwnTask) {
+                toast.error(`Anda hanya dapat menggeser task yang ditugaskan kepada Anda (${user.name})!`);
+                return;
+            }
+        }
         setDraggedTaskId(taskId);
     };
 
@@ -76,6 +86,7 @@ export default function Kanban() {
             )
         );
         setDraggedTaskId(null);
+        toast.success(`Status task berhasil dipindahkan ke: ${targetStage}`);
     };
 
     // Filter tasks
@@ -125,7 +136,7 @@ export default function Kanban() {
                 )}
 
                 {task.type && <div className="mb-2"><RBBBadge type={task.type} deadline={task.rbbDeadline} /></div>}
-            <div className="flex justify-between items-start mb-2">
+                <div className="flex justify-between items-start mb-2">
                     <span className={`text-xs font-bold px-2 py-1 rounded border ${isRework
                         ? 'text-red-600 bg-white border-red-200'
                         : 'text-[#1A56DB] bg-blue-50 border-blue-200'
@@ -139,210 +150,106 @@ export default function Kanban() {
                     )}
                 </div>
 
-                <h4 className="font-semibold text-gray-800 mb-2 text-sm">{task.title}</h4>
-                <p className="text-sm text-gray-500 line-clamp-2 mb-3">{task.description}</p>
+                <h4 className="font-bold text-gray-800 text-sm mb-1.5 leading-snug hover:text-[#1A56DB] transition-colors">
+                    {task.title}
+                </h4>
 
-                {/* Labels */}
-                {task.labels && task.labels.length > 0 && (
-                    <div className="flex flex-wrap gap-1 mb-3">
-                        {task.labels.map((label, idx) => (
-                            <span
-                                key={idx}
-                                className="px-2 py-0.5 text-[10px] font-bold rounded bg-gray-100 text-gray-600 border border-gray-200"
-                            >
-                                {label}
-                            </span>
-                        ))}
+                <p className="text-gray-500 text-xs line-clamp-2 mb-3 leading-relaxed">
+                    {task.description}
+                </p>
+
+                <div className="flex items-center justify-between border-t border-gray-100 pt-3 mt-2 text-xs">
+                    <div className="flex items-center gap-2">
+                        <span className={`px-2 py-0.5 rounded text-[10px] font-bold border ${getPriorityColor(task.priority)}`}>
+                            {task.priority}
+                        </span>
                     </div>
-                )}
 
-                {/* Rework Note */}
-                {isRework && task.reworkNote && (
-                    <div className="bg-white/70 p-2 rounded text-xs text-red-600 mb-3 border border-red-200 flex gap-2">
-                        <MessageSquare size={14} className="shrink-0 mt-0.5" />
-                        <span>{task.reworkNote}</span>
-                    </div>
-                )}
-
-                {/* Subtasks Progress */}
-                {task.subtasks && (
-                    <div className="mb-3">
-                        <div className="flex justify-between text-[10px] text-gray-500 mb-1 font-semibold">
-                            <span>Subtasks</span>
-                            <span>{task.subtasks.done}/{task.subtasks.total}</span>
-                        </div>
-                        <div className="w-full bg-gray-100 h-1.5 rounded-full overflow-hidden">
+                    <div className="flex items-center gap-2">
+                        {task.assignee && (
                             <div
-                                className={`h-full rounded-full ${task.subtasks.done === task.subtasks.total
-                                    ? 'bg-green-500'
-                                    : 'bg-blue-500'
-                                    }`}
-                                style={{ width: `${(task.subtasks.done / task.subtasks.total) * 100}%` }}
-                            />
-                        </div>
-                    </div>
-                )}
-
-                {/* Footer */}
-                <div className="flex justify-between items-center mt-auto pt-2 border-t border-gray-100">
-                    <div className="flex -space-x-2">
-                        {task.assignee ? (
-                            <div className="w-6 h-6 rounded-full border-2 border-white bg-gray-200 flex items-center justify-center text-[10px] font-bold text-gray-600">
+                                className="w-6 h-6 rounded-full bg-blue-600 text-white font-bold text-[10px] flex items-center justify-center border border-white shadow-sm"
+                                title={`Assignee: ${task.assignee}`}
+                            >
                                 {getInitials(task.assignee)}
                             </div>
-                        ) : (
-                            <div className="w-6 h-6 rounded-full border-2 border-white bg-gray-100 flex items-center justify-center text-[10px] text-gray-400">
-                                <User size={12} />
-                            </div>
                         )}
                     </div>
-                    <div className="flex items-center gap-2 text-gray-500 text-xs">
-                        {task.attachments > 0 && (
-                            <span className="flex items-center gap-0.5">
-                                <Paperclip size={12} />
-                                {task.attachments}
-                            </span>
-                        )}
-                        {task.comments > 0 && (
-                            <span className="flex items-center gap-0.5">
-                                <MessageSquare size={12} />
-                                {task.comments}
-                            </span>
-                        )}
-                        {task.timeEstimate && (
-                            <span className="flex items-center gap-0.5">
-                                <Clock size={12} />
-                                {task.timeEstimate}
-                            </span>
-                        )}
-                        {task.priority && (
-                            <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${getPriorityColor(task.priority)}`}>
-                                {task.priority}
-                            </span>
-                        )}
-                    </div>
-                </div>
-            </div>
-        );
-    };
-
-    // Render Column
-    const renderColumn = (stageId) => {
-        const stage = kanbanStages.find((s) => s.id === stageId);
-        const stageTasks = tasksByStage[stageId] || [];
-        const isActive = stageId === 'desain' || stageId === 'analisis';
-        const isLocked = stageId === 'deployment';
-        const isEmpty = stageTasks.length === 0;
-
-        let columnClasses = 'w-80 flex flex-col max-h-full rounded-xl border shrink-0 shadow-sm';
-        if (stageId === 'desain') {
-            columnClasses += ' bg-blue-50/50 border-2 border-primary-fixed-dim shadow-md';
-        } else if (isLocked) {
-            columnClasses += ' bg-gray-100/50 border-gray-300';
-        } else {
-            columnClasses += ' bg-white/50 border-gray-200';
-        }
-
-        return (
-            <div
-                key={stageId}
-                className={columnClasses}
-                onDragOver={handleDragOver}
-                onDrop={() => handleDrop(stageId)}
-            >
-                <div
-                    className={`p-4 border-b rounded-t-xl flex justify-between items-center sticky top-0 z-10 ${stageId === 'desain'
-                        ? 'bg-white border-primary-fixed-dim'
-                        : isLocked
-                            ? 'bg-gray-100/80 border-gray-300'
-                            : 'bg-white border-gray-200'
-                        }`}
-                >
-                    <div className="flex items-center gap-2">
-                        <span className={`w-2 h-2 rounded-full ${stage.color} ${stageId === 'desain' ? 'animate-pulse' : ''}`} />
-                        <h3 className={`font-semibold text-gray-800 ${stageId === 'desain' ? 'text-primary' : ''}`}>
-                            {stage.label}
-                        </h3>
-                    </div>
-                    <span className={`px-2 py-0.5 rounded-full text-xs font-bold ${stageId === 'desain'
-                        ? 'bg-[#1A56DB] text-white'
-                        : 'bg-gray-200 text-gray-600'
-                        }`}>
-                        {stageTasks.length}
-                    </span>
-                </div>
-
-                <div className="p-3 flex-1 overflow-y-auto kanban-scroll flex flex-col gap-3 min-h-[200px] max-h-[calc(100vh-280px)]">
-                    {isEmpty ? (
-                        <div className="flex-1 flex flex-col items-center justify-center gap-2 border-2 border-dashed border-gray-200 rounded-lg bg-white/50 p-6">
-                            {isLocked ? (
-                                <>
-                                    <Lock size={24} className="text-gray-400" />
-                                    <p className="text-sm text-gray-400 text-center">Locked by Release Manager</p>
-                                </>
-                            ) : (
-                                <>
-                                    <Inbox size={24} className="text-gray-400" />
-                                    <p className="text-sm text-gray-400 text-center">No active tasks</p>
-                                </>
-                            )}
-                        </div>
-                    ) : (
-                        stageTasks.map((task) => renderTaskCard(task))
-                    )}
                 </div>
             </div>
         );
     };
 
     return (
-        <div className="flex-1 flex flex-col h-screen overflow-hidden bg-[#F7F8FA] animate-slide-up">
-
-            {/* Main Content */}
-            <main className="flex-1 overflow-x-auto overflow-y-hidden p-6 flex flex-col">
-                {/* Page Header & Board Controls */}
-                <div className="flex justify-between items-end mb-5 shrink-0 w-full flex-wrap gap-3">
-                    <div>
-                        <h2 className="text-2xl font-extrabold text-gray-800">Global Project Flow</h2>
-                        <p className="text-sm text-gray-400 mt-0.5">Papan Kanban — kelola tiket secara visual</p>
+        <div className="flex-1 flex flex-col bg-[#f8f9fb] overflow-hidden">
+            {/* Header */}
+            <div className="px-6 py-4 bg-white border-b border-gray-100 shrink-0 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                <div>
+                    <div className="flex items-center gap-3">
+                        <h1 className="text-2xl font-extrabold text-gray-800">Kanban Board</h1>
+                        <span className="bg-purple-100 text-purple-700 text-xs font-bold px-2.5 py-1 rounded-full flex items-center gap-1">
+                            <KanbanIcon size={14} /> Agile Development
+                        </span>
                     </div>
-                    <div className="flex items-center gap-3 flex-wrap">
-                        {/* Search */}
-                        <div className="relative">
-                            <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-                            <input
-                                type="text"
-                                value={searchTerm}
-                                onChange={(e) => setSearchTerm(e.target.value)}
-                                placeholder="Cari tiket..."
-                                className="pl-9 pr-4 py-2 rounded-xl border border-gray-200 bg-white text-sm focus:outline-none w-44 transition-all focus:w-64 shadow-sm focus:ring-2 focus:ring-[#1A56DB]/20 focus:border-[#1A56DB]"
-                            />
-                        </div>
-                        <div className="flex items-center bg-white rounded-xl border border-gray-200 p-1 shadow-sm gap-0.5">
-                            {[['active', 'Aktif'], ['completed', 'Selesai'], ['all', 'Semua']].map(([val, label]) => (
-                                <button
-                                    key={val}
-                                    onClick={() => setFilter(val)}
-                                    className={`px-3 py-1.5 text-sm font-semibold rounded-lg transition-all ${
-                                        filter === val ? 'bg-[#1A56DB] text-white shadow-sm' : 'text-gray-500 hover:bg-gray-100'
-                                    }`}
-                                >
-                                    {label}
-                                </button>
-                            ))}
-                        </div>
-                        <button className="flex items-center gap-2 bg-[#003a73] text-white px-4 py-2.5 rounded-xl font-bold hover:bg-[#002a5a] transition-all shadow-md shadow-[#003a73]/20 text-sm btn-shimmer">
-                            <Plus size={15} />
-                            Tiket Baru
-                        </button>
-                    </div>
+                    <p className="text-sm text-gray-500 mt-1">
+                        Papan visualisasi alur tugas proyek dari inisiasi hingga deployment produksi.
+                    </p>
                 </div>
 
-                {/* Kanban Board Container - scroll horizontal dengan kolom seimbang */}
-                <div className="flex-1 flex gap-4 pb-4 overflow-x-auto min-h-[500px]">
-                    {stageOrder.map((stageId) => renderColumn(stageId))}
+                <div className="flex items-center gap-3">
+                    <div className="relative">
+                        <Search className="absolute left-3 top-2.5 text-gray-400" size={16} />
+                        <input
+                            type="text"
+                            value={searchTerm}
+                            onChange={(e) => setSearchTerm(e.target.value)}
+                            placeholder="Cari task..."
+                            className="pl-9 pr-4 py-2 bg-gray-50 border border-gray-200 rounded-xl text-xs outline-none focus:border-blue-600 focus:bg-white transition-all w-48 sm:w-64"
+                        />
+                    </div>
                 </div>
-            </main>
+            </div>
+
+            {/* Stage Columns */}
+            <div className="flex-1 overflow-x-auto p-6">
+                <div className="flex gap-4 min-w-[1200px] h-full items-start">
+                    {stageOrder.map((stageId) => {
+                        const stage = kanbanStages.find((s) => s.id === stageId);
+                        const stageTasks = tasksByStage[stageId] || [];
+
+                        return (
+                            <div
+                                key={stageId}
+                                onDragOver={handleDragOver}
+                                onDrop={() => handleDrop(stageId)}
+                                className="w-80 bg-gray-100/70 border border-gray-200 rounded-2xl flex flex-col max-h-full shrink-0 shadow-sm"
+                            >
+                                {/* Column Header */}
+                                <div className="p-4 border-b border-gray-200 flex items-center justify-between bg-white/60 rounded-t-2xl">
+                                    <div className="flex items-center gap-2">
+                                        <div className={`w-3 h-3 rounded-full ${stage?.color || 'bg-gray-400'}`}></div>
+                                        <h3 className="font-bold text-gray-800 text-sm">{stage?.label || stageId}</h3>
+                                    </div>
+                                    <span className="bg-gray-200 text-gray-700 text-xs font-bold px-2 py-0.5 rounded-full">
+                                        {stageTasks.length}
+                                    </span>
+                                </div>
+
+                                {/* Task Cards */}
+                                <div className="p-3 overflow-y-auto space-y-3 flex-1 min-h-[150px]">
+                                    {stageTasks.length === 0 ? (
+                                        <div className="h-24 border-2 border-dashed border-gray-200 rounded-xl flex items-center justify-center text-xs text-gray-400">
+                                            Geser task ke sini
+                                        </div>
+                                    ) : (
+                                        stageTasks.map((t) => renderTaskCard(t))
+                                    )}
+                                </div>
+                            </div>
+                        );
+                    })}
+                </div>
+            </div>
         </div>
     );
 }

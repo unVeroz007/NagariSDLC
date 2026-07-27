@@ -7,6 +7,7 @@ import { useNavigate } from 'react-router-dom';
 import LoadingSpinner from '../../components/LoadingSpinner';
 import EmptyState from '../../components/EmptyState';
 import RBBBadge from '../../components/RBBBadge';
+import ChatBox from '../../components/ChatBox';
 import {
     LayoutDashboard,
     Users,
@@ -555,6 +556,17 @@ export default function PMWorkspace() {
                             {allTasks.length === 0 && (
                                 <div className="p-8 text-center text-gray-400">Belum ada task di proyek Anda.</div>
                             )}
+                        </div>
+                    )}
+
+                    {/* Seksi Chat Discussion Proyek (Inline di Bagian Bawah Halaman) */}
+                    {(selectedProject || filteredProjects[0]) && (
+                        <div className="mt-6">
+                            <ChatBox
+                                projectId={(selectedProject || filteredProjects[0]).id}
+                                projectName={(selectedProject || filteredProjects[0]).name}
+                                className="w-full max-h-[400px]"
+                            />
                         </div>
                     )}
                 </div>

@@ -42,9 +42,12 @@ import ReleaseRequest from '../pages/pm/ReleaseRequest';
 // My Tasks pages
 import MyTasksQA from '../pages/mytasks/MyTasksQA';
 import MyTasksCyber from '../pages/mytasks/MyTasksCyber';
+import MyTasksDev from '../pages/mytasks/MyTasksDev';
 
 // Admin pages
 import Users from '../pages/admin/Users';
+import Divisions from '../pages/admin/Divisions';
+import Roles from '../pages/admin/Roles';
 import Analytics from '../pages/admin/Analytics';
 import Settings from '../pages/admin/settings';
 import ActivityLog from '../pages/admin/ActivityLog';
@@ -53,11 +56,12 @@ import ActivityLog from '../pages/admin/ActivityLog';
 import QualityGate from '../pages/QualityGate';
 
 // Role constants
-const ALL_ROLES = ['super_admin', 'lead_group', 'analyst', 'development_lead', 'project_manager', 'qa_lead', 'qa_tester', 'cyber_team'];
+const ALL_ROLES = ['super_admin', 'lead_group', 'analyst', 'development_lead', 'project_manager', 'qa_lead', 'qa_tester', 'cyber_team', 'developer'];
 const PM_ROLES = ['super_admin', 'project_manager'];
 const LEAD_ROLES = ['super_admin', 'lead_group'];
 const ANALYST_ROLES = ['super_admin', 'analyst'];
-const DEV_ROLES = ['super_admin', 'development_lead'];
+const DEV_LEAD_ROLES = ['super_admin', 'development_lead'];
+const DEV_MEMBER_ROLES = ['super_admin', 'project_manager', 'development_lead', 'developer'];
 const QA_ROLES = ['super_admin', 'qa_lead', 'qa_tester'];
 const CYBER_ROLES = ['super_admin', 'cyber_team'];
 const ADMIN_ROLES = ['super_admin'];
@@ -171,8 +175,16 @@ const router = createBrowserRouter([
             {
                 path: '/workspace/dev-lead',
                 element: (
-                    <ProtectedRoute allowedRoles={DEV_ROLES}>
+                    <ProtectedRoute allowedRoles={DEV_LEAD_ROLES}>
                         <WorkspaceDevLead />
+                    </ProtectedRoute>
+                ),
+            },
+            {
+                path: '/my-tasks/dev',
+                element: (
+                    <ProtectedRoute allowedRoles={DEV_MEMBER_ROLES}>
+                        <MyTasksDev />
                     </ProtectedRoute>
                 ),
             },
@@ -205,7 +217,7 @@ const router = createBrowserRouter([
             {
                 path: '/pm/kanban',
                 element: (
-                    <ProtectedRoute allowedRoles={PM_ROLES}>
+                    <ProtectedRoute allowedRoles={DEV_MEMBER_ROLES}>
                         <Kanban />
                     </ProtectedRoute>
                 ),
@@ -301,6 +313,22 @@ const router = createBrowserRouter([
                 element: (
                     <ProtectedRoute allowedRoles={ADMIN_ROLES}>
                         <Users />
+                    </ProtectedRoute>
+                ),
+            },
+            {
+                path: '/admin/divisions',
+                element: (
+                    <ProtectedRoute allowedRoles={ADMIN_ROLES}>
+                        <Divisions />
+                    </ProtectedRoute>
+                ),
+            },
+            {
+                path: '/admin/roles',
+                element: (
+                    <ProtectedRoute allowedRoles={ADMIN_ROLES}>
+                        <Roles />
                     </ProtectedRoute>
                 ),
             },

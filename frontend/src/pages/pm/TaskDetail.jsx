@@ -1,4 +1,5 @@
 import RBBBadge from '../../components/RBBBadge';
+import ChatBox from '../../components/ChatBox';
 import { useState } from 'react';
 import toast from 'react-hot-toast';
 import { useParams, useNavigate } from 'react-router-dom';
@@ -225,13 +226,6 @@ export default function TaskDetail() {
                         </div>
                     </div>
                     <div className="flex gap-3">
-                        <button 
-                            onClick={() => setIsProjectChatOpen(true)}
-                            className="px-4 py-2 rounded-lg border border-gray-200 bg-white text-gray-700 hover:bg-blue-50 hover:text-[#1A56DB] hover:border-blue-200 transition-colors text-sm font-semibold flex items-center gap-2 shadow-sm"
-                        >
-                            <MessageSquare size={16} />
-                            Diskusi Proyek
-                        </button>
                         <button className="px-4 py-2 rounded-lg border border-gray-200 bg-white text-gray-700 hover:bg-gray-50 transition-colors text-sm font-semibold flex items-center gap-2 shadow-sm">
                             <Share size={16} />
                             Bagikan
@@ -511,6 +505,14 @@ export default function TaskDetail() {
                             <p className="text-sm">Aktivitas akan muncul di sini seiring berjalannya proyek.</p>
                         </div>
                     )}
+
+                    {/* Chat Box Diskusi Proyek (Inline di Bagian Bawah) */}
+                    <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-6 mt-6">
+                        <h3 className="font-bold text-gray-800 mb-4 flex items-center gap-2 text-base">
+                            <MessageSquare size={20} className="text-[#1a365d]" /> Diskusi Proyek: {project.name}
+                        </h3>
+                        <ChatBox projectId={project.id} projectName={project.name} className="max-h-[420px]" />
+                    </div>
                 </div>
             </div>
 
@@ -720,64 +722,6 @@ export default function TaskDetail() {
                                         Simpan
                                     </button>
                                 </div>
-                            </form>
-                        </div>
-                    </div>
-                </div>
-            )}
-
-            {/* Modal Chat Proyek */}
-            {isProjectChatOpen && (
-                <div className="fixed inset-0 z-[100] flex items-center justify-end bg-black/30 backdrop-blur-sm animate-fadeIn">
-                    <div className="bg-white shadow-2xl w-full max-w-md h-full flex flex-col animate-slide-in-right">
-                        <div className="flex flex-col px-6 py-4 border-b border-gray-200 bg-white">
-                            <div className="flex items-center justify-between mb-2">
-                                <h3 className="text-lg font-semibold text-gray-800 flex items-center gap-2">
-                                    <MessageSquare size={18} className="text-[#1A56DB]" />
-                                    Diskusi Proyek
-                                </h3>
-                                <button
-                                    onClick={() => setIsProjectChatOpen(false)}
-                                    className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
-                                >
-                                    <X size={20} />
-                                </button>
-                            </div>
-                            <div className="text-sm font-medium text-gray-800 bg-gray-50 p-2 rounded-lg border border-gray-100">
-                                {project.name}
-                            </div>
-                        </div>
-
-                        <div className="flex-1 overflow-y-auto p-6 space-y-4 bg-gray-50/50">
-                            {chatMessages.map(msg => (
-                                <div key={msg.id} className={`flex flex-col ${msg.sender === 'Anda' ? 'items-end' : 'items-start'}`}>
-                                    <div className="flex items-center gap-2 mb-1">
-                                        <span className="text-xs font-semibold text-gray-600">{msg.sender}</span>
-                                        <span className="text-[10px] text-gray-400">{msg.time}</span>
-                                    </div>
-                                    <div className={`px-4 py-2.5 rounded-2xl max-w-[85%] text-sm ${msg.sender === 'Anda' ? 'bg-[#1A56DB] text-white rounded-tr-none' : 'bg-white border border-gray-200 text-gray-700 rounded-tl-none shadow-sm'}`}>
-                                        {msg.text}
-                                    </div>
-                                </div>
-                            ))}
-                        </div>
-
-                        <div className="p-4 border-t border-gray-200 bg-white">
-                            <form onSubmit={handleSendMessage} className="flex gap-2">
-                                <input
-                                    type="text"
-                                    value={newChatMessage}
-                                    onChange={(e) => setNewChatMessage(e.target.value)}
-                                    placeholder="Tulis komentar..."
-                                    className="flex-1 px-4 py-2.5 bg-gray-50 border border-gray-200 rounded-full text-sm focus:ring-2 focus:ring-[#1A56DB] focus:border-[#1A56DB] outline-none transition-all"
-                                />
-                                <button 
-                                    type="submit" 
-                                    className="w-10 h-10 rounded-full bg-[#1A56DB] text-white flex items-center justify-center hover:bg-[#1346b3] transition-colors shrink-0 shadow-sm"
-                                    disabled={!newChatMessage.trim()}
-                                >
-                                    <MessageSquare size={16} />
-                                </button>
                             </form>
                         </div>
                     </div>

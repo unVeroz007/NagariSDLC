@@ -141,41 +141,9 @@ export default function Queue() {
   }
 
   return (
-    <div className="flex-1 flex flex-col h-full bg-[#f8f9fb] overflow-hidden">
-      {/* Topbar */}
-      <header className="h-16 bg-white border-b border-gray-200 flex justify-between items-center px-6 shrink-0 z-10">
-        <div className="flex items-center text-sm text-gray-500">
-          <span>Beranda</span>
-          <ChevronLeft size={16} className="mx-2 text-gray-300" />
-          <span>Fase 1</span>
-          <ChevronLeft size={16} className="mx-2 text-gray-300" />
-          <span className="font-semibold text-gray-800">Antrean Review</span>
-        </div>
-        <div className="flex items-center gap-4">
-          <div className="relative hidden md:block">
-            <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-            <input
-              type="text"
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              placeholder="Cari ID atau Nama Proyek..."
-              className="pl-10 pr-4 py-2 w-64 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-[#1A56DB] outline-none bg-gray-50"
-            />
-          </div>
-          <button
-            onClick={refreshData}
-            className="p-2 text-gray-500 hover:text-[#1A56DB] hover:bg-gray-100 rounded-full transition-colors"
-          >
-            <RefreshCw size={18} />
-          </button>
-          <div className="w-8 h-8 rounded-full bg-[#003a73] text-white flex items-center justify-center font-bold text-sm">
-            {user?.name?.charAt(0) || 'L'}
-          </div>
-        </div>
-      </header>
-
+    <div className="flex-1 flex flex-col h-full bg-[#f8f9fb] overflow-y-auto">
       {/* Content */}
-      <div className="flex-1 overflow-y-auto p-6 md:p-8">
+      <div className="p-6 md:p-8">
         <div className="max-w-7xl mx-auto space-y-6">
           {/* Header */}
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
