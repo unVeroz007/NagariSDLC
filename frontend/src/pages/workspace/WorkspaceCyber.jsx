@@ -2,6 +2,8 @@ import RBBBadge from '../../components/RBBBadge';
 import { useState } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import { useNotifications } from '../../contexts/NotificationContext';
+import toast from 'react-hot-toast';
+import { cyberQueue, pentesters, mockProjects } from '../../data/mockData';
 import {
     Shield,
     FolderOpen,
@@ -27,72 +29,31 @@ import {
     Filter,
     Inbox,
     ChevronDown,
+    XCircle,
+    ShieldAlert,
+    AlertTriangle,
+    ArrowRight,
+    UserCheck,
+    X,
 } from 'lucide-react';
-
-// Mock data untuk antrean cyber
-const cyberQueue = [
-    {
-        id: 'CYB-REQ-2026-0312',
-        projectName: 'Aplikasi LOS Baru',
-        projectDesc: 'Pengajuan audit keamanan untuk sistem LOS baru sebelum masuk fase UAT dan rilis ke production. Sistem ini menangani data PII nasabah.',
-        submittedBy: 'Anita Rahman',
-        submittedAt: '2 jam lalu',
-        status: 'Menunggu Audit',
-        stagingUrl: 'https://staging-los.banknagari.co.id',
-        documents: [
-            { name: 'BRD_Final.pdf', size: '2.4 MB', type: 'pdf', label: 'Requirements' },
-            { name: 'FSD_v2.docx', size: '1.8 MB', type: 'docx', label: 'System Design' },
-            { name: 'QA_SignOff_Report.pdf', size: '450 KB', type: 'pdf', label: 'Passed' },
-        ],
-    },
-    {
-        id: 'CYB-REQ-2026-0310',
-        projectName: 'Update Core Banking API',
-        projectDesc: 'Audit keamanan untuk API core banking yang terintegrasi dengan sistem mobile banking.',
-        submittedBy: 'Budi Santoso',
-        submittedAt: '5 jam lalu',
-        status: 'In Progress',
-        stagingUrl: 'https://staging-api.banknagari.co.id',
-        documents: [
-            { name: 'BRD_API_v2.pdf', size: '1.2 MB', type: 'pdf', label: 'Requirements' },
-            { name: 'FSD_API_v3.docx', size: '2.1 MB', type: 'docx', label: 'System Design' },
-        ],
-    },
-    {
-        id: 'CYB-REQ-2026-0308',
-        projectName: 'Mobile Banking v4.0',
-        projectDesc: 'Audit keamanan untuk aplikasi mobile banking versi terbaru dengan fitur biometrik.',
-        submittedBy: 'Dian Sastro',
-        submittedAt: '1 hari lalu',
-        status: 'Menunggu Audit',
-        stagingUrl: 'https://staging-mobile.banknagari.co.id',
-        documents: [
-            { name: 'BRD_Mobile_v4.pdf', size: '3.1 MB', type: 'pdf', label: 'Requirements' },
-            { name: 'FSD_Mobile_v4.docx', size: '2.8 MB', type: 'docx', label: 'System Design' },
-            { name: 'QA_Report_Mobile.pdf', size: '1.2 MB', type: 'pdf', label: 'Passed' },
-        ],
-    },
-];
-
-// Mock data untuk pentester
-const pentesters = [
-    { id: 1, name: 'Rizal Pratama', role: 'Senior Pentester' },
-    { id: 2, name: 'Sari Indah', role: 'Security Analyst' },
-    { id: 3, name: 'Budi Santoso', role: 'Junior Pentester' },
-];
 
 export default function WorkspaceCyber() {
     const { user } = useAuth();
     const { addNotification } = useNotifications();
-    const [selectedProject, setSelectedProject] = useState(cyberQueue[0]);
+    const [queueList, setQueueList] = useState([...cyberQueue]);
+    const [selectedProject, setSelectedProject] = useState(queueList[0] || null);
     const [selectedPentester, setSelectedPentester] = useState('');
     const [targetDate, setTargetDate] = useState('');
     const [instructions, setInstructions] = useState('');
     const [isSubmitting, setIsSubmitting] = useState(false);
 
+    // Modal States
+    const [isRejectModalOpen, setIsRejectModalOpen] = useState(false);
+    const [rejectReason, setRejectReason] = useState('');
+
     const handleAssign = () => {
         if (!selectedPentester) {
-            alert('Pilih pentester terlebih dahulu!');
+            toast.error('Pilih Pentester terlebih dahulu!');
             return;
         }
         setIsSubmitting(true);
@@ -103,317 +64,393 @@ export default function WorkspaceCyber() {
                 'success',
                 '/my-tasks/cyber'
             );
-            alert(`Pengajuan cyber untuk ${selectedProject?.projectName} berhasil ditugaskan ke ${selectedPentester}`);
+            toast.success(`Pengajuan cyber untuk ${selectedProject?.projectName} berhasil ditugaskan ke ${selectedPentester}`);
             setIsSubmitting(false);
-            // Remove from queue
-            const index = cyberQueue.indexOf(selectedProject);
-            if (index > -1) cyberQueue.splice(index, 1);
-            if (cyberQueue.length > 0) {
-                setSelectedProject(cyberQueue[0]);
-                setSelectedPentester('');
-                setTargetDate('');
-                setInstructions('');
-            } else {
-                setSelectedProject(null);
-            }
-        }, 1500);
+
+            const updated = queueList.map(item => {
+                if (item.id === selectedProject.id) {
+                    return {
+                        ...item,
+                        status: 'In Progress',
+                        assignedTo: selectedPentester,
+                        targetDate: targetDate,
+                        instructions: instructions,
+                    };
+                }
+                return item;
+            });
+
+            setQueueList(updated);
+            const current = updated.find(i => i.id === selectedProject.id);
+            setSelectedProject(current);
+            setSelectedPentester('');
+            setTargetDate('');
+            setInstructions('');
+        }, 800);
     };
 
-    const handleReject = () => {
-        if (!confirm('Yakin ingin menolak pengajuan ini?')) return;
-        const index = cyberQueue.indexOf(selectedProject);
-        if (index > -1) cyberQueue.splice(index, 1);
-        if (cyberQueue.length > 0) {
-            setSelectedProject(cyberQueue[0]);
-        } else {
-            setSelectedProject(null);
+    const openRejectModal = () => {
+        setRejectReason(instructions || 'Sistem Staging/API tidak dapat diakses atau Dokumen Arsitektur belum lengkap.');
+        setIsRejectModalOpen(true);
+    };
+
+    const handleConfirmReject = (e) => {
+        e.preventDefault();
+        if (!rejectReason.trim()) {
+            toast.error('Masukkan alasan penolakan audit siber!');
+            return;
         }
-        alert('Pengajuan ditolak!');
+
+        setIsSubmitting(true);
+
+        setTimeout(() => {
+            // Update status proyek di mockProjects
+            const proj = mockProjects.find(p => p.name === selectedProject?.projectName);
+            if (proj) {
+                proj.status = 'RETURN TO DEV';
+                proj.phase = 'Fase 2: Pengembangan';
+                proj.statusColor = 'bg-red-100 text-red-700 border-red-200';
+                proj.reworkNotes = `Cyber Audit Rejected: ${rejectReason}`;
+            }
+
+            addNotification(
+                'Audit Siber Ditolak (RETURN TO DEV)',
+                `Audit siber ${selectedProject?.projectName} ditolak & dikembalikan ke Tim Dev: ${rejectReason}`,
+                'danger',
+                '/track'
+            );
+
+            toast.error(`Pengajuan Audit Siber ditolak & dikembalikan ke Tim Dev.`);
+
+            setIsSubmitting(false);
+            setIsRejectModalOpen(false);
+
+            const updated = queueList.map(item => {
+                if (item.id === selectedProject.id) {
+                    return {
+                        ...item,
+                        status: 'Dikembalikan ke Dev (Cyber Rejected)',
+                        notes: rejectReason,
+                    };
+                }
+                return item;
+            });
+
+            setQueueList(updated);
+            const current = updated.find(i => i.id === selectedProject.id);
+            setSelectedProject(current);
+        }, 800);
     };
 
     const getStatusBadge = (status) => {
+        if (!status) return <span className="bg-gray-100 text-gray-600 px-2 py-0.5 rounded text-[10px] font-bold">Draft</span>;
+        if (status.includes('Dikembalikan') || status.includes('Failed') || status.includes('Rejected') || status === 'RETURN TO DEV') {
+            return (
+                <span className="bg-red-100 text-red-700 px-2 py-0.5 rounded text-[10px] font-bold uppercase border border-red-200 flex items-center gap-1">
+                    <XCircle size={12} className="text-red-600" />
+                    {status}
+                </span>
+            );
+        }
         switch (status) {
             case 'Menunggu Audit':
                 return (
-                    <span className="bg-amber-100 text-amber-700 px-2 py-1 rounded text-[10px] font-bold uppercase tracking-wider flex items-center gap-1">
+                    <span className="bg-amber-100 text-amber-700 px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider flex items-center gap-1">
                         <Clock size={12} />
                         {status}
                     </span>
                 );
             case 'In Progress':
                 return (
-                    <span className="bg-emerald-100 text-emerald-700 px-2 py-1 rounded text-[10px] font-bold uppercase tracking-wider flex items-center gap-1">
+                    <span className="bg-purple-100 text-purple-700 px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider flex items-center gap-1">
+                        <Shield size={12} />
+                        {status}
+                    </span>
+                );
+            case 'Selesai':
+            case 'Clean':
+                return (
+                    <span className="bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider flex items-center gap-1">
                         <CheckCircle size={12} />
                         {status}
                     </span>
                 );
-            case 'ANALYSIS_APPROVED': return 'bg-emerald-100 text-emerald-700 border-emerald-200';
-            case 'READY_FOR_DEVELOPMENT': return 'bg-cyan-100 text-cyan-700 border-cyan-200';
-            case 'IN_DEVELOPMENT': return 'bg-indigo-100 text-indigo-700 border-indigo-200';
             default:
-                return (
-                    <span className="bg-gray-100 text-gray-600 px-2 py-1 rounded text-[10px] font-bold uppercase tracking-wider">
-                        {status}
-                    </span>
-                );
-        }
-    };
-
-    const getFileIcon = (type) => {
-        switch (type) {
-            case 'pdf': return <FileText size={20} className="text-red-500" />;
-            case 'docx': return <File size={20} className="text-blue-500" />;
-            case 'ANALYSIS_APPROVED': return 'bg-emerald-100 text-emerald-700 border-emerald-200';
-            case 'READY_FOR_DEVELOPMENT': return 'bg-cyan-100 text-cyan-700 border-cyan-200';
-            case 'IN_DEVELOPMENT': return 'bg-indigo-100 text-indigo-700 border-indigo-200';
-            default: return <File size={20} className="text-gray-400" />;
-        }
-    };
-
-    const getFileBg = (type) => {
-        switch (type) {
-            case 'pdf': return 'bg-red-100 text-red-500';
-            case 'docx': return 'bg-blue-100 text-blue-600';
-            case 'ANALYSIS_APPROVED': return 'bg-emerald-100 text-emerald-700 border-emerald-200';
-            case 'READY_FOR_DEVELOPMENT': return 'bg-cyan-100 text-cyan-700 border-cyan-200';
-            case 'IN_DEVELOPMENT': return 'bg-indigo-100 text-indigo-700 border-indigo-200';
-            default: return 'bg-gray-100 text-gray-500';
+                return <span className="bg-gray-100 text-gray-600 px-2 py-0.5 rounded text-[10px] font-bold">{status}</span>;
         }
     };
 
     if (!selectedProject) {
         return (
-            <div className="flex-1 overflow-y-auto px-6 py-4 md:px-8 md:py-5 bg-[#f8f9fb]">
+            <div className="flex-1 overflow-y-auto p-6 md:p-8 bg-[#f8f9fb]">
                 <div className="max-w-4xl mx-auto text-center py-20">
-                    <div className="w-20 h-20 rounded-full bg-green-100 text-green-600 flex items-center justify-center mx-auto mb-4">
-                        <Shield size={40} />
+                    <div className="w-20 h-20 rounded-full bg-purple-100 text-purple-600 flex items-center justify-center mx-auto mb-4">
+                        <ShieldCheck size={40} />
                     </div>
-                    <h2 className="text-2xl font-bold text-gray-800">Semua Pengajuan Selesai</h2>
-                    <p className="text-gray-500 mt-2">Tidak ada antrean pengajuan keamanan siber yang menunggu.</p>
+                    <h2 className="text-2xl font-bold text-gray-800">Semua Pengajuan Siber Diproses</h2>
+                    <p className="text-gray-500 mt-2">Tidak ada antrean audit siber yang menunggu saat ini.</p>
                 </div>
             </div>
         );
     }
 
+    const isRejected = selectedProject?.status?.includes('Dikembalikan') || selectedProject?.status?.includes('Failed') || selectedProject?.status?.includes('Rejected');
+
     return (
-        <div className="flex-1 flex flex-col h-full bg-[#f8f9fb] overflow-hidden">
+        <div className="flex-1 overflow-y-auto p-6 md:p-8 bg-[#f8f9fb]">
             {/* Header */}
-            <div className="mb-6 px-6 pt-6">
-                <h2 className="text-2xl font-extrabold text-gray-800">Workspace Keamanan Siber (Cyber)</h2>
-                <p className="text-sm text-gray-500 mt-1">
-                    Tinjau antrean audit keamanan dan disposisi pentester.
+            <div className="mb-6">
+                <h2 className="text-2xl font-bold text-gray-800">Workspace Cyber Security</h2>
+                <p className="text-gray-500 text-sm mt-1">
+                    Kelola pengajuan audit Penetration Testing dan disposisi ke Pentester.
                 </p>
             </div>
 
             {/* Split Layout */}
-            <div className="flex-1 overflow-hidden p-6 gap-6 flex">
-                {/* LEFT PANEL: Inbox */}
-                <div className="w-1/3 flex flex-col bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
-                    <div className="p-4 border-b border-gray-200 bg-gray-50/50 flex justify-between items-center shrink-0">
-                        <h3 className="font-semibold text-gray-800 flex items-center gap-2">
-                            <Inbox size={18} className="text-[#1A56DB]" />
-                            Antrean Pengajuan
+            <div className="flex flex-col lg:flex-row gap-6 h-[calc(100vh-220px)] min-h-[600px]">
+                {/* LEFT PANEL: Antrean Cyber */}
+                <div className="w-full lg:w-1/3 flex flex-col bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+                    <div className="p-4 border-b border-gray-200 bg-gray-50/50 flex justify-between items-center">
+                        <h3 className="text-sm font-semibold text-gray-800 flex items-center gap-2">
+                            <Inbox size={18} className="text-purple-600" />
+                            Antrean Audit Siber ({queueList.length})
                         </h3>
-                        <span className="bg-blue-100 text-[#1A56DB] px-2.5 py-0.5 rounded-full text-xs font-bold">
-                            {cyberQueue.length} Active
-                        </span>
                     </div>
-                    <div className="flex-1 overflow-y-auto p-2 space-y-2">
-                        {cyberQueue.map((project) => (
-                            <div
-                                key={project.id}
-                                onClick={() => {
-                                    setSelectedProject(project);
-                                    setSelectedPentester('');
-                                    setTargetDate('');
-                                    setInstructions('');
-                                }}
-                                className={`p-4 rounded-lg border-2 cursor-pointer transition-all ${selectedProject?.id === project.id
-                                        ? 'border-[#1A56DB] bg-blue-50/50 relative'
-                                        : 'border-gray-200 hover:border-gray-300 hover:bg-gray-50'
-                                    }`}
-                            >
-                                {selectedProject?.id === project.id && (
-                                    <div className="absolute right-0 top-0 w-1 h-full bg-[#1A56DB] rounded-r-lg"></div>
-                                )}
-                                <div className="flex justify-between items-start mb-2">
-                                    <span className="text-xs font-bold text-[#1A56DB]">{project.id}</span>
-                                    {getStatusBadge(project.status)}
+                    <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-gray-50/30">
+                        {queueList.map((project) => {
+                            const isSelected = selectedProject?.id === project.id;
+                            return (
+                                <div
+                                    key={project.id}
+                                    onClick={() => {
+                                        setSelectedProject(project);
+                                        setSelectedPentester('');
+                                        setTargetDate('');
+                                        setInstructions('');
+                                    }}
+                                    className={`p-4 rounded-xl cursor-pointer transition-all ${isSelected
+                                            ? 'bg-purple-50/60 border-2 border-purple-600 shadow-sm relative'
+                                            : 'bg-white border border-gray-200 hover:border-gray-300 hover:shadow-sm'
+                                        }`}
+                                >
+                                    <div className="flex justify-between items-start mb-2">
+                                        <span className="text-xs font-bold text-purple-700">{project.id}</span>
+                                        {getStatusBadge(project.status)}
+                                    </div>
+                                    <h4 className="font-bold text-gray-800 text-sm mb-2">{project.projectName}</h4>
+                                    <div className="flex items-center gap-2 text-xs text-gray-500">
+                                        <User size={14} />
+                                        <span>Pengaju: {project.submittedBy || project.requester}</span>
+                                    </div>
+                                    <div className="flex items-center gap-2 text-xs text-gray-500 mt-1">
+                                        <Clock size={14} />
+                                        <span>Submitted: {project.submittedAt}</span>
+                                    </div>
                                 </div>
-                                <div className="mb-2"><RBBBadge type={project.type} deadline={project.rbbDeadline} /></div>
-                                <h4 className="font-semibold text-gray-800 mb-1">{project.projectName}</h4>
-                                <div className="flex items-center text-xs text-gray-500 mt-3">
-                                    <User size={14} className="mr-1" />
-                                    <span>{project.submittedBy}</span>
-                                    <span className="mx-2">•</span>
-                                    <Clock size={14} className="mr-1" />
-                                    <span>{project.submittedAt}</span>
-                                </div>
-                            </div>
-                        ))}
+                            );
+                        })}
                     </div>
                 </div>
 
-                {/* RIGHT PANEL: Detail */}
-                <div className="flex-1 flex flex-col bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
-                    {/* Detail Header */}
-                    <div className="p-6 border-b border-gray-200 bg-gray-50/50 shrink-0">
-                        <div className="flex items-center gap-3 mb-2">
-                            <span className="bg-gray-200 px-3 py-1 rounded-md text-sm font-bold text-gray-600">
-                                {selectedProject.id}
-                            </span>
-                            {getStatusBadge(selectedProject.status)}
+                {/* RIGHT PANEL: Details & Form */}
+                <div className="w-full lg:w-2/3 bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden flex flex-col">
+                    {/* Right Header */}
+                    <div className="p-6 border-b border-gray-200 bg-gray-50/50 flex justify-between items-start flex-shrink-0">
+                        <div>
+                            <div className="flex items-center gap-3 mb-2 flex-wrap">
+                                <span className="bg-purple-50 text-purple-700 px-2.5 py-1 rounded text-xs font-bold">
+                                    {selectedProject.id}
+                                </span>
+                                {getStatusBadge(selectedProject.status)}
+                            </div>
+                            <h3 className="text-xl font-bold text-gray-800">{selectedProject.projectName}</h3>
+                            <p className="text-xs text-gray-500 mt-1">{selectedProject.projectDesc || selectedProject.description}</p>
                         </div>
-                        <div className="mb-2"><RBBBadge type={selectedProject.type} deadline={selectedProject.rbbDeadline} /></div>
-                        <h3 className="text-xl font-bold text-gray-800">{selectedProject.projectName}</h3>
-                        <p className="text-sm text-gray-500 mt-2 max-w-2xl">
-                            {selectedProject.projectDesc}
-                        </p>
                     </div>
 
-                    {/* Scrollable Content */}
-                    <div className="flex-1 overflow-y-auto p-6 space-y-6">
-                        {/* Documents & Access */}
-                        <section>
-                            <h4 className="font-semibold text-gray-700 mb-4 flex items-center">
-                                <FolderOpen size={18} className="mr-2 text-[#1A56DB]" />
-                                Berkas Kumulatif &amp; Akses
+                    <div className="flex-1 overflow-y-auto p-6 space-y-6 bg-gray-50/30">
+                        {/* Banner Jika Audit Ditolak */}
+                        {isRejected && (
+                            <div className="bg-red-50 border-2 border-red-200 rounded-xl p-5 shadow-xs space-y-3">
+                                <div className="flex items-start gap-3">
+                                    <div className="w-10 h-10 rounded-xl bg-red-100 text-red-600 flex items-center justify-center shrink-0">
+                                        <ShieldAlert size={22} />
+                                    </div>
+                                    <div className="flex-1">
+                                        <h4 className="font-bold text-red-800 text-sm">
+                                            AUDIT SIBER DITOLAK &amp; DIKEMBALIKAN KE DEV (RETURN TO DEV)
+                                        </h4>
+                                        <p className="text-xs text-red-700 mt-1 leading-relaxed">
+                                            Pengajuan audit siber ditolak. Proyek dikembalikan ke tim Dev untuk remediasi celah keamanan.
+                                        </p>
+                                    </div>
+                                </div>
+                                <div className="bg-white border border-red-200 rounded-lg p-3 text-xs text-gray-800 font-mono">
+                                    "{selectedProject.notes || 'Ditemukan celah keamanan atau lingkungan uji staging belum dapat diakses secara utuh.'}"
+                                </div>
+                            </div>
+                        )}
+
+                        {/* Staging URL */}
+                        <div>
+                            <h4 className="text-sm font-semibold text-gray-700 mb-3 flex items-center gap-2">
+                                <LinkIcon size={18} className="text-gray-400" />
+                                Target URL Staging Audit
                             </h4>
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                            <div className="bg-white border border-gray-200 rounded-lg p-3 flex items-center justify-between">
+                                <div className="flex items-center gap-3">
+                                    <Shield size={18} className="text-purple-600" />
+                                    <a href={selectedProject.stagingUrl} target="_blank" rel="noreferrer" className="text-purple-700 hover:underline text-sm font-medium">
+                                        {selectedProject.stagingUrl}
+                                    </a>
+                                </div>
+                                <button className="text-gray-400 hover:text-purple-600">
+                                    <Copy size={18} />
+                                </button>
+                            </div>
+                        </div>
+
+                        {/* Documents */}
+                        <div>
+                            <h4 className="text-sm font-semibold text-gray-700 mb-3 flex items-center gap-2">
+                                <FolderOpen size={18} className="text-gray-400" />
+                                Dokumen Referensi Audit
+                            </h4>
+                            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                                 {selectedProject.documents.map((doc, idx) => (
-                                    <div
-                                        key={idx}
-                                        className={`flex items-center p-3 border border-gray-200 rounded-lg bg-white hover:border-[#1A56DB] cursor-pointer transition-colors ${doc.label === 'Passed' ? 'relative overflow-hidden' : ''
-                                            }`}
-                                    >
-                                        {doc.label === 'Passed' && (
-                                            <div className="absolute top-0 right-0 w-2 h-full bg-emerald-500 rounded-r-lg"></div>
-                                        )}
-                                        <div className={`w-10 h-10 ${getFileBg(doc.type)} rounded flex items-center justify-center mr-3 shrink-0`}>
-                                            {getFileIcon(doc.type)}
+                                    <div key={idx} className="border border-gray-200 rounded-lg p-3 flex items-start gap-3 bg-white hover:shadow-md transition-shadow">
+                                        <div className="p-2 rounded bg-purple-50 text-purple-700">
+                                            <FileText size={22} />
                                         </div>
-                                        <div className="overflow-hidden">
+                                        <div className="flex-1 min-w-0">
                                             <p className="text-sm font-medium text-gray-800 truncate">{doc.name}</p>
-                                            <p className="text-xs text-gray-500">
-                                                {doc.size} • {doc.label}
-                                            </p>
+                                            <p className="text-xs text-gray-500">{doc.size}</p>
                                         </div>
                                     </div>
                                 ))}
                             </div>
+                        </div>
 
-                            {/* Staging URL */}
-                            <div className="bg-gray-50 p-4 rounded-lg border border-gray-200 flex items-center justify-between">
-                                <div className="flex items-center">
-                                    <LinkIcon size={18} className="text-gray-400 mr-3" />
-                                    <div>
-                                        <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-0.5">
-                                            Target URL (Staging)
-                                        </p>
-                                        <a
-                                            href={selectedProject.stagingUrl}
-                                            target="_blank"
-                                            rel="noopener noreferrer"
-                                            className="text-[#1A56DB] hover:underline text-sm"
-                                        >
-                                            {selectedProject.stagingUrl}
-                                        </a>
-                                    </div>
-                                </div>
-                                <button
-                                    className="p-2 text-gray-400 hover:text-[#1A56DB] hover:bg-white rounded transition-colors"
-                                    title="Copy URL"
-                                    onClick={() => {
-                                        navigator.clipboard.writeText(selectedProject.stagingUrl);
-                                        alert('URL berhasil disalin!');
-                                    }}
-                                >
-                                    <Copy size={18} />
-                                </button>
-                            </div>
-                        </section>
-
-                        <hr className="border-gray-200" />
-
-                        {/* Form Disposisi */}
-                        <section className="bg-gray-50/50 p-6 rounded-xl border border-gray-200 shadow-sm">
-                            <h4 className="font-semibold text-gray-700 mb-4 flex items-center">
-                                <User size={18} className="mr-2 text-[#1A56DB]" />
-                                Form Disposisi Tugas
+                        {/* Disposisi Form */}
+                        <div className="bg-white border border-gray-200 rounded-xl p-5 shadow-sm space-y-4">
+                            <h4 className="text-sm font-semibold text-gray-700 flex items-center gap-2">
+                                <UserCheck size={18} className="text-purple-600" />
+                                Disposisi Audit Penetration Testing
                             </h4>
 
-                            <div className="grid grid-cols-1 gap-4 mb-4">
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                 <div>
-                                    <label className="block text-sm font-semibold text-gray-700 mb-2">
-                                        Pilih Anggota Tim Cyber <span className="text-red-500">*</span>
+                                    <label className="block text-xs font-semibold text-gray-600 mb-1">
+                                        Pilih Pentester <span className="text-red-500">*</span>
                                     </label>
-                                    <div className="relative">
-                                        <select
-                                            value={selectedPentester}
-                                            onChange={(e) => setSelectedPentester(e.target.value)}
-                                            className="w-full px-4 py-2.5 bg-white border border-gray-300 rounded-lg appearance-none focus:border-[#1A56DB] focus:ring-1 focus:ring-[#1A56DB] text-sm"
-                                        >
-                                            <option value="">Pilih Pentester...</option>
-                                            {pentesters.map((p) => (
-                                                <option key={p.id} value={p.name}>
-                                                    {p.name} ({p.role})
-                                                </option>
-                                            ))}
-                                        </select>
-                                        <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-3 text-gray-400">
-                                            <ChevronDown size={20} />
-                                        </div>
-                                    </div>
+                                    <select
+                                        value={selectedPentester}
+                                        onChange={(e) => setSelectedPentester(e.target.value)}
+                                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-purple-500 bg-white"
+                                    >
+                                        <option value="">Pilih Pentester...</option>
+                                        {pentesters.map((p) => (
+                                            <option key={p.id} value={p.name}>
+                                                {p.name} ({p.role})
+                                            </option>
+                                        ))}
+                                    </select>
                                 </div>
-                            </div>
-
-                            <div className="mb-4">
-                                <label className="block text-sm font-semibold text-gray-700 mb-2">
-                                    Target Selesai Audit <span className="text-red-500">*</span>
-                                </label>
-                                <input
-                                    type="date"
-                                    value={targetDate}
-                                    onChange={(e) => setTargetDate(e.target.value)}
-                                    className="w-full px-4 py-2.5 bg-white border border-gray-300 rounded-lg focus:border-[#1A56DB] focus:ring-1 focus:ring-[#1A56DB] text-sm"
-                                />
+                                <div>
+                                    <label className="block text-xs font-semibold text-gray-600 mb-1">Target Selesai Audit</label>
+                                    <input
+                                        type="date"
+                                        value={targetDate}
+                                        onChange={(e) => setTargetDate(e.target.value)}
+                                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-purple-500 bg-white"
+                                    />
+                                </div>
                             </div>
 
                             <div>
-                                <label className="block text-sm font-semibold text-gray-700 mb-2">
-                                    Instruksi Khusus (Opsional)
-                                </label>
+                                <label className="block text-xs font-semibold text-gray-600 mb-1">Instruksi / Catatan Audit</label>
                                 <textarea
                                     value={instructions}
                                     onChange={(e) => setInstructions(e.target.value)}
-                                    placeholder="Masukkan catatan tambahan untuk pentester..."
+                                    placeholder="Petunjuk khusus pentest (misal: fokus modul payment gateway)..."
                                     rows={3}
-                                    className="w-full px-4 py-3 bg-white border border-gray-300 rounded-lg focus:border-[#1A56DB] focus:ring-1 focus:ring-[#1A56DB] text-sm resize-none"
+                                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-purple-500 bg-white resize-none"
                                 />
                             </div>
-                        </section>
-                    </div>
 
-                    {/* Action Footer */}
-                    <div className="p-4 border-t border-gray-200 bg-gray-50/50 shrink-0 flex justify-between items-center">
-                        <button
-                            onClick={handleReject}
-                            className="px-6 py-2.5 border border-red-500 text-red-500 hover:bg-red-50 rounded-lg font-semibold transition-colors flex items-center gap-2 text-sm"
-                        >
-                            <Ban size={18} />
-                            Tolak Pengajuan
-                        </button>
-                        <button
-                            onClick={handleAssign}
-                            disabled={isSubmitting}
-                            className="px-6 py-2.5 bg-[#003a73] text-white hover:bg-[#002a5a] rounded-lg font-semibold shadow-sm hover:shadow transition-all flex items-center gap-2 text-sm disabled:opacity-70 disabled:cursor-not-allowed"
-                        >
-                            <Send size={18} />
-                            {isSubmitting ? 'Memproses...' : 'Tugaskan Pentester'}
-                        </button>
+                            <div className="pt-4 border-t border-gray-200 flex justify-end gap-3">
+                                <button
+                                    onClick={openRejectModal}
+                                    disabled={isSubmitting}
+                                    className="px-4 py-2 border border-red-500 text-red-600 font-bold rounded-lg text-sm hover:bg-red-50 transition-colors flex items-center gap-2 cursor-pointer"
+                                >
+                                    <X size={18} />
+                                    Tolak &amp; Kembalikan ke Dev
+                                </button>
+                                <button
+                                    onClick={handleAssign}
+                                    disabled={isSubmitting}
+                                    className="px-6 py-2 bg-purple-700 text-white font-bold rounded-lg text-sm hover:bg-purple-800 transition-colors flex items-center gap-2 shadow-sm cursor-pointer disabled:opacity-70"
+                                >
+                                    <UserCheck size={18} />
+                                    {isSubmitting ? 'Memproses...' : 'Tugaskan Audit Siber'}
+                                </button>
+                            </div>
+                        </div>
                     </div>
                 </div>
             </div>
+
+            {/* MODAL REJECT SIBER */}
+            {isRejectModalOpen && (
+                <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs animate-fadeIn">
+                    <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full overflow-hidden border border-gray-100">
+                        <div className="bg-gradient-to-br from-red-600 to-rose-900 p-6 text-white text-center relative">
+                            <div className="w-14 h-14 rounded-2xl bg-white/10 backdrop-blur-md flex items-center justify-center mx-auto mb-3 border border-white/20">
+                                <ShieldAlert size={32} className="text-white animate-pulse" />
+                            </div>
+                            <h3 className="text-lg font-extrabold tracking-tight">KONFIRMASI PENOLAKAN AUDIT SIBER</h3>
+                            <p className="text-xs text-white/80 mt-1">Kembalikan proyek ke Tim Pengembangan (RETURN TO DEV)</p>
+                        </div>
+                        <form onSubmit={handleConfirmReject} className="p-6 space-y-4">
+                            <div className="bg-red-50/60 border border-red-100 rounded-xl p-3.5 text-xs text-red-800">
+                                <strong>Proyek:</strong> {selectedProject?.projectName} ({selectedProject?.id})
+                            </div>
+
+                            <div>
+                                <label className="block text-xs font-bold text-gray-700 mb-1.5">
+                                    Alasan Penolakan &amp; Catatan Remediasi <span className="text-red-500">*</span>
+                                </label>
+                                <textarea
+                                    value={rejectReason}
+                                    onChange={(e) => setRejectReason(e.target.value)}
+                                    placeholder="Jelaskan alasan penolakan pengajuan audit siber..."
+                                    rows={4}
+                                    className="w-full p-3 rounded-xl border border-gray-200 text-xs font-medium focus:ring-2 focus:ring-red-500/20 focus:border-red-500 outline-none"
+                                    required
+                                />
+                            </div>
+
+                            <div className="flex gap-3 pt-3 border-t border-gray-100">
+                                <button
+                                    type="button"
+                                    onClick={() => setIsRejectModalOpen(false)}
+                                    className="flex-1 py-3 rounded-xl border border-gray-300 text-xs font-bold text-gray-700 hover:bg-gray-100 transition-colors cursor-pointer"
+                                >
+                                    ❌ Batal / Cek Ulang
+                                </button>
+                                <button
+                                    type="submit"
+                                    disabled={isSubmitting}
+                                    className="flex-1 py-3 rounded-xl bg-red-600 hover:bg-red-700 text-white text-xs font-bold transition-all shadow-md shadow-red-600/20 cursor-pointer disabled:opacity-70"
+                                >
+                                    {isSubmitting ? 'Memproses...' : '🚨 Ya, Kembalikan ke Dev'}
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            )}
         </div>
     );
 }

@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import { useNotifications } from '../../contexts/NotificationContext';
+import toast from 'react-hot-toast';
 import {
     Search,
     Bell,
@@ -24,6 +25,9 @@ import {
     Trash2,
     Check,
     X,
+    ShieldAlert,
+    ArrowRight,
+    Edit3,
 } from 'lucide-react';
 import { myQaTasks, processQaResult } from '../../data/mockData';
 
@@ -35,20 +39,43 @@ export default function MyTasksQA() {
     const [qaNotes, setQaNotes] = useState('');
     const [isSubmitting, setIsSubmitting] = useState(false);
 
-    const handleSubmit = () => {
+    // Confirmation modal state (Pre-submission)
+    const [showConfirmRejectModal, setShowConfirmRejectModal] = useState(false);
+
+    // Final result modal state (Post-submission)
+    const [showResultModal, setShowResultModal] = useState(false);
+    const [modalData, setModalData] = useState(null);
+
+    const handleInitialSubmit = () => {
         if (!qaResult) {
-            alert('Pilih status hasil pengujian!');
+            toast.error('Pilih status hasil pengujian terlebih dahulu!');
             return;
         }
         if (!qaNotes.trim()) {
-            alert('Masukkan catatan pengujian!');
+            toast.error('Masukkan catatan atau temuan pengujian (Bug Report)!');
             return;
         }
+
+        if (qaResult === 'Failed') {
+            // Tampilkan modal konfirmasi penolakan (Pre-submission)
+            setShowConfirmRejectModal(true);
+        } else {
+            // Lulus langsung eksekusi
+            executeSubmit();
+        }
+    };
+
+    const executeSubmit = () => {
         setIsSubmitting(true);
+        setShowConfirmRejectModal(false);
+
         setTimeout(() => {
-            processQaResult(selectedTask.id, qaResult, qaNotes);
             const isFailed = qaResult === 'Failed';
 
+            // Update global state & mock data
+            processQaResult(selectedTask.id, qaResult, qaNotes);
+
+            // Add notification
             addNotification(
                 isFailed ? 'Pengujian QA Ditolak (RETURN TO DEV)' : 'Pengujian QA Lulus (QA PASSED)',
                 `Pengujian QA untuk ${selectedTask?.projectName} selesai: ${qaResult}. ${isFailed ? 'Proyek dikembalikan ke Tim Dev.' : ''}`,
@@ -56,13 +83,27 @@ export default function MyTasksQA() {
                 '/track'
             );
 
-            alert(
-                isFailed
-                    ? `⚠️ HASIL DITOLAK (FAILED)!\n\nProyek "${selectedTask?.projectName}" telah dikembalikan ke Tim Pengembangan (RETURN TO DEV) untuk dilakukan perbaikan (rework).`
-                    : `✅ HASIL LULUS (PASSED)!\n\nPengujian QA untuk "${selectedTask?.projectName}" berhasil diselesaikan.`
-            );
-            setIsSubmitting(false);
+            // Toast notification
+            toast.success(isFailed ? 'Hasil QA berhasil dikirim (Ditolak & Rework)' : 'Hasil QA berhasil dikirim (Lulus)');
 
+            // Prepare modal data
+            setModalData({
+                projectName: selectedTask?.projectName,
+                projectId: selectedTask?.id,
+                result: qaResult,
+                notes: qaNotes,
+                isFailed: isFailed,
+            });
+
+            setIsSubmitting(false);
+            setShowResultModal(true);
+        }, 800);
+    };
+
+    const handleCloseResultModal = () => {
+        setShowResultModal(false);
+        // Remove task from list
+        if (selectedTask) {
             const index = myQaTasks.indexOf(selectedTask);
             if (index > -1) myQaTasks.splice(index, 1);
             if (myQaTasks.length > 0) {
@@ -72,7 +113,7 @@ export default function MyTasksQA() {
             } else {
                 setSelectedTask(null);
             }
-        }, 1200);
+        }
     };
 
     const getPriorityColor = (priority) => {
@@ -100,24 +141,15 @@ export default function MyTasksQA() {
         }
     };
 
-    const getFileIcon = (type) => {
-        switch (type) {
-            case 'pdf': return { icon: FileText, color: 'text-red-600' };
-            case 'docx': return { icon: FileText, color: 'text-blue-600' };
-            case 'xlsx': return { icon: Table, color: 'text-green-600' };
-            default: return { icon: File, color: 'text-gray-600' };
-        }
-    };
-
     if (!selectedTask) {
         return (
             <div className="flex-1 overflow-y-auto px-6 py-4 md:px-8 md:py-5 bg-[#f8f9fb]">
                 <div className="max-w-4xl mx-auto text-center py-20">
-                    <div className="w-20 h-20 rounded-full bg-green-100 text-green-600 flex items-center justify-center mx-auto mb-4">
+                    <div className="w-20 h-20 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center mx-auto mb-4">
                         <CheckCircle size={40} />
                     </div>
                     <h2 className="text-2xl font-bold text-gray-800">Semua Tugas Selesai</h2>
-                    <p className="text-gray-500 mt-2">Tidak ada tugas QA yang menunggu.</p>
+                    <p className="text-gray-500 mt-2">Tidak ada tugas pengujian QA yang menunggu saat ini.</p>
                 </div>
             </div>
         );
@@ -359,9 +391,9 @@ export default function MyTasksQA() {
                         {/* Footer Actions */}
                         <div className="p-4 border-t border-gray-200 bg-gray-50/50 shrink-0 flex justify-end gap-3">
                             <button
-                                onClick={handleSubmit}
+                                onClick={handleInitialSubmit}
                                 disabled={isSubmitting}
-                                className={`px-6 py-3 text-white font-bold text-sm rounded-xl transition-all shadow-md flex items-center gap-2 disabled:opacity-70 ${qaResult === 'Failed'
+                                className={`px-6 py-3 text-white font-bold text-sm rounded-xl transition-all shadow-md flex items-center gap-2 disabled:opacity-70 cursor-pointer ${qaResult === 'Failed'
                                         ? 'bg-red-600 hover:bg-red-700 shadow-red-600/20'
                                         : 'bg-emerald-600 hover:bg-emerald-700 shadow-emerald-600/20'
                                     }`}
@@ -373,6 +405,142 @@ export default function MyTasksQA() {
                     </div>
                 </div>
             </div>
+
+            {/* MODAL PRE-SUBMISSION CONFIRMATION (DAPAT DIBATALKAN UNTUK EDIT/CEK ULANG) */}
+            {showConfirmRejectModal && (
+                <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs animate-fadeIn">
+                    <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full overflow-hidden border border-gray-100">
+                        {/* Header Red */}
+                        <div className="bg-gradient-to-br from-red-600 via-red-700 to-rose-900 p-6 text-white text-center relative">
+                            <div className="w-14 h-14 rounded-2xl bg-white/10 backdrop-blur-md flex items-center justify-center mx-auto mb-3 border border-white/20">
+                                <ShieldAlert size={32} className="text-white animate-pulse" />
+                            </div>
+                            <h3 className="text-lg font-extrabold tracking-tight">KONFIRMASI PENOLAKAN PROYEK</h3>
+                            <p className="text-xs text-white/80 mt-1">Status proyek akan diubah menjadi RETURN TO DEV</p>
+                        </div>
+
+                        {/* Content */}
+                        <div className="p-6 space-y-4">
+                            <div className="bg-red-50/60 border border-red-100 rounded-xl p-3.5 text-xs text-red-800 space-y-1">
+                                <div className="font-bold text-red-900">{selectedTask?.projectName} ({selectedTask?.id})</div>
+                                <div className="text-[11px] text-red-700">Project Manager: {selectedTask?.pm}</div>
+                            </div>
+
+                            <div>
+                                <label className="block text-xs font-bold text-gray-700 mb-1.5 flex items-center justify-between">
+                                    <span>Alasan &amp; Temuan Bug (Dapat Diedit Kembali):</span>
+                                    <span className="text-[#1A56DB] flex items-center gap-1 font-normal cursor-pointer">
+                                        <Edit3 size={12} /> Edit
+                                    </span>
+                                </label>
+                                <textarea
+                                    value={qaNotes}
+                                    onChange={(e) => setQaNotes(e.target.value)}
+                                    rows={4}
+                                    className="w-full p-3 rounded-xl border border-gray-200 text-xs font-mono bg-gray-50 focus:bg-white focus:ring-2 focus:ring-red-500/20 focus:border-red-500 outline-none text-gray-800"
+                                />
+                            </div>
+
+                            <p className="text-[11px] text-gray-500 leading-relaxed bg-gray-50 p-2.5 rounded-lg border border-gray-200">
+                                💡 Jika Anda ingin mengecek ulang berkas atau mengubah data pengujian, klik <strong>Batal / Cek Ulang</strong>.
+                            </p>
+
+                            <div className="flex gap-3 pt-2">
+                                <button
+                                    type="button"
+                                    onClick={() => setShowConfirmRejectModal(false)}
+                                    className="flex-1 py-3 rounded-xl border border-gray-300 text-xs font-bold text-gray-700 hover:bg-gray-100 transition-colors cursor-pointer"
+                                >
+                                    ❌ Batal / Cek Ulang
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={executeSubmit}
+                                    disabled={isSubmitting}
+                                    className="flex-1 py-3 rounded-xl bg-red-600 hover:bg-red-700 text-white text-xs font-bold transition-all shadow-md shadow-red-600/20 cursor-pointer disabled:opacity-70"
+                                >
+                                    {isSubmitting ? 'Memproses...' : '🚨 Ya, Konfirmasi Penolakan'}
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* MODAL HASIL QA (SELESAI EKSEKUSI) */}
+            {showResultModal && modalData && (
+                <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs animate-fadeIn">
+                    <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full overflow-hidden border border-gray-100 animate-scaleUp">
+                        {/* Header */}
+                        <div className={`p-6 text-white text-center relative ${modalData.isFailed
+                                ? 'bg-gradient-to-br from-red-600 via-red-700 to-rose-900'
+                                : 'bg-gradient-to-br from-emerald-600 via-emerald-700 to-teal-900'
+                            }`}>
+                            <div className="w-16 h-16 rounded-2xl bg-white/10 backdrop-blur-md flex items-center justify-center mx-auto mb-3 border border-white/20 shadow-inner">
+                                {modalData.isFailed ? (
+                                    <ShieldAlert size={36} className="text-white animate-pulse" />
+                                ) : (
+                                    <CheckCircle size={36} className="text-white" />
+                                )}
+                            </div>
+                            <h3 className="text-xl font-extrabold tracking-tight">
+                                {modalData.isFailed ? 'PROYEK DIKEMBALIKAN KE DEV' : 'PENGUJIAN QA LULUS'}
+                            </h3>
+                            <p className="text-xs text-white/80 mt-1">
+                                {modalData.isFailed ? 'Status Eksekusi: FAILED (Ditolak)' : 'Status Eksekusi: PASSED (Lulus)'}
+                            </p>
+                        </div>
+
+                        {/* Body */}
+                        <div className="p-6 space-y-4">
+                            <div className="bg-gray-50 p-4 rounded-xl border border-gray-200/80 space-y-2">
+                                <div className="flex justify-between items-center text-xs">
+                                    <span className="text-gray-500 font-medium">ID / Nama Proyek:</span>
+                                    <span className="font-bold text-[#1A56DB]">{modalData.projectId}</span>
+                                </div>
+                                <h4 className="font-bold text-gray-800 text-sm">{modalData.projectName}</h4>
+                                <div className="pt-2 border-t border-gray-200 flex justify-between items-center text-xs">
+                                    <span className="text-gray-500">Status Terbaru:</span>
+                                    <span className={`px-2 py-0.5 rounded font-bold uppercase text-[10px] ${modalData.isFailed ? 'bg-red-100 text-red-700 border border-red-200' : 'bg-emerald-100 text-emerald-700 border border-emerald-200'
+                                        }`}>
+                                        {modalData.isFailed ? 'RETURN TO DEV' : 'QA PASSED'}
+                                    </span>
+                                </div>
+                            </div>
+
+                            {/* Detail Message */}
+                            <div className="text-xs text-gray-600 leading-relaxed bg-blue-50/50 p-3.5 rounded-xl border border-blue-100">
+                                {modalData.isFailed ? (
+                                    <>
+                                        <strong className="text-red-700 block mb-1">Catatan Temuan Bug (Defect Report):</strong>
+                                        <span className="italic text-gray-700 block bg-white p-2 rounded border border-gray-200 font-mono text-[11px] mb-2">
+                                            "{modalData.notes}"
+                                        </span>
+                                        <p>
+                                            Proyek telah otomatis dialihkan ke <strong>Fase 2: Pengembangan (Rework)</strong>. Notifikasi resmi telah dikirim ke Project Manager dan Developer.
+                                        </p>
+                                    </>
+                                ) : (
+                                    <p>
+                                        Pengujian QA telah selesai tanpa kendala kritikal. Proyek dapat dilanjutkan ke tahap <strong>Pengajuan Audit Cyber Security</strong>.
+                                    </p>
+                                )}
+                            </div>
+
+                            <button
+                                onClick={handleCloseResultModal}
+                                className={`w-full py-3 px-4 text-white font-bold text-sm rounded-xl transition-all shadow-md flex items-center justify-center gap-2 cursor-pointer ${modalData.isFailed
+                                        ? 'bg-red-600 hover:bg-red-700 shadow-red-600/20'
+                                        : 'bg-emerald-600 hover:bg-emerald-700 shadow-emerald-600/20'
+                                    }`}
+                            >
+                                <span>Mengerti &amp; Selesai</span>
+                                <ArrowRight size={16} />
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 }

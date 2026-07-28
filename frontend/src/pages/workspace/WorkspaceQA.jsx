@@ -2,7 +2,8 @@ import RBBBadge from '../../components/RBBBadge';
 import { useState } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import { useNotifications } from '../../contexts/NotificationContext';
-import { qaQueue, qaTesters, rejectQaRequest, mockProjects } from '../../data/mockData';
+import toast from 'react-hot-toast';
+import { qaQueue, qaTesters, rejectQaRequest } from '../../data/mockData';
 import {
     Users,
     UserPlus,
@@ -35,7 +36,8 @@ import {
     Award,
     Building,
     AlertTriangle,
-    RefreshCw,
+    ShieldAlert,
+    ArrowRight,
 } from 'lucide-react';
 
 export default function WorkspaceQA() {
@@ -47,6 +49,10 @@ export default function WorkspaceQA() {
     const [targetDate, setTargetDate] = useState('');
     const [notes, setNotes] = useState('');
     const [isSubmitting, setIsSubmitting] = useState(false);
+
+    // Modal States
+    const [isRejectModalOpen, setIsRejectModalOpen] = useState(false);
+    const [rejectReason, setRejectReason] = useState('');
 
     const getStatusBadge = (status) => {
         if (!status) return 'bg-gray-100 text-gray-600 border-gray-200';
@@ -108,21 +114,18 @@ export default function WorkspaceQA() {
 
     const handleAssign = () => {
         if (!assignee) {
-            alert('Pilih QA Tester terlebih dahulu!');
+            toast.error('Pilih QA Tester terlebih dahulu!');
             return;
         }
         if (!targetDate) {
-            alert('Masukkan target selesai pengujian!');
+            toast.error('Masukkan target selesai pengujian!');
             return;
         }
         setIsSubmitting(true);
         setTimeout(() => {
-            alert(
-                `Pengujian untuk ${selectedRequest?.projectName} berhasil ditugaskan ke ${assignee}!\nTarget Selesai: ${targetDate}`
-            );
+            toast.success(`Pengujian ${selectedRequest?.projectName} berhasil ditugaskan ke ${assignee}!`);
             setIsSubmitting(false);
 
-            // Update status item
             const updated = queueList.map(item => {
                 if (item.id === selectedRequest.id) {
                     return {
@@ -142,35 +145,43 @@ export default function WorkspaceQA() {
             setAssignee('');
             setTargetDate('');
             setNotes('');
-        }, 1000);
+        }, 800);
     };
 
-    const handleReject = () => {
-        const reason = prompt('Masukkan alasan penolakan & pengembalian ke tim Dev:', notes || 'Dokumen BRD/FSD atau Lingkungan Staging belum siap');
-        if (reason === null) return; // Cancelled
+    const openRejectModal = () => {
+        setRejectReason(notes || 'Dokumen BRD/FSD atau Lingkungan Staging belum siap.');
+        setIsRejectModalOpen(true);
+    };
+
+    const handleConfirmReject = (e) => {
+        e.preventDefault();
+        if (!rejectReason.trim()) {
+            toast.error('Masukkan alasan penolakan proyek!');
+            return;
+        }
 
         setIsSubmitting(true);
         setTimeout(() => {
-            rejectQaRequest(selectedRequest.id, reason);
+            rejectQaRequest(selectedRequest.id, rejectReason);
 
             addNotification(
                 'Pengajuan QA Ditolak (RETURN TO DEV)',
-                `Proyek ${selectedRequest?.projectName} ditolak & dikembalikan ke Tim Dev: ${reason}`,
+                `Proyek ${selectedRequest?.projectName} ditolak & dikembalikan ke Tim Dev: ${rejectReason}`,
                 'danger',
                 '/track'
             );
 
-            alert(`🛑 PENOLAKAN BERHASIL!\n\nProyek "${selectedRequest?.projectName}" resmi ditolak dan statusnya telah diubah menjadi RETURN TO DEV (Dikembalikan ke Tim Pengembangan).`);
+            toast.error(`Pengajuan QA ditolak & dikembalikan ke Tim Dev.`);
 
             setIsSubmitting(false);
+            setIsRejectModalOpen(false);
 
-            // Update local state queue
             const updated = queueList.map(item => {
                 if (item.id === selectedRequest.id) {
                     return {
                         ...item,
                         status: 'Dikembalikan ke Dev (QA Rejected)',
-                        notes: reason,
+                        notes: rejectReason,
                     };
                 }
                 return item;
@@ -459,7 +470,7 @@ export default function WorkspaceQA() {
 
                             <div className="mt-6 pt-4 border-t border-gray-200 flex justify-end gap-4">
                                 <button
-                                    onClick={handleReject}
+                                    onClick={openRejectModal}
                                     disabled={isSubmitting}
                                     className="px-4 py-2 border border-red-500 text-red-600 rounded-lg font-bold text-sm hover:bg-red-50 transition-colors flex items-center gap-2 shadow-xs cursor-pointer"
                                 >
@@ -479,6 +490,57 @@ export default function WorkspaceQA() {
                     </div>
                 </div>
             </div>
+
+            {/* MODAL KONFIRMASI PENOLAKAN QA LEAD */}
+            {isRejectModalOpen && (
+                <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs animate-fadeIn">
+                    <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full overflow-hidden border border-gray-100">
+                        <div className="bg-gradient-to-br from-red-600 to-rose-900 p-6 text-white text-center relative">
+                            <div className="w-14 h-14 rounded-2xl bg-white/10 backdrop-blur-md flex items-center justify-center mx-auto mb-3 border border-white/20">
+                                <ShieldAlert size={32} className="text-white animate-pulse" />
+                            </div>
+                            <h3 className="text-lg font-extrabold tracking-tight">KONFIRMASI PENOLAKAN QA</h3>
+                            <p className="text-xs text-white/80 mt-1">Kembalikan proyek ke Tim Pengembangan (RETURN TO DEV)</p>
+                        </div>
+                        <form onSubmit={handleConfirmReject} className="p-6 space-y-4">
+                            <div className="bg-red-50/60 border border-red-100 rounded-xl p-3.5 text-xs text-red-800">
+                                <strong>Proyek:</strong> {selectedRequest?.projectName} ({selectedRequest?.id})
+                            </div>
+
+                            <div>
+                                <label className="block text-xs font-bold text-gray-700 mb-1.5">
+                                    Alasan Penolakan &amp; Catatan Perbaikan <span className="text-red-500">*</span>
+                                </label>
+                                <textarea
+                                    value={rejectReason}
+                                    onChange={(e) => setRejectReason(e.target.value)}
+                                    placeholder="Jelaskan kendala, defect, atau alasan pengembalian proyek ke Dev..."
+                                    rows={4}
+                                    className="w-full p-3 rounded-xl border border-gray-200 text-xs font-medium focus:ring-2 focus:ring-red-500/20 focus:border-red-500 outline-none"
+                                    required
+                                />
+                            </div>
+
+                            <div className="flex gap-3 pt-3 border-t border-gray-100">
+                                <button
+                                    type="button"
+                                    onClick={() => setIsRejectModalOpen(false)}
+                                    className="flex-1 py-2.5 rounded-xl border border-gray-200 text-xs font-bold text-gray-600 hover:bg-gray-50 transition-colors cursor-pointer"
+                                >
+                                    Batal
+                                </button>
+                                <button
+                                    type="submit"
+                                    disabled={isSubmitting}
+                                    className="flex-1 py-2.5 rounded-xl bg-red-600 hover:bg-red-700 text-white text-xs font-bold transition-all shadow-md shadow-red-600/20 cursor-pointer disabled:opacity-70"
+                                >
+                                    {isSubmitting ? 'Memproses...' : 'Ya, Kembalikan ke Dev'}
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            )}
         </div>
     );
 }
