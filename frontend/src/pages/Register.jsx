@@ -22,7 +22,7 @@ import toast from 'react-hot-toast';
 
 export default function Register() {
     const navigate = useNavigate();
-    const { login } = useAuth();
+    const { login, registerUser } = useAuth();
     const { addNotification } = useNotifications();
 
     const [formData, setFormData] = useState({
@@ -118,12 +118,23 @@ export default function Register() {
 
         setIsLoading(true);
 
-        // Simulasi registrasi (nanti diganti dengan API call)
         try {
-            // Simulasi delay
-            await new Promise(resolve => setTimeout(resolve, 1500));
+            await new Promise(resolve => setTimeout(resolve, 800));
 
-            // Simulasi sukses registrasi
+            const result = registerUser({
+                name: formData.name,
+                email: formData.email,
+                password: formData.password,
+                department: formData.department,
+                role: 'lead_group', // default role pengusul
+            });
+
+            if (!result.success) {
+                toast.error(result.message);
+                setIsLoading(false);
+                return;
+            }
+
             toast.success('Registrasi berhasil! Silakan login.');
 
             addNotification(
@@ -132,8 +143,6 @@ export default function Register() {
                 'success'
             );
 
-            // Auto-login setelah registrasi (opsional)
-            // login(formData.email, formData.password);
             navigate('/login');
         } catch (error) {
             toast.error('Registrasi gagal, silakan coba lagi.');

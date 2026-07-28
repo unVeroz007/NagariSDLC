@@ -22,13 +22,10 @@ import {
     Download,
     Upload,
     Trash2,
-    User,
-    Users,
-    Folder,
     Check,
     X,
 } from 'lucide-react';
-import { myQaTasks } from '../../data/mockData';
+import { myQaTasks, processQaResult } from '../../data/mockData';
 
 export default function MyTasksQA() {
     const { user } = useAuth();
@@ -49,15 +46,23 @@ export default function MyTasksQA() {
         }
         setIsSubmitting(true);
         setTimeout(() => {
+            processQaResult(selectedTask.id, qaResult, qaNotes);
+            const isFailed = qaResult === 'Failed';
+
             addNotification(
-                'Hasil QA Selesai',
-                `Pengujian QA untuk ${selectedTask?.projectName} selesai dengan hasil: ${qaResult}.`,
-                qaResult.includes('Passed') ? 'success' : 'danger',
-                '/pm/cyber-request'
+                isFailed ? 'Pengujian QA Ditolak (RETURN TO DEV)' : 'Pengujian QA Lulus (QA PASSED)',
+                `Pengujian QA untuk ${selectedTask?.projectName} selesai: ${qaResult}. ${isFailed ? 'Proyek dikembalikan ke Tim Dev.' : ''}`,
+                isFailed ? 'danger' : 'success',
+                '/track'
             );
-            alert(`Hasil pengujian untuk ${selectedTask?.projectName} berhasil dikirim!\nStatus: ${qaResult}`);
+
+            alert(
+                isFailed
+                    ? `⚠️ HASIL DITOLAK (FAILED)!\n\nProyek "${selectedTask?.projectName}" telah dikembalikan ke Tim Pengembangan (RETURN TO DEV) untuk dilakukan perbaikan (rework).`
+                    : `✅ HASIL LULUS (PASSED)!\n\nPengujian QA untuk "${selectedTask?.projectName}" berhasil diselesaikan.`
+            );
             setIsSubmitting(false);
-            // Remove from tasks
+
             const index = myQaTasks.indexOf(selectedTask);
             if (index > -1) myQaTasks.splice(index, 1);
             if (myQaTasks.length > 0) {
@@ -67,7 +72,7 @@ export default function MyTasksQA() {
             } else {
                 setSelectedTask(null);
             }
-        }, 1500);
+        }, 1200);
     };
 
     const getPriorityColor = (priority) => {
@@ -75,9 +80,6 @@ export default function MyTasksQA() {
             case 'High': return 'bg-red-500/10 text-red-600 border-red-200';
             case 'Medium': return 'bg-yellow-500/10 text-yellow-600 border-yellow-200';
             case 'Low': return 'bg-green-500/10 text-green-600 border-green-200';
-            case 'ANALYSIS_APPROVED': return 'bg-emerald-100 text-emerald-700 border-emerald-200';
-            case 'READY_FOR_DEVELOPMENT': return 'bg-cyan-100 text-cyan-700 border-cyan-200';
-            case 'IN_DEVELOPMENT': return 'bg-indigo-100 text-indigo-700 border-indigo-200';
             default: return 'bg-gray-100 text-gray-600';
         }
     };
@@ -89,10 +91,10 @@ export default function MyTasksQA() {
             case 'Draft':
                 return 'bg-gray-100 text-gray-500 border-gray-200';
             case 'Selesai':
+            case 'Selesai (QA Passed)':
                 return 'bg-green-500/20 text-green-600 border-green-200';
-            case 'ANALYSIS_APPROVED': return 'bg-emerald-100 text-emerald-700 border-emerald-200';
-            case 'READY_FOR_DEVELOPMENT': return 'bg-cyan-100 text-cyan-700 border-cyan-200';
-            case 'IN_DEVELOPMENT': return 'bg-indigo-100 text-indigo-700 border-indigo-200';
+            case 'Dikembalikan ke Dev (QA Failed)':
+                return 'bg-red-500/20 text-red-600 border-red-200';
             default:
                 return 'bg-gray-100 text-gray-600';
         }
@@ -103,9 +105,6 @@ export default function MyTasksQA() {
             case 'pdf': return { icon: FileText, color: 'text-red-600' };
             case 'docx': return { icon: FileText, color: 'text-blue-600' };
             case 'xlsx': return { icon: Table, color: 'text-green-600' };
-            case 'ANALYSIS_APPROVED': return 'bg-emerald-100 text-emerald-700 border-emerald-200';
-            case 'READY_FOR_DEVELOPMENT': return 'bg-cyan-100 text-cyan-700 border-cyan-200';
-            case 'IN_DEVELOPMENT': return 'bg-indigo-100 text-indigo-700 border-indigo-200';
             default: return { icon: File, color: 'text-gray-600' };
         }
     };
@@ -126,7 +125,6 @@ export default function MyTasksQA() {
 
     return (
         <div className="flex-1 flex flex-col bg-[#f8f9fb] overflow-hidden">
-
             {/* Content */}
             <div className="flex-1 overflow-y-auto p-6 flex flex-col gap-6">
                 {/* Header */}
@@ -179,11 +177,11 @@ export default function MyTasksQA() {
                                     <div className="flex items-center justify-between mt-auto">
                                         <span className={`inline-flex items-center gap-1 px-2 py-1 text-[10px] font-semibold rounded-md border ${getPriorityColor(task.priority)}`}>
                                             <AlertTriangle size={12} />
-                                            {task.priority} Priority
+                                            {task.priority}
                                         </span>
                                         <span className="text-xs text-gray-500 flex items-center gap-1">
-                                            <Calendar size={14} />
-                                            H-{Math.ceil((new Date(task.targetDate) - new Date()) / (1000 * 60 * 60 * 24))}
+                                            <Clock size={12} />
+                                            {task.targetDate}
                                         </span>
                                     </div>
                                 </div>
@@ -191,200 +189,185 @@ export default function MyTasksQA() {
                         </div>
                     </div>
 
-                    {/* RIGHT: Execution Form */}
-                    <div className="w-full lg:w-2/3 flex flex-col bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden flex-1">
-                        {/* Form Header */}
-                        <div className="p-5 border-b border-gray-200 bg-gray-50/50 shrink-0 flex justify-between items-start">
-                            <div>
-                                <div className="flex items-center gap-3 mb-1">
-                                    <h2 className="text-2xl font-bold text-gray-800">{selectedTask.projectName}</h2>
-                                    <span className={`px-2.5 py-1 text-xs font-bold rounded-md uppercase tracking-wider border ${getStatusBadge(selectedTask.status)}`}>
-                                        {selectedTask.status}
-                                    </span>
+                    {/* RIGHT: Task Details & Form */}
+                    <div className="flex-1 bg-white rounded-xl shadow-sm border border-gray-200 flex flex-col overflow-hidden">
+                        {/* Task Header */}
+                        <div className="p-6 border-b border-gray-200 bg-gray-50/50 flex flex-col gap-4">
+                            <div className="flex justify-between items-start">
+                                <div>
+                                    <span className="text-xs font-bold text-[#1A56DB] tracking-wider uppercase">{selectedTask.id}</span>
+                                    <h2 className="text-xl font-bold text-gray-800 mt-1">{selectedTask.projectName}</h2>
                                 </div>
-                                <p className="text-sm text-gray-500">Ticket ID: <span className="font-mono text-gray-700">{selectedTask.id}</span></p>
-                            </div>
-                            <button className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-gray-50 border border-gray-200 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-100 transition-colors shadow-sm">
-                                <Eye size={18} />
-                                Lihat Dokumen
-                            </button>
-                        </div>
-
-                        <div className="flex-1 overflow-y-auto p-6 space-y-6">
-                            {/* Info Box */}
-                            {selectedTask.instruction && (
-                                <div className="flex items-start gap-4 p-4 bg-blue-50 border border-blue-200 rounded-xl text-blue-800">
-                                    <Info size={24} className="mt-0.5 shrink-0" />
-                                    <div>
-                                        <h4 className="font-semibold text-sm mb-1">Instruksi Ketua QA ({selectedTask.assignedBy}):</h4>
-                                        <p className="text-sm text-blue-700/80 leading-relaxed">{selectedTask.instruction}</p>
-                                    </div>
-                                </div>
-                            )}
-
-                            {/* Staging Info */}
-                            <div className="flex items-center justify-between p-4 rounded-xl border border-gray-200 bg-gray-50">
-                                <div className="flex flex-col gap-1">
-                                    <span className="text-xs font-semibold text-gray-500">Environment Target</span>
-                                    <div className="flex items-center gap-2">
-                                        <LinkIcon size={18} className="text-gray-400" />
-                                        <a href="#" className="text-[#1A56DB] font-medium hover:underline text-sm break-all">
-                                            {selectedTask.stagingUrl}
-                                        </a>
-                                    </div>
-                                </div>
-                                <span className="px-3 py-1 bg-yellow-100 text-yellow-800 text-xs font-bold rounded-full border border-yellow-200 uppercase tracking-widest shadow-sm">
-                                    Staging
+                                <span className={`px-3 py-1 text-xs font-bold rounded-md uppercase border ${getPriorityColor(selectedTask.priority)}`}>
+                                    {selectedTask.priority} Priority
                                 </span>
                             </div>
 
-                            <hr className="border-gray-200" />
+                            {/* Staging URL */}
+                            <div className="flex items-center gap-2 bg-blue-50/60 p-3 rounded-lg border border-blue-100">
+                                <LinkIcon size={16} className="text-[#1A56DB]" />
+                                <span className="text-xs text-gray-500 font-medium">Staging URL:</span>
+                                <a href={selectedTask.stagingUrl} target="_blank" rel="noreferrer" className="text-xs text-[#1A56DB] font-bold hover:underline truncate">
+                                    {selectedTask.stagingUrl}
+                                </a>
+                            </div>
 
-                            {/* Execution Form */}
-                            <div className="space-y-5">
-                                <h3 className="text-lg font-semibold text-gray-800 border-l-4 border-[#1A56DB] pl-3">Laporan Hasil Pengujian</h3>
-
-                                {/* Status Selection */}
-                                <div>
-                                    <label className="block text-sm font-semibold text-gray-700 mb-2">
-                                        Status Hasil (Overall) <span className="text-red-500">*</span>
-                                    </label>
-                                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                                        <label
-                                            className={`relative flex items-center p-3 border rounded-lg cursor-pointer hover:bg-gray-50 transition-colors ${qaResult === 'Passed'
-                                                    ? 'border-green-500 bg-green-50 ring-1 ring-green-500'
-                                                    : 'border-gray-200'
-                                                }`}
-                                        >
-                                            <input
-                                                type="radio"
-                                                name="qa_status"
-                                                value="Passed"
-                                                checked={qaResult === 'Passed'}
-                                                onChange={(e) => setQaResult(e.target.value)}
-                                                className="hidden"
-                                            />
-                                            <div className="flex items-center gap-3 w-full">
-                                                <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center ${qaResult === 'Passed' ? 'border-green-500 bg-green-500' : 'border-gray-300'
-                                                    }`}>
-                                                    {qaResult === 'Passed' && <Check size={14} className="text-white" />}
-                                                </div>
-                                                <span className={`font-medium ${qaResult === 'Passed' ? 'text-green-600' : 'text-gray-700'}`}>
-                                                    Passed
-                                                </span>
-                                            </div>
-                                        </label>
-
-                                        <label
-                                            className={`relative flex items-center p-3 border rounded-lg cursor-pointer hover:bg-gray-50 transition-colors ${qaResult === 'Failed'
-                                                    ? 'border-red-500 bg-red-50 ring-1 ring-red-500'
-                                                    : 'border-gray-200'
-                                                }`}
-                                        >
-                                            <input
-                                                type="radio"
-                                                name="qa_status"
-                                                value="Failed"
-                                                checked={qaResult === 'Failed'}
-                                                onChange={(e) => setQaResult(e.target.value)}
-                                                className="hidden"
-                                            />
-                                            <div className="flex items-center gap-3 w-full">
-                                                <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center ${qaResult === 'Failed' ? 'border-red-500 bg-red-500' : 'border-gray-300'
-                                                    }`}>
-                                                    {qaResult === 'Failed' && <X size={14} className="text-white" />}
-                                                </div>
-                                                <span className={`font-medium ${qaResult === 'Failed' ? 'text-red-600' : 'text-gray-700'}`}>
-                                                    Failed
-                                                </span>
-                                            </div>
-                                        </label>
-
-                                        <label
-                                            className={`relative flex items-center p-3 border rounded-lg cursor-pointer hover:bg-gray-50 transition-colors ${qaResult === 'Passed with Notes'
-                                                    ? 'border-yellow-500 bg-yellow-50 ring-1 ring-yellow-500'
-                                                    : 'border-gray-200'
-                                                }`}
-                                        >
-                                            <input
-                                                type="radio"
-                                                name="qa_status"
-                                                value="Passed with Notes"
-                                                checked={qaResult === 'Passed with Notes'}
-                                                onChange={(e) => setQaResult(e.target.value)}
-                                                className="hidden"
-                                            />
-                                            <div className="flex items-center gap-3 w-full">
-                                                <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center ${qaResult === 'Passed with Notes' ? 'border-yellow-500 bg-yellow-500' : 'border-gray-300'
-                                                    }`}>
-                                                    {qaResult === 'Passed with Notes' && <AlertCircle size={14} className="text-white" />}
-                                                </div>
-                                                <span className={`font-medium ${qaResult === 'Passed with Notes' ? 'text-yellow-600' : 'text-gray-700'}`}>
-                                                    Passed w/ Notes
-                                                </span>
-                                            </div>
-                                        </label>
+                            {/* Instruction Note */}
+                            {selectedTask.instruction && (
+                                <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 text-xs text-amber-800 flex items-start gap-2">
+                                    <Info size={16} className="text-amber-600 mt-0.5 shrink-0" />
+                                    <div>
+                                        <span className="font-bold block mb-0.5">Instruksi Pengujian (dari QA Lead):</span>
+                                        {selectedTask.instruction}
                                     </div>
                                 </div>
+                            )}
+                        </div>
 
-                                {/* Notes Textarea */}
-                                <div>
-                                    <label className="block text-sm font-semibold text-gray-700 mb-2 flex justify-between">
-                                        Catatan Pengujian
-                                        <span className="text-xs text-gray-400 font-normal">Markdown supported</span>
-                                    </label>
-                                    <textarea
-                                        value={qaNotes}
-                                        onChange={(e) => setQaNotes(e.target.value)}
-                                        placeholder="Deskripsikan temuan, steps to reproduce bug (jika ada), atau catatan khusus lainnya..."
-                                        rows={5}
-                                        className="w-full p-3 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-[#1A56DB] focus:border-[#1A56DB] outline-none resize-y bg-white"
-                                    />
-                                </div>
-
-                                {/* Document Upload */}
-                                <div>
-                                    <label className="block text-sm font-semibold text-gray-700 mb-2">
-                                        Lampiran Bukti Pengujian (UAT/SIT Report) <span className="text-red-500">*</span>
-                                    </label>
-                                    <div className="border-2 border-dashed border-gray-300 rounded-xl p-6 bg-gray-50 text-center hover:bg-gray-100/50 transition-colors relative">
-                                        <div className="flex items-center justify-between p-3 bg-white border border-gray-200 rounded-lg shadow-sm w-full max-w-md mx-auto">
-                                            <div className="flex items-center gap-3 overflow-hidden">
-                                                <div className="w-10 h-10 rounded bg-red-100 text-red-600 flex items-center justify-center shrink-0">
-                                                    <FileText size={20} />
-                                                </div>
-                                                <div className="flex flex-col items-start min-w-0">
-                                                    <span className="font-medium text-sm text-gray-800 truncate max-w-full">
-                                                        UIT_Report_LOS_Dimas.pdf
-                                                    </span>
-                                                    <span className="text-xs text-gray-500">2.4 MB</span>
-                                                </div>
+                        {/* Form Section */}
+                        <div className="flex-1 overflow-y-auto p-6 space-y-6">
+                            {/* Status radio selection */}
+                            <div>
+                                <label className="block text-sm font-semibold text-gray-700 mb-3">
+                                    Status Hasil Pengujian (Overall) <span className="text-red-500">*</span>
+                                </label>
+                                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                                    <label
+                                        className={`relative flex items-center p-3.5 border rounded-xl cursor-pointer hover:bg-gray-50 transition-colors ${qaResult === 'Passed'
+                                                ? 'border-emerald-500 bg-emerald-50/60 ring-2 ring-emerald-500/20'
+                                                : 'border-gray-200'
+                                            }`}
+                                    >
+                                        <input
+                                            type="radio"
+                                            name="qa_status"
+                                            value="Passed"
+                                            checked={qaResult === 'Passed'}
+                                            onChange={(e) => setQaResult(e.target.value)}
+                                            className="hidden"
+                                        />
+                                        <div className="flex items-center gap-3 w-full">
+                                            <div className={`w-6 h-6 rounded-full border-2 flex items-center justify-center ${qaResult === 'Passed' ? 'border-emerald-500 bg-emerald-500' : 'border-gray-300'
+                                                }`}>
+                                                {qaResult === 'Passed' && <Check size={14} className="text-white" />}
                                             </div>
-                                            <div className="flex items-center gap-2 pl-2">
-                                                <CheckCircle size={20} className="text-green-500" />
-                                                <button className="p-1.5 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded transition-colors">
-                                                    <Trash2 size={18} />
-                                                </button>
+                                            <div>
+                                                <span className={`font-bold text-sm block ${qaResult === 'Passed' ? 'text-emerald-700' : 'text-gray-800'}`}>
+                                                    Passed (Lulus)
+                                                </span>
+                                                <span className="text-[11px] text-gray-500">SIT &amp; UAT Berhasil</span>
                                             </div>
                                         </div>
+                                    </label>
+
+                                    <label
+                                        className={`relative flex items-center p-3.5 border rounded-xl cursor-pointer hover:bg-red-50/60 transition-colors ${qaResult === 'Failed'
+                                                ? 'border-red-500 bg-red-50 ring-2 ring-red-500/20'
+                                                : 'border-gray-200'
+                                            }`}
+                                    >
+                                        <input
+                                            type="radio"
+                                            name="qa_status"
+                                            value="Failed"
+                                            checked={qaResult === 'Failed'}
+                                            onChange={(e) => setQaResult(e.target.value)}
+                                            className="hidden"
+                                        />
+                                        <div className="flex items-center gap-3 w-full">
+                                            <div className={`w-6 h-6 rounded-full border-2 flex items-center justify-center ${qaResult === 'Failed' ? 'border-red-500 bg-red-500' : 'border-gray-300'
+                                                }`}>
+                                                {qaResult === 'Failed' && <X size={14} className="text-white" />}
+                                            </div>
+                                            <div>
+                                                <span className={`font-bold text-sm block ${qaResult === 'Failed' ? 'text-red-600' : 'text-gray-800'}`}>
+                                                    Failed (Ditolak)
+                                                </span>
+                                                <span className="text-[11px] text-gray-500">Return to Dev / Rework</span>
+                                            </div>
+                                        </div>
+                                    </label>
+
+                                    <label
+                                        className={`relative flex items-center p-3.5 border rounded-xl cursor-pointer hover:bg-amber-50/60 transition-colors ${qaResult === 'Passed with Notes'
+                                                ? 'border-amber-500 bg-amber-50 ring-2 ring-amber-500/20'
+                                                : 'border-gray-200'
+                                            }`}
+                                    >
+                                        <input
+                                            type="radio"
+                                            name="qa_status"
+                                            value="Passed with Notes"
+                                            checked={qaResult === 'Passed with Notes'}
+                                            onChange={(e) => setQaResult(e.target.value)}
+                                            className="hidden"
+                                        />
+                                        <div className="flex items-center gap-3 w-full">
+                                            <div className={`w-6 h-6 rounded-full border-2 flex items-center justify-center ${qaResult === 'Passed with Notes' ? 'border-amber-500 bg-amber-500' : 'border-gray-300'
+                                                }`}>
+                                                {qaResult === 'Passed with Notes' && <AlertCircle size={14} className="text-white" />}
+                                            </div>
+                                            <div>
+                                                <span className={`font-bold text-sm block ${qaResult === 'Passed with Notes' ? 'text-amber-700' : 'text-gray-800'}`}>
+                                                    Passed w/ Notes
+                                                </span>
+                                                <span className="text-[11px] text-gray-500">Lulus dengan catatan minor</span>
+                                            </div>
+                                        </div>
+                                    </label>
+                                </div>
+                            </div>
+
+                            {/* Notes Textarea */}
+                            <div>
+                                <label className="block text-sm font-semibold text-gray-700 mb-2">
+                                    Catatan / Temuan Pengujian (Defect / Bug Report) <span className="text-red-500">*</span>
+                                </label>
+                                <textarea
+                                    value={qaNotes}
+                                    onChange={(e) => setQaNotes(e.target.value)}
+                                    placeholder="Deskripsikan temuan bug, steps to reproduce, atau alasan pengembalian ke tim Dev..."
+                                    rows={4}
+                                    className="w-full p-3.5 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-[#1A56DB] focus:border-[#1A56DB] outline-none resize-y bg-white"
+                                />
+                            </div>
+
+                            {/* Document Upload */}
+                            <div>
+                                <label className="block text-sm font-semibold text-gray-700 mb-2">
+                                    Lampiran Laporan (UAT/SIT Report)
+                                </label>
+                                <div className="border-2 border-dashed border-gray-200 rounded-xl p-4 bg-gray-50 text-center">
+                                    <div className="flex items-center justify-between p-3 bg-white border border-gray-200 rounded-lg shadow-xs w-full max-w-md mx-auto">
+                                        <div className="flex items-center gap-3 overflow-hidden">
+                                            <div className="w-9 h-9 rounded bg-red-50 text-red-600 flex items-center justify-center shrink-0">
+                                                <FileText size={18} />
+                                            </div>
+                                            <div className="flex flex-col items-start min-w-0">
+                                                <span className="font-semibold text-xs text-gray-800 truncate">
+                                                    UIT_Report_LOS_Dimas.pdf
+                                                </span>
+                                                <span className="text-[10px] text-gray-400">2.4 MB • Ready</span>
+                                            </div>
+                                        </div>
+                                        <CheckCircle size={18} className="text-emerald-500" />
                                     </div>
                                 </div>
                             </div>
                         </div>
 
                         {/* Footer Actions */}
-                        <div className="p-5 border-t border-gray-200 bg-gray-50/50 shrink-0 flex justify-end gap-3">
-                            <button className="px-5 py-2.5 bg-white border border-[#1A56DB] text-[#1A56DB] font-semibold rounded-lg hover:bg-blue-50 transition-colors shadow-sm flex items-center gap-2">
-                                <Save size={18} />
-                                Simpan Draft
-                            </button>
+                        <div className="p-4 border-t border-gray-200 bg-gray-50/50 shrink-0 flex justify-end gap-3">
                             <button
                                 onClick={handleSubmit}
                                 disabled={isSubmitting}
-                                className="px-5 py-2.5 bg-emerald-600 text-white font-semibold rounded-lg hover:bg-emerald-700 transition-colors shadow-sm flex items-center gap-2 disabled:opacity-70 disabled:cursor-not-allowed"
+                                className={`px-6 py-3 text-white font-bold text-sm rounded-xl transition-all shadow-md flex items-center gap-2 disabled:opacity-70 ${qaResult === 'Failed'
+                                        ? 'bg-red-600 hover:bg-red-700 shadow-red-600/20'
+                                        : 'bg-emerald-600 hover:bg-emerald-700 shadow-emerald-600/20'
+                                    }`}
                             >
                                 <Send size={18} />
-                                {isSubmitting ? 'Memproses...' : 'Kirim Hasil & Selesai'}
+                                <span>{isSubmitting ? 'Memproses...' : qaResult === 'Failed' ? 'Tolak & Kembalikan ke Dev' : 'Kirim Hasil Pengujian'}</span>
                             </button>
                         </div>
                     </div>

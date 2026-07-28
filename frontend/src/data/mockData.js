@@ -910,6 +910,62 @@ export const myQaTasks = [
     },
 ];
 
+// Helper untuk memproses hasil QA & Pengembalian Proyek ke Dev
+export const processQaResult = (taskId, qaResult, qaNotes) => {
+    // 1. Update task di myQaTasks
+    const task = myQaTasks.find(t => t.id === taskId);
+    if (task) {
+        task.qaResult = qaResult;
+        task.qaNotes = qaNotes;
+        if (qaResult === 'Failed') {
+            task.status = 'Dikembalikan ke Dev (QA Failed)';
+        } else {
+            task.status = 'Selesai (QA Passed)';
+        }
+    }
+
+    // 2. Update antrean di qaQueue
+    const qaItem = qaQueue.find(q => q.id === taskId || q.projectId === task?.projectId);
+    if (qaItem) {
+        if (qaResult === 'Failed') {
+            qaItem.status = 'Dikembalikan ke Dev (QA Failed)';
+            qaItem.notes = qaNotes;
+        } else {
+            qaItem.status = 'Selesai (QA Passed)';
+            qaItem.notes = qaNotes;
+        }
+    }
+
+    // 3. Update status proyek di mockProjects
+    const project = mockProjects.find(p => p.id === (task?.projectId || qaItem?.projectId) || p.name === task?.projectName);
+    if (project) {
+        if (qaResult === 'Failed') {
+            project.status = 'RETURN TO DEV';
+            project.phase = 'Fase 2: Pengembangan';
+            project.statusColor = 'bg-red-100 text-red-700 border-red-200';
+            project.reworkNotes = qaNotes;
+        } else {
+            project.status = 'QA_PASSED';
+            project.statusColor = 'bg-emerald-100 text-emerald-700 border-emerald-200';
+        }
+    }
+};
+
+export const rejectQaRequest = (requestId, reason) => {
+    const qaItem = qaQueue.find(q => q.id === requestId);
+    if (qaItem) {
+        qaItem.status = 'Dikembalikan ke Dev (QA Rejected)';
+        qaItem.notes = reason;
+    }
+    const project = mockProjects.find(p => p.id === qaItem?.projectId || p.name === qaItem?.projectName);
+    if (project) {
+        project.status = 'RETURN TO DEV';
+        project.phase = 'Fase 2: Pengembangan';
+        project.statusColor = 'bg-red-100 text-red-700 border-red-200';
+        project.reworkNotes = reason;
+    }
+};
+
 // Data dummy untuk QA testers (anggota tim)
 export const qaTesters = [
     { id: 1, name: 'Dimas Anggara', initial: 'DA' },

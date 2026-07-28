@@ -95,9 +95,39 @@ const MOCK_USERS = [
         nip: '199502021234',
         avatar_url: null,
     },
+    {
+        id: 10,
+        name: 'Pengusul Proyek (Business User)',
+        email: 'user@banknagari.com',
+        password: 'user123',
+        role: 'business_user',
+        department: 'Divisi Kredit',
+        nip: '199601011234',
+        avatar_url: null,
+    },
+    {
+        id: 11,
+        name: 'Test Pengusul',
+        email: 'test@nagari.co.id',
+        password: 'test1234',
+        role: 'business_user',
+        department: 'Divisi Kredit',
+        nip: '199801011234',
+        avatar_url: null,
+    },
 ];
 
 const SESSION_KEY = 'nagari_sdlc_session';
+const CUSTOM_USERS_KEY = 'nagari_sdlc_custom_users';
+
+const getCustomUsers = () => {
+    try {
+        const saved = localStorage.getItem(CUSTOM_USERS_KEY);
+        return saved ? JSON.parse(saved) : [];
+    } catch {
+        return [];
+    }
+};
 
 export function AuthProvider({ children }) {
     const [user, setUser] = useState(null);
@@ -110,8 +140,9 @@ export function AuthProvider({ children }) {
         if (savedSession) {
             try {
                 const parsedUser = JSON.parse(savedSession);
+                const allUsers = [...MOCK_USERS, ...getCustomUsers()];
                 // Validasi bahwa user masih ada di "database" kita
-                const validUser = MOCK_USERS.find(u => u.id === parsedUser.id);
+                const validUser = allUsers.find(u => u.id === parsedUser.id || u.email === parsedUser.email);
                 if (validUser) {
                     const { password: _, ...userWithoutPass } = validUser;
                     setUser(userWithoutPass);
@@ -127,11 +158,42 @@ export function AuthProvider({ children }) {
     }, []);
 
     /**
+     * Mendaftarkan user baru ke localStorage
+     */
+    const registerUser = (userData) => {
+        const customUsers = getCustomUsers();
+        const allUsers = [...MOCK_USERS, ...customUsers];
+
+        const existing = allUsers.find(u => u.email.toLowerCase() === userData.email.toLowerCase());
+        if (existing) {
+            return { success: false, message: 'Email sudah terdaftar di sistem.' };
+        }
+
+        const newUser = {
+            id: Date.now(),
+            name: userData.name,
+            email: userData.email,
+            password: userData.password,
+            role: userData.role || 'business_user',
+            department: userData.department || 'Divisi Kredit',
+            nip: userData.nip || '19950101' + Math.floor(1000 + Math.random() * 9000),
+            avatar_url: null,
+        };
+
+        const updatedCustom = [...customUsers, newUser];
+        localStorage.setItem(CUSTOM_USERS_KEY, JSON.stringify(updatedCustom));
+        return { success: true, user: newUser };
+    };
+
+    /**
      * Login dengan email dan password.
      * Mengembalikan { success: true } atau { success: false, message: '...' }
      */
     const login = (email, password) => {
-        const foundUser = MOCK_USERS.find(
+        const customUsers = getCustomUsers();
+        const allUsers = [...MOCK_USERS, ...customUsers];
+
+        const foundUser = allUsers.find(
             u => u.email.toLowerCase() === email.toLowerCase() && u.password === password
         );
 
@@ -169,7 +231,7 @@ export function AuthProvider({ children }) {
     };
 
     return (
-        <AuthContext.Provider value={{ user, isLoggedIn, isLoading, login, logout, updateProfile }}>
+        <AuthContext.Provider value={{ user, isLoggedIn, isLoading, login, logout, registerUser, updateProfile }}>
             {children}
         </AuthContext.Provider>
     );

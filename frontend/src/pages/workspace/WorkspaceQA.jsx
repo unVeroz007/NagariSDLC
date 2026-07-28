@@ -1,6 +1,8 @@
 import RBBBadge from '../../components/RBBBadge';
 import { useState } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
+import { useNotifications } from '../../contexts/NotificationContext';
+import { qaQueue, qaTesters, rejectQaRequest, mockProjects } from '../../data/mockData';
 import {
     Users,
     UserPlus,
@@ -32,87 +34,32 @@ import {
     UserCheck,
     Award,
     Building,
+    AlertTriangle,
+    RefreshCw,
 } from 'lucide-react';
-
-// Mock data untuk antrean QA
-const qaQueue = [
-    {
-        id: 'QA-REQ-2026-0842',
-        projectName: 'Aplikasi LOS Baru',
-        projectId: 'PRJ-2026-088',
-        pm: 'Budi Santoso',
-        submittedAt: '2026-07-19T09:00:00',
-        status: 'Menunggu Disposisi',
-        priority: 'High',
-        stagingUrl: 'https://staging-los.banknagari.co.id',
-        documents: [
-            { name: 'BRD_LOS_v1.2.pdf', type: 'pdf', size: '2.4 MB' },
-            { name: 'FSD_LOS_Final.docx', type: 'docx', size: '1.8 MB' },
-            { name: 'SIT_Report_LOS.xlsx', type: 'xlsx', size: '500 KB' },
-        ],
-        assignedTo: null,
-        targetDate: null,
-        notes: '',
-    },
-    {
-        id: 'QA-REQ-2026-0841',
-        projectName: 'Integrasi QRIS Mobile',
-        projectId: 'PRJ-2026-089',
-        pm: 'Dian Sastro',
-        submittedAt: '2026-07-17T14:30:00',
-        status: 'Menunggu Disposisi',
-        priority: 'Medium',
-        stagingUrl: 'https://staging-qris.banknagari.co.id',
-        documents: [
-            { name: 'BRD_QRIS_v2.0.pdf', type: 'pdf', size: '1.8 MB' },
-            { name: 'FSD_QRIS_v2.0.docx', type: 'docx', size: '2.1 MB' },
-        ],
-        assignedTo: null,
-        targetDate: null,
-        notes: '',
-    },
-    {
-        id: 'QA-REQ-2026-0840',
-        projectName: 'Update Core Banking v2.4',
-        projectId: 'PRJ-2026-093',
-        pm: 'Rina Wati',
-        submittedAt: '2026-07-15T10:00:00',
-        status: 'Dalam Pengujian',
-        priority: 'High',
-        stagingUrl: 'https://staging-core.banknagari.co.id',
-        documents: [
-            { name: 'BRD_Core_v2.4.pdf', type: 'pdf', size: '3.2 MB' },
-            { name: 'FSD_Core_v2.4.docx', type: 'docx', size: '2.8 MB' },
-            { name: 'UAT_Plan_Core.xlsx', type: 'xlsx', size: '1.2 MB' },
-        ],
-        assignedTo: 'Dimas Anggara',
-        targetDate: '2026-07-25',
-        notes: 'Fokus pada modul tabungan dan integrasi API',
-    },
-];
-
-// Daftar QA Tester
-const qaTesters = [
-    { id: 1, name: 'Dimas Anggara', load: 'Sedang' },
-    { id: 2, name: 'Siti Rahmawati', load: 'Rendah' },
-    { id: 3, name: 'Fajar Setiawan', load: 'Tinggi' },
-];
 
 export default function WorkspaceQA() {
     const { user } = useAuth();
-    const [selectedRequest, setSelectedRequest] = useState(qaQueue[0]);
+    const { addNotification } = useNotifications();
+    const [queueList, setQueueList] = useState([...qaQueue]);
+    const [selectedRequest, setSelectedRequest] = useState(queueList[0] || null);
     const [assignee, setAssignee] = useState('');
     const [targetDate, setTargetDate] = useState('');
     const [notes, setNotes] = useState('');
     const [isSubmitting, setIsSubmitting] = useState(false);
 
     const getStatusBadge = (status) => {
+        if (!status) return 'bg-gray-100 text-gray-600 border-gray-200';
+        if (status.includes('Dikembalikan') || status.includes('Failed') || status.includes('Rejected') || status === 'RETURN TO DEV') {
+            return 'bg-red-100 text-red-700 border-red-200 font-bold';
+        }
         switch (status) {
             case 'Menunggu Disposisi':
                 return 'bg-amber-100 text-amber-700 border-amber-200';
             case 'Dalam Pengujian':
                 return 'bg-blue-100 text-blue-700 border-blue-200';
             case 'Selesai':
+            case 'Selesai (QA Passed)':
                 return 'bg-emerald-100 text-emerald-700 border-emerald-200';
             default:
                 return 'bg-gray-100 text-gray-600 border-gray-200';
@@ -120,12 +67,17 @@ export default function WorkspaceQA() {
     };
 
     const getStatusIcon = (status) => {
+        if (!status) return <AlertCircle size={14} />;
+        if (status.includes('Dikembalikan') || status.includes('Failed') || status.includes('Rejected')) {
+            return <XCircle size={14} className="text-red-600" />;
+        }
         switch (status) {
             case 'Menunggu Disposisi':
                 return <Clock size={14} />;
             case 'Dalam Pengujian':
                 return <UserCheck size={14} />;
             case 'Selesai':
+            case 'Selesai (QA Passed)':
                 return <CheckCircle size={14} />;
             default:
                 return <AlertCircle size={14} />;
@@ -169,35 +121,65 @@ export default function WorkspaceQA() {
                 `Pengujian untuk ${selectedRequest?.projectName} berhasil ditugaskan ke ${assignee}!\nTarget Selesai: ${targetDate}`
             );
             setIsSubmitting(false);
-            // Update status dan remove from queue
-            const index = qaQueue.indexOf(selectedRequest);
-            if (index > -1) {
-                qaQueue[index].status = 'Dalam Pengujian';
-                qaQueue[index].assignedTo = assignee;
-                qaQueue[index].targetDate = targetDate;
-                qaQueue[index].notes = notes;
-            }
-            // Reset form
+
+            // Update status item
+            const updated = queueList.map(item => {
+                if (item.id === selectedRequest.id) {
+                    return {
+                        ...item,
+                        status: 'Dalam Pengujian',
+                        assignedTo: assignee,
+                        targetDate: targetDate,
+                        notes: notes || item.notes,
+                    };
+                }
+                return item;
+            });
+
+            setQueueList(updated);
+            const current = updated.find(i => i.id === selectedRequest.id);
+            setSelectedRequest(current);
             setAssignee('');
             setTargetDate('');
             setNotes('');
-            // Refresh selected
-            setSelectedRequest(qaQueue[index]);
-        }, 1500);
+        }, 1000);
     };
 
     const handleReject = () => {
-        if (!confirm('Yakin ingin menolak pengajuan ini?')) return;
-        const index = qaQueue.indexOf(selectedRequest);
-        if (index > -1) {
-            qaQueue.splice(index, 1);
-            if (qaQueue.length > 0) {
-                setSelectedRequest(qaQueue[0]);
-            } else {
-                setSelectedRequest(null);
-            }
-        }
-        alert('Pengajuan ditolak dan dikembalikan ke PM.');
+        const reason = prompt('Masukkan alasan penolakan & pengembalian ke tim Dev:', notes || 'Dokumen BRD/FSD atau Lingkungan Staging belum siap');
+        if (reason === null) return; // Cancelled
+
+        setIsSubmitting(true);
+        setTimeout(() => {
+            rejectQaRequest(selectedRequest.id, reason);
+
+            addNotification(
+                'Pengajuan QA Ditolak (RETURN TO DEV)',
+                `Proyek ${selectedRequest?.projectName} ditolak & dikembalikan ke Tim Dev: ${reason}`,
+                'danger',
+                '/track'
+            );
+
+            alert(`🛑 PENOLAKAN BERHASIL!\n\nProyek "${selectedRequest?.projectName}" resmi ditolak dan statusnya telah diubah menjadi RETURN TO DEV (Dikembalikan ke Tim Pengembangan).`);
+
+            setIsSubmitting(false);
+
+            // Update local state queue
+            const updated = queueList.map(item => {
+                if (item.id === selectedRequest.id) {
+                    return {
+                        ...item,
+                        status: 'Dikembalikan ke Dev (QA Rejected)',
+                        notes: reason,
+                    };
+                }
+                return item;
+            });
+
+            setQueueList(updated);
+            const current = updated.find(i => i.id === selectedRequest.id);
+            setSelectedRequest(current);
+        }, 800);
     };
 
     if (!selectedRequest) {
@@ -214,13 +196,15 @@ export default function WorkspaceQA() {
         );
     }
 
+    const isRejected = selectedRequest?.status?.includes('Dikembalikan') || selectedRequest?.status?.includes('Failed') || selectedRequest?.status?.includes('Rejected');
+
     return (
         <div className="flex-1 overflow-y-auto p-6 md:p-8 bg-[#f8f9fb]">
             {/* Header */}
             <div className="mb-6">
                 <h2 className="text-2xl font-bold text-gray-800">Workspace Quality Assurance (QA)</h2>
                 <p className="text-gray-500 text-sm mt-1">
-                    Kelola antrean pengujian dan disposisi tugas ke anggota QA.
+                    Kelola antrean pengujian, disposisi ke tester, atau kembalikan proyek ke Dev jika terdapat bug/penolakan.
                 </p>
             </div>
 
@@ -231,11 +215,11 @@ export default function WorkspaceQA() {
                     <div className="p-4 border-b border-gray-200 bg-gray-50/50 flex justify-between items-center">
                         <h3 className="text-sm font-semibold text-gray-800 flex items-center gap-2">
                             <Inbox size={18} className="text-[#1A56DB]" />
-                            Antrean Masuk ({qaQueue.length})
+                            Antrean QA ({queueList.length})
                         </h3>
                     </div>
                     <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-gray-50/30">
-                        {qaQueue.map((request) => {
+                        {queueList.map((request) => {
                             const isSelected = selectedRequest?.id === request.id;
                             return (
                                 <div
@@ -246,43 +230,43 @@ export default function WorkspaceQA() {
                                         setTargetDate('');
                                         setNotes('');
                                     }}
-                                    className={`p-4 rounded-lg cursor-pointer transition-all ${isSelected
-                                        ? 'bg-blue-50 border-2 border-[#1A56DB] shadow-sm relative'
+                                    className={`p-4 rounded-xl cursor-pointer transition-all ${isSelected
+                                        ? 'bg-blue-50/60 border-2 border-[#1A56DB] shadow-sm relative'
                                         : 'bg-white border border-gray-200 hover:border-gray-300 hover:shadow-sm'
                                         }`}
                                 >
                                     <div className="flex justify-between items-start mb-2">
-                                        <span className="text-xs font-semibold text-[#1A56DB]">
+                                        <span className="text-xs font-bold text-[#1A56DB]">
                                             {request.id}
                                         </span>
                                         <span
-                                            className={`text-xs font-semibold px-2 py-0.5 rounded border ${getStatusBadge(
+                                            className={`text-[10px] font-bold px-2 py-0.5 rounded border ${getStatusBadge(
                                                 request.status
                                             )}`}
                                         >
                                             {request.status}
                                         </span>
                                     </div>
-                                    <h4 className="font-semibold text-gray-800 text-sm mb-2">
+                                    <h4 className="font-bold text-gray-800 text-sm mb-2">
                                         {request.projectName}
                                     </h4>
                                     <div className="flex items-center gap-2 text-xs text-gray-500">
                                         <User size={14} />
-                                        <span>Dari: {request.pm}</span>
+                                        <span>PM: {request.pm}</span>
                                     </div>
-                                    <div className="flex items-center gap-2 text-xs text-gray-500 mt-2">
+                                    <div className="flex items-center gap-2 text-xs text-gray-500 mt-1">
                                         <Clock size={14} />
                                         <span>
-                                            {new Date(request.submittedAt).toLocaleDateString('id-ID', {
+                                            Submitted: {new Date(request.submittedAt).toLocaleDateString('id-ID', {
                                                 day: 'numeric',
                                                 month: 'short',
-                                                year: 'numeric',
                                             })}
                                         </span>
                                     </div>
                                     {request.assignedTo && (
-                                        <div className="mt-2 text-xs text-blue-600 font-medium">
-                                            Assignee: {request.assignedTo}
+                                        <div className="mt-2 text-xs text-blue-600 font-medium flex items-center gap-1">
+                                            <UserCheck size={13} />
+                                            <span>Tester: {request.assignedTo}</span>
                                         </div>
                                     )}
                                 </div>
@@ -297,11 +281,11 @@ export default function WorkspaceQA() {
                     <div className="p-6 border-b border-gray-200 bg-gray-50/50 flex justify-between items-start flex-shrink-0">
                         <div>
                             <div className="flex items-center gap-3 mb-2 flex-wrap">
-                                <span className="bg-blue-50 text-[#1A56DB] px-2 py-1 rounded text-xs font-bold">
+                                <span className="bg-blue-50 text-[#1A56DB] px-2.5 py-1 rounded text-xs font-bold">
                                     {selectedRequest.id}
                                 </span>
                                 <span
-                                    className={`px-2 py-1 rounded text-xs font-bold flex items-center gap-1 border ${getStatusBadge(
+                                    className={`px-2.5 py-1 rounded text-xs font-bold flex items-center gap-1 border ${getStatusBadge(
                                         selectedRequest.status
                                     )}`}
                                 >
@@ -309,11 +293,11 @@ export default function WorkspaceQA() {
                                     {selectedRequest.status}
                                 </span>
                                 <span
-                                    className={`px-2 py-1 rounded text-xs font-bold ${getPriorityColor(
+                                    className={`px-2.5 py-1 rounded text-xs font-bold ${getPriorityColor(
                                         selectedRequest.priority
                                     )}`}
                                 >
-                                    {selectedRequest.priority}
+                                    {selectedRequest.priority} Priority
                                 </span>
                             </div>
                             <h3 className="text-xl font-bold text-gray-800">
@@ -321,18 +305,53 @@ export default function WorkspaceQA() {
                             </h3>
                             <div className="flex items-center gap-2 text-sm text-gray-500 mt-1">
                                 <Building size={16} />
-                                <span>ID: {selectedRequest.projectId}</span>
+                                <span>ID Proyek: {selectedRequest.projectId}</span>
                                 <span className="text-gray-300">|</span>
                                 <User size={16} />
                                 <span>PM: {selectedRequest.pm}</span>
                             </div>
                         </div>
-                        <button className="text-gray-400 hover:text-[#1A56DB] transition-colors">
-                            <MoreVertical size={20} />
-                        </button>
                     </div>
 
                     <div className="flex-1 overflow-y-auto p-6 space-y-6 bg-gray-50/30">
+                        {/* Banner Jika Proyek Ditolak / Returned to Dev */}
+                        {isRejected && (
+                            <div className="bg-red-50 border-2 border-red-200 rounded-xl p-5 shadow-xs space-y-3">
+                                <div className="flex items-start gap-3">
+                                    <div className="w-10 h-10 rounded-xl bg-red-100 text-red-600 flex items-center justify-center shrink-0">
+                                        <AlertTriangle size={22} />
+                                    </div>
+                                    <div className="flex-1">
+                                        <div className="flex items-center justify-between">
+                                            <h4 className="font-bold text-red-800 text-sm tracking-tight">
+                                                LAPORAN HASIL QA: DITOLAK &amp; DIKEMBALIKAN (RETURN TO DEV)
+                                            </h4>
+                                            <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-red-100 text-red-700 uppercase">
+                                                Defect Report
+                                            </span>
+                                        </div>
+                                        <p className="text-xs text-red-700 mt-1 leading-relaxed">
+                                            Pengujian oleh Tester menghasilkan status <strong>FAILED</strong>. Proyek secara otomatis dikembalikan ke tim Pengembangan untuk perbaikan (*rework*).
+                                        </p>
+                                    </div>
+                                </div>
+
+                                <div className="bg-white border border-red-200 rounded-lg p-3 text-xs space-y-1.5 text-gray-700">
+                                    <div className="flex justify-between font-semibold text-gray-800 pb-1 border-b border-gray-100">
+                                        <span>Catatan / Temuan Bug dari Tester:</span>
+                                        <span className="text-gray-500 font-normal">Tester: {selectedRequest.assignedTo || 'Dimas Anggara'}</span>
+                                    </div>
+                                    <p className="text-red-900 font-mono bg-red-50/50 p-2 rounded border border-red-100">
+                                        "{selectedRequest.notes || 'Ditemukan defect/bug kritikal pada modul. Diperlukan koding perbaikan dan re-test.'}"
+                                    </p>
+                                    <div className="flex items-center justify-between pt-1 text-[11px] text-gray-500">
+                                        <span>Lampiran Laporan: <strong>UIT_Report_LOS_Dimas.pdf (2.4 MB)</strong></span>
+                                        <span className="text-[#1A56DB] font-bold hover:underline cursor-pointer">Lihat Laporan Dokumen PDF &rarr;</span>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+
                         {/* Staging Environment */}
                         <div>
                             <h4 className="text-sm font-semibold text-gray-700 mb-3 flex items-center gap-2">
@@ -343,7 +362,9 @@ export default function WorkspaceQA() {
                                 <div className="flex items-center gap-3">
                                     <Link size={18} className="text-[#1A56DB]" />
                                     <a
-                                        href="#"
+                                        href={selectedRequest.stagingUrl}
+                                        target="_blank"
+                                        rel="noreferrer"
                                         className="text-[#1A56DB] hover:underline text-sm font-medium"
                                     >
                                         {selectedRequest.stagingUrl}
@@ -359,7 +380,7 @@ export default function WorkspaceQA() {
                         <div>
                             <h4 className="text-sm font-semibold text-gray-700 mb-3 flex items-center gap-2">
                                 <Folder size={18} className="text-gray-400" />
-                                Dokumen Referensi
+                                Dokumen Referensi Pengujian
                             </h4>
                             <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                                 {selectedRequest.documents.map((doc, idx) => {
@@ -378,27 +399,24 @@ export default function WorkspaceQA() {
                                                 </p>
                                                 <p className="text-xs text-gray-500">{doc.size}</p>
                                             </div>
-                                            <button className="text-gray-400 hover:text-[#1A56DB] transition-colors opacity-0 group-hover:opacity-100">
-                                                <Eye size={18} />
-                                            </button>
                                         </div>
                                     );
                                 })}
                             </div>
                         </div>
 
-                        {/* Assignment Form */}
+                        {/* Assignment / Action Form */}
                         <div className="bg-white border border-gray-200 rounded-xl p-5 shadow-sm">
                             <h4 className="text-sm font-semibold text-gray-700 mb-4 flex items-center gap-2">
                                 <UserCheck size={18} className="text-[#1A56DB]" />
-                                Form Disposisi Pengujian
+                                Aksi &amp; Form Disposisi Pengujian QA
                             </h4>
 
                             <div className="space-y-4">
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                     <div>
                                         <label className="block text-xs font-semibold text-gray-600 mb-1">
-                                            Pilih Anggota QA <span className="text-red-500">*</span>
+                                            Pilih Anggota QA Tester <span className="text-red-500">*</span>
                                         </label>
                                         <select
                                             value={assignee}
@@ -408,7 +426,7 @@ export default function WorkspaceQA() {
                                             <option value="">Pilih QA Tester...</option>
                                             {qaTesters.map((tester) => (
                                                 <option key={tester.id} value={tester.name}>
-                                                    {tester.name} (Beban: {tester.load})
+                                                    {tester.name} (Beban: {tester.load || 'Sedang'})
                                                 </option>
                                             ))}
                                         </select>
@@ -427,12 +445,12 @@ export default function WorkspaceQA() {
                                 </div>
                                 <div>
                                     <label className="block text-xs font-semibold text-gray-600 mb-1">
-                                        Instruksi Khusus (Opsional)
+                                        Catatan / Instruksi Khusus / Alasan Penolakan
                                     </label>
                                     <textarea
                                         value={notes}
                                         onChange={(e) => setNotes(e.target.value)}
-                                        placeholder="Masukkan instruksi khusus untuk tester..."
+                                        placeholder="Masukkan instruksi khusus atau alasan pengembalian ke tim Dev..."
                                         rows={3}
                                         className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-[#1A56DB] focus:border-[#1A56DB] bg-white resize-none"
                                     />
@@ -442,15 +460,16 @@ export default function WorkspaceQA() {
                             <div className="mt-6 pt-4 border-t border-gray-200 flex justify-end gap-4">
                                 <button
                                     onClick={handleReject}
-                                    className="px-4 py-2 border border-red-500 text-red-500 rounded-lg font-semibold text-sm hover:bg-red-50 transition-colors flex items-center gap-2"
+                                    disabled={isSubmitting}
+                                    className="px-4 py-2 border border-red-500 text-red-600 rounded-lg font-bold text-sm hover:bg-red-50 transition-colors flex items-center gap-2 shadow-xs cursor-pointer"
                                 >
                                     <X size={18} />
-                                    Tolak Pengajuan
+                                    Tolak &amp; Kembalikan ke Dev
                                 </button>
                                 <button
                                     onClick={handleAssign}
                                     disabled={isSubmitting}
-                                    className="px-6 py-2 bg-[#003a73] text-white rounded-lg font-semibold text-sm hover:bg-[#002a5a] transition-colors flex items-center gap-2 shadow-sm disabled:opacity-70 disabled:cursor-not-allowed"
+                                    className="px-6 py-2 bg-[#003a73] text-white rounded-lg font-bold text-sm hover:bg-[#002a5a] transition-colors flex items-center gap-2 shadow-sm disabled:opacity-70 cursor-pointer"
                                 >
                                     <UserPlus size={18} />
                                     {isSubmitting ? 'Memproses...' : 'Tugaskan Pengujian'}
