@@ -72,7 +72,7 @@ export default function QualityGate() {
     const { projects, updateProject } = useProjects();
 
     const dynamicQueue = projects
-        .filter(p => p.status === 'QUALITY_GATE' || p.status === 'UAT_PASSED')
+        .filter(p => p.status === 'PENDING_GOLIVE' || p.status === 'UAT_PASSED')
         .map(p => ({
             id: p.id,
             projectId: p.id,
@@ -92,7 +92,7 @@ export default function QualityGate() {
             rollbackPlan: p.rollbackPlan || 'Restore database snapshot & revert versi deployment.',
         }));
 
-    const queueList = dynamicQueue.length > 0 ? dynamicQueue : defaultQualityGateQueue;
+    const queueList = dynamicQueue;
     const [selectedRelease, setSelectedRelease] = useState(queueList[0] || null);
     const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -102,41 +102,44 @@ export default function QualityGate() {
         }
     }, [projects]);
 
-    const handleApprove = () => {
+    const handleApprove = async () => {
         if (!selectedRelease) return;
         if (!confirm(`Setujui rilis ${selectedRelease.projectName} (${selectedRelease.id}) untuk produksi?`)) return;
         setIsSubmitting(true);
-        setTimeout(() => {
+        try {
             if (selectedRelease.projectId) {
-                updateProject(selectedRelease.projectId, {
-                    status: 'APPROVED_FOR_RELEASE',
-                    phase: 'Fase 4: Rilis Produksi (Live)',
+                await updateProject(selectedRelease.projectId, {
+                    status: 'LIVE_PRODUCTION',
                 });
             }
-            toast.success(`Rilis ${selectedRelease.projectName} berhasil disetujui untuk produksi!`);
-            setIsSubmitting(false);
-
-            const remaining = queueList.filter(item => item.id !== selectedRelease.id);
+            toast.success(`Rilis ${selectedRelease.projectName} berhasil disetujui untuk produksi (LIVE_PRODUCTION)!`);
+            const remaining = dynamicQueue.filter(item => item.id !== selectedRelease.id);
             setSelectedRelease(remaining.length > 0 ? remaining[0] : null);
-        }, 1000);
+        } catch (err) {
+            toast.error(err.message || 'Gagal menyetujui rilis.');
+        } finally {
+            setIsSubmitting(false);
+        }
     };
 
-    const handleReject = () => {
+    const handleReject = async () => {
         if (!selectedRelease) return;
         if (!confirm(`Tolak permohonan rilis ${selectedRelease.projectName}?`)) return;
         setIsSubmitting(true);
-        setTimeout(() => {
+        try {
             if (selectedRelease.projectId) {
-                updateProject(selectedRelease.projectId, {
-                    status: 'RELEASE_REJECTED',
+                await updateProject(selectedRelease.projectId, {
+                    status: 'REJECTED',
                 });
             }
             toast.error(`Rilis ${selectedRelease.projectName} ditolak.`);
-            setIsSubmitting(false);
-
-            const remaining = queueList.filter(item => item.id !== selectedRelease.id);
+            const remaining = dynamicQueue.filter(item => item.id !== selectedRelease.id);
             setSelectedRelease(remaining.length > 0 ? remaining[0] : null);
-        }, 800);
+        } catch (err) {
+            toast.error(err.message || 'Gagal menolak rilis.');
+        } finally {
+            setIsSubmitting(false);
+        }
     };
 
     const getStatusBadge = (status) => {

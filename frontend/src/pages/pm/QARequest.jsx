@@ -78,31 +78,31 @@ export default function QARequest() {
     e.preventDefault();
   };
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
     if (!selectedProject) {
       toast.error('Pilih proyek terlebih dahulu!');
       return;
     }
     setIsSubmitting(true);
-    setTimeout(() => {
-      // Update status proyek agar Workspace QA bisa menerima proyek ini
-      updateProject(selectedProject.id, { status: PROJECT_STATUS.READY_FOR_QA });
+    try {
+      await updateProject(selectedProject.id, { status: 'READY_FOR_QA' });
 
       addNotification(
         'Pengajuan QA Berhasil',
         `Proyek ${selectedProject.name} telah diajukan ke antrean QA.`,
         'success'
       );
-      toast.success(`Pengajuan QA untuk ${selectedProject.id} berhasil dikirim!`);
-      setIsSubmitting(false);
-
-      // Reset form dan kembali ke PM Workspace
+      toast.success(`Pengajuan QA untuk proyek ${selectedProject.name} berhasil dikirim!`);
       setSelectedProject(null);
       setFormData({ targetDate: '', stagingUrl: '', technicalNotes: '' });
       setUploadedFiles([]);
       navigate('/pm/workspace');
-    }, 1500);
+    } catch (err) {
+      toast.error(err.message || 'Gagal mengajukan QA.');
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   if (isLoading) {

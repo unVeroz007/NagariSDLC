@@ -39,19 +39,25 @@ export default function ProjectList() {
         let result = [...projects];
         if (searchTerm) {
             const term = searchTerm.toLowerCase();
-            result = result.filter(p =>
-                p.id.toLowerCase().includes(term) ||
-                p.name.toLowerCase().includes(term) ||
-                p.description.toLowerCase().includes(term)
-            );
+            result = result.filter(p => {
+                const idStr = String(p.reqId || p.req_id || p.id || '').toLowerCase();
+                const nameStr = String(p.name || p.title || '').toLowerCase();
+                const descStr = String(p.description || '').toLowerCase();
+                return idStr.includes(term) || nameStr.includes(term) || descStr.includes(term);
+            });
         }
-        if (divisionFilter) result = result.filter(p => p.division === divisionFilter);
-        if (statusFilter) result = result.filter(p => p.status.includes(statusFilter));
+        if (divisionFilter) {
+            result = result.filter(p => {
+                const divName = typeof p.division === 'object' ? p.division?.name : p.division;
+                return divName === divisionFilter;
+            });
+        }
+        if (statusFilter) result = result.filter(p => (p.status || '').includes(statusFilter));
         if (typeFilter) result = result.filter(p => p.type === typeFilter);
+
         switch (sortBy) {
-            case 'newest': result.sort((a, b) => b.id.localeCompare(a.id)); break;
-            case 'oldest': result.sort((a, b) => a.id.localeCompare(b.id)); break;
-            case 'id_asc': result.sort((a, b) => a.id.localeCompare(b.id)); break;
+            case 'newest': result.sort((a, b) => (b.id || 0) - (a.id || 0)); break;
+            case 'oldest': result.sort((a, b) => (a.id || 0) - (b.id || 0)); break;
             default: break;
         }
         return result;

@@ -43,16 +43,16 @@ export default function Dashboard() {
     const metrics = useMemo(() => {
         const total = projects.length;
         const inisiasi = projects.filter(p =>
-            [PROJECT_STATUS.PENDING, PROJECT_STATUS.LEAD_REVIEW,
-             PROJECT_STATUS.ANALYST_REVIEW, PROJECT_STATUS.ANALYSIS_APPROVED].includes(p.status)
+            [PROJECT_STATUS.PENDING, PROJECT_STATUS.IN_REVIEW,
+             PROJECT_STATUS.ANALYSIS_APPROVED].includes(p.status)
         ).length;
         const pengujian = projects.filter(p =>
-            [PROJECT_STATUS.QA_TESTING, PROJECT_STATUS.READY_FOR_QA,
-             PROJECT_STATUS.CYBER_TESTING, PROJECT_STATUS.READY_FOR_CYBER].includes(p.status)
+            [PROJECT_STATUS.QA_IN_PROGRESS, PROJECT_STATUS.READY_FOR_QA,
+             PROJECT_STATUS.CYBER_IN_PROGRESS, PROJECT_STATUS.QA_PASSED].includes(p.status)
         ).length;
         const siapRilis = projects.filter(p =>
-            [PROJECT_STATUS.READY_FOR_RELEASE, PROJECT_STATUS.UAT,
-             PROJECT_STATUS.UAT_PASSED, PROJECT_STATUS.QUALITY_GATE].includes(p.status)
+            [PROJECT_STATUS.PENDING_GOLIVE, PROJECT_STATUS.READY_FOR_UAT,
+             PROJECT_STATUS.UAT_PASSED, PROJECT_STATUS.LIVE_PRODUCTION].includes(p.status)
         ).length;
 
         return [
@@ -112,19 +112,20 @@ export default function Dashboard() {
         const total = projects.length || 1;
         const phaseMap = {
             'Fase 1: Inisiasi & Analisis': projects.filter(p =>
-                [PROJECT_STATUS.PENDING, PROJECT_STATUS.LEAD_REVIEW,
-                 PROJECT_STATUS.ANALYST_REVIEW, PROJECT_STATUS.ANALYSIS_APPROVED].includes(p.status)
+                [PROJECT_STATUS.PENDING, PROJECT_STATUS.IN_REVIEW,
+                 PROJECT_STATUS.ANALYSIS_APPROVED].includes(p.status)
             ).length,
             'Fase 2: Pengembangan': projects.filter(p =>
-                [PROJECT_STATUS.READY_FOR_DEVELOPMENT, PROJECT_STATUS.IN_DEVELOPMENT].includes(p.status)
+                [PROJECT_STATUS.READY_FOR_DEVELOPMENT, PROJECT_STATUS.DEV_ANALYSIS,
+                 PROJECT_STATUS.DEV_ANALYSIS_DONE, PROJECT_STATUS.IN_DEVELOPMENT].includes(p.status)
             ).length,
             'Fase 3: Pengujian QA & Cyber': projects.filter(p =>
-                [PROJECT_STATUS.READY_FOR_QA, PROJECT_STATUS.QA_TESTING, PROJECT_STATUS.QA_PASSED,
-                 PROJECT_STATUS.READY_FOR_CYBER, PROJECT_STATUS.CYBER_TESTING, PROJECT_STATUS.CYBER_PASSED].includes(p.status)
+                [PROJECT_STATUS.READY_FOR_QA, PROJECT_STATUS.QA_IN_PROGRESS, PROJECT_STATUS.QA_PASSED,
+                 PROJECT_STATUS.CYBER_IN_PROGRESS, PROJECT_STATUS.CYBER_PASSED].includes(p.status)
             ).length,
             'Fase 4: Rilis & Quality Gate': projects.filter(p =>
-                [PROJECT_STATUS.READY_FOR_RELEASE, PROJECT_STATUS.UAT, PROJECT_STATUS.UAT_PASSED,
-                 PROJECT_STATUS.QUALITY_GATE, PROJECT_STATUS.COMPLETED].includes(p.status)
+                [PROJECT_STATUS.READY_FOR_UAT, PROJECT_STATUS.UAT_PASSED,
+                 PROJECT_STATUS.PENDING_GOLIVE, PROJECT_STATUS.LIVE_PRODUCTION].includes(p.status)
             ).length,
         };
 
@@ -148,10 +149,10 @@ export default function Dashboard() {
             (p.type === 'RBB' && p.rbbDeadline && new Date(p.rbbDeadline) < new Date(Date.now() + 7 * 86400000))
         ).length;
         const medium = projects.filter(p =>
-            [PROJECT_STATUS.ANALYST_REVIEW, PROJECT_STATUS.LEAD_REVIEW, PROJECT_STATUS.QA_TESTING].includes(p.status)
+            [PROJECT_STATUS.IN_REVIEW, PROJECT_STATUS.QA_IN_PROGRESS].includes(p.status)
         ).length;
         const low = projects.filter(p =>
-            [PROJECT_STATUS.COMPLETED, PROJECT_STATUS.ANALYSIS_APPROVED, PROJECT_STATUS.IN_DEVELOPMENT].includes(p.status)
+            [PROJECT_STATUS.LIVE_PRODUCTION, PROJECT_STATUS.ANALYSIS_APPROVED, PROJECT_STATUS.IN_DEVELOPMENT].includes(p.status)
         ).length;
 
         return [
@@ -165,10 +166,10 @@ export default function Dashboard() {
     const priorityProjects = useMemo(() => {
         const priorityOrder = [
             PROJECT_STATUS.REJECTED,
-            PROJECT_STATUS.QUALITY_GATE,
+            PROJECT_STATUS.PENDING_GOLIVE,
             PROJECT_STATUS.UAT_PASSED,
-            PROJECT_STATUS.ANALYST_REVIEW,
-            PROJECT_STATUS.QA_TESTING,
+            PROJECT_STATUS.IN_REVIEW,
+            PROJECT_STATUS.QA_IN_PROGRESS,
         ];
         const sorted = [...projects].sort((a, b) => {
             const aIdx = priorityOrder.indexOf(a.status);
@@ -184,7 +185,7 @@ export default function Dashboard() {
         const thirtyDays = new Date(now.getTime() + 30 * 86400000);
         return projects
             .filter(p => p.type === 'RBB' && p.rbbDeadline && new Date(p.rbbDeadline) <= thirtyDays
-                && p.status !== PROJECT_STATUS.COMPLETED)
+                && p.status !== PROJECT_STATUS.LIVE_PRODUCTION)
             .sort((a, b) => new Date(a.rbbDeadline) - new Date(b.rbbDeadline))
             .slice(0, 3);
     }, [projects]);

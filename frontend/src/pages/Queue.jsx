@@ -50,15 +50,16 @@ export default function Queue() {
     // Search
     if (searchTerm) {
       const term = searchTerm.toLowerCase();
-      result = result.filter(p =>
-        p.id?.toLowerCase().includes(term) ||
-        p.name?.toLowerCase().includes(term) ||
-        p.division?.toLowerCase().includes(term)
-      );
+      result = result.filter(p => {
+        const idStr = String(p.reqId || p.req_id || p.id || '').toLowerCase();
+        const nameStr = String(p.name || p.title || '').toLowerCase();
+        const divStr = String(typeof p.division === 'object' ? p.division?.name : p.division || '').toLowerCase();
+        return idStr.includes(term) || nameStr.includes(term) || divStr.includes(term);
+      });
     }
 
     // Sorting (terbaru dulu)
-    result.sort((a, b) => (b.id || '').localeCompare(a.id || ''));
+    result.sort((a, b) => (b.id || 0) - (a.id || 0));
 
     return result;
   }, [projects, activeTab, searchTerm, typeFilter]);

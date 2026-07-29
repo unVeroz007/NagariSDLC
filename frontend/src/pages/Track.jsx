@@ -1,5 +1,6 @@
 import { useState, useMemo } from 'react';
 import { useAuth } from '../contexts/AuthContext';
+import { useProjects } from '../contexts/ProjectContext';
 import {
     Search,
     Bell,
@@ -22,160 +23,77 @@ import {
     Eye,
     Download,
 } from 'lucide-react';
-import { mockProjects } from '../data/mockData';
-
-// Data dummy untuk tracking (proyek yang diajukan oleh business_user)
-const trackingProjects = [
-    {
-        id: 'REQ-2026-011',
-        name: 'Sistem Anti-Fraud Baru',
-        status: 'IN DEVELOPMENT',
-        statusColor: 'bg-blue-100 text-blue-700',
-        submittedDate: '12 Okt 2025',
-        targetDate: '28 Feb 2026',
-        pm: 'Budi Santoso',
-        pmAvatar: 'BS',
-        description: 'Sistem deteksi anomali transaksi berbasis machine learning untuk mencegah fraud.',
-        phases: [
-            {
-                name: 'Fase 1: Inisiasi & Persetujuan',
-                description: 'Pengajuan disetujui oleh manajemen dan dialokasikan ke tim IT.',
-                completed: true,
-                items: [
-                    { label: 'Review Bisnis Selesai', date: '15 Okt 2025', done: true },
-                    { label: 'Alokasi Anggaran Disetujui', date: '20 Okt 2025', done: true },
-                ],
-            },
-            {
-                name: 'Fase 2: Desain & Arsitektur',
-                description: 'Perancangan sistem dan infrastruktur oleh tim teknis.',
-                completed: true,
-                items: [],
-            },
-            {
-                name: 'Fase 3: Pengembangan & Testing',
-                description: 'Pembuatan kode program dan pengujian kualitas sistem.',
-                completed: false,
-                isActive: true,
-                items: [
-                    { label: 'Pengembangan Backend', date: 'Selesai', done: true },
-                    { label: 'Integrasi API', date: 'Selesai', done: true },
-                ],
-                activeNote: 'Uji Siber sedang berjalan',
-                activeNoteDetail: 'Tim security sedang memvalidasi keamanan enkripsi data. Estimasi selesai: 5 Nov 2025.',
-            },
-            {
-                name: 'Fase 4: Rilis & Deployment',
-                description: 'Penerapan ke lingkungan produksi dan serah terima.',
-                completed: false,
-                isActive: false,
-                items: [],
-            },
-        ],
-    },
-    {
-        id: 'REQ-2025-089',
-        name: 'Update Dashboard Pelaporan',
-        status: 'LIVE',
-        statusColor: 'bg-emerald-100 text-emerald-700',
-        submittedDate: '05 Jul 2025',
-        targetDate: '15 Sep 2025',
-        pm: 'Dewi Lestari',
-        pmAvatar: 'DL',
-        description: 'Pembaruan dashboard pelaporan dengan visualisasi data real-time.',
-        phases: [
-            {
-                name: 'Fase 1: Inisiasi & Persetujuan',
-                description: 'Pengajuan disetujui.',
-                completed: true,
-                items: [{ label: 'Review Bisnis Selesai', date: '10 Jul 2025', done: true }],
-            },
-            {
-                name: 'Fase 2: Desain & Arsitektur',
-                description: 'Perancangan sistem.',
-                completed: true,
-                items: [],
-            },
-            {
-                name: 'Fase 3: Pengembangan & Testing',
-                description: 'Pengembangan dan testing.',
-                completed: true,
-                items: [],
-            },
-            {
-                name: 'Fase 4: Rilis & Deployment',
-                description: 'Sudah live di produksi.',
-                completed: true,
-                isActive: false,
-                items: [],
-            },
-        ],
-    },
-    {
-        id: 'REQ-2026-005',
-        name: 'Mobile Banking V3',
-        status: 'RETURN TO DEV',
-        statusColor: 'bg-red-100 text-red-700',
-        submittedDate: '20 Sep 2025',
-        targetDate: '15 Jan 2026',
-        pm: 'Andi Pratama',
-        pmAvatar: 'AP',
-        description: 'Versi terbaru mobile banking dengan fitur biometrik.',
-        phases: [
-            {
-                name: 'Fase 1: Inisiasi & Persetujuan',
-                description: 'Pengajuan disetujui.',
-                completed: true,
-                items: [{ label: 'Review Bisnis Selesai', date: '25 Sep 2025', done: true }],
-            },
-            {
-                name: 'Fase 2: Desain & Arsitektur',
-                description: 'Perancangan sistem.',
-                completed: true,
-                items: [],
-            },
-            {
-                name: 'Fase 3: Pengembangan & Testing',
-                description: 'Dikembalikan ke tim dev karena bug kritikal.',
-                completed: false,
-                isActive: true,
-                items: [],
-                activeNote: 'Rework: Bug pada modul autentikasi biometrik',
-                activeNoteDetail: 'Tim QA menemukan celah keamanan pada login biometrik. Perbaikan sedang dilakukan.',
-            },
-        ],
-    },
-];
 
 // Filter status options
 const statusOptions = ['Semua Status', 'Sedang Berjalan', 'Selesai'];
 
 export default function Track() {
     const { user } = useAuth();
-    const [selectedProject, setSelectedProject] = useState(trackingProjects[0]);
+    const { projects } = useProjects();
+
+    const mappedTrackingProjects = useMemo(() => {
+        return (projects || []).map(p => ({
+            id: p.reqId || p.req_id || `REQ-${p.id}`,
+            name: p.name || p.title || 'Proyek Tanpa Judul',
+            status: p.status || 'PENDING',
+            submittedDate: p.created_at ? new Date(p.created_at).toLocaleDateString('id-ID') : 'Terbaru',
+            targetDate: p.targetDate || p.target_date || 'TBD',
+            pm: typeof p.pm === 'object' ? (p.pm?.name || 'Belum Dialokasi') : (p.pm || 'Belum Dialokasi'),
+            pmAvatar: (p.pm?.name || 'BD').substring(0, 2).toUpperCase(),
+            description: p.description || 'Pengajuan proyek baru.',
+            phases: p.phases || [
+                {
+                    name: 'Fase 1: Inisiasi & Persetujuan',
+                    description: 'Pengajuan disetujui oleh manajemen dan dialokasikan ke tim IT.',
+                    completed: p.status !== 'PENDING',
+                    items: [
+                        { label: 'Pengajuan Selesai', date: 'Terbaru', done: true },
+                    ],
+                },
+                {
+                    name: 'Fase 2: Desain & Arsitektur',
+                    description: 'Perancangan sistem dan infrastruktur oleh tim teknis.',
+                    completed: ['IN_DEVELOPMENT', 'QA_IN_PROGRESS', 'CYBER_IN_PROGRESS', 'LIVE_PRODUCTION'].includes(p.status),
+                    items: [],
+                },
+                {
+                    name: 'Fase 3: Pengembangan & Testing',
+                    description: 'Pembuatan kode program dan pengujian kualitas sistem.',
+                    completed: ['LIVE_PRODUCTION'].includes(p.status),
+                    isActive: ['IN_DEVELOPMENT', 'QA_IN_PROGRESS', 'CYBER_IN_PROGRESS'].includes(p.status),
+                    items: [],
+                },
+            ],
+        }));
+    }, [projects]);
+
+    const [selectedProject, setSelectedProject] = useState(null);
     const [searchTerm, setSearchTerm] = useState('');
     const [filterStatus, setFilterStatus] = useState('Semua Status');
 
+    const listProjects = mappedTrackingProjects;
+    const activeSelected = selectedProject || listProjects[0] || null;
+
     // Filter projects
     const filteredProjects = useMemo(() => {
-        let result = trackingProjects;
+        let result = listProjects;
 
         if (searchTerm) {
             const term = searchTerm.toLowerCase();
             result = result.filter(p =>
-                p.id.toLowerCase().includes(term) ||
-                p.name.toLowerCase().includes(term)
+                String(p.id).toLowerCase().includes(term) ||
+                String(p.name).toLowerCase().includes(term)
             );
         }
 
         if (filterStatus === 'Sedang Berjalan') {
-            result = result.filter(p => p.status !== 'LIVE');
+            result = result.filter(p => p.status !== 'LIVE_PRODUCTION');
         } else if (filterStatus === 'Selesai') {
-            result = result.filter(p => p.status === 'LIVE');
+            result = result.filter(p => p.status === 'LIVE_PRODUCTION');
         }
 
         return result;
-    }, [searchTerm, filterStatus]);
+    }, [listProjects, searchTerm, filterStatus]);
 
     // Get status badge
     const getStatusBadge = (status) => {
@@ -223,7 +141,7 @@ export default function Track() {
         );
     };
 
-    if (!selectedProject) {
+    if (listProjects.length === 0) {
         return (
             <div className="flex-1 overflow-y-auto px-6 py-4 md:px-8 md:py-5 bg-[#f8f9fb]">
                 <div className="max-w-4xl mx-auto text-center py-20">
@@ -278,34 +196,37 @@ export default function Track() {
                                 <div
                                     key={project.id}
                                     onClick={() => setSelectedProject(project)}
-                                    className={`bg-white rounded-xl shadow-sm border relative overflow-hidden cursor-pointer hover:shadow-md transition-shadow group ${selectedProject?.id === project.id
+                                    className={`bg-white rounded-xl shadow-sm border relative overflow-hidden cursor-pointer hover:shadow-md transition-shadow group ${activeSelected?.id === project.id
                                             ? 'border-[#1A56DB] ring-1 ring-[#1A56DB]'
                                             : 'border-gray-200'
                                         }`}
                                 >
-                                    {selectedProject?.id === project.id && (
+                                    {activeSelected?.id === project.id && (
                                         <div className="absolute left-0 top-0 bottom-0 w-1.5 bg-[#D4A017]"></div>
                                     )}
                                     <div className="p-4 pl-5">
                                         <div className="flex justify-between items-start mb-2">
                                             <div className="flex flex-col gap-1">
                                                 <span className="text-xs font-semibold text-gray-500">{project.id}</span>
-                                                {project.type && (
-                                                    <span className={`inline-flex self-start px-1.5 py-0.5 rounded text-[10px] font-semibold border ${project.type === 'RBB' ? 'bg-red-50 text-red-700 border-red-200' : 'bg-gray-50 text-gray-600 border-gray-200'}`}>
-                                                        {project.type === 'RBB' ? '🔴 RBB' : '⚪ Non-RBB'}
-                                                    </span>
-                                                )}
                                             </div>
                                             <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold ${getStatusBadge(project.status)}`}>
                                                 {project.status}
                                             </span>
                                         </div>
-                                        <h3 className="font-semibold text-gray-800 mb-1 group-hover:text-[#1A56DB] transition-colors">
+                                        <h3 className="font-semibold text-gray-800 text-sm mb-1 group-hover:text-[#1A56DB] transition-colors line-clamp-1">
                                             {project.name}
                                         </h3>
-                                        <div className="flex items-center text-xs text-gray-500 mt-3">
-                                            <Calendar size={14} className="mr-1" />
-                                            {project.submittedDate}
+                                        <p className="text-xs text-gray-500 line-clamp-2 mb-3">
+                                            {project.description}
+                                        </p>
+                                        <div className="flex items-center justify-between text-[11px] text-gray-500 border-t border-gray-100 pt-2">
+                                            <div className="flex items-center gap-1.5">
+                                                <div className="w-5 h-5 rounded-full bg-blue-100 text-[#1A56DB] flex items-center justify-center font-bold text-[10px]">
+                                                    {project.pmAvatar}
+                                                </div>
+                                                <span className="truncate max-w-[100px]">{project.pm}</span>
+                                            </div>
+                                            <span className="text-gray-400">{project.submittedDate}</span>
                                         </div>
                                     </div>
                                 </div>
@@ -327,46 +248,49 @@ export default function Track() {
                                 <div>
                                     <div className="flex items-center gap-3 mb-2 flex-wrap">
                                         <span className="px-2.5 py-1 bg-gray-100 rounded-md text-xs font-semibold text-gray-600 border border-gray-200">
-                                            {selectedProject.id}
+                                            {activeSelected?.id}
                                         </span>
-                                        {selectedProject.type && (
-                                            <span className={`px-2.5 py-1 rounded-md text-xs font-semibold border ${selectedProject.type === 'RBB' ? 'bg-red-50 text-red-700 border-red-200' : 'bg-gray-50 text-gray-600 border-gray-200'}`}>
-                                                {selectedProject.type === 'RBB' ? '🔴 RBB (Wajib Selesai)' : '⚪ Non-RBB (Fleksibel)'}
+                                        {activeSelected?.type && (
+                                            <span className={`px-2.5 py-1 rounded-md text-xs font-semibold border ${activeSelected.type === 'RBB' ? 'bg-red-50 text-red-700 border-red-200' : 'bg-gray-50 text-gray-600 border-gray-200'}`}>
+                                                {activeSelected.type === 'RBB' ? '🔴 RBB (Wajib Selesai)' : '⚪ Non-RBB (Fleksibel)'}
                                             </span>
                                         )}
-                                        <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-bold ${getStatusBadge(selectedProject.status)}`}>
-                                            <span className={`w-1.5 h-1.5 rounded-full mr-1.5 ${selectedProject.status === 'IN DEVELOPMENT' ? 'bg-blue-500 animate-pulse' : 'bg-current'
+                                        <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-bold ${getStatusBadge(activeSelected?.status)}`}>
+                                            <span className={`w-1.5 h-1.5 rounded-full mr-1.5 ${activeSelected?.status === 'IN DEVELOPMENT' ? 'bg-blue-500 animate-pulse' : 'bg-current'
                                                 }`}></span>
-                                            {selectedProject.status}
+                                            {activeSelected?.status}
                                         </span>
                                     </div>
-                                    <h1 className="text-3xl font-bold text-gray-800 mb-4">{selectedProject.name}</h1>
-                                    <div className="flex flex-wrap gap-x-8 gap-y-4">
-                                        <div>
-                                            <p className="text-xs text-gray-500 mb-1">Tanggal Pengajuan</p>
-                                            <p className="font-semibold text-gray-800 flex items-center">
-                                                <Calendar size={16} className="mr-1.5 text-gray-400" />
-                                                {selectedProject.submittedDate}
-                                            </p>
+                                    <h1 className="text-2xl font-bold text-gray-800">{activeSelected?.name}</h1>
+                                </div>
+                            </div>
+
+                            {/* Info Grid */}
+                            <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-200 mb-6 grid grid-cols-1 md:grid-cols-3 gap-6">
+                                <div>
+                                    <p className="text-xs text-gray-500 mb-1">Deskripsi</p>
+                                    <p className="text-sm text-gray-700">{activeSelected?.description}</p>
+                                </div>
+                                <div>
+                                    <p className="text-xs text-gray-500 mb-1">Target Go-Live</p>
+                                    <p className="font-semibold text-gray-800 flex items-center">
+                                        <Rocket size={16} className="mr-1.5 text-gray-400" />
+                                        {activeSelected?.targetDate}
+                                    </p>
+                                </div>
+                                <div>
+                                    <p className="text-xs text-gray-500 mb-1">Project Manager</p>
+                                    <div className="flex items-center">
+                                        <div className="w-6 h-6 rounded-full bg-[#1A56DB] text-white flex items-center justify-center text-[10px] font-bold mr-2">
+                                            {activeSelected?.pmAvatar}
                                         </div>
-                                        <div>
-                                            <p className="text-xs text-gray-500 mb-1">Target Go-Live</p>
-                                            <p className="font-semibold text-gray-800 flex items-center">
-                                                <Rocket size={16} className="mr-1.5 text-gray-400" />
-                                                {selectedProject.targetDate}
-                                            </p>
-                                        </div>
-                                        <div>
-                                            <p className="text-xs text-gray-500 mb-1">Project Manager</p>
-                                            <div className="flex items-center">
-                                                <div className="w-6 h-6 rounded-full bg-[#1A56DB] text-white flex items-center justify-center text-[10px] font-bold mr-2">
-                                                    {selectedProject.pmAvatar}
-                                                </div>
-                                                <p className="font-semibold text-gray-800">{selectedProject.pm}</p>
-                                            </div>
-                                        </div>
+                                        <p className="font-semibold text-gray-800">{activeSelected?.pm}</p>
                                     </div>
                                 </div>
+                            </div>
+
+                            {/* Action Button */}
+                            <div className="flex justify-end mb-6">
                                 <button
                                     className="shrink-0 flex items-center px-4 py-2.5 rounded-lg bg-gray-100 text-gray-500 cursor-not-allowed opacity-60 transition-colors border border-gray-200 font-semibold text-sm"
                                     disabled
@@ -384,13 +308,13 @@ export default function Track() {
                                 </h2>
 
                                 <div className="relative px-2">
-                                    {selectedProject.phases.map((phase, idx) => (
+                                    {activeSelected?.phases?.map((phase, idx) => (
                                         <div
                                             key={idx}
                                             className="relative flex gap-6 pb-12 last:pb-0"
                                         >
                                             {/* Timeline line */}
-                                            {idx < selectedProject.phases.length - 1 && (
+                                            {idx < activeSelected.phases.length - 1 && (
                                                 <div className="absolute left-5 top-10 bottom-0 w-0.5 bg-gray-200 z-0"></div>
                                             )}
 

@@ -36,10 +36,10 @@ export default function CyberRequest() {
   const [uploadedFiles, setUploadedFiles] = useState([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  // Filter projects ready for Cyber — QA_PASSED atau READY_FOR_CYBER
+  // Filter projects ready for Cyber — QA_PASSED
   const readyProjects = useMemo(() => {
     return projects.filter(
-      p => p.status === PROJECT_STATUS.QA_PASSED || p.status === PROJECT_STATUS.READY_FOR_CYBER
+      p => p.status === PROJECT_STATUS.QA_PASSED || p.status === PROJECT_STATUS.CYBER_IN_PROGRESS
     );
   }, [projects]);
 
@@ -87,7 +87,7 @@ export default function CyberRequest() {
     setIsSubmitting(true);
     setTimeout(() => {
       // Update status proyek agar Workspace Cyber bisa menerima proyek ini
-      updateProject(selectedProject.id, { status: PROJECT_STATUS.READY_FOR_CYBER });
+      updateProject(selectedProject.id, { status: PROJECT_STATUS.CYBER_IN_PROGRESS });
 
       addNotification(
         'Pengajuan Cyber Berhasil',

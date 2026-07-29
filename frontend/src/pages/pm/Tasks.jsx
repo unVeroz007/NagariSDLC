@@ -1,6 +1,7 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
+import { useProjects } from '../../contexts/ProjectContext';
 import {
     Search,
     User,
@@ -13,41 +14,52 @@ import {
     Briefcase,
     TrendingUp,
 } from 'lucide-react';
-import { taskProjects } from '../../data/mockData';
 
 export default function Tasks() {
     const { user } = useAuth();
+    const { projects } = useProjects();
     const navigate = useNavigate();
     const [searchTerm, setSearchTerm] = useState('');
     const [statusFilter, setStatusFilter] = useState('');
-    const [departmentFilter, setDepartmentFilter] = useState('');
 
-    const filteredProjects = taskProjects.filter((project) => {
-        const matchSearch =
-            project.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-            project.id.toLowerCase().includes(searchTerm.toLowerCase());
-        const matchStatus = statusFilter ? project.status === statusFilter : true;
-        return matchSearch && matchStatus;
-    });
+    const mappedProjects = useMemo(() => {
+        return (projects || []).map(p => ({
+            id: p.reqId || p.req_id || `REQ-${p.id}`,
+            realId: p.id,
+            name: p.name || p.title || 'Proyek Tanpa Judul',
+            pm: typeof p.pm === 'object' ? (p.pm?.name || 'Belum Dialokasi') : (p.pm || 'Belum Dialokasi'),
+            status: p.status || 'PENDING',
+            progress: p.status === 'LIVE_PRODUCTION' ? 100 : (p.status === 'IN_DEVELOPMENT' ? 50 : 25),
+        }));
+    }, [projects]);
+
+    const filteredProjects = useMemo(() => {
+        return mappedProjects.filter((project) => {
+            const matchSearch =
+                project.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                String(project.id).toLowerCase().includes(searchTerm.toLowerCase());
+            const matchStatus = statusFilter ? project.status === statusFilter : true;
+            return matchSearch && matchStatus;
+        });
+    }, [mappedProjects, searchTerm, statusFilter]);
 
     const getStatusIcon = (status) => {
         switch (status) {
-            case 'Sedang Berjalan': return <Clock size={14} className="text-emerald-600" />;
-            case 'Kritis': return <AlertCircle size={14} className="text-red-600" />;
-            case 'Selesai': return <CheckCircle size={14} className="text-blue-600" />;
+            case 'IN_DEVELOPMENT': return <Clock size={14} className="text-emerald-600" />;
+            case 'REJECTED': return <AlertCircle size={14} className="text-red-600" />;
+            case 'LIVE_PRODUCTION': return <CheckCircle size={14} className="text-blue-600" />;
             default: return <Briefcase size={14} className="text-gray-500" />;
         }
     };
 
     const getProgressColor = (pct) => {
         if (pct === 100) return 'bg-blue-500';
-        if (pct >= 60) return 'bg-emerald-500';
-        if (pct >= 30) return 'bg-amber-500';
-        return 'bg-red-500';
+        if (pct >= 50) return 'bg-emerald-500';
+        return 'bg-amber-500';
     };
 
     const handleSelectProject = (projectId) => {
-        navigate(`/pm/tasks/${projectId}`);
+        navigate(`/pm/kanban`);
     };
 
     return (
@@ -55,7 +67,7 @@ export default function Tasks() {
             {/* Header */}
             <div className="mb-6">
                 <h2 className="text-2xl font-extrabold text-gray-800">Manajemen Task</h2>
-                <p className="text-gray-500 text-sm mt-1">Pilih proyek untuk mengelola task dan sub-task tim development.</p>
+                <p className="text-gray-500 text-sm mt-1">Pilih proyek dari database backend untuk mengelola task dan sub-task tim development.</p>
             </div>
 
             {/* Toolbar */}
@@ -77,93 +89,61 @@ export default function Tasks() {
                         className="border border-gray-200 rounded-xl px-4 py-2.5 bg-white text-sm focus:outline-none focus:ring-2 focus:ring-[#1A56DB]/20 focus:border-[#1A56DB] shadow-sm"
                     >
                         <option value="">Semua Status</option>
-                        <option value="Sedang Berjalan">Sedang Berjalan</option>
-                        <option value="Kritis">Kritis</option>
-                        <option value="Selesai">Selesai</option>
-                    </select>
-                    <select
-                        value={departmentFilter}
-                        onChange={(e) => setDepartmentFilter(e.target.value)}
-                        className="border border-gray-200 rounded-xl px-4 py-2.5 bg-white text-sm focus:outline-none focus:ring-2 focus:ring-[#1A56DB]/20 focus:border-[#1A56DB] shadow-sm"
-                    >
-                        <option value="">Semua Departemen</option>
-                        <option value="IT Core">IT Core</option>
-                        <option value="Digital Banking">Digital Banking</option>
-                        <option value="Infrastruktur">Infrastruktur</option>
+                        <option value="PENDING">Menunggu Review</option>
+                        <option value="IN_DEVELOPMENT">Sedang Dikembangkan</option>
+                        <option value="LIVE_PRODUCTION">Live Production</option>
                     </select>
                 </div>
             </div>
 
-            {/* Project Grid */}
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
-                {filteredProjects.map((project, idx) => (
-                    <div
-                        key={project.id}
-                        onClick={() => handleSelectProject(project.id)}
-                        className={`bg-white rounded-2xl shadow-sm border border-gray-100 p-5 hover:shadow-lg hover:-translate-y-1 transition-all cursor-pointer flex flex-col group animate-slide-up-${Math.min(idx + 1, 4)}`}
-                    >
-                        {/* Card top */}
-                        <div className="flex justify-between items-start mb-4">
-                            <span className={`flex items-center gap-1.5 text-xs font-bold px-2.5 py-1 rounded-full border ${project.statusColor}`}>
-                                {getStatusIcon(project.status)}
-                                {project.status}
-                            </span>
-                            <span className="text-[10px] font-bold text-gray-400 bg-gray-100 px-2 py-1 rounded-lg">{project.id}</span>
-                        </div>
-
-                        <h3 className="text-base font-bold text-gray-800 mb-2 group-hover:text-[#1A56DB] transition-colors leading-snug">
-                            {project.name}
-                        </h3>
-
-                        <div className="flex items-center gap-2 mb-3">
-                            <div className="w-6 h-6 rounded-full bg-gradient-to-br from-[#1A56DB] to-indigo-600 flex items-center justify-center text-white text-[9px] font-bold shrink-0">
-                                {project.pm?.charAt(0) || 'P'}
-                            </div>
-                            <span className="text-sm text-gray-500">PM: {project.pm}</span>
-                        </div>
-
-                        <div className="mb-4">
-                            <span className={`text-xs font-bold px-2.5 py-1 rounded-full border ${project.priorityColor}`}>
-                                {project.priority}
-                            </span>
-                        </div>
-
-                        {/* Progress section */}
-                        <div className="mt-auto">
-                            <div className="flex justify-between text-xs mb-2">
-                                <span className="font-semibold text-gray-600 flex items-center gap-1">
-                                    <TrendingUp size={12} /> Progress
-                                </span>
-                                <span className={`font-extrabold ${
-                                    project.progress === 100 ? 'text-blue-600' :
-                                    project.progress >= 60 ? 'text-emerald-600' :
-                                    project.progress >= 30 ? 'text-amber-600' : 'text-red-600'
-                                }`}>{project.progress}%</span>
-                            </div>
-                            <div className="w-full bg-gray-100 rounded-full h-2 mb-4 overflow-hidden">
-                                <div
-                                    className={`h-2 rounded-full animate-progress ${getProgressColor(project.progress)}`}
-                                    style={{ width: `${project.progress}%` }}
-                                />
-                            </div>
-
-                            <button className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-[#1A56DB] to-indigo-600 text-white font-bold text-sm py-2.5 rounded-xl hover:shadow-md hover:shadow-[#1A56DB]/30 transition-all group-hover:gap-3 btn-shimmer">
-                                Kelola Task <ArrowUpRight size={15} />
-                            </button>
-                        </div>
+            {/* Cards Grid */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+                {filteredProjects.length === 0 ? (
+                    <div className="col-span-3 bg-white p-8 rounded-2xl border border-gray-200 text-center text-gray-400 font-medium">
+                        Tidak ada proyek ditemukan di database.
                     </div>
-                ))}
+                ) : (
+                    filteredProjects.map((project) => (
+                        <div key={project.realId} className="bg-white rounded-2xl border border-gray-200/80 p-5 shadow-xs hover:shadow-md transition-all flex flex-col justify-between">
+                            <div>
+                                <div className="flex justify-between items-start mb-3">
+                                    <span className="px-2.5 py-1 bg-gray-100 text-gray-600 rounded-lg text-xs font-mono font-bold">
+                                        {project.id}
+                                    </span>
+                                    <span className="flex items-center gap-1.5 text-xs font-bold px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-700">
+                                        {getStatusIcon(project.status)}
+                                        {project.status}
+                                    </span>
+                                </div>
+                                <h3 className="font-bold text-gray-800 text-base mb-2 line-clamp-1">{project.name}</h3>
+                                <p className="text-xs text-gray-500 flex items-center gap-1.5 mb-4">
+                                    <User size={13} className="text-gray-400" /> PM: <span className="font-semibold text-gray-700">{project.pm}</span>
+                                </p>
+                            </div>
+
+                            <div>
+                                <div className="mb-4">
+                                    <div className="flex justify-between text-xs font-bold text-gray-600 mb-1">
+                                        <span>Progress Proyek</span>
+                                        <span>{project.progress}%</span>
+                                    </div>
+                                    <div className="w-full h-2 bg-gray-100 rounded-full overflow-hidden">
+                                        <div className={`h-full ${getProgressColor(project.progress)} rounded-full transition-all duration-500`} style={{ width: `${project.progress}%` }}></div>
+                                    </div>
+                                </div>
+
+                                <button
+                                    onClick={() => handleSelectProject(project.realId)}
+                                    className="w-full py-2.5 px-4 bg-[#1A56DB] hover:bg-[#1546b8] text-white rounded-xl text-xs font-bold transition-all shadow-xs flex items-center justify-center gap-2 group"
+                                >
+                                    <span>Buka Kanban Task</span>
+                                    <ArrowUpRight size={14} className="group-hover:translate-x-0.5 group-hover:-translate-y-0.5 transition-transform" />
+                                </button>
+                            </div>
+                        </div>
+                    ))
+                )}
             </div>
-
-            {filteredProjects.length === 0 && (
-                <div className="text-center py-20 animate-scale-in">
-                    <div className="w-20 h-20 rounded-3xl bg-gray-100 flex items-center justify-center mx-auto mb-4">
-                        <Briefcase size={36} className="text-gray-400" />
-                    </div>
-                    <p className="text-gray-500 font-medium">Tidak ada proyek yang ditemukan.</p>
-                    <p className="text-gray-400 text-sm mt-1">Coba ubah filter pencarian Anda.</p>
-                </div>
-            )}
         </div>
     );
 }

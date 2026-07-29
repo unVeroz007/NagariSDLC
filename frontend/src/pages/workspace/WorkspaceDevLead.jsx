@@ -46,14 +46,14 @@ export default function WorkspaceDevLead() {
     const [estimationDays, setEstimationDays] = useState('');
     const [isSubmitting, setIsSubmitting] = useState(false);
 
-    // 1. Proyek Masuk (READY_FOR_DEV)
+    // 1. Proyek Masuk (READY_FOR_DEVELOPMENT)
     const incomingProjects = projects.filter(p =>
-        p.status === 'READY_FOR_DEV' || p.status === 'PENDING'
+        p.status === 'READY_FOR_DEVELOPMENT' || p.status === 'PENDING'
     );
 
     // 2. Proyek Sedang Dikaji Analyst (DEV_ANALYSIS)
     const analyzingProjects = projects.filter(p =>
-        p.status === 'DEV_ANALYSIS' || p.status === 'ANALYST_REVIEW'
+        p.status === 'DEV_ANALYSIS' || p.status === 'IN_REVIEW'
     );
 
     // 3. Proyek Siap Tunjuk PM (DEV_ANALYSIS_DONE)

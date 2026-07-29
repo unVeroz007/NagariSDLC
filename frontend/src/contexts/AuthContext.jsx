@@ -1,5 +1,8 @@
 // src/contexts/AuthContext.jsx
 import { createContext, useState, useContext, useEffect } from 'react';
+import { authService } from '../services/api';
+
+const MODE = import.meta.env.VITE_API_MODE || 'mock';
 
 const AuthContext = createContext();
 
@@ -132,34 +135,63 @@ const getCustomUsers = () => {
 export function AuthProvider({ children }) {
     const [user, setUser] = useState(null);
     const [isLoggedIn, setIsLoggedIn] = useState(false);
-    const [isLoading, setIsLoading] = useState(true); // untuk cek session awal
+    const [isLoading, setIsLoading] = useState(true);
 
-    // Saat app pertama dimuat, cek apakah ada session di localStorage
     useEffect(() => {
-        const savedSession = localStorage.getItem(SESSION_KEY);
-        if (savedSession) {
-            try {
-                const parsedUser = JSON.parse(savedSession);
-                const allUsers = [...MOCK_USERS, ...getCustomUsers()];
-                // Validasi bahwa user masih ada di "database" kita
-                const validUser = allUsers.find(u => u.id === parsedUser.id || u.email === parsedUser.email);
-                if (validUser) {
-                    const { password: _, ...userWithoutPass } = validUser;
-                    setUser(userWithoutPass);
-                    setIsLoggedIn(true);
-                } else {
-                    localStorage.removeItem(SESSION_KEY);
-                }
-            } catch {
-                localStorage.removeItem(SESSION_KEY);
+        const initAuth = async () => {
+            const savedSession = localStorage.getItem(SESSION_KEY);
+            if (!savedSession) {
+                setIsLoading(false);
+                return;
             }
-        }
-        setIsLoading(false);
+
+            try {
+                const parsed = JSON.parse(savedSession);
+                if (MODE === 'api') {
+                    // Jika token berupa mock token atau tidak valid, hapus session lama
+                    if (!parsed.token || parsed.token === 'mock_token') {
+                        localStorage.removeItem(SESSION_KEY);
+                        setUser(null);
+                        setIsLoggedIn(false);
+                        setIsLoading(false);
+                        return;
+                    }
+
+                    // Verifikasi token dengan backend
+                    const meRes = await authService.getCurrentUser();
+                    if (meRes && meRes.status === 'success' && meRes.data) {
+                        const userData = {
+                            ...meRes.data,
+                            role: meRes.data.role?.name || 'super_admin',
+                        };
+                        setUser(userData);
+                        setIsLoggedIn(true);
+                    } else {
+                        localStorage.removeItem(SESSION_KEY);
+                        setUser(null);
+                        setIsLoggedIn(false);
+                    }
+                } else {
+                    const sessionUser = parsed.user || parsed;
+                    if (sessionUser && (sessionUser.id || sessionUser.email)) {
+                        setUser(sessionUser);
+                        setIsLoggedIn(true);
+                    } else {
+                        localStorage.removeItem(SESSION_KEY);
+                    }
+                }
+            } catch (err) {
+                localStorage.removeItem(SESSION_KEY);
+                setUser(null);
+                setIsLoggedIn(false);
+            } finally {
+                setIsLoading(false);
+            }
+        };
+
+        initAuth();
     }, []);
 
-    /**
-     * Mendaftarkan user baru ke localStorage
-     */
     const registerUser = (userData) => {
         const customUsers = getCustomUsers();
         const allUsers = [...MOCK_USERS, ...customUsers];
@@ -185,11 +217,31 @@ export function AuthProvider({ children }) {
         return { success: true, user: newUser };
     };
 
-    /**
-     * Login dengan email dan password.
-     * Mengembalikan { success: true } atau { success: false, message: '...' }
-     */
-    const login = (email, password) => {
+    const login = async (email, password) => {
+        if (MODE === 'api') {
+            try {
+                const res = await authService.login(email, password);
+                if (res.status === 'success' && res.data) {
+                    const userData = {
+                        ...res.data.user,
+                        role: res.data.user.role?.name || 'super_admin',
+                    };
+                    const sessionData = {
+                        user: userData,
+                        token: res.data.token,
+                    };
+                    setUser(userData);
+                    setIsLoggedIn(true);
+                    localStorage.setItem(SESSION_KEY, JSON.stringify(sessionData));
+                    return { success: true };
+                } else {
+                    return { success: false, message: res.message || 'Login gagal.' };
+                }
+            } catch (err) {
+                return { success: false, message: err.message || 'Email atau password salah.' };
+            }
+        }
+
         const customUsers = getCustomUsers();
         const allUsers = [...MOCK_USERS, ...customUsers];
 
@@ -201,33 +253,24 @@ export function AuthProvider({ children }) {
             return { success: false, message: 'Email atau password salah.' };
         }
 
-        // Jangan simpan password di state/localStorage
         const { password: _, ...userWithoutPass } = foundUser;
         setUser(userWithoutPass);
         setIsLoggedIn(true);
-
-        // Simpan session ke localStorage agar persist setelah refresh
-        localStorage.setItem(SESSION_KEY, JSON.stringify(userWithoutPass));
+        localStorage.setItem(SESSION_KEY, JSON.stringify({ user: userWithoutPass, token: 'mock_token' }));
 
         return { success: true };
     };
 
-    /**
-     * Logout: hapus state dan session.
-     */
     const logout = () => {
         setUser(null);
         setIsLoggedIn(false);
         localStorage.removeItem(SESSION_KEY);
     };
 
-    /**
-     * Update data profil user yang sedang login.
-     */
     const updateProfile = (updates) => {
         const updatedUser = { ...user, ...updates };
         setUser(updatedUser);
-        localStorage.setItem(SESSION_KEY, JSON.stringify(updatedUser));
+        localStorage.setItem(SESSION_KEY, JSON.stringify({ user: updatedUser }));
     };
 
     return (

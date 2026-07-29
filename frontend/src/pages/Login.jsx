@@ -27,19 +27,22 @@ export default function Login() {
 
     const [error, setError] = useState('');
 
-    const handleSubmit = (e) => {
+    const handleSubmit = async (e) => {
         e.preventDefault();
         setError('');
         setIsLoading(true);
-        setTimeout(() => {
-            const result = login(username, password);
+        try {
+            const result = await login(username, password);
             setIsLoading(false);
             if (result.success) {
                 navigate('/dashboard');
             } else {
                 setError(result.message || 'Login gagal. Periksa kembali email dan password Anda.');
             }
-        }, 500);
+        } catch (err) {
+            setIsLoading(false);
+            setError(err.message || 'Terjadi kesalahan koneksi ke server.');
+        }
     };
 
 

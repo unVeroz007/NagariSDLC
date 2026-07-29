@@ -37,7 +37,7 @@ export default function ReleaseRequest() {
     const navigate = useNavigate();
     const { addNotification } = useNotifications();
     const { projects, updateProject, isLoading } = useProjects();
-    const readyProjects = projects.filter(p => p.status === 'Passed Security' || p.status === 'Ready for Release' || p.phase === 'Fase 3: Pengujian');
+    const readyProjects = projects.filter(p => p.status === 'UAT_PASSED' || p.status === 'PENDING_GOLIVE');
     const [formData, setFormData] = useState({
         projectId: '',
         releaseDate: '',
@@ -48,16 +48,19 @@ export default function ReleaseRequest() {
     const [uploadedFile, setUploadedFile] = useState(null);
     const [isSubmitting, setIsSubmitting] = useState(false);
 
-    // Mock release ticket number
     const ticketNumber = 'REL-REQ-2026-0015';
 
-    // Handle form change
+    const complianceDocs = [
+        { id: 'fsd', icon: Network, label: 'FSD & TSD', sub: 'System Design', verified: true },
+        { id: 'qa', icon: CheckSquare, label: 'QA Sign-Off', sub: 'UAT Passed', verified: true },
+        { id: 'cyber', icon: Shield, label: 'Pentest Report', sub: 'Cyber Security Cleared', verified: true },
+    ];
+
     const handleChange = (e) => {
         const { name, value } = e.target;
         setFormData((prev) => ({ ...prev, [name]: value }));
     };
 
-    // Handle file upload
     const handleFileUpload = (e) => {
         const file = e.target.files[0];
         if (file) {
@@ -87,69 +90,38 @@ export default function ReleaseRequest() {
         e.preventDefault();
     };
 
-    // Handle submit
-    const handleSubmit = (e) => {
+    const handleSubmit = async (e) => {
         e.preventDefault();
         if (!formData.projectId) {
             toast.error('Pilih proyek terlebih dahulu!');
             return;
         }
-        if (!formData.releaseDate) {
-            toast.error('Tentukan jadwal rilis!');
-            return;
-        }
-        if (!formData.releaseNotes.trim()) {
-            toast.error('Masukkan release notes!');
-            return;
-        }
-        if (!formData.rollbackProcedure.trim()) {
-            toast.error('Masukkan prosedur rollback!');
-            return;
-        }
         setIsSubmitting(true);
-        setTimeout(() => {
+        try {
+            await updateProject(formData.projectId, { status: 'PENDING_GOLIVE' });
             addNotification(
                 'Rilis Menunggu Approval',
-                `Proyek ${formData.projectId} menunggu approval Quality Gate.`,
+                `Proyek #${formData.projectId} telah diajukan ke Quality Gate Head of IT.`,
                 'warning',
                 '/quality-gate'
             );
-            toast.error(`Pengajuan rilis ${ticketNumber} berhasil dikirim ke Quality Gate!`);
+            toast.success(`Pengajuan rilis berhasil dikirim ke Quality Gate!`);
             navigate('/quality-gate');
+        } catch (err) {
+            toast.error(err.message || 'Gagal mengajukan rilis.');
+        } finally {
             setIsSubmitting(false);
-            // Reset form
-            setFormData({
-                projectId: '',
-                releaseDate: '',
-                downtime: 'Tidak ada downtime (Zero Downtime)',
-                releaseNotes: '',
-                rollbackProcedure: '',
-            });
-            setUploadedFile(null);
-        }, 1500);
+        }
     };
 
-    // Compliance documents (mock data)
-    const complianceDocs = [
-        { id: 'brd', icon: FileText, label: 'BRD', sub: 'Business Req. Doc', verified: true },
-        { id: 'fsd', icon: Network, label: 'FSD & TSD', sub: 'System Design', verified: true },
-        { id: 'qa', icon: CheckSquare, label: 'QA Sign-Off', sub: 'UAT Passed', verified: true },
-        { id: 'cyber', icon: Shield, label: 'Pentest Report', sub: 'Cyber Security Cleared', verified: true },
-    ];
-
-        if (isLoading) return <LoadingSpinner text="Memuat proyek..." />;
+    if (isLoading) return <LoadingSpinner text="Memuat proyek..." />;
 
     return (
         <div className="flex-1 overflow-y-auto px-6 py-4 md:px-8 md:py-5 bg-[#f8f9fb]">
             <div className="max-w-5xl mx-auto space-y-6">
-                {/* Page Header */}
                 <div className="mb-6">
-                    <h2 className="text-2xl font-bold text-gray-800 mb-2">
-                        Form Pengajuan Rilis Produksi (Go-Live)
-                    </h2>
-                    <p className="text-sm text-gray-500">
-                        Lengkapi parameter deployment. Tiket ini memerlukan verifikasi Quality Gate (QA &amp; Cyber Security) sebelum rilis ke Production.
-                    </p>
+                    <h2 className="text-2xl font-bold text-gray-800 mb-2">Form Pengajuan Rilis Produksi (Go-Live)</h2>
+                    <p className="text-sm text-gray-500">Lengkapi parameter deployment. Tiket ini memerlukan verifikasi Quality Gate sebelum rilis ke Production.</p>
                 </div>
 
                 <form className="space-y-6" onSubmit={handleSubmit}>
@@ -180,40 +152,12 @@ export default function ReleaseRequest() {
                                     className="w-full px-4 py-2 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-[#1A56DB] focus:border-[#1A56DB] bg-white"
                                     required
                                 >
-                                    <option value="">Pilih proyek...</option>
-                                    {mockProjects.map((project) => (
+                                    <option value="">Pilih proyek dari database...</option>
+                                    {(projects || []).map((project) => (
                                         <option key={project.id} value={project.id}>
-                                            {project.type === 'RBB' ? '🔴 [RBB] ' : ''}{project.name} ({project.id})
+                                            {project.name || project.title} ({project.reqId || project.req_id || project.id})
                                         </option>
                                     ))}
-                                </select>
-                            </div>
-                            <div className="space-y-2">
-                                <label className="block text-sm font-semibold text-gray-700">
-                                    Jadwal Rilis (Target) <span className="text-red-500">*</span>
-                                </label>
-                                <input
-                                    type="datetime-local"
-                                    name="releaseDate"
-                                    value={formData.releaseDate}
-                                    onChange={handleChange}
-                                    className="w-full px-4 py-2 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-[#1A56DB] focus:border-[#1A56DB] bg-white"
-                                    required
-                                />
-                            </div>
-                            <div className="space-y-2">
-                                <label className="block text-sm font-semibold text-gray-700">
-                                    Kebutuhan Downtime <span className="text-red-500">*</span>
-                                </label>
-                                <select
-                                    name="downtime"
-                                    value={formData.downtime}
-                                    onChange={handleChange}
-                                    className="w-full px-4 py-2 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-[#1A56DB] focus:border-[#1A56DB] bg-white"
-                                >
-                                    <option>Ya, butuh downtime (Full)</option>
-                                    <option>Ya, butuh downtime (Parsial)</option>
-                                    <option selected>Tidak ada downtime (Zero Downtime)</option>
                                 </select>
                             </div>
                         </div>

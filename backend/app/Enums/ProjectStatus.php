@@ -1,0 +1,27 @@
+<?php
+
+namespace App\Enums;
+
+enum ProjectStatus: string
+{
+    case PENDING = 'PENDING';
+    case IN_REVIEW = 'IN_REVIEW';
+    case ANALYSIS_APPROVED = 'ANALYSIS_APPROVED';
+    case REJECTED = 'REJECTED';
+    case READY_FOR_DEVELOPMENT = 'READY_FOR_DEVELOPMENT';
+    case DEV_ANALYSIS = 'DEV_ANALYSIS';
+    case DEV_ANALYSIS_DONE = 'DEV_ANALYSIS_DONE';
+    case IN_DEVELOPMENT = 'IN_DEVELOPMENT';
+    case READY_FOR_QA = 'READY_FOR_QA';
+    case QA_IN_PROGRESS = 'QA_IN_PROGRESS';
+    case RETURN_TO_DEV = 'RETURN_TO_DEV';
+    case QA_PASSED = 'QA_PASSED';
+    case CYBER_IN_PROGRESS = 'CYBER_IN_PROGRESS';
+    case CYBER_PASSED = 'CYBER_PASSED';
+    case READY_FOR_UAT = 'READY_FOR_UAT';
+    case UAT_PASSED = 'UAT_PASSED';
+    case PENDING_GOLIVE = 'PENDING_GOLIVE';
+    case LIVE_PRODUCTION = 'LIVE_PRODUCTION';
+    case ON_HOLD = 'ON_HOLD';
+    case CANCELLED = 'CANCELLED';
+}

@@ -33,12 +33,10 @@ export default function WorkspaceAnalyst() {
     const { projects, updateProject, isLoading } = useProjects();
     const navigate = useNavigate();
     const { addNotification } = useNotifications();
-    // Ambil queue review analis dari status DEV_ANALYSIS, ANALYST_REVIEW, atau Review Analis
+    // Ambil queue review analis dari status IN_REVIEW atau DEV_ANALYSIS
     const reviewQueue = projects.filter(p =>
-        p.status === 'DEV_ANALYSIS' ||
-        p.status === 'ANALYST_REVIEW' ||
-        p.status === 'Review Analis' ||
-        p.status === 'Menunggu Analis'
+        p.status === 'IN_REVIEW' ||
+        p.status === 'DEV_ANALYSIS'
     );
     const [selectedProject, setSelectedProject] = useState(null);
 
@@ -65,7 +63,7 @@ export default function WorkspaceAnalyst() {
         
         // Update project status based on decision
         const isApproved = decision.includes('Disetujui');
-        const finalStatus = isApproved ? 'DEV_ANALYSIS_DONE' : 'DEV_ANALYSIS_REJECTED';
+        const finalStatus = isApproved ? 'DEV_ANALYSIS_DONE' : 'REJECTED';
 
         updateProject(selectedProject.id, {
             status: finalStatus,

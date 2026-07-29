@@ -51,8 +51,7 @@ const PHASES = [
         activeBg: 'bg-blue-50',
         statuses: [
             PROJECT_STATUS.PENDING,
-            PROJECT_STATUS.LEAD_REVIEW,
-            PROJECT_STATUS.ANALYST_REVIEW,
+            PROJECT_STATUS.IN_REVIEW,
             PROJECT_STATUS.ANALYSIS_APPROVED,
         ],
     },
@@ -69,6 +68,8 @@ const PHASES = [
         activeBg: 'bg-indigo-50',
         statuses: [
             PROJECT_STATUS.READY_FOR_DEVELOPMENT,
+            PROJECT_STATUS.DEV_ANALYSIS,
+            PROJECT_STATUS.DEV_ANALYSIS_DONE,
             PROJECT_STATUS.IN_DEVELOPMENT,
         ],
     },
@@ -85,7 +86,7 @@ const PHASES = [
         activeBg: 'bg-purple-50',
         statuses: [
             PROJECT_STATUS.READY_FOR_QA,
-            PROJECT_STATUS.QA_TESTING,
+            PROJECT_STATUS.QA_IN_PROGRESS,
             PROJECT_STATUS.QA_PASSED,
         ],
     },
@@ -101,8 +102,7 @@ const PHASES = [
         borderColor: 'border-orange-200',
         activeBg: 'bg-orange-50',
         statuses: [
-            PROJECT_STATUS.READY_FOR_CYBER,
-            PROJECT_STATUS.CYBER_TESTING,
+            PROJECT_STATUS.CYBER_IN_PROGRESS,
             PROJECT_STATUS.CYBER_PASSED,
         ],
     },
@@ -118,11 +118,10 @@ const PHASES = [
         borderColor: 'border-emerald-200',
         activeBg: 'bg-emerald-50',
         statuses: [
-            PROJECT_STATUS.READY_FOR_RELEASE,
-            PROJECT_STATUS.UAT,
+            PROJECT_STATUS.READY_FOR_UAT,
             PROJECT_STATUS.UAT_PASSED,
-            PROJECT_STATUS.QUALITY_GATE,
-            PROJECT_STATUS.COMPLETED,
+            PROJECT_STATUS.PENDING_GOLIVE,
+            PROJECT_STATUS.LIVE_PRODUCTION,
         ],
     },
 ];
@@ -130,23 +129,23 @@ const PHASES = [
 // Urutan semua status agar bisa menentukan posisi relatif
 const STATUS_ORDER = [
     PROJECT_STATUS.PENDING,
-    PROJECT_STATUS.LEAD_REVIEW,
-    PROJECT_STATUS.ANALYST_REVIEW,
+    PROJECT_STATUS.IN_REVIEW,
     PROJECT_STATUS.ANALYSIS_APPROVED,
     PROJECT_STATUS.REJECTED,
     PROJECT_STATUS.READY_FOR_DEVELOPMENT,
+    PROJECT_STATUS.DEV_ANALYSIS,
+    PROJECT_STATUS.DEV_ANALYSIS_DONE,
     PROJECT_STATUS.IN_DEVELOPMENT,
+    PROJECT_STATUS.RETURN_TO_DEV,
     PROJECT_STATUS.READY_FOR_QA,
-    PROJECT_STATUS.QA_TESTING,
+    PROJECT_STATUS.QA_IN_PROGRESS,
     PROJECT_STATUS.QA_PASSED,
-    PROJECT_STATUS.READY_FOR_CYBER,
-    PROJECT_STATUS.CYBER_TESTING,
+    PROJECT_STATUS.CYBER_IN_PROGRESS,
     PROJECT_STATUS.CYBER_PASSED,
-    PROJECT_STATUS.READY_FOR_RELEASE,
-    PROJECT_STATUS.UAT,
+    PROJECT_STATUS.READY_FOR_UAT,
     PROJECT_STATUS.UAT_PASSED,
-    PROJECT_STATUS.QUALITY_GATE,
-    PROJECT_STATUS.COMPLETED,
+    PROJECT_STATUS.PENDING_GOLIVE,
+    PROJECT_STATUS.LIVE_PRODUCTION,
 ];
 
 // Tentukan apakah status tertentu sudah dilewati oleh status saat ini
@@ -188,7 +187,7 @@ function ProjectCard({ project, isSelected, onClick }) {
 
     // Hitung % progress berdasarkan posisi status di STATUS_ORDER
     const currentIdx = STATUS_ORDER.indexOf(project.status);
-    const progress = project.status === PROJECT_STATUS.COMPLETED
+    const progress = project.status === PROJECT_STATUS.LIVE_PRODUCTION
         ? 100
         : project.status === PROJECT_STATUS.REJECTED
         ? 0

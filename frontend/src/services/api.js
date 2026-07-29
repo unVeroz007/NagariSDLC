@@ -15,22 +15,23 @@
  */
 
 // Base URL (dari environment variable Vite)
-const BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001/api';
+const BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000/api/v1';
 
 // ──────────────────────────────────────────────────────────
 // Helper: buat headers dengan JWT token
 // ──────────────────────────────────────────────────────────
 function authHeaders() {
     const session = localStorage.getItem('nagari_sdlc_session');
-    if (!session) return { 'Content-Type': 'application/json' };
+    if (!session) return { 'Content-Type': 'application/json', 'Accept': 'application/json' };
     try {
         const { token } = JSON.parse(session);
         return {
             'Content-Type': 'application/json',
+            'Accept': 'application/json',
             ...(token ? { Authorization: `Bearer ${token}` } : {}),
         };
     } catch {
-        return { 'Content-Type': 'application/json' };
+        return { 'Content-Type': 'application/json', 'Accept': 'application/json' };
     }
 }
 

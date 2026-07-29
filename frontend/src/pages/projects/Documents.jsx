@@ -55,14 +55,6 @@ const mapDocTypeToCategory = (type) => {
     }
 };
 
-// Statistik ringkasan
-const summaryData = [
-    { label: 'Total Dokumen', value: '1,248', icon: FolderOpen, change: '+12%', changeColor: 'text-status-success' },
-    { label: 'File PDF', value: '452', icon: File, sub: 'BRD, FSD, Kontrak' },
-    { label: 'File Word', value: '620', icon: FileText, sub: 'Draft, Notulensi, UAT' },
-    { label: 'File Excel', value: '176', icon: FileSpreadsheet, sub: 'Matrix, Timeline, Data' },
-];
-
 // Mapping icon
 const iconMap = {
     pdf: { icon: File, className: 'text-status-error' },
@@ -93,12 +85,28 @@ export default function Documents() {
             size: doc.file_size,
             project: doc.project_name,
             category: typeInfo.category,
-            categoryColor: typeInfo.color,
-            uploadedBy: doc.uploaded_by,
-            date: new Date(doc.created_at).toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' }),
-            icon: icon,
+            uploadedBy: doc.uploaded_by_name || 'System User',
+            date: doc.created_at ? new Date(doc.created_at).toLocaleDateString('id-ID') : 'Terbaru',
+            type: doc.doc_type,
+            icon,
+            color: typeInfo.color,
         };
     }), [ctxDocs]);
+
+    // Dynamic summary metrics based on real mappedDocs
+    const summaryData = useMemo(() => {
+        const total = mappedDocs.length;
+        const pdf = mappedDocs.filter(d => d.name?.toLowerCase().endsWith('.pdf')).length;
+        const word = mappedDocs.filter(d => d.name?.toLowerCase().endsWith('.docx') || d.name?.toLowerCase().endsWith('.doc')).length;
+        const excel = mappedDocs.filter(d => d.name?.toLowerCase().endsWith('.xlsx') || d.name?.toLowerCase().endsWith('.xls')).length;
+
+        return [
+            { label: 'Total Dokumen', value: total.toLocaleString(), icon: FolderOpen, sub: `${total} dokumen tersimpan` },
+            { label: 'File PDF', value: pdf.toLocaleString(), icon: File, sub: 'BRD, FSD, Kontrak' },
+            { label: 'File Word', value: word.toLocaleString(), icon: FileText, sub: 'Draft, Notulensi, UAT' },
+            { label: 'File Excel', value: excel.toLocaleString(), icon: FileSpreadsheet, sub: 'Matrix, Timeline, Data' },
+        ];
+    }, [mappedDocs]);
 
     // Filter dokumen
     const filteredDocs = useMemo(() => {
