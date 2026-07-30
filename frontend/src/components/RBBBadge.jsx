@@ -1,7 +1,9 @@
 import { Calendar, AlertTriangle } from 'lucide-react';
 
 export default function RBBBadge({ type, deadline }) {
-  if (type === 'RBB') {
+  const normType = String(type || '').toUpperCase().replace('-', '_');
+
+  if (normType === 'RBB') {
     const isNearDeadline = deadline && (new Date(deadline) - new Date()) < 30 * 24 * 60 * 60 * 1000;
     
     return (
@@ -23,13 +25,10 @@ export default function RBBBadge({ type, deadline }) {
     );
   }
 
-  if (type === 'NON_RBB') {
-    return (
-      <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-bold bg-gray-100 text-gray-500 border border-gray-200 shadow-sm">
-        Non-RBB
-      </span>
-    );
-  }
-
-  return null;
+  return (
+    <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-bold bg-gray-100 text-gray-500 border border-gray-200 shadow-sm">
+      Non-RBB
+    </span>
+  );
 }
+

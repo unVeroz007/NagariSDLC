@@ -59,7 +59,7 @@ export default function Tasks() {
     };
 
     const handleSelectProject = (projectId) => {
-        navigate(`/pm/kanban`);
+        navigate(`/pm/tasks/${projectId}`);
     };
 
     return (
@@ -134,9 +134,9 @@ export default function Tasks() {
 
                                 <button
                                     onClick={() => handleSelectProject(project.realId)}
-                                    className="w-full py-2.5 px-4 bg-[#1A56DB] hover:bg-[#1546b8] text-white rounded-xl text-xs font-bold transition-all shadow-xs flex items-center justify-center gap-2 group"
+                                    className="w-full py-2.5 px-4 bg-[#1A56DB] hover:bg-[#1546b8] text-white rounded-xl text-xs font-bold transition-all shadow-xs flex items-center justify-center gap-2 group cursor-pointer active:scale-95"
                                 >
-                                    <span>Buka Kanban Task</span>
+                                    <span>Kelola Task &amp; Pekerjaan Dev</span>
                                     <ArrowUpRight size={14} className="group-hover:translate-x-0.5 group-hover:-translate-y-0.5 transition-transform" />
                                 </button>
                             </div>

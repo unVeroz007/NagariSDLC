@@ -2,6 +2,7 @@ import { useState, useMemo } from 'react';
 import RBBBadge from '../../components/RBBBadge';
 import { useNavigate } from 'react-router-dom';
 import { useProjects } from '../../contexts/ProjectContext';
+import { useAuth } from '../../contexts/AuthContext';
 import LoadingSpinner from '../../components/LoadingSpinner';
 import EmptyState from '../../components/EmptyState';
 import {
@@ -21,9 +22,11 @@ import {
     ArrowUpRight,
 } from 'lucide-react';
 import { mockProjects, getProjectStats } from '../../data/mockData';
+import { PROJECT_STATUS_LABEL, PROJECT_STATUS_COLOR } from '../../constants/projectStatus';
 
 export default function ProjectList() {
     const navigate = useNavigate();
+    const { user } = useAuth();
     const { projects, isLoading } = useProjects();
     const [searchTerm, setSearchTerm] = useState('');
     const [divisionFilter, setDivisionFilter] = useState('');
@@ -53,7 +56,15 @@ export default function ProjectList() {
             });
         }
         if (statusFilter) result = result.filter(p => (p.status || '').includes(statusFilter));
-        if (typeFilter) result = result.filter(p => p.type === typeFilter);
+        if (typeFilter) {
+            result = result.filter(p => {
+                const normType = String(p.type || '').toUpperCase().replace('-', '_');
+                const normFilter = String(typeFilter).toUpperCase().replace('-', '_');
+                if (normFilter === 'RBB') return normType === 'RBB';
+                if (normFilter === 'NON_RBB') return normType === 'NON_RBB' || normType === 'NONRBB' || normType !== 'RBB';
+                return normType === normFilter;
+            });
+        }
 
         switch (sortBy) {
             case 'newest': result.sort((a, b) => (b.id || 0) - (a.id || 0)); break;
@@ -199,52 +210,73 @@ export default function ProjectList() {
                             </thead>
                             <tbody className="divide-y divide-gray-50 text-sm">
                                 {currentProjects.length > 0 ? (
-                                    currentProjects.map((project) => (
-                                        <tr key={project.id} className="group hover:bg-blue-50/30 transition-colors cursor-pointer">
-                                            <td className="px-5 py-4">
-                                                <span className="font-bold text-[#1A56DB] bg-blue-50 px-2.5 py-1 rounded-lg text-xs">{project.id}</span>
-                                            </td>
-                                            <td className="px-5 py-4">
-                                                <div>
-                                                    <div className="font-semibold text-gray-800 group-hover:text-[#1A56DB] transition-colors">{project.name}</div>
-                                                    <div className="text-xs text-gray-400 truncate w-48 xl:w-64 mt-0.5">{project.description}</div>
-                                                </div>
-                                            </td>
-                                            <td className="px-5 py-4 text-gray-500 text-sm">{project.division}</td>
-                                            <td className="px-5 py-4">
-                                                {project.pm ? (
-                                                    <div className="flex items-center gap-2">
-                                                        <div className="w-7 h-7 rounded-full bg-gradient-to-br from-[#1A56DB] to-indigo-600 text-white flex items-center justify-center text-[10px] font-bold shadow-sm">
-                                                            {project.pm.initial}
-                                                        </div>
-                                                        <span className="text-gray-700 font-medium">{project.pm.name}</span>
+                                    currentProjects.map((project) => {
+                                        const isPmOrAdmin = ['project_manager', 'super_admin'].includes(user?.role);
+                                        const targetPath = isPmOrAdmin ? '/pm/tracker' : '/track';
+                                        const handleNavigate = () => {
+                                            navigate(`${targetPath}?projectId=${project.id}`, { state: { projectId: project.id } });
+                                        };
+
+                                        return (
+                                            <tr
+                                                key={project.id}
+                                                onClick={handleNavigate}
+                                                className="group hover:bg-blue-50/40 transition-colors cursor-pointer"
+                                            >
+                                                <td className="px-5 py-4">
+                                                    <span className="font-bold text-[#1A56DB] bg-blue-50 px-2.5 py-1 rounded-lg text-xs">{project.reqId || project.id}</span>
+                                                </td>
+                                                <td className="px-5 py-4">
+                                                    <div>
+                                                        <div className="font-semibold text-gray-800 group-hover:text-[#1A56DB] transition-colors">{project.name}</div>
+                                                        <div className="text-xs text-gray-400 truncate w-48 xl:w-64 mt-0.5">{project.description}</div>
                                                     </div>
-                                                ) : (
-                                                    <div className="flex items-center gap-2 text-gray-400">
-                                                        <div className="w-7 h-7 rounded-full border-2 border-dashed border-gray-200 flex items-center justify-center">
-                                                            <UserX size={13} />
+                                                </td>
+                                                <td className="px-5 py-4 text-gray-500 text-sm">{project.division}</td>
+                                                <td className="px-5 py-4">
+                                                    {project.pm ? (
+                                                        <div className="flex items-center gap-2">
+                                                            <div className="w-7 h-7 rounded-full bg-gradient-to-br from-[#1A56DB] to-indigo-600 text-white flex items-center justify-center text-[10px] font-bold shadow-sm">
+                                                                {project.pm.initial || (project.pm.name || 'PM').substring(0, 2).toUpperCase()}
+                                                            </div>
+                                                            <span className="text-gray-700 font-medium">{project.pm.name}</span>
                                                         </div>
-                                                        <span className="italic text-xs">Belum Dialokasi</span>
+                                                    ) : (
+                                                        <div className="flex items-center gap-2 text-gray-400">
+                                                            <div className="w-7 h-7 rounded-full border-2 border-dashed border-gray-200 flex items-center justify-center">
+                                                                <UserX size={13} />
+                                                            </div>
+                                                            <span className="italic text-xs">Belum Dialokasi</span>
+                                                        </div>
+                                                    )}
+                                                </td>
+                                                <td className="px-5 py-4">
+                                                    <div className="flex flex-col gap-1.5 items-start">
+                                                        <RBBBadge type={project.type} deadline={project.rbbDeadline} />
+                                                        <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-semibold border ${
+                                                            PROJECT_STATUS_COLOR[project.status] || project.statusColor || 'bg-gray-100 text-gray-700'
+                                                        }`}>
+                                                            <span className="w-1 h-1 rounded-full bg-current" />
+                                                            {PROJECT_STATUS_LABEL[project.status] || project.status}
+                                                        </span>
                                                     </div>
-                                                )}
-                                            </td>
-                                            <td className="px-5 py-4">
-                                                <div className="flex flex-col gap-1.5 items-start">
-                                                    <RBBBadge type={project.type} deadline={project.rbbDeadline} />
-                                                    <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-semibold border ${project.statusColor}`}>
-                                                        <span className="w-1 h-1 rounded-full bg-current" />
-                                                        {project.status}
-                                                    </span>
-                                                </div>
-                                            </td>
-                                            <td className="px-5 py-4 text-gray-500 text-sm">{project.targetDate}</td>
-                                            <td className="px-5 py-4 text-center">
-                                                <button className="p-2 text-gray-300 hover:text-[#1A56DB] hover:bg-blue-50 rounded-lg transition-all opacity-0 group-hover:opacity-100">
-                                                    <ArrowUpRight size={16} />
-                                                </button>
-                                            </td>
-                                        </tr>
-                                    ))
+                                                </td>
+                                                <td className="px-5 py-4 text-gray-500 text-sm">{project.targetDate}</td>
+                                                <td className="px-5 py-4 text-center">
+                                                    <button
+                                                        onClick={(e) => {
+                                                            e.stopPropagation();
+                                                            handleNavigate();
+                                                        }}
+                                                        className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-50 hover:bg-blue-100 text-[#1A56DB] text-xs font-bold rounded-lg border border-[#1A56DB]/30 transition-all shadow-sm active:scale-95"
+                                                    >
+                                                        <span>Detail</span>
+                                                        <ArrowUpRight size={14} />
+                                                    </button>
+                                                </td>
+                                            </tr>
+                                        );
+                                    })
                                 ) : (
                                     <tr>
                                         <td colSpan="7" className="px-6 py-16 text-center">

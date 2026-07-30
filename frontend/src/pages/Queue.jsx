@@ -9,6 +9,7 @@ import {
   Search,
   ChevronLeft,
   ChevronRight,
+  ChevronDown,
   Clock,
   CheckCircle,
   XCircle,
@@ -31,7 +32,7 @@ export default function Queue() {
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 5;
 
-  // Filter proyek berdasarkan status
+  // Filter proyek berdasarkan status & tipe
   const filteredProjects = useMemo(() => {
     let result = [];
 
@@ -44,7 +45,12 @@ export default function Queue() {
     }
 
     if (typeFilter !== 'All') {
-      result = result.filter(p => p.type === typeFilter);
+      result = result.filter(p => {
+        const norm = (p.type || '').toUpperCase().replace('-', '_');
+        if (typeFilter === 'RBB') return norm === 'RBB';
+        if (typeFilter === 'NON_RBB') return norm === 'NON_RBB' || norm !== 'RBB';
+        return true;
+      });
     }
 
     // Search
@@ -155,15 +161,20 @@ export default function Queue() {
               </p>
             </div>
             
-            <select
+            {/* Dropdown Filter Tipe */}
+            <div className="relative shrink-0 sm:w-64">
+              <select
                 value={typeFilter}
-                onChange={(e) => setTypeFilter(e.target.value)}
-                className="px-4 py-2 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-[#1A56DB] outline-none appearance-none bg-white font-medium text-gray-700"
-            >
-                <option value="All">Semua Tipe</option>
-                <option value="RBB">RBB (Wajib Selesai)</option>
-                <option value="NON_RBB">Non-RBB (Fleksibel)</option>
-            </select>
+                onChange={(e) => { setTypeFilter(e.target.value); setCurrentPage(1); }}
+                className="w-full pl-9 pr-10 py-2.5 bg-white border border-gray-200 rounded-xl text-sm font-semibold text-gray-700 shadow-xs focus:ring-2 focus:ring-[#1A56DB]/20 focus:border-[#1A56DB] outline-none cursor-pointer appearance-none transition-all hover:border-gray-300"
+              >
+                <option value="All">Semua Tipe Proyek</option>
+                <option value="RBB">Tipe: RBB (Wajib Selesai)</option>
+                <option value="NON_RBB">Tipe: Non-RBB (Fleksibel)</option>
+              </select>
+              <Filter size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#1A56DB] pointer-events-none" />
+              <ChevronDown size={16} className="absolute right-3.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+            </div>
           </div>
 
           {/* Tabs */}
@@ -218,10 +229,10 @@ export default function Queue() {
             </button>
           </div>
           
-          <div className="text-sm text-gray-500 bg-white px-6 py-3 border-b border-gray-100">
-            {activeTab === 'pending' && '📋 Proyek yang belum ditugaskan ke Analyst. Klik "Disposisi" untuk menugaskan.'}
-            {activeTab === 'in_review' && '⏳ Proyek yang sedang direview oleh Analyst. Tunggu hasil review.'}
-            {activeTab === 'completed' && '✅ Proyek yang sudah selesai direview. Klik "Verifikasi" untuk melanjutkan.'}
+          <div className="text-sm text-gray-500 bg-white px-6 py-3 border-b border-gray-100 font-medium">
+            {activeTab === 'pending' && 'Proyek yang belum ditugaskan ke Analyst. Klik "Disposisi" untuk menugaskan.'}
+            {activeTab === 'in_review' && 'Proyek yang sedang direview oleh Analyst. Tunggu hasil review.'}
+            {activeTab === 'completed' && 'Proyek yang sudah selesai direview. Klik "Verifikasi" untuk melanjutkan.'}
           </div>
 
           {/* Table */}

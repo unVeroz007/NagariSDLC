@@ -47,30 +47,38 @@ class ProjectWorkflowService
         ],
         ProjectStatus::IN_DEVELOPMENT->value => [
             ProjectStatus::READY_FOR_QA->value,
+            ProjectStatus::CYBER_IN_PROGRESS->value,
+            ProjectStatus::QA_IN_PROGRESS->value,
             ProjectStatus::DEV_ANALYSIS_DONE->value, // Mundur
             ProjectStatus::ON_HOLD->value,
         ],
         ProjectStatus::RETURN_TO_DEV->value => [
             ProjectStatus::IN_DEVELOPMENT->value,
             ProjectStatus::READY_FOR_DEVELOPMENT->value,
+            ProjectStatus::READY_FOR_QA->value,
+            ProjectStatus::CYBER_IN_PROGRESS->value,
         ],
         ProjectStatus::READY_FOR_QA->value => [
             ProjectStatus::QA_IN_PROGRESS->value,
+            ProjectStatus::CYBER_IN_PROGRESS->value,
             ProjectStatus::IN_DEVELOPMENT->value, // Mundur
         ],
         ProjectStatus::QA_IN_PROGRESS->value => [
             ProjectStatus::QA_PASSED->value,
+            ProjectStatus::CYBER_IN_PROGRESS->value, // Paralel Cyber Audit
             ProjectStatus::RETURN_TO_DEV->value, // Mundur (Defect QA)
             ProjectStatus::READY_FOR_QA->value,
         ],
         ProjectStatus::QA_PASSED->value => [
             ProjectStatus::CYBER_IN_PROGRESS->value,
+            ProjectStatus::CYBER_PASSED->value,
             ProjectStatus::QA_IN_PROGRESS->value, // Mundur
         ],
         ProjectStatus::CYBER_IN_PROGRESS->value => [
             ProjectStatus::CYBER_PASSED->value,
-            ProjectStatus::RETURN_TO_DEV->value, // Mundur (Vulnerability Defect)
+            ProjectStatus::QA_IN_PROGRESS->value, // Paralel QA Audit
             ProjectStatus::QA_PASSED->value,
+            ProjectStatus::RETURN_TO_DEV->value, // Mundur (Vulnerability Defect)
         ],
         ProjectStatus::CYBER_PASSED->value => [
             ProjectStatus::READY_FOR_UAT->value,

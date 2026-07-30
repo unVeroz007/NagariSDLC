@@ -164,171 +164,90 @@ export default function Kanban() {
                 </div>
 
                 <div className="flex flex-wrap items-center gap-3">
-                    {/* View Switcher */}
-                    <div className="bg-white p-1 rounded-xl border border-gray-200 shadow-xs flex items-center gap-1">
-                        <button
-                            onClick={() => setViewMode('project')}
-                            className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${
-                                viewMode === 'project'
-                                    ? 'bg-[#1A56DB] text-white shadow-xs'
-                                    : 'text-gray-600 hover:text-gray-900'
-                            }`}
-                        >
-                            <Layers size={14} />
-                            <span>Status SDLC Proyek ({projects.length})</span>
-                        </button>
-                        <button
-                            onClick={() => {
-                                setViewMode('task');
-                                if (projects.length > 0 && !selectedProjectId) setSelectedProjectId(projects[0].id);
-                            }}
-                            className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${
-                                viewMode === 'task'
-                                    ? 'bg-[#1A56DB] text-white shadow-xs'
-                                    : 'text-gray-600 hover:text-gray-900'
-                            }`}
-                        >
-                            <KanbanIcon size={14} />
-                            <span>Task Per-Proyek</span>
-                        </button>
+                    {/* Filter Input Search */}
+                    <div className="relative">
+                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={15} />
+                        <input
+                            type="text"
+                            value={searchTerm}
+                            onChange={(e) => setSearchTerm(e.target.value)}
+                            placeholder="Cari ID / Nama Proyek..."
+                            className="pl-9 pr-4 py-2 bg-white border border-gray-200 rounded-xl text-xs md:text-sm focus:outline-none focus:ring-2 focus:ring-[#1A56DB]/20 focus:border-[#1A56DB] shadow-xs w-64"
+                        />
                     </div>
-
-                    {/* Filter Input */}
-                    {viewMode === 'project' ? (
-                        <div className="relative">
-                            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={14} />
-                            <input
-                                type="text"
-                                value={searchTerm}
-                                onChange={(e) => setSearchTerm(e.target.value)}
-                                placeholder="Cari ID / Nama Proyek..."
-                                className="pl-8 pr-3 py-1.5 bg-white border border-gray-200 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-[#1A56DB]/20 shadow-xs"
-                            />
-                        </div>
-                    ) : (
-                        <select
-                            value={selectedProjectId}
-                            onChange={(e) => setSelectedProjectId(e.target.value)}
-                            className="px-3 py-1.5 bg-white border border-gray-200 rounded-xl text-xs font-bold text-gray-700 shadow-xs focus:outline-none focus:ring-2 focus:ring-[#1A56DB]/20"
-                        >
-                            {projects.map(p => (
-                                <option key={p.id} value={p.id}>{p.reqId || p.req_id} - {p.name || p.title}</option>
-                            ))}
-                        </select>
-                    )}
                 </div>
             </div>
 
             {/* ======================================================== */}
-            {/* VIEW MODE 1: SDLC PROJECT KANBAN (ALL PROJECTS PER PHASE) */}
+            {/* SDLC PROJECT KANBAN BOARD (ALL PROJECTS PER PHASE)       */}
             {/* ======================================================== */}
-            {viewMode === 'project' && (
-                <div className="grid grid-cols-1 md:grid-cols-5 gap-4 overflow-x-auto pb-4">
-                    {sdlcColumns.map(col => {
-                        const colProjects = filteredProjects.filter(p => col.statuses.includes(p.status));
+            <div className="grid grid-cols-1 md:grid-cols-5 gap-4 overflow-x-auto pb-4">
+                {sdlcColumns.map(col => {
+                    const colProjects = filteredProjects.filter(p => col.statuses.includes(p.status));
 
-                        return (
-                            <div
-                                key={col.id}
-                                className={`bg-white p-4 rounded-2xl border-t-4 ${col.color} border-x border-b border-gray-200/70 shadow-sm min-h-[550px] flex flex-col`}
-                            >
-                                <div className="flex items-center justify-between mb-4 pb-2 border-b border-gray-100">
-                                    <h3 className="font-bold text-gray-800 text-xs leading-tight">{col.title}</h3>
-                                    <span className="px-2 py-0.5 bg-gray-100 text-gray-700 font-extrabold rounded-full text-xs">
-                                        {colProjects.length}
-                                    </span>
-                                </div>
+                    return (
+                        <div
+                            key={col.id}
+                            className={`bg-white p-4 rounded-2xl border-t-4 ${col.color} border-x border-b border-gray-200/70 shadow-sm min-h-[550px] flex flex-col`}
+                        >
+                            <div className="flex items-center justify-between mb-4 pb-2 border-b border-gray-100">
+                                <h3 className="font-bold text-gray-800 text-xs leading-tight">{col.title}</h3>
+                                <span className="px-2 py-0.5 bg-gray-100 text-gray-700 font-extrabold rounded-full text-xs">
+                                    {colProjects.length}
+                                </span>
+                            </div>
 
-                                <div className="flex-1 space-y-3">
-                                    {colProjects.length === 0 ? (
-                                        <div className="h-36 border-2 border-dashed border-gray-200 rounded-xl flex items-center justify-center text-gray-400 text-xs font-medium text-center p-3">
-                                            Tidak ada proyek di fase ini
-                                        </div>
-                                    ) : (
-                                        colProjects.map(p => (
-                                            <div
-                                                key={p.id}
-                                                className="p-3.5 bg-white hover:bg-blue-50/40 rounded-xl border border-gray-200 shadow-xs hover:shadow-md transition-all group"
+                            <div className="flex-1 space-y-3">
+                                {colProjects.length === 0 ? (
+                                    <div className="h-36 border-2 border-dashed border-gray-200 rounded-xl flex items-center justify-center text-gray-400 text-xs font-medium text-center p-3">
+                                        Tidak ada proyek di fase ini
+                                    </div>
+                                ) : (
+                                    colProjects.map(p => (
+                                        <div
+                                            key={p.id}
+                                            className="p-3.5 bg-white hover:bg-blue-50/40 rounded-xl border border-gray-200 shadow-xs hover:shadow-md transition-all group"
+                                        >
+                                            <div className="flex items-center justify-between mb-1.5">
+                                                <span className="text-[11px] font-mono font-bold text-[#1A56DB]">
+                                                    {p.reqId || p.req_id || `REQ-${p.id}`}
+                                                </span>
+                                                <span className={`text-[10px] px-2 py-0.5 font-bold rounded-md border ${getStatusBadgeStyle(p.status)}`}>
+                                                    {p.status}
+                                                </span>
+                                            </div>
+
+                                            <h4 className="font-bold text-gray-800 text-xs mb-2 line-clamp-2 group-hover:text-[#1A56DB] transition-colors">
+                                                {p.name || p.title}
+                                            </h4>
+
+                                            <div className="text-[11px] text-gray-500 space-y-1 mb-3 pt-2 border-t border-gray-100">
+                                                <div className="flex items-center justify-between">
+                                                    <span>Divisi:</span>
+                                                    <span className="font-medium text-gray-700">{p.division}</span>
+                                                </div>
+                                                <div className="flex items-center justify-between">
+                                                    <span>PM:</span>
+                                                    <span className="font-semibold text-gray-800">{typeof p.pm === 'object' ? p.pm?.name : p.pm}</span>
+                                                </div>
+                                            </div>
+
+                                            <button
+                                                onClick={() => navigate(`/pm/tasks/${p.id}`)}
+                                                className="w-full py-2 bg-[#1A56DB] text-white hover:bg-blue-700 rounded-xl text-xs font-bold transition-all shadow-xs flex items-center justify-center gap-1.5 cursor-pointer active:scale-95"
                                             >
-                                                <div className="flex items-center justify-between mb-1.5">
-                                                    <span className="text-[11px] font-mono font-bold text-[#1A56DB]">
-                                                        {p.reqId || p.req_id || `REQ-${p.id}`}
-                                                    </span>
-                                                    <span className={`text-[10px] px-2 py-0.5 font-bold rounded-md border ${getStatusBadgeStyle(p.status)}`}>
-                                                        {p.status}
-                                                    </span>
-                                                </div>
-
-                                                <h4 className="font-bold text-gray-800 text-xs mb-2 line-clamp-2 group-hover:text-[#1A56DB] transition-colors">
-                                                    {p.name || p.title}
-                                                </h4>
-
-                                                <div className="text-[11px] text-gray-500 space-y-1 mb-3 pt-2 border-t border-gray-100">
-                                                    <div className="flex items-center justify-between">
-                                                        <span>Divisi:</span>
-                                                        <span className="font-medium text-gray-700">{p.division}</span>
-                                                    </div>
-                                                    <div className="flex items-center justify-between">
-                                                        <span>PM:</span>
-                                                        <span className="font-semibold text-gray-800">{typeof p.pm === 'object' ? p.pm?.name : p.pm}</span>
-                                                    </div>
-                                                </div>
-
-                                                <button
-                                                    onClick={() => navigate('/pm/tracker')}
-                                                    className="w-full py-1.5 bg-gray-50 hover:bg-[#1A56DB] hover:text-white text-gray-700 rounded-lg text-[11px] font-bold transition-all border border-gray-200 flex items-center justify-center gap-1.5"
-                                                >
-                                                    <span>Lacak Proyek</span>
-                                                    <ArrowRight size={12} />
-                                                </button>
-                                            </div>
-                                        ))
-                                    )}
-                                </div>
-                            </div>
-                        );
-                    })}
-                </div>
-            )}
-
-            {/* ======================================================== */}
-            {/* VIEW MODE 2: TASK KANBAN (DEVELOPER TASKS FOR SELECTED PROJECT) */}
-            {/* ======================================================== */}
-            {viewMode === 'task' && (
-                <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-                    {[
-                        { id: 'todo', label: 'To Do', color: 'border-blue-500' },
-                        { id: 'in_progress', label: 'In Progress', color: 'border-indigo-500' },
-                        { id: 'review', label: 'In Review', color: 'border-purple-500' },
-                        { id: 'done', label: 'Done', color: 'border-emerald-500' },
-                    ].map(stage => {
-                        const stageTasks = tasks.filter(t => t.stage === stage.id);
-                        return (
-                            <div key={stage.id} className={`bg-white p-4 rounded-2xl border-t-4 ${stage.color} border-x border-b border-gray-100 shadow-sm min-h-[450px]`}>
-                                <div className="flex items-center justify-between mb-4 pb-2 border-b border-gray-100">
-                                    <h3 className="font-bold text-gray-800 text-sm">{stage.label}</h3>
-                                    <span className="px-2 py-0.5 bg-gray-100 text-gray-600 font-bold rounded-full text-xs">{stageTasks.length}</span>
-                                </div>
-                                <div className="space-y-3">
-                                    {stageTasks.length === 0 ? (
-                                        <div className="h-32 border-2 border-dashed border-gray-200 rounded-xl flex items-center justify-center text-gray-400 text-xs font-medium">
-                                            Belum ada task
+                                                <List size={13} />
+                                                <span>Detail Task &amp; Pekerjaan Dev</span>
+                                                <ArrowRight size={13} />
+                                            </button>
                                         </div>
-                                    ) : (
-                                        stageTasks.map(t => (
-                                            <div key={t.id} className="p-3.5 bg-gray-50 rounded-xl border border-gray-200">
-                                                <span className="text-xs font-mono font-bold text-[#1A56DB]">{t.code}</span>
-                                                <h4 className="font-bold text-gray-800 text-sm mt-1">{t.title}</h4>
-                                                <p className="text-xs text-gray-500 line-clamp-2 mt-1">{t.description}</p>
-                                            </div>
-                                        ))
-                                    )}
-                                </div>
+                                    ))
+                                )}
                             </div>
-                        );
-                    })}
-                </div>
-            )}
+                        </div>
+                    );
+                })}
+            </div>
         </div>
     );
 }

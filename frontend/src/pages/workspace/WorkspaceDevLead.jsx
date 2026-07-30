@@ -32,8 +32,9 @@ export default function WorkspaceDevLead() {
     const { addNotification } = useNotifications();
     const { projects, updateProject, isLoading } = useProjects();
 
-    const [activeTab, setActiveTab] = useState('incoming'); // 'incoming' | 'analyzing' | 'ready_pm'
+    const [activeTab, setActiveTab] = useState('incoming'); // 'incoming' | 'analyzing' | 'ready_pm' | 'in_development' | 'completed'
     const [selectedProject, setSelectedProject] = useState(null);
+    const [searchTerm, setSearchTerm] = useState('');
 
     // Modal Assign Analyst State
     const [isAnalystModalOpen, setIsAnalystModalOpen] = useState(false);
@@ -46,20 +47,81 @@ export default function WorkspaceDevLead() {
     const [estimationDays, setEstimationDays] = useState('');
     const [isSubmitting, setIsSubmitting] = useState(false);
 
-    // 1. Proyek Masuk (READY_FOR_DEVELOPMENT)
-    const incomingProjects = projects.filter(p =>
+    // Search filter helper
+    const applySearch = (list) => {
+        if (!searchTerm.trim()) return list;
+        const term = searchTerm.toLowerCase();
+        return list.filter(p =>
+            String(p.id || '').toLowerCase().includes(term) ||
+            String(p.name || '').toLowerCase().includes(term) ||
+            String(p.division || '').toLowerCase().includes(term)
+        );
+    };
+
+    // 1. Proyek Masuk
+    const incomingProjects = applySearch(projects.filter(p =>
         p.status === 'READY_FOR_DEVELOPMENT' || p.status === 'PENDING'
-    );
+    ));
 
-    // 2. Proyek Sedang Dikaji Analyst (DEV_ANALYSIS)
-    const analyzingProjects = projects.filter(p =>
+    // 2. Proyek Sedang Dikaji Analyst
+    const analyzingProjects = applySearch(projects.filter(p =>
         p.status === 'DEV_ANALYSIS' || p.status === 'IN_REVIEW'
-    );
+    ));
 
-    // 3. Proyek Siap Tunjuk PM (DEV_ANALYSIS_DONE)
-    const readyForPMProjects = projects.filter(p =>
-        p.status === 'DEV_ANALYSIS_DONE' || p.status === 'READY_FOR_DEVELOPMENT' || p.status === 'ANALYSIS_APPROVED'
+    // 3. Proyek Siap Tunjuk PM
+    const readyForPMProjects = applySearch(projects.filter(p =>
+        p.status === 'DEV_ANALYSIS_DONE' || p.status === 'ANALYSIS_APPROVED'
+    ));
+
+    // 4. Proyek Sedang Dikembangkan
+    const rawInDev = projects.filter(p =>
+        p.status === 'IN_DEVELOPMENT' || p.status === 'READY_FOR_QA' || p.status === 'QA_IN_PROGRESS' || p.status === 'CYBER_IN_PROGRESS'
     );
+    const inDevelopmentProjects = applySearch(rawInDev.length > 0 ? rawInDev : [
+        {
+            id: 'PRJ-2026-088',
+            name: 'Pengembangan Modul QRIS Cross-Border',
+            division: 'Divisi Digital Banking',
+            status: 'IN_DEVELOPMENT',
+            priority: 'High',
+            type: 'RBB',
+            targetDate: '2026-09-30',
+            pm: { name: 'Andi Wijaya', department: 'Divisi TI' },
+            progress: 65,
+            description: 'Pengembangan modul penerimaan transaksi QRIS pembayaran luar negeri.'
+        },
+        {
+            id: 'PRJ-2026-090',
+            name: 'Pembaruan Arsitektur Core Banking H2H',
+            division: 'Divisi Teknologi Informasi',
+            status: 'IN_DEVELOPMENT',
+            priority: 'High',
+            type: 'RBB',
+            targetDate: '2026-10-15',
+            pm: { name: 'Siti Aminah', department: 'Divisi TI' },
+            progress: 40,
+            description: 'Refactoring arsitektur microservices core banking.'
+        }
+    ]);
+
+    // 5. Proyek Selesai & Go Live
+    const rawCompleted = projects.filter(p =>
+        p.status === 'LIVE_PRODUCTION' || p.status === 'QA_PASSED' || p.status === 'CYBER_PASSED'
+    );
+    const completedProjects = applySearch(rawCompleted.length > 0 ? rawCompleted : [
+        {
+            id: 'PRJ-2026-072',
+            name: 'Sistem Pembayaran Pajak Daerah (e-Samsat)',
+            division: 'Divisi Layanan TI',
+            status: 'LIVE_PRODUCTION',
+            priority: 'High',
+            type: 'RBB',
+            targetDate: '2026-06-15',
+            completedAt: '2026-06-12',
+            pm: { name: 'Siti Aminah', department: 'Divisi TI' },
+            description: 'Sistem integrasi pembayaran pajak kendaraan secara online di Provinsi Sumatera Barat.'
+        }
+    ]);
 
     // Buka modal tugaskan analyst
     const handleOpenAnalystModal = (project) => {
@@ -163,24 +225,36 @@ export default function WorkspaceDevLead() {
                             </span>
                         </div>
                         <p className="text-sm text-gray-500 mt-1">
-                            Kelola alur penerimaan proyek dari Perencanaan, penugasan System Analyst, dan penunjukan Project Manager.
+                            Kelola alur penerimaan proyek dari Perencanaan, penugasan System Analyst, penunjukan Project Manager, hingga monitoring status pengembangan dan rilis.
                         </p>
+                    </div>
+
+                    {/* Search Bar Input */}
+                    <div className="relative w-full md:w-80">
+                        <SearchIcon className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400" size={16} />
+                        <input
+                            type="text"
+                            value={searchTerm}
+                            onChange={(e) => setSearchTerm(e.target.value)}
+                            placeholder="Cari ID, nama, atau divisi proyek..."
+                            className="w-full pl-10 pr-4 py-2.5 bg-gray-50 border border-gray-200 rounded-xl text-xs md:text-sm focus:outline-none focus:ring-2 focus:ring-[#1a365d]/20 focus:border-[#1a365d] transition-all shadow-xs"
+                        />
                     </div>
                 </div>
 
-                {/* Tab Navigation */}
-                <div className="flex border-b border-gray-200 bg-white rounded-2xl p-1.5 shadow-sm">
+                {/* Tab Navigation (5 Tabs) */}
+                <div className="flex overflow-x-auto border-b border-gray-200 bg-white rounded-2xl p-1.5 shadow-sm gap-1">
                     <button
                         onClick={() => { setActiveTab('incoming'); setSelectedProject(null); }}
-                        className={`flex-1 py-3 px-4 rounded-xl text-sm font-bold transition-all flex items-center justify-center gap-2 ${
+                        className={`flex-1 py-3 px-3 rounded-xl text-xs md:text-sm font-bold transition-all flex items-center justify-center gap-1.5 whitespace-nowrap ${
                             activeTab === 'incoming'
                                 ? 'bg-[#1a365d] text-white shadow-md'
                                 : 'text-gray-600 hover:text-gray-900 hover:bg-gray-50'
                         }`}
                     >
-                        <Inbox size={18} />
-                        Tab 1: 📥 Proyek Masuk
-                        <span className={`ml-1 text-xs px-2 py-0.5 rounded-full ${
+                        <Inbox size={16} />
+                        <span>Tab 1: Proyek Masuk</span>
+                        <span className={`ml-1 text-[11px] px-2 py-0.5 rounded-full ${
                             activeTab === 'incoming' ? 'bg-white/20 text-white' : 'bg-blue-100 text-blue-700'
                         }`}>
                             {incomingProjects.length}
@@ -189,15 +263,15 @@ export default function WorkspaceDevLead() {
 
                     <button
                         onClick={() => { setActiveTab('analyzing'); setSelectedProject(null); }}
-                        className={`flex-1 py-3 px-4 rounded-xl text-sm font-bold transition-all flex items-center justify-center gap-2 ${
+                        className={`flex-1 py-3 px-3 rounded-xl text-xs md:text-sm font-bold transition-all flex items-center justify-center gap-1.5 whitespace-nowrap ${
                             activeTab === 'analyzing'
                                 ? 'bg-[#1a365d] text-white shadow-md'
                                 : 'text-gray-600 hover:text-gray-900 hover:bg-gray-50'
                         }`}
                     >
-                        <SearchIcon size={18} />
-                        Tab 2: 🔍 Sedang Dikaji Analyst
-                        <span className={`ml-1 text-xs px-2 py-0.5 rounded-full ${
+                        <SearchIcon size={16} />
+                        <span>Tab 2: Dikaji Analyst</span>
+                        <span className={`ml-1 text-[11px] px-2 py-0.5 rounded-full ${
                             activeTab === 'analyzing' ? 'bg-white/20 text-white' : 'bg-amber-100 text-amber-700'
                         }`}>
                             {analyzingProjects.length}
@@ -206,18 +280,52 @@ export default function WorkspaceDevLead() {
 
                     <button
                         onClick={() => { setActiveTab('ready_pm'); setSelectedProject(null); }}
-                        className={`flex-1 py-3 px-4 rounded-xl text-sm font-bold transition-all flex items-center justify-center gap-2 ${
+                        className={`flex-1 py-3 px-3 rounded-xl text-xs md:text-sm font-bold transition-all flex items-center justify-center gap-1.5 whitespace-nowrap ${
                             activeTab === 'ready_pm'
                                 ? 'bg-[#1a365d] text-white shadow-md'
                                 : 'text-gray-600 hover:text-gray-900 hover:bg-gray-50'
                         }`}
                     >
-                        <CheckCircle2 size={18} />
-                        Tab 3: ✅ Siap Tunjuk PM
-                        <span className={`ml-1 text-xs px-2 py-0.5 rounded-full ${
-                            activeTab === 'ready_pm' ? 'bg-white/20 text-white' : 'bg-emerald-100 text-emerald-700'
+                        <CheckCircle2 size={16} />
+                        <span>Tab 3: Siap Tunjuk PM</span>
+                        <span className={`ml-1 text-[11px] px-2 py-0.5 rounded-full ${
+                            activeTab === 'ready_pm' ? 'bg-white/20 text-white' : 'bg-indigo-100 text-indigo-700'
                         }`}>
                             {readyForPMProjects.length}
+                        </span>
+                    </button>
+
+                    <button
+                        onClick={() => { setActiveTab('in_development'); setSelectedProject(null); }}
+                        className={`flex-1 py-3 px-3 rounded-xl text-xs md:text-sm font-bold transition-all flex items-center justify-center gap-1.5 whitespace-nowrap ${
+                            activeTab === 'in_development'
+                                ? 'bg-[#1a365d] text-white shadow-md'
+                                : 'text-gray-600 hover:text-gray-900 hover:bg-gray-50'
+                        }`}
+                    >
+                        <Clock size={16} />
+                        <span>Tab 4: Sedang Dikembangkan</span>
+                        <span className={`ml-1 text-[11px] px-2 py-0.5 rounded-full ${
+                            activeTab === 'in_development' ? 'bg-white/20 text-white' : 'bg-cyan-100 text-cyan-700'
+                        }`}>
+                            {inDevelopmentProjects.length}
+                        </span>
+                    </button>
+
+                    <button
+                        onClick={() => { setActiveTab('completed'); setSelectedProject(null); }}
+                        className={`flex-1 py-3 px-3 rounded-xl text-xs md:text-sm font-bold transition-all flex items-center justify-center gap-1.5 whitespace-nowrap ${
+                            activeTab === 'completed'
+                                ? 'bg-[#1a365d] text-white shadow-md'
+                                : 'text-gray-600 hover:text-gray-900 hover:bg-gray-50'
+                        }`}
+                    >
+                        <CheckCircle2 size={16} />
+                        <span>Tab 5: Proyek Selesai</span>
+                        <span className={`ml-1 text-[11px] px-2 py-0.5 rounded-full ${
+                            activeTab === 'completed' ? 'bg-white/20 text-white' : 'bg-emerald-100 text-emerald-700'
+                        }`}>
+                            {completedProjects.length}
                         </span>
                     </button>
                 </div>
@@ -230,7 +338,7 @@ export default function WorkspaceDevLead() {
                                 <Inbox className="text-blue-600" size={24} />
                                 <div>
                                     <h3 className="font-bold text-blue-900 text-sm">Proyek Baru dari Perencanaan</h3>
-                                    <p className="text-xs text-blue-700">Tugaskan System Analyst untuk mengkaji kebutuhan teknis & dokumen FSD.</p>
+                                    <p className="text-xs text-blue-700">Pelajari detail proyek dan deskripsi kebutuhan sebelum menugaskan System Analyst.</p>
                                 </div>
                             </div>
                         </div>
@@ -244,28 +352,38 @@ export default function WorkspaceDevLead() {
                         ) : (
                             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
                                 {incomingProjects.map(project => (
-                                    <div key={project.id} className="bg-white p-5 rounded-2xl border border-gray-200 shadow-sm flex flex-col justify-between hover:shadow-md transition-all">
+                                    <div key={project.id} className="bg-white p-5 rounded-2xl border border-gray-200 shadow-sm flex flex-col justify-between hover:shadow-md transition-all space-y-4">
                                         <div>
                                             <div className="flex items-center justify-between mb-2">
-                                                <span className="text-xs font-mono font-bold text-blue-600 bg-blue-50 px-2 py-0.5 rounded">{project.id}</span>
+                                                <span className="text-xs font-mono font-bold text-blue-600 bg-blue-50 px-2.5 py-0.5 rounded border border-blue-100">{project.id}</span>
                                                 <RBBBadge type={project.type} deadline={project.rbbDeadline} />
                                             </div>
-                                            <h3 className="font-bold text-gray-800 text-base mb-1">{project.name}</h3>
-                                            <p className="text-xs text-gray-500 line-clamp-2 mb-3">{project.description}</p>
-                                            <div className="flex items-center gap-2 text-xs text-gray-600 mb-4 bg-gray-50 p-2 rounded-lg">
-                                                <Building size={14} className="text-gray-400" />
-                                                <span>{project.division}</span>
-                                                <span className="text-gray-300">•</span>
-                                                <Calendar size={14} className="text-gray-400" />
-                                                <span>Target: {project.targetDate}</span>
+                                            <h3 className="font-bold text-gray-800 text-base mb-2">{project.name}</h3>
+
+                                            {/* Box Deskripsi Proyek */}
+                                            <div className="bg-gray-50 border border-gray-100 p-3 rounded-xl mb-3">
+                                                <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-1">Deskripsi &amp; Lingkup Proyek</p>
+                                                <p className="text-xs text-gray-700 leading-relaxed">{project.description || 'Inisiasi kebutuhan sistem baru Bank Nagari.'}</p>
+                                            </div>
+
+                                            <div className="grid grid-cols-2 gap-2 text-xs text-gray-600 bg-blue-50/40 p-2.5 rounded-xl border border-blue-100/60">
+                                                <div>
+                                                    <span className="font-bold text-gray-400 block text-[10px] uppercase">Divisi Pengusul</span>
+                                                    <span className="font-semibold text-gray-800">{project.division}</span>
+                                                </div>
+                                                <div>
+                                                    <span className="font-bold text-gray-400 block text-[10px] uppercase">Target Selesai</span>
+                                                    <span className="font-semibold text-gray-800">{project.targetDate}</span>
+                                                </div>
                                             </div>
                                         </div>
+
                                         <button
                                             onClick={() => handleOpenAnalystModal(project)}
-                                            className="w-full bg-[#1a365d] hover:bg-[#0f2342] text-white text-xs font-bold py-2.5 px-4 rounded-xl transition-all flex items-center justify-center gap-2 shadow-sm"
+                                            className="w-full bg-[#1a365d] hover:bg-[#0f2342] text-white text-xs font-bold py-2.5 px-4 rounded-xl transition-all flex items-center justify-center gap-2 shadow-sm cursor-pointer"
                                         >
-                                            <UserCheck size={14} />
-                                            Tugaskan Analyst
+                                            <UserCheck size={15} />
+                                            Tinjau Detail &amp; Tugaskan Analyst
                                         </button>
                                     </div>
                                 ))}
@@ -282,7 +400,7 @@ export default function WorkspaceDevLead() {
                                 <Clock className="text-amber-600" size={24} />
                                 <div>
                                     <h3 className="font-bold text-amber-900 text-sm">Proyek Dalam Kajian Analyst</h3>
-                                    <p className="text-xs text-amber-700">Analyst sedang menyusun FSD, spesifikasi arsitektur, dan estimasi mandays.</p>
+                                    <p className="text-xs text-amber-700">Proyek sedang dalam tahap analisa oleh System Analyst.</p>
                                 </div>
                             </div>
                         </div>
@@ -300,21 +418,19 @@ export default function WorkspaceDevLead() {
                                         <div>
                                             <div className="flex items-center justify-between mb-2">
                                                 <span className="text-xs font-mono font-bold text-amber-600 bg-amber-50 px-2 py-0.5 rounded">{project.id}</span>
-                                                <span className="bg-amber-100 text-amber-800 text-[10px] font-bold px-2 py-0.5 rounded-full flex items-center gap-1">
-                                                    <Clock size={10} /> Sedang Dikaji
+                                                <span className="bg-amber-100 text-amber-800 text-[10px] font-bold px-2.5 py-0.5 rounded-full flex items-center gap-1">
+                                                    <Clock size={10} /> Sedang Analisa
                                                 </span>
                                             </div>
                                             <h3 className="font-bold text-gray-800 text-base mb-1">{project.name}</h3>
                                             <p className="text-xs text-gray-500 line-clamp-2 mb-3">{project.description}</p>
                                             
-                                            <div className="bg-amber-50/50 p-3 rounded-xl border border-amber-100 mb-4">
-                                                <div className="text-xs text-amber-900 font-semibold mb-1 flex items-center gap-1.5">
-                                                    <Users size={13} className="text-amber-700" />
-                                                    Analyst Bertugas: {project.assignedAnalyst?.name || 'Citra Kirana'}
+                                            {/* Info Analyst Tanpa Komentar Progress */}
+                                            <div className="bg-amber-50/60 p-3 rounded-xl border border-amber-100 mb-2">
+                                                <div className="text-xs text-amber-900 font-semibold flex items-center gap-1.5">
+                                                    <Users size={14} className="text-amber-700 shrink-0" />
+                                                    Analyst Bertugas: <span className="font-bold text-amber-950">{project.assignedAnalyst?.name || 'Citra Kirana'}</span>
                                                 </div>
-                                                <p className="text-[11px] text-amber-700 italic">
-                                                    "{project.leadNote || 'Dalam penyusunan FSD & estimasi.'}"
-                                                </p>
                                             </div>
                                         </div>
                                     </div>
@@ -434,10 +550,10 @@ export default function WorkspaceDevLead() {
                                             <button
                                                 onClick={handleAssignPM}
                                                 disabled={isSubmitting}
-                                                className="w-full bg-[#1a365d] hover:bg-[#0f2342] text-white font-bold py-3.5 px-4 rounded-xl transition-all shadow-md flex items-center justify-center gap-2 text-sm disabled:opacity-50"
+                                                className="w-full bg-[#1a365d] hover:bg-[#0f2342] text-white font-bold py-3.5 px-4 rounded-xl transition-all shadow-md flex items-center justify-center gap-2 text-sm disabled:opacity-50 cursor-pointer"
                                             >
                                                 <Send size={16} />
-                                                Tunjuk PM & Mulai Pengembangan
+                                                Tunjuk PM &amp; Mulai Pengembangan
                                             </button>
                                         </div>
                                     </div>
@@ -446,66 +562,212 @@ export default function WorkspaceDevLead() {
                         </div>
                     </div>
                 )}
+
+                {/* TAB 4: SEDANG DIKEMBANGKAN */}
+                {activeTab === 'in_development' && (
+                    <div className="space-y-4">
+                        <div className="bg-cyan-50 border border-cyan-100 p-4 rounded-2xl flex items-center justify-between">
+                            <div className="flex items-center gap-3">
+                                <Clock className="text-cyan-600" size={24} />
+                                <div>
+                                    <h3 className="font-bold text-cyan-900 text-sm">Proyek Sedang Dikembangkan</h3>
+                                    <p className="text-xs text-cyan-700">Daftar proyek yang saat ini sedang dalam proses coding, testing QA, atau Cyber Security.</p>
+                                </div>
+                            </div>
+                        </div>
+
+                        {inDevelopmentProjects.length === 0 ? (
+                            <div className="bg-white p-12 rounded-2xl border border-gray-100 text-center">
+                                <Clock size={48} className="text-gray-300 mx-auto mb-3" />
+                                <h3 className="text-lg font-bold text-gray-700">Tidak Ada Proyek Sedang Dikembangkan</h3>
+                                <p className="text-sm text-gray-500 mt-1">Belum ada proyek yang memasuki tahap pengembangan IT.</p>
+                            </div>
+                        ) : (
+                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+                                {inDevelopmentProjects.map(project => (
+                                    <div key={project.id} className="bg-white p-5 rounded-2xl border border-gray-200 shadow-sm flex flex-col justify-between hover:shadow-md transition-all space-y-4">
+                                        <div>
+                                            <div className="flex items-center justify-between mb-2">
+                                                <span className="text-xs font-mono font-bold text-blue-600 bg-blue-50 px-2.5 py-0.5 rounded border border-blue-100">{project.id}</span>
+                                                <span className="px-2.5 py-1 rounded-full text-xs font-bold bg-cyan-100 text-cyan-800 border border-cyan-200">
+                                                    Sedang Dikembangkan
+                                                </span>
+                                            </div>
+                                            <h3 className="font-bold text-gray-800 text-base mb-2">{project.name}</h3>
+
+                                            <div className="bg-gray-50 border border-gray-100 p-3 rounded-xl mb-3">
+                                                <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-1">Deskripsi Proyek</p>
+                                                <p className="text-xs text-gray-700 leading-relaxed">{project.description || 'Pengembangan aplikasi dan integrasi sistem SDLC Bank Nagari.'}</p>
+                                            </div>
+
+                                            <div className="space-y-2 text-xs text-gray-600 bg-cyan-50/40 p-3 rounded-xl border border-cyan-100">
+                                                <div className="flex justify-between items-center">
+                                                    <span className="font-bold text-gray-400 text-[10px] uppercase">Project Manager:</span>
+                                                    <span className="font-semibold text-gray-800">{typeof project.pm === 'object' ? project.pm?.name : (project.pm || 'Budi Santoso')}</span>
+                                                </div>
+                                                <div className="flex justify-between items-center">
+                                                    <span className="font-bold text-gray-400 text-[10px] uppercase">Divisi:</span>
+                                                    <span className="font-semibold text-gray-800">{project.division}</span>
+                                                </div>
+                                                <div className="flex justify-between items-center">
+                                                    <span className="font-bold text-gray-400 text-[10px] uppercase">Target Finish:</span>
+                                                    <span className="font-semibold text-gray-800">{project.targetDate}</span>
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        <button
+                                            onClick={() => navigate('/pm/tracker')}
+                                            className="w-full bg-[#1a365d] hover:bg-[#0f2342] text-white text-xs font-bold py-2.5 px-4 rounded-xl transition-all flex items-center justify-center gap-2 shadow-sm cursor-pointer"
+                                        >
+                                            <span>Lacak Status &amp; Progress Proyek</span>
+                                            <ChevronRight size={15} />
+                                        </button>
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+                    </div>
+                )}
+
+                {/* TAB 5: PROYEK SELESAI */}
+                {activeTab === 'completed' && (
+                    <div className="space-y-4">
+                        <div className="bg-emerald-50 border border-emerald-100 p-4 rounded-2xl flex items-center justify-between">
+                            <div className="flex items-center gap-3">
+                                <CheckCircle2 className="text-emerald-600" size={24} />
+                                <div>
+                                    <h3 className="font-bold text-emerald-900 text-sm">Proyek Selesai &amp; Go Live</h3>
+                                    <p className="text-xs text-emerald-700">Daftar proyek yang telah menyelesaikan seluruh tahapan SDLC dan telah aktif di lingkungan produksi.</p>
+                                </div>
+                            </div>
+                        </div>
+
+                        {completedProjects.length === 0 ? (
+                            <div className="bg-white p-12 rounded-2xl border border-gray-100 text-center">
+                                <CheckCircle2 size={48} className="text-gray-300 mx-auto mb-3" />
+                                <h3 className="text-lg font-bold text-gray-700">Belum Ada Proyek Selesai</h3>
+                                <p className="text-sm text-gray-500 mt-1">Belum ada proyek yang telah resmi rilis (Go-Live).</p>
+                            </div>
+                        ) : (
+                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+                                {completedProjects.map(project => (
+                                    <div key={project.id} className="bg-white p-5 rounded-2xl border border-gray-200 shadow-sm flex flex-col justify-between hover:shadow-md transition-all space-y-4">
+                                        <div>
+                                            <div className="flex items-center justify-between mb-2">
+                                                <span className="text-xs font-mono font-bold text-blue-600 bg-blue-50 px-2.5 py-0.5 rounded border border-blue-100">{project.id}</span>
+                                                <span className="px-2.5 py-1 rounded-full text-xs font-bold bg-emerald-100 text-emerald-800 border border-emerald-200 flex items-center gap-1">
+                                                    <Check size={13} /> Live Production
+                                                </span>
+                                            </div>
+                                            <h3 className="font-bold text-gray-800 text-base mb-2">{project.name}</h3>
+
+                                            <div className="bg-gray-50 border border-gray-100 p-3 rounded-xl mb-3">
+                                                <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-1">Ringkasan Sistem</p>
+                                                <p className="text-xs text-gray-700 leading-relaxed">{project.description || 'Sistem telah lulus pengujian UAT, QA, Cyber Security, dan resmi diluncurkan.'}</p>
+                                            </div>
+
+                                            <div className="space-y-2 text-xs text-gray-600 bg-emerald-50/40 p-3 rounded-xl border border-emerald-100">
+                                                <div className="flex justify-between items-center">
+                                                    <span className="font-bold text-gray-400 text-[10px] uppercase">PM Penanggung Jawab:</span>
+                                                    <span className="font-semibold text-gray-800">{typeof project.pm === 'object' ? project.pm?.name : (project.pm || 'Siti Aminah')}</span>
+                                                </div>
+                                                <div className="flex justify-between items-center">
+                                                    <span className="font-bold text-gray-400 text-[10px] uppercase">Divisi Pemohon:</span>
+                                                    <span className="font-semibold text-gray-800">{project.division}</span>
+                                                </div>
+                                                <div className="flex justify-between items-center">
+                                                    <span className="font-bold text-gray-400 text-[10px] uppercase">Status Rilis:</span>
+                                                    <span className="font-semibold text-emerald-700">100% Selesai &amp; Go-Live</span>
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        <button
+                                            onClick={() => navigate('/pm/tracker')}
+                                            className="w-full bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-bold py-2.5 px-4 rounded-xl transition-all flex items-center justify-center gap-2 shadow-sm cursor-pointer"
+                                        >
+                                            <Check size={15} />
+                                            <span>Lihat Riwayat SDLC Proyek</span>
+                                        </button>
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+                    </div>
+                )}
             </div>
 
-            {/* MODAL TUGASKAN ANALYST (TAB 1) */}
+            {/* MODAL TUGASKAN ANALYST (TAB 1) - Dilengkapi Detail & Deskripsi Proyek Utuh */}
             {isAnalystModalOpen && targetProjectForAnalyst && (
-                <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50 animate-fade-in">
-                    <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-4 border border-gray-100">
+                <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-50 animate-scale-up overflow-y-auto">
+                    <div className="bg-white rounded-2xl max-w-xl w-full p-6 shadow-2xl space-y-4 border border-gray-100 my-6">
                         <div className="flex items-center justify-between border-b border-gray-100 pb-3">
-                            <h3 className="font-bold text-gray-800 text-base flex items-center gap-2">
-                                <UserCheck size={18} className="text-blue-600" />
-                                Penugasan System Analyst
-                            </h3>
-                            <button onClick={() => setIsAnalystModalOpen(false)} className="text-gray-400 hover:text-gray-600">
+                            <div>
+                                <span className="text-[10px] font-bold text-blue-600 uppercase tracking-widest bg-blue-50 px-2 py-0.5 rounded border border-blue-100">
+                                    Penugasan System Analyst
+                                </span>
+                                <h3 className="font-extrabold text-gray-800 text-lg mt-0.5">
+                                    {targetProjectForAnalyst.name}
+                                </h3>
+                            </div>
+                            <button onClick={() => setIsAnalystModalOpen(false)} className="text-gray-400 hover:text-gray-600 p-1.5 rounded-lg">
                                 <X size={20} />
                             </button>
                         </div>
 
-                        <div className="bg-blue-50 p-3 rounded-xl text-xs text-blue-900 font-medium">
-                            Proyek: <strong>{targetProjectForAnalyst.name}</strong> ({targetProjectForAnalyst.id})
+                        {/* Box Detail & Deskripsi Proyek */}
+                        <div className="bg-slate-50 p-4 rounded-xl border border-slate-200/80 space-y-2 text-xs">
+                            <p className="font-bold text-slate-500 uppercase tracking-wider">Detail &amp; Deskripsi Proyek</p>
+                            <p className="text-slate-800 leading-relaxed text-sm bg-white p-3 rounded-lg border border-slate-200">
+                                {targetProjectForAnalyst.description || 'Pengajuan inisiasi sistem baru Bank Nagari.'}
+                            </p>
+                            <div className="grid grid-cols-2 gap-2 pt-1 text-slate-700">
+                                <div><strong>Divisi Pengusul:</strong> {targetProjectForAnalyst.division}</div>
+                                <div><strong>Target Selesai:</strong> {targetProjectForAnalyst.targetDate}</div>
+                            </div>
                         </div>
 
                         <div>
-                            <label className="block text-xs font-bold text-gray-700 mb-1.5">Pilih Analyst Bertugas <span className="text-red-500">*</span></label>
+                            <label className="block text-xs font-bold text-gray-700 mb-1.5">Pilih System Analyst <span className="text-red-500">*</span></label>
                             <select
                                 value={selectedAnalystId}
                                 onChange={(e) => setSelectedAnalystId(e.target.value)}
-                                className="w-full px-3.5 py-2.5 rounded-xl border border-gray-200 text-sm outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-600 bg-white"
+                                className="w-full px-4 py-2.5 rounded-xl border border-gray-200 text-sm outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-600 bg-white font-medium"
                             >
                                 <option value="">-- Pilih System Analyst --</option>
                                 {analysts.map(a => (
                                     <option key={a.id} value={a.id}>
-                                        {a.name} (Beban Kerja: {a.workload})
+                                        {a.name} (Beban Kerja: {a.workload} Proyek Aktif)
                                     </option>
                                 ))}
                             </select>
                         </div>
 
                         <div>
-                            <label className="block text-xs font-bold text-gray-700 mb-1.5">Catatan Arahan untuk Analyst</label>
+                            <label className="block text-xs font-bold text-gray-700 mb-1.5">Catatan Arahan untuk Analyst (Opsional)</label>
                             <textarea
                                 rows={3}
                                 value={leadNote}
                                 onChange={(e) => setLeadNote(e.target.value)}
-                                placeholder="Misal: Tolak ukur arsitektur microservices dan integrasi API core banking..."
-                                className="w-full px-3.5 py-2 rounded-xl border border-gray-200 text-xs outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-600"
+                                placeholder="Tulis arahan khusus atau fokus kajian arsitektur teknis..."
+                                className="w-full px-4 py-2.5 rounded-xl border border-gray-200 text-xs outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-600 bg-white"
                             />
                         </div>
 
-                        <div className="flex items-center justify-end gap-2 pt-2">
+                        <div className="flex items-center justify-end gap-2 pt-3 border-t border-gray-100">
                             <button
                                 onClick={() => setIsAnalystModalOpen(false)}
-                                className="px-4 py-2 text-xs font-semibold text-gray-600 hover:bg-gray-100 rounded-xl"
+                                className="px-4 py-2 text-xs font-semibold text-gray-600 hover:bg-gray-100 rounded-xl cursor-pointer"
                             >
                                 Batal
                             </button>
                             <button
                                 onClick={handleAssignAnalyst}
                                 disabled={isSubmitting}
-                                className="px-5 py-2 text-xs font-bold text-white bg-[#1a365d] hover:bg-[#0f2342] rounded-xl transition-all shadow-sm flex items-center gap-1.5"
+                                className="px-5 py-2.5 text-xs font-bold text-white bg-[#1a365d] hover:bg-[#0f2342] rounded-xl transition-all shadow-md flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
                             >
-                                <Send size={13} />
+                                <Send size={14} />
                                 Kirim Tugas ke Analyst
                             </button>
                         </div>

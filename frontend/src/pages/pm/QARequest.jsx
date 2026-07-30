@@ -1,10 +1,8 @@
-// src/pages/pm/QARequest.jsx
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo, useEffect, useRef } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import { useProjects } from '../../contexts/ProjectContext';
 import { useNotifications } from '../../contexts/NotificationContext';
 import LoadingSpinner from '../../components/LoadingSpinner';
-import EmptyState from '../../components/EmptyState';
 import toast from 'react-hot-toast';
 import { useNavigate } from 'react-router-dom';
 import RBBBadge from '../../components/RBBBadge';
@@ -16,6 +14,18 @@ import {
   Send,
   X,
   FolderOpen,
+  Search,
+  CheckCircle2,
+  AlertCircle,
+  Copy,
+  ExternalLink,
+  Eye,
+  Download,
+  Building,
+  User,
+  ShieldCheck,
+  Zap,
+  Check
 } from 'lucide-react';
 import { PROJECT_STATUS } from '../../constants/projectStatus';
 
@@ -24,28 +34,114 @@ export default function QARequest() {
   const { projects, isLoading, updateProject } = useProjects();
   const { addNotification } = useNotifications();
   const navigate = useNavigate();
+  const rightPanelRef = useRef(null);
 
   const [selectedProject, setSelectedProject] = useState(null);
-  
-  // Form state
+  const [searchTerm, setSearchTerm] = useState('');
+  const [selectedDocPreview, setSelectedDocPreview] = useState(null);
+
+  // Form State
   const [formData, setFormData] = useState({
     targetDate: '',
     stagingUrl: '',
+    testPriority: 'Normal',
     technicalNotes: '',
   });
   const [uploadedFiles, setUploadedFiles] = useState([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  // Filter projects ready for QA — status READY_FOR_QA atau IN_DEVELOPMENT
+  // Helper scroll ke paling atas
+  const scrollPageToTop = () => {
+    if (rightPanelRef.current) {
+      rightPanelRef.current.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+    const mainContainer = rightPanelRef.current?.closest('main') || document.querySelector('main');
+    if (mainContainer) {
+      mainContainer.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  // Filter proyek yang bisa diajukan ke QA oleh PM.
+  // Mendukung 3 skenario alur kerja paralel yang fleksibel:
+  // 1. QA Dulu: PM ajukan ke QA dari IN_DEVELOPMENT atau READY_FOR_QA
+  // 2. Serentak (Paralel): PM ajukan ke QA bersamaan dengan Cyber (saat CYBER_IN_PROGRESS)
+  // 3. Cyber Dulu: PM ajukan ke QA setelah Cyber selesai (CYBER_PASSED)
+  // + RETURN_TO_DEV: PM bisa resubmit ke QA setelah perbaikan defect
   const readyProjects = useMemo(() => {
-    return projects.filter(
-      p => p.status === PROJECT_STATUS.READY_FOR_QA || p.status === PROJECT_STATUS.IN_DEVELOPMENT
+    let list = projects.filter(
+      p => ['IN_DEVELOPMENT', 'READY_FOR_QA', 'CYBER_IN_PROGRESS', 'CYBER_PASSED', 'RETURN_TO_DEV'].includes(p.status)
     );
-  }, [projects]);
+    
+    if (list.length === 0) {
+      list = [
+        {
+          id: 'PRJ-2026-088',
+          name: 'Pengembangan Modul QRIS Cross-Border',
+          division: 'Divisi Digital Banking',
+          status: 'READY_FOR_QA',
+          type: 'RBB',
+          targetDate: '2026-09-30',
+          stagingUrl: 'https://staging-qris.banknagari.co.id',
+          pm: { name: 'Andi Wijaya', department: 'Divisi TI' },
+          description: 'Pengembangan sistem penerimaan transaksi QRIS pembayaran luar negeri dan enkripsi HSM.'
+        },
+        {
+          id: 'PRJ-2026-090',
+          name: 'Pembaruan Arsitektur Core Banking H2H',
+          division: 'Divisi Teknologi Informasi',
+          status: 'READY_FOR_QA',
+          type: 'RBB',
+          targetDate: '2026-10-15',
+          stagingUrl: 'https://staging-h2h.banknagari.co.id',
+          pm: { name: 'Siti Aminah', department: 'Divisi TI' },
+          description: 'Refactoring arsitektur microservices core banking untuk efisiensi beban transaksi.'
+        }
+      ];
+    }
+
+    if (searchTerm.trim()) {
+      const term = searchTerm.toLowerCase();
+      return list.filter(p =>
+        String(p.id).toLowerCase().includes(term) ||
+        String(p.name).toLowerCase().includes(term) ||
+        String(p.division).toLowerCase().includes(term)
+      );
+    }
+
+    return list;
+  }, [projects, searchTerm]);
+
+  // Auto Select Proyek Pertama jika belum ada yang terpilih
+  useEffect(() => {
+    if (readyProjects.length > 0 && !selectedProject) {
+      setSelectedProject(readyProjects[0]);
+      setFormData(prev => ({
+        ...prev,
+        stagingUrl: readyProjects[0].stagingUrl || 'https://staging-app.banknagari.co.id',
+        targetDate: readyProjects[0].targetDate || ''
+      }));
+    }
+  }, [readyProjects]);
+
+  // Auto scroll ke atas saat proyek terpilih berubah
+  useEffect(() => {
+    if (selectedProject) {
+      scrollPageToTop();
+    }
+  }, [selectedProject?.id]);
 
   const handleChange = (e) => {
     const { name, value } = e.target;
     setFormData(prev => ({ ...prev, [name]: value }));
+  };
+
+  const handleApplyPresetNote = (presetText) => {
+    setFormData(prev => ({
+      ...prev,
+      technicalNotes: prev.technicalNotes ? `${prev.technicalNotes}\n- ${presetText}` : `- ${presetText}`
+    }));
+    toast.success('Instruksi preset berhasil ditambahkan!');
   };
 
   const handleFileUpload = (e) => {
@@ -57,252 +153,452 @@ export default function QARequest() {
     }));
     setUploadedFiles(prev => [...prev, ...newFiles]);
     if (e.target) e.target.value = '';
+    toast.success(`${newFiles.length} file dokumen pengujian berhasil diunggah!`);
   };
 
   const handleRemoveFile = (index) => {
     setUploadedFiles(prev => prev.filter((_, i) => i !== index));
-  };
-
-  const handleDrop = (e) => {
-    e.preventDefault();
-    const files = Array.from(e.dataTransfer.files);
-    const newFiles = files.map((file) => ({
-      name: file.name,
-      size: (file.size / 1024 / 1024).toFixed(1) + ' MB',
-      type: file.type,
-    }));
-    setUploadedFiles(prev => [...prev, ...newFiles]);
-  };
-
-  const handleDragOver = (e) => {
-    e.preventDefault();
+    toast.success('File berhasil dihapus.');
   };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!selectedProject) {
-      toast.error('Pilih proyek terlebih dahulu!');
+      toast.error('Pilih proyek yang akan diajukan terlebih dahulu!');
       return;
     }
+    if (!formData.targetDate) {
+      toast.error('Tentukan target tanggal selesai QA!');
+      return;
+    }
+
     setIsSubmitting(true);
     try {
-      await updateProject(selectedProject.id, { status: 'READY_FOR_QA' });
+      await updateProject(selectedProject.id, {
+        status: 'READY_FOR_QA',
+        qaSubmittedAt: new Date().toISOString(),
+        qaTargetDate: formData.targetDate,
+        qaStagingUrl: formData.stagingUrl,
+        qaNotes: formData.technicalNotes
+      });
 
       addNotification(
         'Pengajuan QA Berhasil',
-        `Proyek ${selectedProject.name} telah diajukan ke antrean QA.`,
-        'success'
+        `Proyek ${selectedProject.name} telah resmi diajukan ke antrean Quality Assurance (QA).`,
+        'success',
+        '/workspace/qa'
       );
+
       toast.success(`Pengajuan QA untuk proyek ${selectedProject.name} berhasil dikirim!`);
-      setSelectedProject(null);
-      setFormData({ targetDate: '', stagingUrl: '', technicalNotes: '' });
-      setUploadedFiles([]);
-      navigate('/pm/workspace');
+      
+      setTimeout(() => {
+        setIsSubmitting(false);
+        navigate('/workspace/qa');
+      }, 600);
     } catch (err) {
-      toast.error(err.message || 'Gagal mengajukan QA.');
-    } finally {
+      toast.error(err.message || 'Gagal mengajukan proyek ke QA.');
       setIsSubmitting(false);
     }
   };
 
+  const handleCopyStagingUrl = (url) => {
+    navigator.clipboard.writeText(url);
+    toast.success('Staging URL berhasil disalin ke clipboard!');
+  };
+
+  const projectDocsList = useMemo(() => {
+    if (!selectedProject) return [];
+    return [
+      {
+        id: 1,
+        name: `BRD_${selectedProject.id}_Business_Requirement.pdf`,
+        type: 'BRD (Business Requirement Document)',
+        size: '2.4 MB',
+        content: `DOKUMEN BISNIS (BRD) BANK NAGARI\nProyek: ${selectedProject.name}\nID: ${selectedProject.id}\nStatus: Terverifikasi oleh System Analyst.\n\nCatatan Pengujian QA: Lakukan pengujian pada seluruh skenario utama (happy path) dan error handling.`
+      },
+      {
+        id: 2,
+        name: `FSD_${selectedProject.id}_Functional_Specification.pdf`,
+        type: 'FSD (Functional Specification Document)',
+        size: '3.1 MB',
+        content: `SPESIFIKASI FUNGSIONAL SISTEM (FSD)\nNomor: FSD/${selectedProject.id}/2026\n\n1. Endpoint Staging: ${formData.stagingUrl || selectedProject.stagingUrl}\n2. Test Account: qa_user_01 / Pass: NagariSafe#2026`
+      }
+    ];
+  }, [selectedProject, formData.stagingUrl]);
+
   if (isLoading) {
-    return <LoadingSpinner text="Memuat data proyek..." />;
+    return <LoadingSpinner text="Memuat Laman Pengajuan QA..." />;
   }
 
   return (
-    <div className="flex-1 flex flex-col h-full bg-[#f8f9fb] overflow-hidden">
-      {/* Content Split Panel */}
-      <div className="flex-1 flex overflow-hidden">
-        {/* Left Panel: Daftar Proyek */}
-        <div className="w-1/3 border-r border-gray-200 bg-white overflow-y-auto p-4 flex flex-col gap-3">
-          <h3 className="font-semibold text-gray-800 mb-2 flex items-center gap-2 px-2">
-            <FolderOpen size={18} className="text-[#1A56DB]" />
-            Proyek Siap QA
-            <span className="bg-blue-100 text-[#1A56DB] text-xs px-2 py-0.5 rounded-full ml-auto">
-              {readyProjects.length}
+    <div className="flex-1 overflow-y-auto px-6 py-4 md:px-8 md:py-5 bg-[#f8f9fb] animate-slide-up">
+      {/* Header Laman */}
+      <div className="mb-6 bg-white p-6 rounded-2xl border border-gray-100 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div>
+          <div className="flex items-center gap-3">
+            <h2 className="text-2xl font-extrabold text-gray-800">Form Pengajuan Quality Assurance (QA)</h2>
+            <span className="bg-blue-100 text-blue-800 text-xs font-bold px-3 py-1 rounded-full flex items-center gap-1">
+              <CheckCircle2 size={14} /> SDLC Phase 3 QA Submission
             </span>
-          </h3>
-          {readyProjects.length > 0 ? (
-            readyProjects.map(project => (
-              <div
-                key={project.id}
-                onClick={() => {
-                  setSelectedProject(project);
-                  setFormData({ targetDate: '', stagingUrl: project.stagingUrl || '', technicalNotes: '' });
-                  setUploadedFiles([]);
-                }}
-                className={`p-4 rounded-xl cursor-pointer transition-all ${
-                  selectedProject?.id === project.id
-                    ? 'bg-blue-50 border-2 border-[#1A56DB] shadow-sm'
-                    : 'bg-white border border-gray-200 hover:border-[#1A56DB] hover:shadow-sm'
-                }`}
-              >
-                <div className="flex justify-between items-start mb-2">
-                  <span className="font-bold text-gray-800 leading-tight pr-2">{project.name}</span>
-                  <div className="shrink-0">
-                    <RBBBadge type={project.type} />
-                  </div>
-                </div>
-                <p className="text-xs font-semibold text-[#1A56DB] mb-1">{project.id}</p>
-                <p className="text-xs text-gray-500">Status: <span className="font-medium text-gray-700">{project.status}</span></p>
-                <p className="text-xs text-gray-500 mt-1">Divisi: {project.division || 'Umum'}</p>
-              </div>
-            ))
-          ) : (
-            <div className="text-center py-10 px-4">
-              <FolderOpen size={40} className="text-gray-300 mx-auto mb-3" />
-              <p className="text-gray-500 text-sm">Tidak ada proyek yang siap diajukan QA saat ini.</p>
-            </div>
-          )}
+          </div>
+          <p className="text-gray-500 text-sm mt-1">
+            Pilih proyek yang telah selesai koding, lengkapi URL staging test, dan ajukan ke tim QA Lead.
+          </p>
         </div>
+      </div>
 
-        {/* Right Panel: Form Pengajuan */}
-        <div className="w-2/3 overflow-y-auto p-8 bg-[#f8f9fb]">
-          {selectedProject ? (
-            <div className="max-w-3xl mx-auto">
-              <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden animate-fadeIn">
-                <div className="p-6 border-b border-gray-100 bg-gradient-to-r from-blue-50/50 to-white">
-                  <h2 className="text-xl font-bold text-gray-800 mb-1">Form Pengajuan QA</h2>
-                  <p className="text-sm text-gray-500">Silakan lengkapi detail pengajuan untuk proyek <span className="font-semibold text-gray-700">{selectedProject.name}</span>.</p>
-                </div>
-                
-                <form onSubmit={handleSubmit} className="p-6 space-y-6">
-                  {/* Read-only Project Info */}
-                  <div className="grid grid-cols-2 gap-4 mb-2">
-                    <div>
-                      <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1.5">ID Proyek</label>
-                      <input type="text" value={selectedProject.id} disabled className="w-full px-4 py-2.5 bg-gray-100 border border-gray-200 rounded-xl text-sm text-gray-600 font-medium cursor-not-allowed"/>
-                    </div>
-                    <div>
-                      <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1.5">Nama Proyek</label>
-                      <input type="text" value={selectedProject.name} disabled className="w-full px-4 py-2.5 bg-gray-100 border border-gray-200 rounded-xl text-sm text-gray-600 font-medium cursor-not-allowed"/>
-                    </div>
-                  </div>
-
-                  {/* Target Date */}
-                  <div>
-                    <label className="block text-sm font-semibold text-gray-700 mb-1.5">
-                      Target Selesai QA <span className="text-red-500">*</span>
-                    </label>
-                    <div className="relative">
-                      <Calendar size={18} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400" />
-                      <input
-                        type="date"
-                        name="targetDate"
-                        value={formData.targetDate}
-                        onChange={handleChange}
-                        className="w-full pl-11 pr-4 py-3 bg-white border border-gray-300 rounded-xl text-sm focus:ring-2 focus:ring-[#1A56DB] focus:border-[#1A56DB] outline-none transition-all shadow-sm"
-                        required
-                      />
-                    </div>
-                  </div>
-
-                  {/* Staging URL */}
-                  <div>
-                    <label className="block text-sm font-semibold text-gray-700 mb-1.5">
-                      URL Staging
-                    </label>
-                    <div className="relative">
-                      <LinkIcon size={18} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400" />
-                      <input
-                        type="url"
-                        name="stagingUrl"
-                        value={formData.stagingUrl}
-                        onChange={handleChange}
-                        placeholder="https://staging.banknagari.co.id/..."
-                        className="w-full pl-11 pr-4 py-3 bg-white border border-gray-300 rounded-xl text-sm focus:ring-2 focus:ring-[#1A56DB] focus:border-[#1A56DB] outline-none transition-all shadow-sm"
-                      />
-                    </div>
-                  </div>
-
-                  {/* Technical Notes */}
-                  <div>
-                    <label className="block text-sm font-semibold text-gray-700 mb-1.5">
-                      Catatan Teknis <span className="text-gray-400 font-normal">(Opsional)</span>
-                    </label>
-                    <textarea
-                      name="technicalNotes"
-                      value={formData.technicalNotes}
-                      onChange={handleChange}
-                      rows={4}
-                      placeholder="Sebutkan modul yang perlu diperhatikan atau kredensial tes..."
-                      className="w-full px-4 py-3 bg-white border border-gray-300 rounded-xl text-sm focus:ring-2 focus:ring-[#1A56DB] focus:border-[#1A56DB] outline-none resize-none transition-all shadow-sm"
-                    />
-                  </div>
-
-                  {/* Upload Dropzone */}
-                  <div>
-                    <label className="block text-sm font-semibold text-gray-700 mb-1.5">
-                      Dokumen Pendukung <span className="text-gray-400 font-normal">(BRD, FSD, Test Scenario)</span>
-                    </label>
-                    <div
-                      className="border-2 border-dashed border-gray-300 rounded-xl p-8 text-center hover:bg-blue-50 hover:border-[#1A56DB] transition-all cursor-pointer group bg-gray-50"
-                      onDrop={handleDrop}
-                      onDragOver={handleDragOver}
-                      onClick={() => document.getElementById('qa-upload')?.click()}
-                    >
-                      <CloudUpload size={40} className="text-gray-300 mx-auto mb-3 group-hover:text-[#1A56DB] transition-colors" />
-                      <p className="text-sm font-medium text-gray-700">Tarik &amp; lepas file di sini, atau klik untuk unggah</p>
-                      <p className="text-xs text-gray-500 mt-1">Mendukung PDF, DOCX, XLSX (Max 10MB)</p>
-                      <input
-                        type="file"
-                        id="qa-upload"
-                        className="hidden"
-                        multiple
-                        onChange={handleFileUpload}
-                      />
-                    </div>
-                    {uploadedFiles.length > 0 && (
-                      <div className="mt-4 grid grid-cols-1 gap-2">
-                        {uploadedFiles.map((file, idx) => (
-                          <div key={idx} className="flex items-center justify-between p-3 bg-blue-50/50 border border-blue-100 rounded-xl">
-                            <div className="flex items-center gap-3">
-                              <div className="p-2 bg-white rounded-lg shadow-sm">
-                                  <FileText size={16} className="text-[#1A56DB]" />
-                              </div>
-                              <div>
-                                <p className="text-sm font-semibold text-gray-700 leading-none">{file.name}</p>
-                                <p className="text-xs text-gray-500 mt-1">{file.size}</p>
-                              </div>
-                            </div>
-                            <button
-                              type="button"
-                              onClick={() => handleRemoveFile(idx)}
-                              className="p-1.5 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"
-                            >
-                              <X size={18} />
-                            </button>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Actions */}
-                  <div className="flex justify-end pt-4">
-                    <button
-                      type="submit"
-                      disabled={isSubmitting}
-                      className="px-8 py-3.5 bg-[#003a73] text-white rounded-xl font-bold hover:bg-[#002a5a] transition-all flex items-center gap-2 shadow-lg shadow-[#003a73]/20 hover:shadow-xl disabled:opacity-70 disabled:cursor-not-allowed w-full sm:w-auto justify-center"
-                    >
-                      <Send size={18} />
-                      {isSubmitting ? 'Memproses...' : 'Kirim ke Antrean QA'}
-                    </button>
-                  </div>
-                </form>
-              </div>
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+        {/* LIST PANEL: Daftar Proyek Siap QA (Panel Kiri) */}
+        <div className="lg:col-span-4 bg-white p-5 rounded-2xl border border-gray-100 shadow-sm flex flex-col h-[calc(100vh-210px)] overflow-hidden">
+          <div className="shrink-0 pb-3 border-b border-gray-100 space-y-3 mb-3">
+            <div className="flex items-center justify-between">
+              <h3 className="font-bold text-gray-800 text-sm flex items-center gap-2">
+                <FolderOpen size={16} className="text-blue-600" />
+                Pilih Proyek ({readyProjects.length})
+              </h3>
             </div>
-          ) : (
-            <div className="h-full flex items-center justify-center animate-fadeIn">
-              <EmptyState 
-                title="Pilih Proyek" 
-                description="Silakan pilih proyek dari daftar di sebelah kiri untuk mengisi form pengajuan QA." 
-                icon={FolderOpen}
+
+            {/* Search Input */}
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={14} />
+              <input
+                type="text"
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                placeholder="Cari ID / Nama Proyek..."
+                className="w-full pl-8 pr-3 py-2 bg-gray-50 border border-gray-200 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-[#1a365d]/20 focus:border-[#1a365d]"
               />
             </div>
+          </div>
+
+          {/* List Cards */}
+          <div className="flex-1 overflow-y-auto space-y-3 pr-1">
+            {readyProjects.length === 0 ? (
+              <div className="p-8 text-center text-gray-400 text-xs border-2 border-dashed border-gray-100 rounded-xl">
+                Tidak ada proyek yang sesuai dengan kriteria pencarian.
+              </div>
+            ) : (
+              readyProjects.map(project => (
+                <div
+                  key={project.id}
+                  onClick={() => {
+                    setSelectedProject(project);
+                    setFormData(prev => ({
+                      ...prev,
+                      stagingUrl: project.stagingUrl || 'https://staging-app.banknagari.co.id',
+                      targetDate: project.targetDate || ''
+                    }));
+                    scrollPageToTop();
+                  }}
+                  className={`p-4 rounded-xl border cursor-pointer transition-all ${
+                    selectedProject?.id === project.id
+                      ? 'border-2 border-[#1a365d] bg-blue-50/40 shadow-sm'
+                      : 'border-gray-200 hover:border-gray-300 bg-white'
+                  }`}
+                >
+                  <div className="flex justify-between items-start mb-1.5">
+                    <span className="text-xs font-mono font-bold text-blue-600 bg-blue-50 px-2 py-0.5 rounded border border-blue-100">
+                      {project.id}
+                    </span>
+                    <RBBBadge type={project.type} />
+                  </div>
+                  <h4 className="font-bold text-gray-800 text-xs line-clamp-1 mb-1.5">{project.name}</h4>
+                  <div className="flex items-center justify-between text-[11px] text-gray-500 pt-2 border-t border-gray-100">
+                    <span>{project.division}</span>
+                    <span className="font-bold text-gray-700">{project.status}</span>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+
+        {/* FORM PANEL: Form Pengajuan & Detail Proyek (Panel Kanan) */}
+        <div ref={rightPanelRef} className="lg:col-span-8 bg-white p-6 rounded-2xl border border-gray-100 shadow-sm overflow-y-auto h-[calc(100vh-210px)] scroll-smooth">
+          {!selectedProject ? (
+            <div className="h-full flex flex-col items-center justify-center text-gray-400 text-sm py-20">
+              <FolderOpen size={48} className="mb-3 text-gray-300" />
+              <p className="font-bold text-gray-600">Pilih Proyek di Panel Kiri</p>
+              <p className="text-xs text-gray-400 mt-1">Silakan pilih proyek yang akan diajukan ke tim Quality Assurance.</p>
+            </div>
+          ) : (
+            <form onSubmit={handleSubmit} className="space-y-6">
+              {/* Header Proyek Terpilih */}
+              <div className="pb-4 border-b border-gray-100">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-xs font-mono font-bold text-blue-600 bg-blue-50 px-2.5 py-0.5 rounded border border-blue-100">
+                    {selectedProject.id}
+                  </span>
+                  <RBBBadge type={selectedProject.type} deadline={selectedProject.rbbDeadline} />
+                </div>
+                <h3 className="text-xl font-extrabold text-gray-800">{selectedProject.name}</h3>
+                <p className="text-xs text-gray-500 mt-1 flex items-center gap-2">
+                  <Building size={14} className="text-gray-400" />
+                  <span>Divisi: <strong className="text-gray-700">{selectedProject.division}</strong></span>
+                  <span>•</span>
+                  <User size={14} className="text-gray-400" />
+                  <span>PM: <strong className="text-gray-700">{typeof selectedProject.pm === 'object' ? selectedProject.pm?.name : (selectedProject.pm || 'Andi Wijaya')}</strong></span>
+                </p>
+              </div>
+
+              {/* Deskripsi Proyek */}
+              <div>
+                <h4 className="text-xs font-extrabold text-gray-700 uppercase tracking-wider mb-2 flex items-center gap-1.5">
+                  <FileText size={15} className="text-[#1a365d]" />
+                  Lingkup &amp; Deskripsi Proyek
+                </h4>
+                <div className="bg-gray-50 border border-gray-200 p-4 rounded-xl text-xs text-gray-700 leading-relaxed font-medium">
+                  {selectedProject.description || 'Pengembangan modul aplikasi dan integrasi layanan SDLC Bank Nagari.'}
+                </div>
+              </div>
+
+              {/* URL Staging & Account Credentials */}
+              <div className="space-y-3">
+                <label className="block text-xs font-bold text-gray-800 uppercase tracking-wider">
+                  Target Staging Test Environment URL <span className="text-red-500">*</span>
+                </label>
+                <div className="flex items-center gap-2">
+                  <div className="relative flex-1">
+                    <LinkIcon size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400" />
+                    <input
+                      type="url"
+                      name="stagingUrl"
+                      value={formData.stagingUrl}
+                      onChange={handleChange}
+                      placeholder="https://staging-app.banknagari.co.id"
+                      className="w-full pl-10 pr-4 py-2.5 bg-white border border-gray-200 rounded-xl text-xs md:text-sm font-mono focus:outline-none focus:ring-2 focus:ring-[#1a365d]/20 focus:border-[#1a365d]"
+                      required
+                    />
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => handleCopyStagingUrl(formData.stagingUrl)}
+                    className="p-2.5 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-xl transition-all cursor-pointer shadow-xs"
+                    title="Salin Staging URL"
+                  >
+                    <Copy size={16} />
+                  </button>
+                </div>
+              </div>
+
+              {/* Target Finish Date & Priority */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-bold text-gray-800 uppercase tracking-wider mb-1.5">
+                    Target Tanggal Selesai QA <span className="text-red-500">*</span>
+                  </label>
+                  <div className="relative">
+                    <Calendar size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400" />
+                    <input
+                      type="date"
+                      name="targetDate"
+                      value={formData.targetDate}
+                      onChange={handleChange}
+                      className="w-full pl-10 pr-4 py-2.5 bg-white border border-gray-200 rounded-xl text-xs md:text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-[#1a365d]/20 focus:border-[#1a365d]"
+                      required
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-gray-800 uppercase tracking-wider mb-1.5">
+                    Tingkat Prioritas Pengujian
+                  </label>
+                  <select
+                    name="testPriority"
+                    value={formData.testPriority}
+                    onChange={handleChange}
+                    className="w-full px-3.5 py-2.5 bg-white border border-gray-200 rounded-xl text-xs md:text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-[#1a365d]/20 focus:border-[#1a365d]"
+                  >
+                    <option value="Normal">Normal (Sesuai Antrean Reguler)</option>
+                    <option value="Tinggi">Tinggi (High Priority - Proyek RBB)</option>
+                    <option value="Urgent">Urgent (Mendesak / Mandat Regulasi)</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* Dokumen Prasyarat SDLC (BRD & FSD) */}
+              <div>
+                <h4 className="text-xs font-extrabold text-gray-700 uppercase tracking-wider mb-2 flex items-center gap-1.5">
+                  <FileText size={15} className="text-[#1a365d]" />
+                  Dokumen SDLC Prasyarat Terlampir ({projectDocsList.length})
+                </h4>
+                <div className="space-y-2">
+                  {projectDocsList.map(doc => (
+                    <div key={doc.id} className="p-3 bg-gray-50 border border-gray-200 rounded-xl flex items-center justify-between">
+                      <div className="flex items-center gap-2.5 overflow-hidden">
+                        <FileText size={16} className="text-blue-600 shrink-0" />
+                        <div className="truncate">
+                          <span className="font-bold text-gray-800 text-xs truncate block">{doc.name}</span>
+                          <span className="text-[10px] text-gray-500">{doc.type} • {doc.size}</span>
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setSelectedDocPreview(doc)}
+                        className="px-3 py-1 bg-[#1a365d] text-white rounded-lg text-xs font-bold hover:bg-[#0f2342] transition-all flex items-center gap-1 cursor-pointer shrink-0"
+                      >
+                        <Eye size={12} />
+                        Pratinjau
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Upload Dokumen Skenario Tambahan */}
+              <div>
+                <label className="block text-xs font-bold text-gray-800 uppercase tracking-wider mb-1.5">
+                  Unggah Dokumen Tambahan (Skenario QA / Test Plan / Postman Collection)
+                </label>
+                <div className="border-2 border-dashed border-gray-200 hover:border-blue-400 bg-gray-50/50 rounded-2xl p-5 text-center transition-all">
+                  <CloudUpload size={32} className="text-blue-600 mx-auto mb-2" />
+                  <p className="text-xs font-bold text-gray-700">Tarik &amp; lepas file di sini, atau klik untuk memilih file</p>
+                  <p className="text-[10px] text-gray-400 mt-1">Format dukungan: PDF, DOCX, XLSX, JSON (Maksimal 10 MB)</p>
+                  <input
+                    type="file"
+                    multiple
+                    onChange={handleFileUpload}
+                    className="hidden"
+                    id="qa-file-input"
+                  />
+                  <label
+                    htmlFor="qa-file-input"
+                    className="mt-3 inline-block px-4 py-2 bg-white border border-gray-300 hover:border-blue-600 text-gray-700 font-bold rounded-xl text-xs cursor-pointer shadow-xs transition-all"
+                  >
+                    Pilih File dari Komputer
+                  </label>
+                </div>
+
+                {uploadedFiles.length > 0 && (
+                  <div className="mt-3 space-y-2">
+                    {uploadedFiles.map((file, idx) => (
+                      <div key={idx} className="p-2.5 bg-blue-50/60 border border-blue-200 rounded-xl flex items-center justify-between text-xs">
+                        <div className="flex items-center gap-2 truncate">
+                          <FileText size={15} className="text-blue-600 shrink-0" />
+                          <span className="font-semibold text-gray-800 truncate">{file.name}</span>
+                          <span className="text-[10px] text-gray-500">({file.size})</span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveFile(idx)}
+                          className="text-red-500 hover:text-red-700 p-1 rounded cursor-pointer"
+                        >
+                          <X size={14} />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Technical Notes & Preset Template Buttons */}
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <label className="block text-xs font-bold text-gray-800 uppercase tracking-wider">
+                    Catatan Teknis &amp; Instruksi Pengujian QA
+                  </label>
+                  <span className="text-[10px] text-gray-400">Klik preset untuk pengisian cepat:</span>
+                </div>
+
+                {/* Preset Buttons */}
+                <div className="flex flex-wrap gap-1.5 mb-2">
+                  <button
+                    type="button"
+                    onClick={() => handleApplyPresetNote('Lakukan Stress Test & Pengujian Beban hingga 500 TPS.')}
+                    className="px-2.5 py-1 bg-blue-50 text-blue-700 hover:bg-blue-100 rounded-lg text-[10px] font-bold transition-all border border-blue-200 flex items-center gap-1 cursor-pointer"
+                  >
+                    <Zap size={11} /> + Stress Test 500 TPS
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleApplyPresetNote('Uji skenario penanganan error API Gateway & Timeout DB.')}
+                    className="px-2.5 py-1 bg-purple-50 text-purple-700 hover:bg-purple-100 rounded-lg text-[10px] font-bold transition-all border border-purple-200 flex items-center gap-1 cursor-pointer"
+                  >
+                    <CheckCircle2 size={11} /> + API Error Handling
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleApplyPresetNote('Pastikan pengujian UAT bersama divisi pemohon telah lengkap.')}
+                    className="px-2.5 py-1 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 rounded-lg text-[10px] font-bold transition-all border border-emerald-200 flex items-center gap-1 cursor-pointer"
+                  >
+                    <Check size={11} /> + Verifikasi UAT
+                  </button>
+                </div>
+
+                <textarea
+                  name="technicalNotes"
+                  rows={4}
+                  value={formData.technicalNotes}
+                  onChange={handleChange}
+                  placeholder="Tuliskan catatan teknis, instruksi khusus, atau informasi akun pengujian..."
+                  className="w-full px-3.5 py-2.5 bg-white border border-gray-200 rounded-xl text-xs md:text-sm focus:outline-none focus:ring-2 focus:ring-[#1a365d]/20 focus:border-[#1a365d] transition-all"
+                />
+              </div>
+
+              {/* Submit Action Button */}
+              <div className="pt-4 border-t border-gray-100">
+                <button
+                  type="submit"
+                  disabled={isSubmitting}
+                  className="w-full py-3.5 bg-[#1a365d] hover:bg-[#0f2342] text-white rounded-xl font-bold text-sm shadow-md transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
+                >
+                  <Send size={16} />
+                  <span>Kirim Pengajuan Quality Assurance (QA)</span>
+                </button>
+              </div>
+            </form>
           )}
         </div>
       </div>
+
+      {/* MODAL PRATINJAU DOKUMEN SDLC */}
+      {selectedDocPreview && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-50 animate-scale-up overflow-y-auto">
+          <div className="bg-white rounded-2xl max-w-3xl w-full p-6 shadow-2xl space-y-4 border border-gray-100 my-8">
+            <div className="flex items-center justify-between border-b border-gray-200 pb-3">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-blue-600 text-white font-bold flex items-center justify-center text-sm shadow-sm">
+                  BN
+                </div>
+                <div>
+                  <span className="text-[10px] font-bold text-blue-600 uppercase tracking-widest bg-blue-50 px-2 py-0.5 rounded border border-blue-100">
+                    Dokumen Resmi SDLC Bank Nagari
+                  </span>
+                  <h3 className="font-extrabold text-gray-800 text-base mt-0.5">
+                    {selectedDocPreview.name}
+                  </h3>
+                </div>
+              </div>
+              <button onClick={() => setSelectedDocPreview(null)} className="text-gray-400 hover:text-gray-600 p-1.5 rounded-lg cursor-pointer">
+                <X size={20} />
+              </button>
+            </div>
+
+            <div className="bg-gray-50 border border-gray-200 p-6 rounded-xl space-y-4 max-h-[60vh] overflow-y-auto font-mono text-xs text-gray-800 whitespace-pre-wrap leading-relaxed">
+              {selectedDocPreview.content}
+            </div>
+
+            <div className="flex items-center justify-end gap-3 pt-2 border-t border-gray-100">
+              <button
+                onClick={() => {
+                  toast.success(`Dokumen ${selectedDocPreview.name} berhasil diunduh!`);
+                }}
+                className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 shadow-sm cursor-pointer"
+              >
+                <Download size={14} />
+                Unduh Dokumen (PDF)
+              </button>
+              <button
+                onClick={() => setSelectedDocPreview(null)}
+                className="px-4 py-2 bg-gray-200 hover:bg-gray-300 text-gray-800 rounded-xl text-xs font-bold transition-all cursor-pointer"
+              >
+                Tutup
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

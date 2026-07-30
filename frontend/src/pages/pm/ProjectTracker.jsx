@@ -1,6 +1,6 @@
 // src/pages/pm/ProjectTracker.jsx
-import { useState, useMemo } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useState, useMemo, useEffect, useRef } from 'react';
+import { useNavigate, useLocation, useSearchParams } from 'react-router-dom';
 import { useProjects } from '../../contexts/ProjectContext';
 import { useAuth } from '../../contexts/AuthContext';
 import LoadingSpinner from '../../components/LoadingSpinner';
@@ -383,10 +383,51 @@ export default function ProjectTracker() {
     const { projects, isLoading } = useProjects();
     const { user } = useAuth();
     const navigate = useNavigate();
+    const location = useLocation();
+    const [searchParams] = useSearchParams();
 
     const [selectedProject, setSelectedProject] = useState(null);
     const [searchTerm, setSearchTerm] = useState('');
     const [filterPhase, setFilterPhase] = useState('');
+    const detailPanelRef = useRef(null);
+
+    // Helper untuk scroll paling atas panel detail & container main di MainLayout
+    const scrollPageToTop = () => {
+        if (detailPanelRef.current) {
+            detailPanelRef.current.scrollTo({ top: 0, behavior: 'smooth' });
+        }
+        const mainContainer = detailPanelRef.current?.closest('main') || document.querySelector('main');
+        if (mainContainer) {
+            mainContainer.scrollTo({ top: 0, behavior: 'smooth' });
+        }
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+    };
+
+    // Auto scroll ke paling atas panel detail & main layout saat proyek dipilih
+    useEffect(() => {
+        if (selectedProject) {
+            scrollPageToTop();
+        }
+    }, [selectedProject?.id]);
+
+    // Auto seleksi proyek berdasarkan query parameter / location state
+    useEffect(() => {
+        const targetId = location.state?.projectId || searchParams.get('projectId') || searchParams.get('id');
+        if (targetId && projects.length > 0) {
+            const found = projects.find(p =>
+                String(p.id).toLowerCase() === String(targetId).toLowerCase() ||
+                String(p.reqId || p.req_id || '').toLowerCase() === String(targetId).toLowerCase()
+            );
+            if (found) {
+                setSelectedProject(found);
+                return;
+            }
+        }
+        // Jika tidak ada ID spesifik dikirim dan selectedProject belum ada, pilih proyek pertama
+        if (!selectedProject && projects.length > 0) {
+            setSelectedProject(projects[0]);
+        }
+    }, [location.state, searchParams, projects]);
 
     // Filter proyek
     const filteredProjects = useMemo(() => {
@@ -408,9 +449,10 @@ export default function ProjectTracker() {
         return result;
     }, [projects, searchTerm, filterPhase]);
 
-    // Auto select first project
+    // Auto select & scroll
     const handleSelectProject = (project) => {
         setSelectedProject(project);
+        scrollPageToTop();
     };
 
     // Hitung stats for selected project
@@ -484,7 +526,7 @@ export default function ProjectTracker() {
             </div>
 
             {/* ── RIGHT PANEL: Detail Tracker ── */}
-            <div className="flex-1 overflow-y-auto">
+            <div ref={detailPanelRef} className="flex-1 overflow-y-auto">
                 {selectedProject ? (
                     <div className="max-w-3xl mx-auto p-6">
                         {/* Project header */}

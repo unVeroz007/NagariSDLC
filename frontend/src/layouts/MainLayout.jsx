@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Outlet, NavLink, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
+import { useProjects } from '../contexts/ProjectContext';
 import { menuSections } from '../data/menuConfig';
 import NotificationBell from '../components/NotificationBell';
 import {
@@ -13,9 +14,30 @@ import {
 
 export default function MainLayout() {
     const { user, logout } = useAuth();
+    const { projects } = useProjects();
     const location = useLocation();
     const navigate = useNavigate();
     const [isMobileOpen, setIsMobileOpen] = useState(false);
+
+    // Search Bar State & Functionality
+    const [searchQuery, setSearchQuery] = useState('');
+    const [isSearchOpen, setIsSearchOpen] = useState(false);
+
+    const filteredProjects = searchQuery.trim()
+        ? projects.filter(p =>
+            p.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+            p.id.toLowerCase().includes(searchQuery.toLowerCase()) ||
+            p.division.toLowerCase().includes(searchQuery.toLowerCase())
+        )
+        : [];
+
+    const handleSearchSubmit = (e) => {
+        e.preventDefault();
+        if (searchQuery.trim()) {
+            navigate(`/projects?search=${encodeURIComponent(searchQuery.trim())}`);
+            setIsSearchOpen(false);
+        }
+    };
 
     const handleLogout = () => {
         logout();
@@ -147,14 +169,58 @@ export default function MainLayout() {
                     </div>
 
                     <div className="flex items-center gap-3 md:gap-5">
-                        <div className="relative hidden md:block">
+                        <form onSubmit={handleSearchSubmit} className="relative hidden md:block">
                             <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={16} />
                             <input
-                                className="pl-9 pr-4 py-1.5 rounded-xl border border-gray-200 bg-[#f8f9fb] text-xs md:text-sm focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 w-[200px] lg:w-[260px] outline-none transition-all"
-                                placeholder="Cari proyek..."
+                                value={searchQuery}
+                                onChange={(e) => {
+                                    setSearchQuery(e.target.value);
+                                    setIsSearchOpen(true);
+                                }}
+                                onFocus={() => setIsSearchOpen(true)}
+                                className="pl-9 pr-4 py-1.5 rounded-xl border border-gray-200 bg-[#f8f9fb] text-xs md:text-sm focus:ring-2 focus:ring-[#1A56DB]/20 focus:border-[#1A56DB] w-[200px] lg:w-[260px] outline-none transition-all"
+                                placeholder="Cari nama atau ID proyek..."
                                 type="text"
                             />
-                        </div>
+
+                            {/* Dropdown Hasil Pencarian Realtime */}
+                            {isSearchOpen && searchQuery.trim() && (
+                                <div className="absolute right-0 top-full mt-2 w-[320px] bg-white rounded-2xl shadow-2xl border border-gray-100 p-2 z-50 animate-scale-up">
+                                    <div className="flex justify-between items-center px-3 py-1.5 border-b border-gray-100">
+                                        <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">
+                                            Hasil Pencarian Proyek ({filteredProjects.length})
+                                        </span>
+                                        <button type="button" onClick={() => setIsSearchOpen(false)} className="text-gray-400 hover:text-gray-600">
+                                            <X size={14} />
+                                        </button>
+                                    </div>
+                                    <div className="max-h-[260px] overflow-y-auto space-y-1 py-1">
+                                        {filteredProjects.length === 0 ? (
+                                            <div className="p-4 text-center text-xs text-gray-400">Tidak ada proyek yang sesuai</div>
+                                        ) : (
+                                            filteredProjects.map((p) => (
+                                                <div
+                                                    key={p.id}
+                                                    onClick={() => {
+                                                        navigate('/projects');
+                                                        setIsSearchOpen(false);
+                                                        setSearchQuery('');
+                                                    }}
+                                                    className="p-2.5 rounded-xl hover:bg-blue-50/60 cursor-pointer transition-colors flex items-center justify-between group"
+                                                >
+                                                    <div>
+                                                        <span className="text-[10px] font-bold text-[#1A56DB] bg-blue-50 px-1.5 py-0.5 rounded border border-blue-100">{p.id}</span>
+                                                        <p className="text-xs font-bold text-gray-800 line-clamp-1 mt-0.5 group-hover:text-[#1A56DB]">{p.name}</p>
+                                                        <p className="text-[10px] text-gray-500">{p.division}</p>
+                                                    </div>
+                                                    <ChevronRight size={14} className="text-gray-400 shrink-0 group-hover:text-[#1A56DB]" />
+                                                </div>
+                                            ))
+                                        )}
+                                    </div>
+                                </div>
+                            )}
+                        </form>
 
                         {/* Notification Bell */}
                         <NotificationBell />

@@ -2,6 +2,7 @@ import { useState, useRef } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import { useNavigate } from 'react-router-dom';
 import { useNotifications } from '../../contexts/NotificationContext';
+import { useProjects } from '../../contexts/ProjectContext';
 import {
     User,
     Info,
@@ -20,6 +21,7 @@ export default function ProjectNew() {
     const { user } = useAuth();
     const navigate = useNavigate();
     const { addNotification } = useNotifications();
+    const { addProject } = useProjects();
     const fileInputRef = useRef(null);
 
     // Form state
@@ -31,12 +33,8 @@ export default function ProjectNew() {
         description: '',
     });
 
-    const [uploadedFiles, setUploadedFiles] = useState([
-        { name: 'BRD_Aplikasi_Kredit.pdf', size: '2.4 MB', type: 'pdf', status: 'success' },
-        { name: 'FSD_Draft_v1.docx', size: '1.8 MB', type: 'docx', status: 'success' },
-        { name: 'Flowchart_Sistem.pdf', size: '4.1 MB', type: 'pdf', status: 'success' },
-    ]);
-
+    // Default uploaded files kosong (hanya tampil jika user upload)
+    const [uploadedFiles, setUploadedFiles] = useState([]);
     const [isSubmitting, setIsSubmitting] = useState(false);
 
     // Handle input changes
@@ -45,10 +43,10 @@ export default function ProjectNew() {
         setFormData((prev) => ({ ...prev, [name]: value }));
     };
 
-    // Handle file upload (simulasi)
+    // Handle file upload
     const handleFileUpload = (e) => {
         const files = e.target.files;
-        if (files.length > 0) {
+        if (files && files.length > 0) {
             const newFiles = Array.from(files).map((file) => ({
                 name: file.name,
                 size: (file.size / 1024 / 1024).toFixed(1) + ' MB',
@@ -67,11 +65,11 @@ export default function ProjectNew() {
         setUploadedFiles((prev) => prev.filter((_, i) => i !== index));
     };
 
-    // Handle drag & drop (simulasi)
+    // Handle drag & drop
     const handleDrop = (e) => {
         e.preventDefault();
         const files = e.dataTransfer.files;
-        if (files.length > 0) {
+        if (files && files.length > 0) {
             const newFiles = Array.from(files).map((file) => ({
                 name: file.name,
                 size: (file.size / 1024 / 1024).toFixed(1) + ' MB',
@@ -86,65 +84,84 @@ export default function ProjectNew() {
         e.preventDefault();
     };
 
-    // Handle submit
-    const handleSubmit = (e) => {
+    // Handle Save as Draft
+    const handleSaveDraft = async (e) => {
+        e.preventDefault();
+        if (!formData.projectName.trim()) {
+            alert('Nama proyek wajib diisi untuk menyimpan draft!');
+            return;
+        }
+
+        try {
+            const draftProject = {
+                name: formData.projectName,
+                description: formData.description || 'Draft pengajuan proyek',
+                division: formData.division || 'Divisi TI',
+                priority: formData.priority,
+                targetDate: formData.targetDate || 'TBD',
+                status: 'PENDING',
+                type: 'NON_RBB',
+                documents: uploadedFiles,
+                isDraft: true,
+            };
+
+            await addProject(draftProject);
+
+            addNotification(
+                'Draft Proyek Tersimpan',
+                `Draft "${formData.projectName}" berhasil disimpan.`,
+                'info',
+                '/projects'
+            );
+
+            alert(`Draft proyek "${formData.projectName}" berhasil disimpan!`);
+            navigate('/projects');
+        } catch (err) {
+            console.error(err);
+            alert('Gagal menyimpan draft proyek.');
+        }
+    };
+
+    // Handle Submit Ajukan Proyek
+    const handleSubmit = async (e) => {
         e.preventDefault();
         setIsSubmitting(true);
 
-        // Validasi sederhana
         if (!formData.projectName.trim()) {
             alert('Nama proyek wajib diisi!');
             setIsSubmitting(false);
             return;
         }
 
-        // Simulasi submit ke backend
-        setTimeout(() => {
-            // Generate ID proyek baru
-            const lastId = mockProjects.length > 0
-                ? parseInt(mockProjects[mockProjects.length - 1].id.split('-')[2])
-                : 0;
-            const newId = `PRJ-2026-${String(lastId + 1).padStart(3, '0')}`;
-
-            // Tambahkan ke mockProjects
+        try {
             const newProject = {
-                id: newId,
                 name: formData.projectName,
-                description: formData.description || 'Proyek baru dari ' + user?.name,
+                description: formData.description || 'Pengajuan proyek baru oleh ' + (user?.name || 'PIC'),
                 division: formData.division || 'Divisi TI',
-                pm: null,
-                phase: 'Fase 1: Inisiasi',
-                status: 'Inisiasi (Baru)',
-                statusColor: 'bg-gray-100 text-gray-600 border-gray-200',
+                priority: formData.priority,
                 targetDate: formData.targetDate || 'TBD',
+                status: 'PENDING',
+                type: 'NON_RBB',
+                documents: uploadedFiles,
             };
-            mockProjects.push(newProject);
 
-            // Tambahkan juga ke dispositionQueue agar muncul di halaman Workspace Lead
-            const newDisposition = {
-                id: newId,
-                name: formData.projectName,
-                division: formData.division || 'Divisi TI',
-                priority: formData.priority === 'Urgent' ? 'High' : formData.priority,
-                submittedAt: new Date().toISOString(),
-                targetDate: formData.targetDate || 'TBD',
-                status: 'Menunggu Analis',
-                documents: uploadedFiles.map(f => ({ name: f.name, size: f.size, type: f.type })),
-                assignedAnalyst: null,
-            };
-            dispositionQueue.unshift(newDisposition); // Gunakan unshift agar muncul di urutan teratas
+            await addProject(newProject);
 
             addNotification(
                 'Proyek Baru Diajukan',
-                `${formData.projectName} menunggu disposisi dari Lead Group.`,
+                `Proyek "${formData.projectName}" menunggu review dari Lead Group.`,
                 'info',
                 '/queue'
             );
 
             setIsSubmitting(false);
-            alert(`Proyek ${newId} berhasil diajukan!`);
-            navigate('/track');
-        }, 1000);
+            alert(`Proyek "${formData.projectName}" berhasil diajukan!`);
+            navigate('/projects');
+        } catch (err) {
+            console.error(err);
+            setIsSubmitting(false);
+            alert('Gagal mengajukan proyek.');
+        }
     };
 
     // Get file icon based on type
@@ -412,21 +429,22 @@ export default function ProjectNew() {
                     </div>
 
                     {/* Footer Actions */}
-                    <div className="flex flex-col sm:flex-row items-center justify-end gap-4 py-8">
+                    <div className="flex flex-col sm:flex-row items-center justify-end gap-3 pt-3 pb-2 border-t border-gray-200/60 mt-2">
                         <button
                             type="button"
-                            className="w-full sm:w-auto px-8 py-3.5 bg-white border border-gray-200 text-gray-600 font-bold rounded-xl hover:bg-gray-50 transition-all text-sm active:scale-95 flex items-center gap-2"
+                            onClick={handleSaveDraft}
+                            className="w-full sm:w-auto px-6 py-2.5 bg-white border border-gray-300 text-gray-700 font-bold rounded-xl hover:bg-gray-50 transition-all text-sm active:scale-95 flex items-center justify-center gap-2 shadow-xs cursor-pointer"
                         >
-                            <Save size={18} />
+                            <Save size={16} />
                             Simpan sebagai Draft
                         </button>
                         <button
                             type="submit"
                             disabled={isSubmitting}
-                            className="w-full sm:w-auto px-8 py-3.5 bg-[#003a73] text-white font-bold rounded-xl hover:bg-[#002a5a] transition-all text-sm flex items-center justify-center gap-3 shadow-lg shadow-blue-900/25 active:scale-95 disabled:opacity-70 disabled:cursor-not-allowed"
+                            className="w-full sm:w-auto px-6 py-2.5 bg-[#003a73] text-white font-bold rounded-xl hover:bg-[#002a5a] transition-all text-sm flex items-center justify-center gap-2 shadow-md shadow-blue-900/20 active:scale-95 disabled:opacity-70 disabled:cursor-not-allowed cursor-pointer"
                         >
                             <span>{isSubmitting ? 'Memproses...' : 'Ajukan Proyek'}</span>
-                            <Send size={18} />
+                            <Send size={16} />
                         </button>
                     </div>
                 </form>

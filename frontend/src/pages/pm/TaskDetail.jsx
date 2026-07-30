@@ -1,9 +1,10 @@
 import RBBBadge from '../../components/RBBBadge';
 import ChatBox from '../../components/ChatBox';
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import toast from 'react-hot-toast';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
+import { useProjects } from '../../contexts/ProjectContext';
 import {
     ChevronLeft,
     ChevronRight,
@@ -38,10 +39,44 @@ import { taskProjects } from '../../data/mockData';
 
 export default function TaskDetail() {
     const { user } = useAuth();
+    const { projects: contextProjects } = useProjects();
     const { id: projectId } = useParams();
     const navigate = useNavigate();
 
-    const project = taskProjects.find((p) => p.id === projectId);
+    const project = useMemo(() => {
+        if (!projectId) return taskProjects[0];
+
+        // 1. Cari di taskProjects mockData
+        let found = taskProjects.find((p) => String(p.id).toLowerCase() === String(projectId).toLowerCase());
+        if (found) return found;
+
+        // 2. Cari di ProjectContext
+        const ctxFound = (contextProjects || []).find((p) =>
+            String(p.id).toLowerCase() === String(projectId).toLowerCase() ||
+            String(p.reqId || p.req_id).toLowerCase() === String(projectId).toLowerCase()
+        );
+
+        if (ctxFound) {
+            return {
+                id: ctxFound.id,
+                name: ctxFound.name,
+                code: ctxFound.id,
+                pm: typeof ctxFound.pm === 'object' ? ctxFound.pm?.name : ctxFound.pm || 'Budi Santoso',
+                division: ctxFound.division || 'Divisi TI',
+                status: ctxFound.status || 'IN_DEVELOPMENT',
+                progress: 60,
+                tasks: [
+                    { id: 1, name: 'Analisis Spesifikasi API & Database', assignee: 'Dimas Anggara', deadline: '2026-08-10', priority: 'High', status: 'Done', description: 'Perancangan skema database dan rute API.' },
+                    { id: 2, name: 'Pengembangan Modul Utama (Backend)', assignee: 'Dimas Anggara', deadline: '2026-08-20', priority: 'High', status: 'In Progress', description: 'Coding business logic dan arsitektur backend.' },
+                    { id: 3, name: 'Integrasi Antarmuka UI/UX Front-end', assignee: 'Eka Putri', deadline: '2026-08-25', priority: 'Medium', status: 'In Progress', description: 'Pembuatan komponen UI dan pengintegrasian REST API.' },
+                    { id: 4, name: 'Pengujian QA & Security Audit', assignee: 'Fani Wijaya', deadline: '2026-09-01', priority: 'Medium', status: 'To Do', description: 'Pengujian otomatis dan audit kepatuhan keamanan.' }
+                ]
+            };
+        }
+
+        // 3. Fallback default project
+        return taskProjects[0] || null;
+    }, [projectId, contextProjects]);
 
     if (!project) {
         return (

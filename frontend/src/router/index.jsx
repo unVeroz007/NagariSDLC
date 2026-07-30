@@ -37,6 +37,7 @@ import Task from '../pages/pm/Tasks';
 import TaskDetail from '../pages/pm/TaskDetail';
 import QARequest from '../pages/pm/QARequest';
 import CyberRequest from '../pages/pm/CyberRequest';
+import ReviewDocs from '../pages/pm/ReviewDocs';
 import ReleaseRequest from '../pages/pm/ReleaseRequest';
 
 // My Tasks pages
@@ -115,10 +116,6 @@ const router = createBrowserRouter([
                 element: <Dashboard />,
             },
             {
-                path: '/Dashboard', // backward compat
-                element: <Navigate to="/dashboard" replace />,
-            },
-            {
                 path: '/profile',
                 element: <Profile />,
             },
@@ -127,24 +124,12 @@ const router = createBrowserRouter([
                 element: <ProjectList />,
             },
             {
-                path: '/Documents',
-                element: <Documents />,
-            },
-            {
                 path: '/documents',
                 element: <Documents />,
             },
             {
-                path: '/Track',
-                element: <Track />,
-            },
-            {
                 path: '/track',
                 element: <Track />,
-            },
-            {
-                path: '/Queue',
-                element: <Queue />,
             },
             {
                 path: '/queue',
@@ -294,6 +279,14 @@ const router = createBrowserRouter([
             },
 
             // FASE 4 – Rilis & Kepatuhan
+            {
+                path: '/pm/review-docs',
+                element: (
+                    <ProtectedRoute allowedRoles={PM_ROLES}>
+                        <ReviewDocs />
+                    </ProtectedRoute>
+                ),
+            },
             {
                 path: '/pm/release-request',
                 element: (

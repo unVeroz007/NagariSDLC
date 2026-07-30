@@ -41,7 +41,8 @@ export const menuSections = {
         {
             label: 'Fase 4 (Rilis & Kepatuhan)',
             items: [
-                { label: 'Pengajuan Rilis', path: '/pm/release-request', icon: 'Rocket' },
+                { label: 'Terima Dok. QA & Cyber', path: '/pm/review-docs', icon: 'FileCheck' },
+                { label: 'Pengajuan Rilis ke INFRA', path: '/pm/release-request', icon: 'Rocket' },
                 { label: 'Quality Gate', path: '/quality-gate', icon: 'Verified' },
             ],
         },
@@ -141,7 +142,8 @@ export const menuSections = {
         {
             label: 'Fase 4 (Rilis & Kepatuhan)',
             items: [
-                { label: 'Pengajuan Rilis', path: '/pm/release-request', icon: 'Rocket' },
+                { label: 'Terima Dok. QA & Cyber', path: '/pm/review-docs', icon: 'FileCheck' },
+                { label: 'Pengajuan Rilis ke INFRA', path: '/pm/release-request', icon: 'Rocket' },
             ],
         },
     ],

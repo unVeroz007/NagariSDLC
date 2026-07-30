@@ -39,6 +39,17 @@ export default function Dashboard() {
     const { notifications, unreadCount } = useNotifications();
     const navigate = useNavigate();
 
+    // Helper navigasi lacak proyek langsung ke proyek yang dituju
+    const handleTrackProject = (projectId) => {
+        const isPmOrAdmin = ['project_manager', 'super_admin'].includes(user?.role);
+        const targetPath = isPmOrAdmin ? '/pm/tracker' : '/track';
+        if (projectId) {
+            navigate(`${targetPath}?projectId=${projectId}`, { state: { projectId } });
+        } else {
+            navigate(targetPath);
+        }
+    };
+
     // 📊 Hitung metrics dari data proyek pakai PROJECT_STATUS constants
     const metrics = useMemo(() => {
         const total = projects.length;
@@ -107,23 +118,25 @@ export default function Dashboard() {
         ];
     }, [projects, navigate]);
 
-    // 📊 Distribusi fase — pakai PROJECT_STATUS constants
+    // 📊 Distribusi fase — pakai PROJECT_STATUS constants (100% sinkron DB)
     const phases = useMemo(() => {
-        const total = projects.length || 1;
+        const activeProjects = projects.filter(p => p.status !== PROJECT_STATUS.CANCELLED);
+        const total = activeProjects.length || 1;
         const phaseMap = {
-            'Fase 1: Inisiasi & Analisis': projects.filter(p =>
+            'Fase 1: Inisiasi & Analisis': activeProjects.filter(p =>
                 [PROJECT_STATUS.PENDING, PROJECT_STATUS.IN_REVIEW,
-                 PROJECT_STATUS.ANALYSIS_APPROVED].includes(p.status)
+                 PROJECT_STATUS.ANALYSIS_APPROVED, PROJECT_STATUS.REJECTED].includes(p.status)
             ).length,
-            'Fase 2: Pengembangan': projects.filter(p =>
+            'Fase 2: Pengembangan': activeProjects.filter(p =>
                 [PROJECT_STATUS.READY_FOR_DEVELOPMENT, PROJECT_STATUS.DEV_ANALYSIS,
-                 PROJECT_STATUS.DEV_ANALYSIS_DONE, PROJECT_STATUS.IN_DEVELOPMENT].includes(p.status)
+                 PROJECT_STATUS.DEV_ANALYSIS_DONE, PROJECT_STATUS.IN_DEVELOPMENT,
+                 PROJECT_STATUS.RETURN_TO_DEV].includes(p.status)
             ).length,
-            'Fase 3: Pengujian QA & Cyber': projects.filter(p =>
+            'Fase 3: Pengujian QA & Cyber': activeProjects.filter(p =>
                 [PROJECT_STATUS.READY_FOR_QA, PROJECT_STATUS.QA_IN_PROGRESS, PROJECT_STATUS.QA_PASSED,
                  PROJECT_STATUS.CYBER_IN_PROGRESS, PROJECT_STATUS.CYBER_PASSED].includes(p.status)
             ).length,
-            'Fase 4: Rilis & Quality Gate': projects.filter(p =>
+            'Fase 4: Rilis & Quality Gate': activeProjects.filter(p =>
                 [PROJECT_STATUS.READY_FOR_UAT, PROJECT_STATUS.UAT_PASSED,
                  PROJECT_STATUS.PENDING_GOLIVE, PROJECT_STATUS.LIVE_PRODUCTION].includes(p.status)
             ).length,
@@ -141,19 +154,44 @@ export default function Dashboard() {
         }));
     }, [projects]);
 
-    // 📊 Analisis risiko pakai PROJECT_STATUS constants
+    // 📊 Analisis risiko pakai PROJECT_STATUS constants & deadline (100% sinkron DB)
     const risks = useMemo(() => {
         const total = projects.length || 1;
-        const high = projects.filter(p =>
-            p.status === PROJECT_STATUS.REJECTED ||
-            (p.type === 'RBB' && p.rbbDeadline && new Date(p.rbbDeadline) < new Date(Date.now() + 7 * 86400000))
-        ).length;
-        const medium = projects.filter(p =>
-            [PROJECT_STATUS.IN_REVIEW, PROJECT_STATUS.QA_IN_PROGRESS].includes(p.status)
-        ).length;
-        const low = projects.filter(p =>
-            [PROJECT_STATUS.LIVE_PRODUCTION, PROJECT_STATUS.ANALYSIS_APPROVED, PROJECT_STATUS.IN_DEVELOPMENT].includes(p.status)
-        ).length;
+        const now = Date.now();
+        const sevenDays = 7 * 86400000;
+
+        let high = 0;
+        let medium = 0;
+        let low = 0;
+
+        projects.forEach(p => {
+            const isNearDeadline = p.rbbDeadline && (new Date(p.rbbDeadline).getTime() - now <= sevenDays);
+            const isTargetNear = p.targetDate && p.targetDate !== 'TBD' && (new Date(p.targetDate).getTime() - now <= sevenDays);
+
+            if (
+                p.status === PROJECT_STATUS.REJECTED ||
+                p.status === PROJECT_STATUS.RETURN_TO_DEV ||
+                p.priority === 'High' ||
+                (p.type === 'RBB' && isNearDeadline) ||
+                isTargetNear
+            ) {
+                high++;
+            } else if (
+                [
+                    PROJECT_STATUS.PENDING,
+                    PROJECT_STATUS.IN_REVIEW,
+                    PROJECT_STATUS.DEV_ANALYSIS,
+                    PROJECT_STATUS.QA_IN_PROGRESS,
+                    PROJECT_STATUS.CYBER_IN_PROGRESS,
+                    PROJECT_STATUS.PENDING_GOLIVE,
+                ].includes(p.status) ||
+                p.priority === 'Medium'
+            ) {
+                medium++;
+            } else {
+                low++;
+            }
+        });
 
         return [
             { label: 'Risiko Tinggi', count: high, pct: Math.round((high / total) * 100), color: 'bg-red-500', textColor: 'text-red-600', dot: 'bg-red-500' },
@@ -162,16 +200,22 @@ export default function Dashboard() {
         ];
     }, [projects]);
 
-    // 📋 Proyek prioritas — diurutkan berdasarkan kedekatan status kritis
+    // 📋 Proyek prioritas — diurutkan berdasarkan status kritis & jenis proyek RBB
     const priorityProjects = useMemo(() => {
         const priorityOrder = [
             PROJECT_STATUS.REJECTED,
+            PROJECT_STATUS.RETURN_TO_DEV,
             PROJECT_STATUS.PENDING_GOLIVE,
             PROJECT_STATUS.UAT_PASSED,
             PROJECT_STATUS.IN_REVIEW,
             PROJECT_STATUS.QA_IN_PROGRESS,
+            PROJECT_STATUS.CYBER_IN_PROGRESS,
         ];
         const sorted = [...projects].sort((a, b) => {
+            const aRbb = a.type === 'RBB' ? 0 : 1;
+            const bRbb = b.type === 'RBB' ? 0 : 1;
+            if (aRbb !== bRbb) return aRbb - bRbb;
+
             const aIdx = priorityOrder.indexOf(a.status);
             const bIdx = priorityOrder.indexOf(b.status);
             return (aIdx === -1 ? 999 : aIdx) - (bIdx === -1 ? 999 : bIdx);
@@ -194,34 +238,34 @@ export default function Dashboard() {
     const quickActions = useMemo(() => {
         const role = user?.role;
         if (role === 'project_manager') return [
-            { label: 'PM Workspace', icon: Briefcase, path: '/pm/workspace', color: 'bg-blue-600' },
-            { label: 'Lacak Proyek', icon: MapPin, path: '/pm/tracker', color: 'bg-indigo-600' },
-            { label: 'Ajukan QA', icon: Bug, path: '/pm/qa-request', color: 'bg-purple-600' },
-            { label: 'Ajukan Rilis', icon: Rocket, path: '/pm/release-request', color: 'bg-emerald-600' },
+            { label: 'PM Workspace', icon: Briefcase, action: () => navigate('/pm/workspace'), color: 'bg-blue-600' },
+            { label: 'Lacak Proyek', icon: MapPin, action: () => handleTrackProject(''), color: 'bg-indigo-600' },
+            { label: 'Ajukan QA', icon: Bug, action: () => navigate('/pm/qa-request'), color: 'bg-purple-600' },
+            { label: 'Ajukan Rilis', icon: Rocket, action: () => navigate('/pm/release-request'), color: 'bg-emerald-600' },
         ];
         if (role === 'lead_group') return [
-            { label: 'Workspace Lead', icon: Verified, path: '/workspace/lead', color: 'bg-amber-600' },
-            { label: 'Antrean Review', icon: Clock, path: '/queue', color: 'bg-blue-600' },
+            { label: 'Workspace Lead', icon: Verified, action: () => navigate('/workspace/lead'), color: 'bg-amber-600' },
+            { label: 'Antrean Review', icon: Clock, action: () => navigate('/queue'), color: 'bg-blue-600' },
         ];
         if (role === 'analyst') return [
-            { label: 'Workspace Analyst', icon: FileEdit, path: '/workspace/analyst', color: 'bg-blue-600' },
+            { label: 'Workspace Analyst', icon: FileEdit, action: () => navigate('/workspace/analyst'), color: 'bg-blue-600' },
         ];
         if (role === 'qa_lead') return [
-            { label: 'Workspace QA', icon: Bug, path: '/workspace/qa', color: 'bg-purple-600' },
-            { label: 'Tugas QA Saya', icon: CheckCircle, path: '/my-tasks/qa', color: 'bg-indigo-600' },
+            { label: 'Workspace QA', icon: Bug, action: () => navigate('/workspace/qa'), color: 'bg-[#1A56DB]' },
+            { label: 'Tugas QA Saya', icon: CheckCircle, action: () => navigate('/my-tasks/qa'), color: 'bg-indigo-600' },
         ];
         if (role === 'cyber_team') return [
-            { label: 'Workspace Cyber', icon: ShieldCheck, path: '/workspace/cyber', color: 'bg-orange-600' },
-            { label: 'Tugas Siber Saya', icon: ShieldCheck, path: '/my-tasks/cyber', color: 'bg-red-600' },
+            { label: 'Workspace Cyber', icon: ShieldCheck, action: () => navigate('/workspace/cyber'), color: 'bg-orange-600' },
+            { label: 'Tugas Siber Saya', icon: ShieldCheck, action: () => navigate('/my-tasks/cyber'), color: 'bg-red-600' },
         ];
         // super_admin
         return [
-            { label: 'Buat Proyek', icon: PlusCircle, path: '/projects/new', color: 'bg-blue-600' },
-            { label: 'Lacak Proyek', icon: MapPin, path: '/pm/tracker', color: 'bg-indigo-600' },
-            { label: 'Manajemen User', icon: Users, path: '/admin/users', color: 'bg-gray-700' },
-            { label: 'Quality Gate', icon: Verified, path: '/quality-gate', color: 'bg-emerald-600' },
+            { label: 'Buat Proyek', icon: PlusCircle, action: () => navigate('/projects/new'), color: 'bg-blue-600' },
+            { label: 'Lacak Proyek', icon: MapPin, action: () => handleTrackProject(''), color: 'bg-indigo-600' },
+            { label: 'Manajemen User', icon: Users, action: () => navigate('/admin/users'), color: 'bg-gray-700' },
+            { label: 'Quality Gate', icon: Verified, action: () => navigate('/quality-gate'), color: 'bg-emerald-600' },
         ];
-    }, [user]);
+    }, [user, navigate]);
 
     // Helper untuk format waktu
     const formatTimeAgo = (timestamp) => {
@@ -388,7 +432,7 @@ export default function Dashboard() {
                         {quickActions.map((a, i) => (
                             <button
                                 key={i}
-                                onClick={() => navigate(a.path)}
+                                onClick={a.action}
                                 className={`flex items-center gap-3 p-3 ${a.color} text-white rounded-xl text-sm font-semibold hover:opacity-90 active:scale-[0.97] transition-all shadow-sm`}
                             >
                                 <a.icon size={18} />
@@ -409,7 +453,7 @@ export default function Dashboard() {
                             {rbbUrgentProjects.map((p, i) => {
                                 const daysLeft = Math.ceil((new Date(p.rbbDeadline) - new Date()) / 86400000);
                                 return (
-                                    <div key={i} className="flex items-center gap-3 p-3 bg-red-50 rounded-xl border border-red-100 hover:bg-red-100/50 transition-colors cursor-pointer" onClick={() => navigate('/pm/tracker')}>
+                                    <div key={i} className="flex items-center gap-3 p-3 bg-red-50 rounded-xl border border-red-100 hover:bg-red-100/50 transition-colors cursor-pointer" onClick={() => handleTrackProject(p.id)}>
                                         <div className="w-9 h-9 bg-red-100 rounded-xl flex items-center justify-center shrink-0">
                                             <Flag size={16} className="text-red-600" />
                                         </div>
@@ -527,8 +571,8 @@ export default function Dashboard() {
                                     </td>
                                     <td className="py-4 px-5 text-center">
                                         <button
-                                            onClick={() => navigate('/pm/tracker')}
-                                            className="text-xs font-semibold text-[#1A56DB] hover:bg-blue-50 px-3 py-1.5 rounded-lg border border-[#1A56DB]/20 transition-all opacity-0 group-hover:opacity-100"
+                                            onClick={() => handleTrackProject(proj.id)}
+                                            className="text-xs font-semibold text-[#1A56DB] bg-blue-50 hover:bg-blue-100 px-3.5 py-1.5 rounded-lg border border-[#1A56DB]/30 transition-all shadow-sm"
                                         >
                                             Lacak
                                         </button>

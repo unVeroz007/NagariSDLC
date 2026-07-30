@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import { useProjects } from '../../contexts/ProjectContext';
@@ -37,6 +37,7 @@ export default function Allocation() {
     const navigate = useNavigate();
     const { addNotification } = useNotifications();
     const { projects, updateProject, isLoading } = useProjects();
+    const rightPanelRef = useRef(null);
 
     // Filter proyek yang sudah memiliki PM (Status IN_DEVELOPMENT atau memiliki objek PM)
     const activeProjectsWithPM = projects.filter(p =>
@@ -52,6 +53,25 @@ export default function Allocation() {
             setSelectedProject(activeProjectsWithPM[0]);
         }
     }, [projects]);
+
+    // Helper untuk scroll paling atas panel detail & container main di MainLayout
+    const scrollPageToTop = () => {
+        if (rightPanelRef.current) {
+            rightPanelRef.current.scrollTo({ top: 0, behavior: 'smooth' });
+        }
+        const mainContainer = rightPanelRef.current?.closest('main') || document.querySelector('main');
+        if (mainContainer) {
+            mainContainer.scrollTo({ top: 0, behavior: 'smooth' });
+        }
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+    };
+
+    // Auto scroll ke atas saat proyek dipilih
+    useEffect(() => {
+        if (selectedProject) {
+            scrollPageToTop();
+        }
+    }, [selectedProject?.id]);
 
     // Update selected team IDs when selected project changes
     useEffect(() => {
@@ -170,7 +190,10 @@ export default function Allocation() {
                     {activeProjectsWithPM.map((project) => (
                         <div
                             key={project.id}
-                            onClick={() => setSelectedProject(project)}
+                            onClick={() => {
+                                setSelectedProject(project);
+                                scrollPageToTop();
+                            }}
                             className={`p-4 rounded-xl cursor-pointer transition-all border relative overflow-hidden ${
                                 selectedProject?.id === project.id
                                     ? 'bg-white border-2 border-[#1a365d] shadow-sm'
@@ -196,7 +219,7 @@ export default function Allocation() {
                 {/* KANAN: Detail Proyek & Form Alokasi Developer */}
                 {selectedProject && (
                     <div className="w-2/3 bg-white flex flex-col overflow-hidden relative">
-                        <div className="flex-1 overflow-y-auto p-6 pb-28 space-y-6">
+                        <div ref={rightPanelRef} className="flex-1 overflow-y-auto p-6 pb-28 space-y-6">
                             
                             {/* Metadata Proyek */}
                             <div className="border-b border-gray-100 pb-4">
@@ -227,6 +250,7 @@ export default function Allocation() {
                             </div>
 
                             {/* SEKSI FORM ALOKASI TIM DEVELOPER */}
+                            {/* SEKSI FORM ALOKASI TIM DEVELOPER */}
                             <section className="bg-gray-50 rounded-2xl border border-gray-200 p-5 space-y-4">
                                 <div className="flex items-center justify-between border-b border-gray-200 pb-3">
                                     <div>
@@ -239,7 +263,7 @@ export default function Allocation() {
                                     <button
                                         type="button"
                                         onClick={handleSelectAllDevs}
-                                        className="text-xs font-bold text-blue-600 hover:text-blue-800 bg-white border border-blue-200 px-3 py-1.5 rounded-lg transition-all"
+                                        className="text-xs font-bold text-blue-600 hover:text-blue-800 bg-white border border-blue-200 px-3 py-1.5 rounded-lg transition-all cursor-pointer"
                                     >
                                         {selectedTeamIds.length === developerCandidates.filter(d => d.available).length ? 'Batal Pilih Semua' : 'Pilih Semua Tersedia'}
                                     </button>
@@ -251,7 +275,6 @@ export default function Allocation() {
                                             <tr className="bg-gray-100/70 border-b border-gray-200 text-gray-600 text-xs font-bold uppercase">
                                                 <th className="p-3.5 text-center w-12">Pilih</th>
                                                 <th className="p-3.5">Nama Developer</th>
-                                                <th className="p-3.5">Skill / Peran Utama</th>
                                                 <th className="p-3.5">Beban Kerja Saat Ini</th>
                                                 <th className="p-3.5 text-center">Ketersediaan</th>
                                             </tr>
@@ -282,11 +305,6 @@ export default function Allocation() {
                                                         </td>
                                                         <td className="p-3.5 text-gray-800 font-bold">
                                                             {dev.name}
-                                                        </td>
-                                                        <td className="p-3.5 text-gray-600">
-                                                            <span className="bg-gray-100 text-gray-700 px-2.5 py-1 rounded-md text-[11px] font-mono">
-                                                                {dev.skill}
-                                                            </span>
                                                         </td>
                                                         <td className="p-3.5 text-gray-600">
                                                             <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-gray-100 text-gray-700">
@@ -326,22 +344,22 @@ export default function Allocation() {
                                         </div>
                                     </div>
                                 )}
-                            </section>
-                        </div>
 
-                        {/* Footer Action Bar */}
-                        <div className="absolute bottom-0 left-0 w-full bg-white border-t border-gray-200 p-4 flex items-center justify-between shadow-lg">
-                            <div className="text-xs text-gray-500">
-                                Total dipilih: <strong className="text-gray-800">{selectedTeamIds.length} Developer</strong>
-                            </div>
-                            <button
-                                onClick={handleSubmit}
-                                disabled={isSubmitting}
-                                className="px-6 py-2.5 bg-[#1a365d] hover:bg-[#0f2342] text-white font-bold rounded-xl text-xs transition-all shadow-md flex items-center gap-2 disabled:opacity-50"
-                            >
-                                <Users size={16} />
-                                {isSubmitting ? 'Mengalokasikan...' : 'Alokasikan Tim'}
-                            </button>
+                                {/* Action Bar / Total Developer & Tombol Alokasi (Diposisikan di Bawah Tabel Tim Dev) */}
+                                <div className="bg-white border border-gray-200 p-4 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-xs mt-4">
+                                    <div className="text-xs text-gray-600">
+                                        Total Developer Dipilih: <strong className="text-gray-900 text-sm font-extrabold">{selectedTeamIds.length} Orang</strong>
+                                    </div>
+                                    <button
+                                        onClick={handleSubmit}
+                                        disabled={isSubmitting}
+                                        className="px-6 py-2.5 bg-[#1a365d] hover:bg-[#0f2342] text-white font-bold rounded-xl text-xs transition-all shadow-md flex items-center justify-center gap-2 disabled:opacity-50 cursor-pointer active:scale-95"
+                                    >
+                                        <Users size={16} />
+                                        {isSubmitting ? 'Mengalokasikan...' : 'Alokasikan Tim Developer'}
+                                    </button>
+                                </div>
+                            </section>
                         </div>
                     </div>
                 )}

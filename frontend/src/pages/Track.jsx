@@ -1,4 +1,5 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect, useRef } from 'react';
+import { useLocation, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { useProjects } from '../contexts/ProjectContext';
 import {
@@ -30,9 +31,13 @@ const statusOptions = ['Semua Status', 'Sedang Berjalan', 'Selesai'];
 export default function Track() {
     const { user } = useAuth();
     const { projects } = useProjects();
+    const location = useLocation();
+    const [searchParams] = useSearchParams();
+    const detailPanelRef = useRef(null);
 
     const mappedTrackingProjects = useMemo(() => {
         return (projects || []).map(p => ({
+            rawId: p.id,
             id: p.reqId || p.req_id || `REQ-${p.id}`,
             name: p.name || p.title || 'Proyek Tanpa Judul',
             status: p.status || 'PENDING',
@@ -72,7 +77,45 @@ export default function Track() {
     const [filterStatus, setFilterStatus] = useState('Semua Status');
 
     const listProjects = mappedTrackingProjects;
+
+    // Auto seleksi proyek berdasarkan query parameter / location state
+    useEffect(() => {
+        const targetId = location.state?.projectId || searchParams.get('projectId') || searchParams.get('id');
+        if (targetId && listProjects.length > 0) {
+            const found = listProjects.find(p =>
+                String(p.rawId).toLowerCase() === String(targetId).toLowerCase() ||
+                String(p.id).toLowerCase() === String(targetId).toLowerCase()
+            );
+            if (found) {
+                setSelectedProject(found);
+                return;
+            }
+        }
+        if (!selectedProject && listProjects.length > 0) {
+            setSelectedProject(listProjects[0]);
+        }
+    }, [location.state, searchParams, listProjects]);
+
     const activeSelected = selectedProject || listProjects[0] || null;
+
+    // Helper untuk scroll paling atas panel detail & container main di MainLayout
+    const scrollPageToTop = () => {
+        if (detailPanelRef.current) {
+            detailPanelRef.current.scrollTo({ top: 0, behavior: 'smooth' });
+        }
+        const mainContainer = detailPanelRef.current?.closest('main') || document.querySelector('main');
+        if (mainContainer) {
+            mainContainer.scrollTo({ top: 0, behavior: 'smooth' });
+        }
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+    };
+
+    // Smooth auto-scroll ke atas detail panel & main layout saat proyek terpilih berubah
+    useEffect(() => {
+        if (activeSelected) {
+            scrollPageToTop();
+        }
+    }, [activeSelected?.id]);
 
     // Filter projects
     const filteredProjects = useMemo(() => {
@@ -241,7 +284,7 @@ export default function Track() {
 
                 {/* Right Panel (Details) */}
                 <div className="flex-1 flex flex-col bg-gray-50/30 overflow-hidden">
-                    <div className="flex-1 overflow-y-auto px-6 py-4 md:px-8 md:py-5 lg:p-10">
+                    <div ref={detailPanelRef} className="flex-1 overflow-y-auto px-6 py-4 md:px-8 md:py-5 lg:p-10">
                         <div className="max-w-4xl mx-auto">
                             {/* Detail Header */}
                             <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-200 mb-6 flex flex-col sm:flex-row justify-between items-start gap-4">
