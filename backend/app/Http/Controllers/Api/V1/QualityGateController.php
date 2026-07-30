@@ -18,11 +18,32 @@ class QualityGateController extends Controller
         protected ProjectWorkflowService $workflowService
     ) {}
 
+    /**
+     * GET /api/v1/quality-gate/queue
+     * Daftar proyek yang menunggu persetujuan Quality Gate (Head of IT)
+     */
+    public function queue(): JsonResponse
+    {
+        $projects = Project::with(['creator', 'pm', 'analyst', 'division', 'releaseRequests.requester'])
+            ->where('status', ProjectStatus::PENDING_GOLIVE->value)
+            ->orderBy('updated_at', 'desc')
+            ->get();
+
+        return response()->json([
+            'status' => 'success',
+            'data'   => ProjectResource::collection($projects),
+        ]);
+    }
+
+    /**
+     * POST /api/v1/quality-gate/approve
+     * Head of IT menyetujui rilis ke LIVE_PRODUCTION
+     */
     public function approve(Request $request): JsonResponse
     {
         $request->validate([
             'project_id' => ['required', 'exists:projects,id'],
-            'notes' => ['nullable', 'string'],
+            'notes'      => ['nullable', 'string'],
         ]);
 
         $project = Project::findOrFail($request->project_id);
@@ -40,17 +61,17 @@ class QualityGateController extends Controller
                 ->where('head_of_it_approval', false)
                 ->update([
                     'head_of_it_approval' => true,
-                    'approved_at' => now(),
+                    'approved_at'         => now(),
                 ]);
 
             return response()->json([
-                'status' => 'success',
+                'status'  => 'success',
                 'message' => 'Proyek berhasil disetujui (Quality Gate Approved) dan berstatus LIVE_PRODUCTION.',
-                'data' => new ProjectResource($updatedProject),
+                'data'    => new ProjectResource($updatedProject),
             ]);
         } catch (Throwable $e) {
             return response()->json([
-                'status' => 'error',
+                'status'  => 'error',
                 'message' => $e->getMessage(),
             ], 422);
         }

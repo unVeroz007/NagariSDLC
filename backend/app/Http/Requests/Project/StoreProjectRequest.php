@@ -14,10 +14,28 @@ class StoreProjectRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'title' => ['required', 'string', 'max:255'],
+            // FE bisa kirim 'title' ATAU 'name'
+            'title'       => ['nullable', 'string', 'max:255'],
+            'name'        => ['nullable', 'string', 'max:255'],
             'description' => ['nullable', 'string'],
-            'division_id' => ['required', 'exists:divisions,id'],
+            // FE bisa kirim 'division_id' (int) ATAU 'division_name' (string)
+            'division_id' => ['nullable', 'exists:divisions,id'],
             'target_date' => ['nullable', 'date'],
+            'type'        => ['nullable', 'string', 'in:RBB,Non-RBB,NON_RBB'],
+            'rbb_deadline'=> ['nullable', 'date'],
         ];
     }
+
+    /**
+     * Pastikan minimal 'title' atau 'name' diisi.
+     */
+    public function withValidator($validator): void
+    {
+        $validator->after(function ($v) {
+            if (empty($this->title) && empty($this->name)) {
+                $v->errors()->add('title', 'Nama/judul proyek wajib diisi.');
+            }
+        });
+    }
 }
+

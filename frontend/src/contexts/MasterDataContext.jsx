@@ -1,8 +1,10 @@
 import { createContext, useContext, useState, useEffect } from 'react';
 import { INITIAL_DIVISIONS, INITIAL_ROLES } from '../data/masterData';
+import { roleService, divisionService } from '../services/api';
 import toast from 'react-hot-toast';
 
 const MasterDataContext = createContext(null);
+const MODE = import.meta.env.VITE_API_MODE || 'mock';
 
 export function MasterDataProvider({ children }) {
     // Divisions state
@@ -22,6 +24,45 @@ export function MasterDataProvider({ children }) {
         }
         return INITIAL_ROLES;
     });
+
+    // Load from API when MODE === 'api'
+    useEffect(() => {
+        if (MODE === 'api') {
+            const loadMasterData = async () => {
+                try {
+                    const [roleRes, divRes] = await Promise.all([
+                        roleService.getAll().catch(() => null),
+                        divisionService.getAll().catch(() => null),
+                    ]);
+
+                    if (roleRes && roleRes.data && Array.isArray(roleRes.data) && roleRes.data.length > 0) {
+                        const formattedRoles = roleRes.data.map(r => ({
+                            id: `ROL-${r.id}`,
+                            name: r.display_name || r.name,
+                            code: r.name,
+                            description: r.description || '',
+                            menuAccess: 'Modul Standar',
+                        }));
+                        setRoles(formattedRoles);
+                    }
+
+                    if (divRes && divRes.data && Array.isArray(divRes.data) && divRes.data.length > 0) {
+                        const formattedDivisions = divRes.data.map(d => ({
+                            id: `DIV-${d.id}`,
+                            name: d.name,
+                            code: d.code || `DIV-${d.id}`,
+                            description: `Divisi ${d.name}`,
+                        }));
+                        setDivisions(formattedDivisions);
+                    }
+                } catch (err) {
+                    console.warn('[MasterDataContext] Failed to fetch master data from API:', err);
+                }
+            };
+            loadMasterData();
+        }
+    }, []);
+
 
     // Save Divisions to LocalStorage
     const saveDivisions = (updated) => {

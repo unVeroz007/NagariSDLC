@@ -21,8 +21,8 @@ import {
     List,
 } from 'lucide-react';
 import { analysts } from '../../data/mockData';
-import { useProjects } from '../../contexts/ProjectContext';
-import { useNavigate } from 'react-router-dom';
+import { useProjects, getFileFromStore } from '../../contexts/ProjectContext';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useNotifications } from '../../contexts/NotificationContext';
 import LoadingSpinner from '../../components/LoadingSpinner';
 import EmptyState from '../../components/EmptyState';
@@ -31,99 +31,84 @@ import toast from 'react-hot-toast';
 export default function WorkspaceLead() {
     const { user } = useAuth();
     const navigate = useNavigate();
+    const [searchParams] = useSearchParams();
     const { addNotification } = useNotifications();
     const { projects, updateProject, isLoading } = useProjects();
 
-    const [activeTab, setActiveTab] = useState('disposition'); // 'disposition' or 'verification'
+    const initialTab = searchParams.get('tab') === 'verification' ? 'verification' : 'disposition';
+    const [activeTab, setActiveTab] = useState(initialTab);
     const [isPreviewModalOpen, setIsPreviewModalOpen] = useState(false);
+    const [previewFsdDoc, setPreviewFsdDoc] = useState(null);
 
-    // Filter antrean Disposisi (Proyek PENDING / READY_FOR_DEV)
+    // Filter 1: Antrean Disposisi Proyek Baru (Proyek PENDING yang BELUM ditugaskan ke Analyst)
     const dispositionQueue = useMemo(() => {
-        const list = projects.filter(p => p.status === 'PENDING' || p.status === 'READY_FOR_DEV');
-        if (list.length === 0) {
-            return [
-                {
-                    id: 'PRJ-2026-105',
-                    name: 'Modul Autentikasi Biometrik Face Recognition',
-                    division: 'Divisi Cyber Security',
-                    priority: 'High',
-                    submittedAt: new Date().toISOString(),
-                    targetDate: '15 Okt 2026',
-                    status: 'PENDING',
-                    type: 'NON_RBB',
-                    documents: [
-                        { type: 'brd', name: 'BRD_FaceRecognition_v1.pdf', size: '3.2 MB' },
-                        { type: 'fsd', name: 'Security_Spec_Face.docx', size: '2.1 MB' }
-                    ],
-                    description: 'Implementasi login biometrik menggunakan verifikasi wajah untuk aplikasi mobile banking.'
-                }
-            ];
-        }
-        return list;
+        return projects.filter(p => p.status === 'PENDING');
     }, [projects]);
 
-    // Filter antrean Verifikasi Hasil Analisis (Proyek yang selesai dianalisis Analyst)
-    const verificationQueue = useMemo(() => {
-        const list = projects.filter(p =>
-            p.status === 'ANALYSIS_APPROVED' ||
-            p.status === 'DEV_ANALYSIS_DONE' ||
-            (p.status === 'IN_REVIEW' && p.analystResult)
-        );
-        if (list.length === 0) {
-            return [
-                {
-                    id: 'PRJ-2026-102',
-                    name: 'Integrasi e-KTP Dukcapil',
-                    division: 'Divisi Kepatuhan',
-                    priority: 'High',
-                    submittedAt: '2026-07-22T08:00:00Z',
-                    targetDate: '15 Des 2026',
-                    status: 'DEV_ANALYSIS_DONE',
-                    type: 'RBB',
-                    rbbDeadline: '2026-12-31',
-                    analyst: 'Fajar Ramadhan',
-                    analystResult: {
-                        decision: 'Disetujui (Lanjut ke IT)',
-                        notes: 'Spesifikasi API Dukcapil telah divalidasi dan aman diintegrasikan ke sistem utama. Siap alokasi tim dev.',
-                        estimation: '25 Hari Kerja'
-                    },
-                    documents: [
-                        { type: 'brd', name: 'BRD_Dukcapil_v1.pdf', size: '2.5 MB' },
-                        { type: 'fsd', name: 'FSD_Dukcapil_API_Spec.docx', size: '1.9 MB' }
-                    ],
-                    description: 'Integrasi sistem dengan server Dukcapil untuk verifikasi data kependudukan secara elektronik.'
-                },
-                {
-                    id: 'PRJ-2026-098',
-                    name: 'Audit Trail Terpusat',
-                    division: 'Divisi TI',
-                    priority: 'Medium',
-                    submittedAt: '2026-07-20T10:00:00Z',
-                    targetDate: '01 Okt 2026',
-                    status: 'ANALYSIS_APPROVED',
-                    type: 'NON_RBB',
-                    analyst: 'Dewi Lestari',
-                    analystResult: {
-                        decision: 'Disetujui',
-                        notes: 'Hasil pengujian arsitektur logging terpusat sesuai standar keamanan ISO 27001.',
-                        estimation: '15 Hari Kerja'
-                    },
-                    documents: [
-                        { type: 'brd', name: 'BRD_AuditTrail.pdf', size: '1.8 MB' }
-                    ],
-                    description: 'Sistem pencatatan log transaksi dan aktivitas pengguna secara terpusat.'
-                }
-            ];
-        }
-        return list;
+    // Filter 2: Antrean Sedang Dikaji Analyst (Proyek IN_REVIEW yang sedang dianalisis oleh System Analyst)
+    const analyzingQueue = useMemo(() => {
+        return projects.filter(p => p.status === 'IN_REVIEW' || p.status === 'PLANNING_ANALYSIS');
     }, [projects]);
-    
-    // Switch queue based on tab
-    const activeQueue = activeTab === 'disposition' ? dispositionQueue : verificationQueue;
+
+    // Filter 3: Antrean Verifikasi Hasil Analisis (Proyek yang SUDAH selesai dikaji oleh Analyst Perencanaan)
+    const verificationQueue = useMemo(() => {
+        return projects.filter(p =>
+            p.status === 'ANALYSIS_APPROVED' ||
+            p.status === 'ANALYST_SUBMITTED' ||
+            p.status === 'VERIFICATION_PENDING'
+        );
+    }, [projects]);
+
+    // Switch queue based on tab ('disposition' | 'analyzing' | 'verification')
+    const activeQueue = activeTab === 'disposition' 
+        ? dispositionQueue 
+        : activeTab === 'analyzing' 
+            ? analyzingQueue 
+            : verificationQueue;
     const [selectedProject, setSelectedProject] = useState(null);
     
     // Set default selected project
     const currentSelected = selectedProject || activeQueue[0] || null;
+
+    // Convert Data URL / Store URL to Real Blob URL for embedded PDF reading in Workspace Lead
+    const previewFsdBlobUrl = useMemo(() => {
+        if (!previewFsdDoc) return null;
+        let rawUrl = previewFsdDoc.url || previewFsdDoc.fileUrl || previewFsdDoc.dataUrl;
+        if (!rawUrl && previewFsdDoc.name) {
+            rawUrl = getFileFromStore(previewFsdDoc.name) || getFileFromStore(previewFsdDoc.id);
+        }
+        if (!rawUrl && currentSelected) {
+            rawUrl = getFileFromStore(`fsd_${currentSelected.id}`) || currentSelected.analystResult?.fsdUrl;
+        }
+
+        if (!rawUrl) {
+            const docTitle = (previewFsdDoc.name || 'Dokumen_SDLC.pdf').replace(/[^a-zA-Z0-9_\-\.]/g, '_');
+            const projName = currentSelected?.name || 'Proyek SDLC';
+            const divName = currentSelected?.division || 'Divisi TI';
+            const pdfContent = `%PDF-1.4\n1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>\nendobj\n4 0 obj\n<< /Length 280 >>\nstream\nBT\n/F1 18 Tf\n50 720 Td\n(PT BANK NAGARI - DOKUMEN SDLC RESMI) Tj\n0 -35 Td\n/F1 14 Tf\n(Nama Berkas: ${docTitle}) Tj\n0 -25 Td\n(Proyek: ${projName}) Tj\n0 -25 Td\n(Divisi Peminta: ${divName}) Tj\n0 -25 Td\n(Status: Terverifikasi Quality Gate SDLC Bank Nagari) Tj\n0 -30 Td\n/F1 11 Tf\n(Dokumen ini adalah berkas spesifikasi & kelengkapan proyek SDLC.) Tj\nET\nendstream\nendobj\n5 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\nxref\n0 6\n0000000000 65535 f\n0000000009 00000 n\n0000000058 00000 n\n0000000115 00000 n\n0000000244 00000 n\n0000000575 00000 n\ntrailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n654\n%%EOF`;
+            const blob = new Blob([pdfContent], { type: 'application/pdf' });
+            return URL.createObjectURL(blob);
+        }
+
+        if (rawUrl.startsWith('data:')) {
+            try {
+                const parts = rawUrl.split(',');
+                const mimeMatch = parts[0].match(/:(.*?);/);
+                const mime = mimeMatch ? mimeMatch[1] : 'application/pdf';
+                const bstr = atob(parts[1]);
+                let n = bstr.length;
+                const u8arr = new Uint8Array(n);
+                while (n--) {
+                    u8arr[n] = bstr.charCodeAt(n);
+                }
+                const blob = new Blob([u8arr], { type: mime });
+                return URL.createObjectURL(blob);
+            } catch (e) {
+                return rawUrl;
+            }
+        }
+        return rawUrl;
+    }, [previewFsdDoc, currentSelected]);
 
     const [selectedAnalyst, setSelectedAnalyst] = useState('');
     const [deadline, setDeadline] = useState('');
@@ -135,17 +120,17 @@ export default function WorkspaceLead() {
         setIsSubmitting(true);
         updateProject(currentSelected.id, {
             status: 'READY_FOR_DEVELOPMENT',
-            statusColor: 'bg-cyan-100 text-cyan-700 border-cyan-200',
+            statusColor: 'bg-[#1A56DB]/10 text-[#1A56DB] border-blue-200',
         });
 
         addNotification(
-            'Analisis Disetujui',
-            `Hasil analisis untuk ${currentSelected?.name} telah disetujui Lead.`,
+            'Analisis Diverifikasi Lead',
+            `Hasil analisis teknis untuk ${currentSelected?.name} telah diverifikasi oleh Lead Perencanaan dan diteruskan ke Lead Pengembangan untuk alokasi tim.`,
             'success',
-            '/pm/allocation'
+            '/workspace/dev-lead'
         );
         
-        toast.success(`Proyek ${currentSelected?.name} dilanjutkan ke tahap Pengembangan`);
+        toast.success(`Hasil analisis ${currentSelected?.name} berhasil diverifikasi & dikirim ke Lead Pengembangan!`);
         setIsSubmitting(false);
 
         const nextQueue = verificationQueue.filter(p => p.id !== currentSelected.id);
@@ -178,8 +163,7 @@ export default function WorkspaceLead() {
             '/workspace/analyst'
         );
         
-        toast.success(`Proyek ${currentSelected?.name} berhasil ditugaskan ke ${selectedAnalyst}`);
-        navigate('/queue');
+        toast.success(`Proyek "${currentSelected?.name}" berhasil ditugaskan ke System Analyst ${selectedAnalyst}!`);
         setIsSubmitting(false);
 
         const nextQueue = dispositionQueue.filter(p => p.id !== currentSelected.id);
@@ -189,6 +173,8 @@ export default function WorkspaceLead() {
             setNotes('');
         } else {
             setSelectedProject(null);
+            setSelectedAnalyst('');
+            setNotes('');
         }
     };
     const getPriorityColor = (priority) => {
@@ -227,20 +213,31 @@ export default function WorkspaceLead() {
                             Kelola disposisi proyek baru ke analis atau verifikasi hasil analisis.
                         </p>
                     </div>
-                    <div className="flex bg-white p-1 rounded-xl border border-gray-200 shadow-sm">
+                    <div className="flex bg-white p-1 rounded-xl border border-gray-200 shadow-sm flex-wrap gap-1">
                         <button
                             onClick={() => { setActiveTab('disposition'); setSelectedProject(null); }}
-                            className={`px-4 py-2 rounded-lg text-sm font-semibold transition-all ${activeTab === 'disposition' ? 'bg-[#1A56DB] text-white shadow-md' : 'text-gray-500 hover:text-gray-700 hover:bg-gray-50'}`}
+                            className={`px-3.5 py-2 rounded-lg text-xs md:text-sm font-semibold transition-all cursor-pointer ${activeTab === 'disposition' ? 'bg-[#1A56DB] text-white shadow-md' : 'text-gray-600 hover:text-gray-800 hover:bg-gray-50'}`}
                         >
                             Disposisi Proyek Baru
                         </button>
                         <button
-                            onClick={() => { setActiveTab('verification'); setSelectedProject(null); }}
-                            className={`px-4 py-2 rounded-lg text-sm font-semibold transition-all ${activeTab === 'verification' ? 'bg-[#1A56DB] text-white shadow-md' : 'text-gray-500 hover:text-gray-700 hover:bg-gray-50'}`}
+                            onClick={() => { setActiveTab('analyzing'); setSelectedProject(null); }}
+                            className={`px-3.5 py-2 rounded-lg text-xs md:text-sm font-semibold transition-all cursor-pointer flex items-center gap-1.5 ${activeTab === 'analyzing' ? 'bg-[#1A56DB] text-white shadow-md' : 'text-gray-600 hover:text-gray-800 hover:bg-gray-50'}`}
                         >
-                            Verifikasi Hasil Analisis
+                            <span>Sedang Dikaji Analyst</span>
+                            {analyzingQueue.length > 0 && (
+                                <span className={`px-2 py-0.5 rounded-full text-xs ${activeTab === 'analyzing' ? 'bg-white/20 text-white' : 'bg-amber-100 text-amber-700'}`}>
+                                    {analyzingQueue.length}
+                                </span>
+                            )}
+                        </button>
+                        <button
+                            onClick={() => { setActiveTab('verification'); setSelectedProject(null); }}
+                            className={`px-3.5 py-2 rounded-lg text-xs md:text-sm font-semibold transition-all cursor-pointer flex items-center gap-1.5 ${activeTab === 'verification' ? 'bg-[#1A56DB] text-white shadow-md' : 'text-gray-600 hover:text-gray-800 hover:bg-gray-50'}`}
+                        >
+                            <span>Verifikasi Hasil Analisis</span>
                             {verificationQueue.length > 0 && (
-                                <span className="ml-2 bg-red-500 text-white px-2 py-0.5 rounded-full text-xs">
+                                <span className={`px-2 py-0.5 rounded-full text-xs ${activeTab === 'verification' ? 'bg-white/20 text-white' : 'bg-red-500 text-white'}`}>
                                     {verificationQueue.length}
                                 </span>
                             )}
@@ -255,8 +252,10 @@ export default function WorkspaceLead() {
                 <div className="w-full lg:w-1/3 flex flex-col bg-white border border-gray-100 rounded-2xl shadow-sm overflow-hidden">
                     <div className="p-4 border-b border-gray-100 flex justify-between items-center shrink-0">
                         <div>
-                            <h2 className="text-base font-bold text-gray-800">{activeTab === 'disposition' ? 'Antrean Disposisi' : 'Antrean Verifikasi'}</h2>
-                            <p className="text-xs text-gray-400 mt-0.5">{activeQueue.length} menunggu</p>
+                            <h2 className="text-base font-bold text-gray-800">
+                                {activeTab === 'disposition' ? 'Antrean Disposisi Baru' : activeTab === 'analyzing' ? 'Proyek Sedang Dikaji Analyst' : 'Antrean Verifikasi FSD'}
+                            </h2>
+                            <p className="text-xs text-gray-400 mt-0.5">{activeQueue.length} proyek</p>
                         </div>
                         <button className="p-2 text-gray-400 hover:text-[#1A56DB] hover:bg-blue-50 rounded-lg transition-colors">
                             <Filter size={16} />
@@ -284,7 +283,7 @@ export default function WorkspaceLead() {
                                         {new Date(project.submittedAt).toLocaleDateString('id-ID', { day: 'numeric', month: 'short' })}
                                     </span>
                                 </div>
-                                <div className="mb-2"><RBBBadge type={project.type} deadline={project.rbbDeadline} /></div>
+                                <div className="mb-2"><RBBBadge type={project.type} deadline={project.rbbDeadline} status={project.status} /></div>
                                 <h3 className="font-semibold text-gray-800 text-sm mb-1 group-hover:text-[#1A56DB] transition-colors">{project.name}</h3>
                                 <div className="flex items-center gap-1 text-xs text-gray-500">
                                     <Users size={13} />
@@ -326,7 +325,7 @@ export default function WorkspaceLead() {
                                     </span>
                                     <span className="text-xs font-bold text-gray-400 bg-gray-100 px-2 py-0.5 rounded">{currentSelected.id}</span>
                                 </div>
-                                <div className="mb-2"><RBBBadge type={currentSelected.type} deadline={currentSelected.rbbDeadline} /></div>
+                                <div className="mb-2"><RBBBadge type={currentSelected.type} deadline={currentSelected.rbbDeadline} status={currentSelected.status} /></div>
                                 <h2 className="text-2xl font-extrabold text-gray-800">{currentSelected.name}</h2>
                                 <div className="flex items-center gap-2 text-gray-500 text-sm mt-1">
                                     <Users size={15} />
@@ -365,24 +364,63 @@ export default function WorkspaceLead() {
                                 Dokumen Inisiasi
                             </h3>
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                                {(currentSelected.documents || []).map((doc, idx) => (
+                                {((currentSelected.documents && currentSelected.documents.length > 0)
+                                    ? currentSelected.documents
+                                    : [{ id: 'BRD-01', name: `${currentSelected.name}_BRD_Inisiasi.pdf`, size: '2.4 MB', type: 'pdf', category: 'brd' }]
+                                ).map((doc, idx) => (
                                     <div key={idx} className="flex items-center justify-between p-3 border border-gray-200 rounded-lg bg-gray-50 hover:border-gray-300 transition-colors group">
-                                        <div className="flex items-center gap-3 overflow-hidden">
+                                        <div className="flex items-center gap-3 overflow-hidden min-w-0">
                                             <div className={`w-10 h-10 rounded ${getFileIcon(doc.type)} flex items-center justify-center shrink-0 font-bold text-[10px]`}>
                                                 {getFileLabel(doc.type)}
                                             </div>
-                                            <div className="truncate">
+                                            <div className="truncate min-w-0">
                                                 <p className="text-sm font-semibold text-gray-800 truncate">{doc.name}</p>
-                                                <p className="text-xs text-gray-500">{doc.size}</p>
+                                                <p className="text-xs text-gray-500">{doc.size || '2.4 MB'}</p>
                                             </div>
                                         </div>
-                                        <button
-                                            onClick={() => toast.success(`Mengunduh file ${doc.name}...`)}
-                                            className="p-2 text-gray-400 hover:text-[#1A56DB] hover:bg-blue-50 rounded-md transition-colors opacity-0 group-hover:opacity-100 cursor-pointer"
-                                            title="Unduh Dokumen"
-                                        >
-                                            <Download size={18} />
-                                        </button>
+                                        <div className="flex items-center gap-1.5 shrink-0">
+                                            <button
+                                                type="button"
+                                                onClick={() => setPreviewFsdDoc(doc)}
+                                                className="px-3 py-1.5 border border-[#1A56DB] text-[#1A56DB] hover:bg-blue-50 rounded-lg text-xs font-bold transition-all flex items-center gap-1 cursor-pointer active:scale-95"
+                                                title="View & Baca Dokumen"
+                                            >
+                                                <Eye size={14} />
+                                                <span>View</span>
+                                            </button>
+                                            <button
+                                                type="button"
+                                                onClick={() => {
+                                                    const rawUrl = doc.url || doc.fileUrl || doc.dataUrl || getFileFromStore(doc.name) || getFileFromStore(doc.id);
+                                                    const fileName = doc.name || 'Dokumen_SDLC.pdf';
+                                                    if (rawUrl) {
+                                                        const link = document.createElement('a');
+                                                        link.href = rawUrl;
+                                                        link.download = fileName;
+                                                        document.body.appendChild(link);
+                                                        link.click();
+                                                        document.body.removeChild(link);
+                                                        toast.success(`Mengunduh file "${fileName}"...`);
+                                                    } else {
+                                                        const textContent = `PT BANK NAGARI - DOKUMEN SDLC\n===============================\nNama Dokumen: ${fileName}\nProyek: ${currentSelected?.name || 'Proyek SDLC'}\nTanggal: ${new Date().toLocaleDateString('id-ID')}`;
+                                                        const blob = new Blob([textContent], { type: 'text/plain;charset=utf-8' });
+                                                        const url = URL.createObjectURL(blob);
+                                                        const link = document.createElement('a');
+                                                        link.href = url;
+                                                        link.download = fileName.endsWith('.pdf') ? fileName.replace('.pdf', '_ringkasan.txt') : `${fileName}.txt`;
+                                                        document.body.appendChild(link);
+                                                        link.click();
+                                                        document.body.removeChild(link);
+                                                        URL.revokeObjectURL(url);
+                                                        toast.success(`Mengunduh salinan berkas "${fileName}"...`);
+                                                    }
+                                                }}
+                                                className="p-2 text-gray-500 hover:text-[#1A56DB] hover:bg-blue-50 rounded-lg transition-colors cursor-pointer"
+                                                title="Unduh Dokumen"
+                                            >
+                                                <Download size={16} />
+                                            </button>
+                                        </div>
                                     </div>
                                 ))}
                             </div>
@@ -390,7 +428,7 @@ export default function WorkspaceLead() {
 
                         <hr className="border-gray-200 mb-6" />
 
-                        {/* Action Form (Assignment / Verification) */}
+                        {/* Action Form (Assignment / Monitoring / Verification) */}
                         {activeTab === 'disposition' ? (
                             <div className="bg-gray-50 rounded-xl p-6 border border-gray-200">
                                 <h3 className="text-lg font-semibold text-gray-800 mb-4 flex items-center gap-2">
@@ -441,6 +479,40 @@ export default function WorkspaceLead() {
                                     </div>
                                 </div>
                             </div>
+                        ) : activeTab === 'analyzing' ? (
+                            <div className="bg-amber-50/70 rounded-xl p-6 border border-amber-200 space-y-4">
+                                <h3 className="text-lg font-bold text-amber-900 flex items-center gap-2">
+                                    <Clock size={20} className="text-amber-700" />
+                                    Status Pemantauan Kajian System Analyst
+                                </h3>
+                                <div className="bg-white p-4 rounded-xl border border-amber-200 space-y-3">
+                                    <div className="flex justify-between items-center text-xs">
+                                        <span className="font-bold text-gray-400 uppercase">System Analyst Bertugas:</span>
+                                        <span className="font-extrabold text-amber-900 bg-amber-100 px-3 py-1 rounded-lg">
+                                            {currentSelected?.analyst || currentSelected?.assignedAnalyst?.name || 'Ahmad Rifai'}
+                                        </span>
+                                    </div>
+                                    <div className="flex justify-between items-center text-xs">
+                                        <span className="font-bold text-gray-400 uppercase">Status Pengerjaan:</span>
+                                        <span className="font-bold text-amber-700 flex items-center gap-1">
+                                            <Clock size={13} /> Sedang Analisa Kelayakan Bisnis &amp; FSD
+                                        </span>
+                                    </div>
+                                    <div className="flex justify-between items-center text-xs">
+                                        <span className="font-bold text-gray-400 uppercase">Lembar Kerja Analyst:</span>
+                                        <span className="font-semibold text-blue-700">Workspace System Analyst Perencanaan</span>
+                                    </div>
+                                </div>
+                                {currentSelected?.leadNote && (
+                                    <div className="bg-white p-4 rounded-xl border border-amber-100 text-xs">
+                                        <span className="font-bold text-gray-400 uppercase block mb-1">Catatan Arahan dari Lead:</span>
+                                        <p className="text-gray-700 leading-relaxed italic">{currentSelected.leadNote}</p>
+                                    </div>
+                                )}
+                                <div className="p-3 bg-amber-100/60 rounded-xl text-xs text-amber-900 font-medium leading-relaxed">
+                                    ℹ️ Proyek sedang dikaji secara aktif oleh Analyst. Setelah Analyst menyelesaikan kajian FSD, proyek akan otomatis berpindah ke tab <strong>Verifikasi Hasil Analisis</strong> untuk Anda tinjau.
+                                </div>
+                            </div>
                         ) : (
                             <div className="bg-emerald-50/70 rounded-xl p-6 border border-emerald-200">
                                 <h3 className="text-lg font-bold text-emerald-900 mb-4 flex items-center gap-2">
@@ -448,12 +520,80 @@ export default function WorkspaceLead() {
                                     Verifikasi Hasil Analisis System Analyst
                                 </h3>
                                 <div className="space-y-4">
+                                    {/* Berkas Kajian Teknis (FSD) Terlampir */}
+                                    <div className="bg-white p-4 rounded-xl border border-emerald-200 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                                        <div className="flex items-center gap-3 min-w-0">
+                                            <div className="w-10 h-10 bg-emerald-100 text-emerald-700 rounded-xl flex items-center justify-center font-bold text-xs shrink-0 border border-emerald-200">
+                                                FSD
+                                            </div>
+                                            <div className="min-w-0">
+                                                <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">BERKAS KAJIAN TEKNIS (FSD)</p>
+                                                <p className="font-bold text-gray-800 text-sm truncate">
+                                                    {currentSelected.fsdDocument?.name || currentSelected.analystResult?.fsdFile || 'FSD_SpesifikasiTeknis.pdf'}
+                                                </p>
+                                                <p className="text-[11px] text-gray-500">
+                                                    {currentSelected.fsdDocument?.size || '1.8 MB'} • Terlampir Hasil Kajian Analis
+                                                </p>
+                                            </div>
+                                        </div>
+                                        <div className="flex items-center gap-2 shrink-0">
+                                            <button
+                                                type="button"
+                                                onClick={() => setPreviewFsdDoc(currentSelected.fsdDocument || {
+                                                    name: currentSelected.analystResult?.fsdFile || 'FSD_SpesifikasiTeknis.pdf',
+                                                    url: currentSelected.fsdDocument?.url || currentSelected.analystResult?.fsdUrl || null,
+                                                    size: currentSelected.fsdDocument?.size || '1.8 MB'
+                                                })}
+                                                className="px-3 py-1.5 border border-[#1A56DB] text-[#1A56DB] rounded-lg font-bold hover:bg-blue-50 transition-colors flex items-center gap-1.5 text-xs cursor-pointer"
+                                            >
+                                                <Eye size={14} />
+                                                View &amp; Baca FSD
+                                            </button>
+                                            <button
+                                                type="button"
+                                                onClick={() => {
+                                                    const doc = currentSelected.fsdDocument || {
+                                                        name: currentSelected.analystResult?.fsdFile || 'FSD_SpesifikasiTeknis.pdf',
+                                                        url: currentSelected.fsdDocument?.url || currentSelected.analystResult?.fsdUrl || null
+                                                    };
+                                                    const rawUrl = doc.url || doc.fileUrl || doc.dataUrl;
+                                                    const fileName = doc.name || 'FSD_SpesifikasiTeknis.pdf';
+                                                    if (rawUrl) {
+                                                        const link = document.createElement('a');
+                                                        link.href = rawUrl;
+                                                        link.download = fileName;
+                                                        document.body.appendChild(link);
+                                                        link.click();
+                                                        document.body.removeChild(link);
+                                                        toast.success(`Mengunduh file FSD "${fileName}"...`);
+                                                    } else {
+                                                        const textContent = `PT BANK NAGARI - DOKUMEN FSD RESMI\n===================================\nDokumen: ${fileName}\nProyek: ${currentSelected.name}\nAnalis: ${currentSelected.analystResult?.analystName || 'System Analyst'}\nStatus Kajian: ${currentSelected.analystResult?.decision || 'Disetujui'}`;
+                                                        const blob = new Blob([textContent], { type: 'text/plain;charset=utf-8' });
+                                                        const url = URL.createObjectURL(blob);
+                                                        const link = document.createElement('a');
+                                                        link.href = url;
+                                                        link.download = fileName.endsWith('.pdf') ? fileName.replace('.pdf', '_ringkasan.txt') : `${fileName}.txt`;
+                                                        document.body.appendChild(link);
+                                                        link.click();
+                                                        document.body.removeChild(link);
+                                                        URL.revokeObjectURL(url);
+                                                        toast.success(`Mengunduh salinan berkas FSD "${fileName}"...`);
+                                                    }
+                                                }}
+                                                className="p-2 text-emerald-700 bg-emerald-100 hover:bg-emerald-200 rounded-lg transition-colors cursor-pointer"
+                                                title="Unduh FSD"
+                                            >
+                                                <Download size={16} />
+                                            </button>
+                                        </div>
+                                    </div>
+
                                     <div className="bg-white p-4 rounded-xl border border-emerald-100 shadow-xs">
                                         <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-1">Keputusan Analis</p>
                                         <p className="font-bold text-emerald-800 text-base">{currentSelected.analystResult?.decision || 'Disetujui'}</p>
                                     </div>
                                     <div className="bg-white p-4 rounded-xl border border-emerald-100 shadow-xs">
-                                        <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-1">Catatan & Rekomendasi Analis</p>
+                                        <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-1">Catatan &amp; Rekomendasi Analis</p>
                                         <p className="text-gray-700 text-sm">{currentSelected.analystResult?.notes || 'Spesifikasi teknis telah lengkap dan valid.'}</p>
                                     </div>
                                     {currentSelected.analystResult?.estimation && (
@@ -548,6 +688,126 @@ export default function WorkspaceLead() {
                                 className="px-5 py-2 bg-[#003a73] text-white font-bold rounded-xl text-sm hover:bg-[#002a5a] transition-all cursor-pointer"
                             >
                                 Tutup
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* ── MODAL VIEWER DOKUMEN FSD (Lead Perencanaan) ── */}
+            {previewFsdDoc && (
+                <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-xs z-50 flex items-center justify-center p-4 overflow-y-auto">
+                    <div className="bg-white rounded-2xl max-w-3xl w-full p-6 sm:p-8 shadow-2xl animate-scale-up border border-gray-200 my-8">
+                        <div className="flex justify-between items-center mb-6 pb-4 border-b border-gray-200">
+                            <div className="flex items-center gap-3">
+                                <div className="w-10 h-10 bg-emerald-700 text-white rounded-xl flex items-center justify-center font-extrabold text-xs shadow-sm">
+                                    FSD
+                                </div>
+                                <div>
+                                    <h3 className="font-bold text-gray-800 text-sm sm:text-base">{previewFsdDoc.name}</h3>
+                                    <p className="text-xs text-gray-500">Hasil Kajian Analisis Teknis • Terverifikasi SDLC</p>
+                                </div>
+                            </div>
+                            <button onClick={() => setPreviewFsdDoc(null)} className="text-gray-400 hover:text-gray-600 p-1.5 rounded-lg hover:bg-gray-100 transition-colors">
+                                <X size={20} />
+                            </button>
+                        </div>
+
+                        <div className="bg-[#f8f9fb] border border-gray-200 rounded-xl p-3 sm:p-6 max-h-[70vh] overflow-y-auto space-y-6 text-gray-800 font-sans shadow-inner flex justify-center items-start">
+                            {previewFsdBlobUrl ? (
+                                <object
+                                    data={previewFsdBlobUrl}
+                                    type="application/pdf"
+                                    className="w-full h-full min-h-[650px] w-full bg-white rounded-xl shadow-md border border-gray-200"
+                                >
+                                    <embed
+                                        src={previewFsdBlobUrl}
+                                        type="application/pdf"
+                                        className="w-full h-full min-h-[650px]"
+                                    />
+                                    <iframe
+                                        src={previewFsdBlobUrl}
+                                        title={previewFsdDoc.name}
+                                        className="w-full h-full min-h-[650px] bg-white rounded-xl border-0"
+                                    />
+                                </object>
+                            ) : (
+                                <div className="bg-white p-6 sm:p-8 rounded-xl border border-gray-200 shadow-xs space-y-6 w-full text-gray-800">
+                                    {/* Kop Surat Dokumen Resmi SDLC */}
+                                    <div className="bg-[#003a73] text-white p-6 rounded-xl shadow-sm flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+                                        <div>
+                                            <span className="text-[10px] font-extrabold tracking-widest uppercase bg-white/20 px-2.5 py-1 rounded text-white border border-white/30">
+                                                SDLC BANK NAGARI ENTERPRISE
+                                            </span>
+                                            <h2 className="text-lg sm:text-xl font-black mt-2 text-white">
+                                                FUNCTIONAL SPECIFICATION DOCUMENT (FSD)
+                                            </h2>
+                                            <p className="text-xs text-blue-100 mt-1 font-medium">
+                                                Proyek: <span className="font-bold text-white">{currentSelected?.name}</span> ({currentSelected?.id})
+                                            </p>
+                                        </div>
+                                        <div className="text-right text-xs text-blue-100 border-l sm:border-l-0 border-white/20 pl-3 sm:pl-0 font-mono">
+                                            <p>STATUS: <span className="font-bold text-emerald-300">DIVERIFIKASI</span></p>
+                                            <p>VERSI: v1.0.0-FSD</p>
+                                            <p>TANGGAL: {new Date().toLocaleDateString('id-ID')}</p>
+                                        </div>
+                                    </div>
+
+                                    {/* Bab 1: Latar Belakang & Ringkasan Kajian */}
+                                    <div className="bg-gray-50/70 p-5 rounded-xl border border-gray-200 space-y-2">
+                                        <h4 className="font-bold text-xs text-[#003a73] uppercase tracking-wider border-b border-gray-200 pb-2">
+                                            1. RINGKASAN KAJIAN ANALISIS TEKNIS (ANALYST RESULT)
+                                        </h4>
+                                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2 text-xs">
+                                            <div className="bg-white p-3 rounded-lg border border-gray-200 shadow-2xs">
+                                                <span className="font-bold text-gray-400 uppercase block mb-1 text-[10px]">Keputusan Analyst</span>
+                                                <span className="font-extrabold text-emerald-700 text-sm">{currentSelected?.analystResult?.decision || 'Disetujui (Layak Develop)'}</span>
+                                            </div>
+                                            <div className="bg-white p-3 rounded-lg border border-gray-200 shadow-2xs">
+                                                <span className="font-bold text-gray-400 uppercase block mb-1 text-[10px]">Estimasi Pengerjaan</span>
+                                                <span className="font-extrabold text-[#1A56DB] text-sm">{currentSelected?.analystResult?.estimation || '30 Hari Kerja'}</span>
+                                            </div>
+                                        </div>
+                                        <div className="bg-white p-3 rounded-lg border border-gray-200 shadow-2xs mt-2 text-xs">
+                                            <span className="font-bold text-gray-400 uppercase block mb-1 text-[10px]">Catatan & Instuksi Analis</span>
+                                            <p className="text-gray-700 font-medium leading-relaxed">
+                                                {currentSelected?.analystResult?.notes || 'Spesifikasi teknis telah lengkap dan divalidasi sesuai standar arsitektur perbankan.'}
+                                            </p>
+                                        </div>
+                                    </div>
+
+                                    {/* Bab 2: Ruang Lingkup Arsitektur Sistem */}
+                                    <div className="bg-white p-5 rounded-xl border border-gray-200 space-y-3 text-xs sm:text-sm">
+                                        <h4 className="font-bold text-xs text-[#003a73] uppercase tracking-wider border-b border-gray-100 pb-2">
+                                            2. SPESIFIKASI ARSITEKTUR & INTEGRASI SISTEM
+                                        </h4>
+                                        <ul className="list-disc pl-5 text-gray-700 space-y-2">
+                                            <li>Integrasi API Middleware Gateway dengan infrastruktur Core Banking Bank Nagari.</li>
+                                            <li>Penerapan autentikasi dua faktor (2FA) & mekanisme SSL Pinning pada jalur komunikasi data.</li>
+                                            <li>Fitur otorisasi akses bertingkat (*Role-Based Access Control*) untuk menjaga integritas data nasabah.</li>
+                                        </ul>
+                                    </div>
+
+                                    {/* Bab 3: Kepatuhan Keamanan Siber */}
+                                    <div className="bg-white p-5 rounded-xl border border-gray-200 space-y-2 text-xs sm:text-sm">
+                                        <h4 className="font-bold text-xs text-[#003a73] uppercase tracking-wider border-b border-gray-100 pb-2">
+                                            3. KEPATUHAN KEAMANAN SIBER & REGULASI POJK
+                                        </h4>
+                                        <p className="text-gray-600 leading-relaxed">
+                                            Seluruh rancangan spesifikasi teknis dalam dokumen FSD ini telah memenuhi ketentuan POJK No.11/POJK.03/2022 tentang Penyelenggaraan Teknologi Informasi oleh Bank Umum serta petunjuk teknis Siber Divisi TI Bank Nagari.
+                                        </p>
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+
+                        <div className="flex justify-between items-center mt-6 pt-4 border-t border-gray-200 text-xs">
+                            <span className="text-gray-400 font-medium">SDLC Bank Nagari Enterprise • Viewer FSD</span>
+                            <button
+                                onClick={() => setPreviewFsdDoc(null)}
+                                className="px-5 py-2 bg-gray-100 text-gray-700 font-bold rounded-xl hover:bg-gray-200 transition-colors cursor-pointer"
+                            >
+                                Tutup Viewer
                             </button>
                         </div>
                     </div>

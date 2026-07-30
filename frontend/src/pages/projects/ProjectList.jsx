@@ -252,7 +252,7 @@ export default function ProjectList() {
                                                 </td>
                                                 <td className="px-5 py-4">
                                                     <div className="flex flex-col gap-1.5 items-start">
-                                                        <RBBBadge type={project.type} deadline={project.rbbDeadline} />
+                                                        <RBBBadge type={project.type} deadline={project.rbbDeadline} status={project.status} />
                                                         <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-semibold border ${
                                                             PROJECT_STATUS_COLOR[project.status] || project.statusColor || 'bg-gray-100 text-gray-700'
                                                         }`}>

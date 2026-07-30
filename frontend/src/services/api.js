@@ -40,6 +40,9 @@ function authHeaders() {
 // ──────────────────────────────────────────────────────────
 async function handleResponse(res) {
     if (!res.ok) {
+        if (res.status === 401) {
+            localStorage.removeItem('nagari_sdlc_session');
+        }
         const err = await res.json().catch(() => ({ message: 'Terjadi kesalahan server.' }));
         throw new Error(err.message || `HTTP ${res.status}`);
     }
@@ -434,3 +437,127 @@ export const activityLogService = {
         return [];
     },
 };
+
+// ──────────────────────────────────────────────────────────
+// WORKSPACE SERVICE
+// Mengambil item kerja per role — endpoint: GET /workspace/{role}
+// ──────────────────────────────────────────────────────────
+export const workspaceService = {
+    getByRole: async (role) => {
+        if (MODE === 'api') {
+            const res = await fetch(`${BASE_URL}/workspace/${role}`, { headers: authHeaders() });
+            return handleResponse(res);
+        }
+        return { data: { projects: [], assigned_tasks: [] } };
+    },
+};
+
+// ──────────────────────────────────────────────────────────
+// ROLE SERVICE
+// ──────────────────────────────────────────────────────────
+export const roleService = {
+    getAll: async () => {
+        if (MODE === 'api') {
+            const res = await fetch(`${BASE_URL}/roles`, { headers: authHeaders() });
+            return handleResponse(res);
+        }
+        // Mock fallback
+        return {
+            status: 'success',
+            data: [
+                { id: 1, name: 'super_admin', display_name: 'Super Admin' },
+                { id: 2, name: 'head_of_it', display_name: 'Head of IT' },
+                { id: 3, name: 'lead_group', display_name: 'Lead Group / Kadiv' },
+                { id: 4, name: 'analyst', display_name: 'System Analyst' },
+                { id: 5, name: 'development_lead', display_name: 'Development Lead' },
+                { id: 6, name: 'project_manager', display_name: 'Project Manager' },
+                { id: 7, name: 'developer', display_name: 'Developer' },
+                { id: 8, name: 'qa_lead', display_name: 'QA Lead' },
+                { id: 9, name: 'qa_tester', display_name: 'QA Tester' },
+                { id: 10, name: 'cyber_lead', display_name: 'Cyber Security Lead' },
+                { id: 11, name: 'pentester', display_name: 'Pentester' },
+                { id: 12, name: 'business_user', display_name: 'Business User / Pemohon' },
+            ],
+        };
+    },
+};
+
+// ──────────────────────────────────────────────────────────
+// DIVISION SERVICE
+// ──────────────────────────────────────────────────────────
+export const divisionService = {
+    getAll: async () => {
+        if (MODE === 'api') {
+            const res = await fetch(`${BASE_URL}/divisions`, { headers: authHeaders() });
+            return handleResponse(res);
+        }
+        // Mock fallback
+        return {
+            status: 'success',
+            data: [
+                { id: 1, code: 'IT-DEV', name: 'IT Development' },
+                { id: 2, code: 'IT-OPS', name: 'IT Operations' },
+                { id: 3, code: 'IT-SEC', name: 'IT Security' },
+                { id: 4, code: 'IT-QA', name: 'IT Quality Assurance' },
+                { id: 5, code: 'DSI', name: 'Divisi Sistem Informasi' },
+            ],
+        };
+    },
+};
+
+// ──────────────────────────────────────────────────────────
+// QUALITY GATE SERVICE
+// ──────────────────────────────────────────────────────────
+export const qualityGateService = {
+    /**
+     * Ambil daftar proyek PENDING_GOLIVE (menunggu persetujuan Head of IT)
+     */
+    getQueue: async () => {
+        if (MODE === 'api') {
+            const res = await fetch(`${BASE_URL}/quality-gate/queue`, { headers: authHeaders() });
+            return handleResponse(res);
+        }
+        return { status: 'success', data: [] };
+    },
+
+    /**
+     * Head of IT menyetujui rilis proyek ke produksi
+     */
+    approve: async (projectId, notes = '') => {
+        if (MODE === 'api') {
+            const res = await fetch(`${BASE_URL}/quality-gate/approve`, {
+                method: 'POST',
+                headers: authHeaders(),
+                body: JSON.stringify({ project_id: projectId, notes }),
+            });
+            return handleResponse(res);
+        }
+        return null;
+    },
+};
+
+// ──────────────────────────────────────────────────────────
+// RELEASE REQUEST SERVICE
+// ──────────────────────────────────────────────────────────
+export const releaseRequestService = {
+    getAll: async () => {
+        if (MODE === 'api') {
+            const res = await fetch(`${BASE_URL}/release-requests`, { headers: authHeaders() });
+            return handleResponse(res);
+        }
+        return [];
+    },
+
+    store: async (data) => {
+        if (MODE === 'api') {
+            const res = await fetch(`${BASE_URL}/release-requests`, {
+                method: 'POST',
+                headers: authHeaders(),
+                body: JSON.stringify(data),
+            });
+            return handleResponse(res);
+        }
+        return null;
+    },
+};
+

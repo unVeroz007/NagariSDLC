@@ -51,35 +51,9 @@ export default function MyTasksCyber() {
 
     // Proyek yang didisposisi Lead Cyber ke pentester: hanya CYBER_IN_PROGRESS
     const cyberTasks = useMemo(() => {
-        const filtered = (projects || []).filter(p =>
-            ['CYBER_IN_PROGRESS'].includes(p.status)
-        );
-        if (filtered.length > 0) return filtered;
-        return [
-            {
-                id: 'PRJ-2026-097',
-                realId: 97,
-                name: 'Audit Trail & Log Security Terpusat',
-                division: 'Divisi Kepatuhan & Keamanan',
-                status: 'CYBER_IN_PROGRESS',
-                type: 'RBB',
-                targetDate: '2026-10-01',
-                stagingUrl: 'https://staging-siem.banknagari.co.id',
-                description: 'Implementasi SIEM terpusat untuk pemantauan akses dan log keamanan server.'
-            },
-            {
-                id: 'PRJ-2026-096',
-                realId: 96,
-                name: 'Integrasi API Payment Aggregator H2H',
-                division: 'Divisi Perbankan Digital',
-                status: 'CYBER_IN_PROGRESS',
-                type: 'RBB',
-                targetDate: '2026-09-15',
-                stagingUrl: 'https://staging-payment.banknagari.co.id',
-                description: 'Pengembangan integrasi Host-to-Host payment gateway untuk transaksi merchant.'
-            }
-        ];
+        return (projects || []).filter(p => ['CYBER_IN_PROGRESS'].includes(p.status));
     }, [projects]);
+
 
     const [selectedTask, setSelectedTask] = useState(null);
     const activeTask = selectedTask || cyberTasks[0] || null;

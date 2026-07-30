@@ -1,7 +1,9 @@
 import { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { useProjects } from '../contexts/ProjectContext';
+import { qualityGateService } from '../services/api';
 import toast from 'react-hot-toast';
+
 import {
     CheckCircle,
     ChevronRight,
@@ -30,42 +32,6 @@ import {
     Timer,
 } from 'lucide-react';
 
-const defaultQualityGateQueue = [
-    {
-        id: 'REL-REQ-2026-0015',
-        projectName: 'Aplikasi LOS Baru',
-        division: 'Divisi Kredit Consumer',
-        type: 'Mayor Release',
-        goLiveDate: '15 Juli 2026, 23:00 WIB',
-        downtime: '120 Menit',
-        pm: { name: 'Budi Santoso', initial: 'BS' },
-        status: 'Menunggu Approval',
-        documents: {
-            brd: { status: 'Lengkap', icon: FileText, label: 'Dokumen BRD & FSD', desc: 'Business & Functional Requirements' },
-            qa: { status: 'Lulus QA', icon: CheckCircle, label: 'Laporan QA & UAT', desc: 'Sign-off dari bisnis user' },
-            security: { status: 'Aman', icon: Shield, label: 'Security Pentest', desc: 'Tidak ada critical vulnerability' },
-            infra: { status: 'Siap', icon: Server, label: 'Kesiapan Infrastruktur', desc: 'Server Produksi terskalakan' },
-        },
-        rollbackPlan: 'Restore database dari backup snapshot terakhir (15/07) dan revert branch ke versi v1.4 pada server Load Balancer.',
-    },
-    {
-        id: 'REL-REQ-2026-0012',
-        projectName: 'Update Core Banking API',
-        division: 'Divisi TI Core',
-        type: 'Patch Release',
-        goLiveDate: 'TBD',
-        downtime: '30 Menit',
-        pm: { name: 'Andi Wijaya', initial: 'AW' },
-        status: 'Draft',
-        documents: {
-            brd: { status: 'Lengkap', icon: FileText, label: 'Dokumen BRD & FSD', desc: 'Business & Functional Requirements' },
-            qa: { status: 'Lulus QA', icon: CheckCircle, label: 'Laporan QA & UAT', desc: 'Sign-off dari bisnis user' },
-            security: { status: 'Aman', icon: Shield, label: 'Security Pentest', desc: 'Tidak ada critical vulnerability' },
-            infra: { status: 'Siap', icon: Server, label: 'Kesiapan Infrastruktur', desc: 'Server Produksi terskalakan' },
-        },
-        rollbackPlan: 'Rollback ke versi sebelumnya melalui deployment pipeline.',
-    },
-];
 
 export default function QualityGate() {
     const { user } = useAuth();
@@ -107,13 +73,15 @@ export default function QualityGate() {
         if (!confirm(`Setujui rilis ${selectedRelease.projectName} (${selectedRelease.id}) untuk produksi?`)) return;
         setIsSubmitting(true);
         try {
-            if (selectedRelease.projectId) {
-                await updateProject(selectedRelease.projectId, {
-                    status: 'LIVE_PRODUCTION',
-                });
+            // Gunakan qualityGateService.approve() jika mode API
+            const mode = import.meta.env.VITE_API_MODE || 'mock';
+            if (mode === 'api') {
+                await qualityGateService.approve(selectedRelease.projectId || selectedRelease.id, 'Disetujui oleh Head of IT');
+            } else {
+                await updateProjectStatus(selectedRelease.projectId || selectedRelease.id, 'LIVE_PRODUCTION');
             }
             toast.success(`Rilis ${selectedRelease.projectName} berhasil disetujui untuk produksi (LIVE_PRODUCTION)!`);
-            const remaining = dynamicQueue.filter(item => item.id !== selectedRelease.id);
+            const remaining = queueList.filter(item => item.id !== selectedRelease.id);
             setSelectedRelease(remaining.length > 0 ? remaining[0] : null);
         } catch (err) {
             toast.error(err.message || 'Gagal menyetujui rilis.');
@@ -121,6 +89,7 @@ export default function QualityGate() {
             setIsSubmitting(false);
         }
     };
+
 
     const handleReject = async () => {
         if (!selectedRelease) return;

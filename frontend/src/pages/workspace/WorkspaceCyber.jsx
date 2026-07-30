@@ -58,81 +58,16 @@ export default function WorkspaceCyber() {
     const [activeTab, setActiveTab] = useState('DISPOSITION'); // 'DISPOSITION' | 'REVIEW_LEAD'
 
     // Tab 1 (Disposisi): proyek yang sudah diajukan PM ke Cyber Lead (status CYBER_IN_PROGRESS)
-    // Cyber Lead menunjuk Pentester / Security Auditor penanggung jawab
     const cyberProjects = useMemo(() => {
-        const filtered = (projects || []).filter(p =>
-            ['CYBER_IN_PROGRESS'].includes(p.status)
-        );
-        return filtered.length > 0 ? filtered : [
-            {
-                id: 'PRJ-2026-096',
-                name: 'Integrasi API Payment Aggregator H2H',
-                division: 'Divisi Perbankan Digital',
-                status: 'CYBER_IN_PROGRESS',
-                type: 'RBB',
-                targetDate: '2026-09-15',
-                stagingUrl: 'https://staging-payment.banknagari.co.id',
-                pm: { name: 'Budi Santoso', department: 'Divisi TI' },
-                description: 'Pengembangan integrasi Host-to-Host payment gateway untuk transaksi merchant.'
-            },
-            {
-                id: 'PRJ-2026-097',
-                name: 'Audit Trail & Log Security Terpusat',
-                division: 'Divisi Kepatuhan & Keamanan',
-                status: 'CYBER_IN_PROGRESS',
-                type: 'RBB',
-                targetDate: '2026-10-01',
-                stagingUrl: 'https://staging-siem.banknagari.co.id',
-                pm: { name: 'Siti Aminah', department: 'Divisi TI' },
-                description: 'Implementasi SIEM terpusat untuk pemantauan akses dan log keamanan server.'
-            }
-        ];
+        return (projects || []).filter(p => ['CYBER_IN_PROGRESS'].includes(p.status));
     }, [projects]);
 
-    // Tab 2 (Review Lead): proyek yang laporan pentestnya sudah masuk dari auditor (masih CYBER_IN_PROGRESS)
-    // Cyber Lead meninjau temuan dan memberikan sign-off untuk dikembalikan ke Dev/PM
+
+    // Tab 2 (Review Lead): laporan pentest masuk, Cyber Lead meninjau
     const reviewLeadProjects = useMemo(() => {
-        const filtered = (projects || []).filter(p =>
-            ['CYBER_IN_PROGRESS'].includes(p.status)
-        );
-        if (filtered.length > 0) return filtered;
-        return [
-            {
-                id: 'PRJ-2026-097',
-                name: 'Audit Trail & Log Security Terpusat',
-                division: 'Divisi Kepatuhan & Keamanan',
-                status: 'CYBER_IN_PROGRESS',
-                type: 'RBB',
-                targetDate: '2026-10-01',
-                stagingUrl: 'https://staging-siem.banknagari.co.id',
-                pm: { name: 'Siti Aminah', department: 'Divisi TI' },
-                description: 'Implementasi SIEM terpusat untuk pemantauan akses dan log keamanan server.',
-                auditorResult: {
-                    auditorName: 'Bambang Supriyadi, CEH (Penetration Testing Specialist)',
-                    decision: 'PASS (PENTEST CLEARED)',
-                    riskLevel: 'Low Risk (Aman / Minor Advisory)',
-                    notes: 'Seluruh celah OWASP Top 10 (SQLi, XSS, CSRF, JWT Validation) telah dites dan dinyatakan aman.'
-                }
-            },
-            {
-                id: 'PRJ-2026-096',
-                name: 'Integrasi API Payment Aggregator H2H',
-                division: 'Divisi Perbankan Digital',
-                status: 'CYBER_IN_PROGRESS',
-                type: 'RBB',
-                targetDate: '2026-09-15',
-                stagingUrl: 'https://staging-payment.banknagari.co.id',
-                pm: { name: 'Budi Santoso', department: 'Divisi TI' },
-                description: 'Pengembangan integrasi Host-to-Host payment gateway untuk transaksi merchant.',
-                auditorResult: {
-                    auditorName: 'Rian Hidayat, CISA (Senior Cybersecurity Auditor)',
-                    decision: 'PASS (PENTEST CLEARED)',
-                    riskLevel: 'Low Risk (Aman)',
-                    notes: 'Pengujian enkripsi HSM dan rate limiting API gateway telah diverifikasi aman.'
-                }
-            }
-        ];
+        return (projects || []).filter(p => ['CYBER_IN_PROGRESS'].includes(p.status));
     }, [projects]);
+
 
     const activeList = activeTab === 'DISPOSITION' ? cyberProjects : reviewLeadProjects;
     const [selectedProject, setSelectedProject] = useState(null);

@@ -71,32 +71,7 @@ export default function CyberRequest() {
     let list = projects.filter(
       p => ['IN_DEVELOPMENT', 'READY_FOR_QA', 'QA_IN_PROGRESS', 'QA_PASSED', 'RETURN_TO_DEV'].includes(p.status)
     );
-    if (list.length === 0) {
-      list = [
-        {
-          id: 'PRJ-2026-096',
-          name: 'Integrasi API Payment Aggregator H2H',
-          division: 'Divisi Perbankan Digital',
-          status: 'QA_PASSED',
-          type: 'RBB',
-          targetDate: '2026-09-15',
-          stagingUrl: 'https://staging-payment.banknagari.co.id',
-          pm: { name: 'Budi Santoso', department: 'Divisi TI' },
-          description: 'Pengembangan integrasi Host-to-Host payment gateway untuk transaksi merchant.'
-        },
-        {
-          id: 'PRJ-2026-097',
-          name: 'Audit Trail & Log Security Terpusat',
-          division: 'Divisi Kepatuhan & Keamanan',
-          status: 'QA_PASSED',
-          type: 'RBB',
-          targetDate: '2026-10-01',
-          stagingUrl: 'https://staging-siem.banknagari.co.id',
-          pm: { name: 'Siti Aminah', department: 'Divisi TI' },
-          description: 'Implementasi SIEM terpusat untuk pemantauan akses dan log keamanan server.'
-        }
-      ];
-    }
+
 
     if (searchTerm.trim()) {
       const term = searchTerm.toLowerCase();

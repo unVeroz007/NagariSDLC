@@ -49,37 +49,9 @@ export default function MyTasksQA() {
 
     // Proyek yang didisposisi Lead QA ke tester ini: hanya QA_IN_PROGRESS
     const qaTasks = useMemo(() => {
-        const filtered = (projects || []).filter(p =>
-            ['QA_IN_PROGRESS'].includes(p.status)
-        );
-        if (filtered.length > 0) return filtered;
-        return [
-            {
-                id: 'PRJ-2026-088',
-                realId: 88,
-                name: 'Pengembangan Modul QRIS Cross-Border',
-                division: 'Divisi Digital Banking',
-                status: 'QA_IN_PROGRESS',
-                type: 'RBB',
-                targetDate: '2026-09-30',
-                stagingUrl: 'https://staging-qris.banknagari.co.id',
-                pm: { name: 'Andi Wijaya', department: 'Divisi TI' },
-                description: 'Pengembangan sistem penerimaan transaksi QRIS pembayaran luar negeri dan enkripsi HSM.'
-            },
-            {
-                id: 'PRJ-2026-090',
-                realId: 90,
-                name: 'Pembaruan Arsitektur Core Banking H2H',
-                division: 'Divisi Teknologi Informasi',
-                status: 'QA_IN_PROGRESS',
-                type: 'RBB',
-                targetDate: '2026-10-15',
-                stagingUrl: 'https://staging-h2h.banknagari.co.id',
-                pm: { name: 'Siti Aminah', department: 'Divisi TI' },
-                description: 'Refactoring arsitektur microservices core banking untuk efisiensi beban transaksi.'
-            }
-        ];
+        return (projects || []).filter(p => ['QA_IN_PROGRESS'].includes(p.status));
     }, [projects]);
+
 
     const [selectedTask, setSelectedTask] = useState(null);
     const activeTask = selectedTask || qaTasks[0] || null;

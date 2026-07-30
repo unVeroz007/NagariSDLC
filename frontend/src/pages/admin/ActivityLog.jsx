@@ -112,8 +112,11 @@ export default function ActivityLog() {
         setCurrentPage(1);
     };
 
+    const [toast, setToast] = useState(null);
+
     const handleExport = () => {
-        alert('Fitur export akan segera hadir! Data dapat diexport ke CSV/PDF.');
+        setToast('Fitur export akan segera hadir! Data dapat diexport ke CSV/PDF.');
+        setTimeout(() => setToast(null), 3000);
     };
 
     if (isLoading) {

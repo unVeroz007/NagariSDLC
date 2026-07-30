@@ -12,7 +12,8 @@ class DatabaseSeeder extends Seeder
             RoleSeeder::class,
             DivisionSeeder::class,
             UserSeeder::class,
-            ProjectSeeder::class,
+            // ProjectSeeder::class, // Nonaktifkan seeder proyek agar database bersih dari proyek awal
         ]);
     }
+
 }

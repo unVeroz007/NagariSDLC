@@ -49,82 +49,12 @@ export default function ReviewDocs() {
     const [selectedDocPreview, setSelectedDocPreview] = useState(null);
 
     // Proyek yang dikembalikan dari QA Lead atau Cyber Lead ke Tim Dev/PM.
-    // Ini adalah "kotak masuk" PM setelah menerima hasil pengujian.
     const receivedProjects = useMemo(() => {
-        const filtered = (projects || []).filter(p =>
+        return (projects || []).filter(p =>
             ['QA_PASSED', 'CYBER_PASSED'].includes(p.status)
         );
-        if (filtered.length > 0) return filtered;
-        // Fallback mock data - kondisi nyata ketika tidak ada data dari API
-        return [
-            {
-                id: 'PRJ-2026-088',
-                name: 'Pengembangan Modul QRIS Cross-Border',
-                division: 'Divisi Digital Banking',
-                status: 'QA_PASSED',
-                type: 'RBB',
-                targetDate: '2026-09-30',
-                stagingUrl: 'https://staging-qris.banknagari.co.id',
-                pm: { name: 'Andi Wijaya', department: 'Divisi TI' },
-                description: 'Pengembangan sistem penerimaan transaksi QRIS pembayaran luar negeri dan enkripsi HSM.',
-                qaSignOff: {
-                    leadName: 'Siti Rahmawati (QA Lead)',
-                    signOffDate: '2026-07-28',
-                    decision: 'PASSED (LULUS 100%)',
-                    notes: 'Seluruh skenario pengujian fungsional Happy Path & Error Handling lulus. Tidak ada defect kritis.',
-                },
-                cyberSignOff: null, // Belum selesai Cyber
-            },
-            {
-                id: 'PRJ-2026-096',
-                name: 'Integrasi API Payment Aggregator H2H',
-                division: 'Divisi Perbankan Digital',
-                status: 'CYBER_PASSED',
-                type: 'RBB',
-                targetDate: '2026-09-15',
-                stagingUrl: 'https://staging-payment.banknagari.co.id',
-                pm: { name: 'Budi Santoso', department: 'Divisi TI' },
-                description: 'Pengembangan integrasi Host-to-Host payment gateway untuk transaksi merchant.',
-                qaSignOff: {
-                    leadName: 'Rahmat Hidayat (QA Lead)',
-                    signOffDate: '2026-07-25',
-                    decision: 'PASSED (LULUS 100%)',
-                    notes: 'Seluruh pengujian integrasi API dan stress test 500 req/sec berhasil tanpa timeout.',
-                },
-                cyberSignOff: {
-                    leadName: 'Rian Hidayat, CISA (Cyber Lead)',
-                    signOffDate: '2026-07-28',
-                    decision: 'PASS (PENTEST CLEARED)',
-                    riskLevel: 'Low Risk',
-                    notes: 'Pengujian enkripsi HSM, rate limiting, dan JWT token validation dinyatakan aman.',
-                },
-            },
-            {
-                id: 'PRJ-2026-097',
-                name: 'Audit Trail & Log Security Terpusat',
-                division: 'Divisi Kepatuhan & Keamanan',
-                status: 'CYBER_PASSED',
-                type: 'RBB',
-                targetDate: '2026-10-01',
-                stagingUrl: 'https://staging-siem.banknagari.co.id',
-                pm: { name: 'Siti Aminah', department: 'Divisi TI' },
-                description: 'Implementasi SIEM terpusat untuk pemantauan akses dan log keamanan server.',
-                qaSignOff: {
-                    leadName: 'Dewi Lestari (QA Lead)',
-                    signOffDate: '2026-07-24',
-                    decision: 'PASSED (LULUS 100%)',
-                    notes: 'Pengujian performance monitoring dan integrasi Splunk SIEM berhasil.',
-                },
-                cyberSignOff: {
-                    leadName: 'Bambang Supriyadi, CEH (Cyber Lead)',
-                    signOffDate: '2026-07-27',
-                    decision: 'PASS (PENTEST CLEARED)',
-                    riskLevel: 'Low Risk',
-                    notes: 'Seluruh celah OWASP Top 10 (SQLi, XSS, CSRF, JWT) telah dites dan dinyatakan aman.',
-                },
-            },
-        ];
     }, [projects]);
+
 
     const activeProject = selectedProject || receivedProjects[0] || null;
 

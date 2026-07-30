@@ -48,37 +48,11 @@ export default function ReleaseRequest() {
     // - CYBER_PASSED: sudah lulus kedua jalur QA & Cyber, siap diajukan ke INFRA
     // - PENDING_GOLIVE: sudah diajukan ke INFRA, menunggu approval quality gate
     const readyProjects = useMemo(() => {
-        let list = projects.filter(p =>
+        return projects.filter(p =>
             ['CYBER_PASSED', 'PENDING_GOLIVE'].includes(p.status)
         );
-        if (list.length === 0) {
-            list = [
-                {
-                    id: 'PRJ-2026-096',
-                    name: 'Integrasi API Payment Aggregator H2H',
-                    division: 'Divisi Perbankan Digital',
-                    status: 'CYBER_PASSED',
-                    type: 'RBB',
-                    targetDate: '2026-09-15',
-                    stagingUrl: 'https://staging-payment.banknagari.co.id',
-                    pm: { name: 'Budi Santoso', department: 'Divisi TI' },
-                    description: 'Pengembangan integrasi Host-to-Host payment gateway untuk transaksi merchant.'
-                },
-                {
-                    id: 'PRJ-2026-097',
-                    name: 'Audit Trail & Log Security Terpusat',
-                    division: 'Divisi Kepatuhan & Keamanan',
-                    status: 'CYBER_PASSED',
-                    type: 'RBB',
-                    targetDate: '2026-10-01',
-                    stagingUrl: 'https://staging-siem.banknagari.co.id',
-                    pm: { name: 'Siti Aminah', department: 'Divisi TI' },
-                    description: 'Implementasi SIEM terpusat untuk pemantauan akses dan log keamanan server.'
-                }
-            ];
-        }
-        return list;
     }, [projects]);
+
 
     const [selectedProject, setSelectedProject] = useState(null);
     const [searchTerm, setSearchTerm] = useState('');

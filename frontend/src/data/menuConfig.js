@@ -15,8 +15,9 @@ export const menuSections = {
                 { label: 'Inisiasi Proyek Baru', path: '/projects/new', icon: 'PlusCircle' },
                 { label: 'Antrean Review', path: '/queue', icon: 'Clock' },
                 { label: 'Workspace Lead', path: '/workspace/lead', icon: 'UserCheck' },
-                { label: 'Workspace Analyst', path: '/workspace/analyst', icon: 'FileText' },
-                { label: 'Workspace Development', path: '/workspace/dev-lead', icon: 'Users' },
+                { label: 'Workspace Analyst (Plan)', path: '/workspace/analyst', icon: 'FileText' },
+                { label: 'Workspace Dev Lead', path: '/workspace/dev-lead', icon: 'Users' },
+                { label: 'Workspace Analyst (Dev)', path: '/workspace/dev-analyst', icon: 'Cpu' },
             ],
         },
         {

@@ -1,19 +1,22 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import { useNavigate } from 'react-router-dom';
 import { useNotifications } from '../../contexts/NotificationContext';
 import { useProjects } from '../../contexts/ProjectContext';
+import { divisionService } from '../../services/api';
 import {
     User,
     Info,
     CloudUpload,
     Upload,
     CheckCircle,
+    CheckCircle2,
     Trash2,
     Send,
     Save,
     HelpCircle,
     ChevronRight,
+    AlertCircle,
 } from 'lucide-react';
 import { mockProjects, dispositionQueue } from '../../data/mockData';
 
@@ -24,36 +27,126 @@ export default function ProjectNew() {
     const { addProject } = useProjects();
     const fileInputRef = useRef(null);
 
-    // Form state
+    const defaultDivisions = [
+        'Divisi Pengembangan TI',
+        'Divisi Operasional & Infra TI',
+        'Divisi Cyber Security',
+        'Divisi Quality Assurance TI',
+        'Divisi Strategi Perbankan Digital',
+        'Divisi Kredit',
+        'Divisi Dana & Jasa',
+        'Divisi Kepatuhan',
+        'Divisi Manajemen Risiko',
+        'Divisi Audit Internal',
+        'Divisi SDM',
+    ];
+
+    const [divisionList, setDivisionList] = useState(defaultDivisions);
+
+    useEffect(() => {
+        const fetchDivisions = async () => {
+            try {
+                const res = await divisionService.getAll();
+                if (res && res.data && Array.isArray(res.data) && res.data.length > 0) {
+                    const apiNames = res.data.map(d => d.name || d.code);
+                    // Merge API divisions with default divisions cleanly
+                    const merged = Array.from(new Set([...apiNames, ...defaultDivisions]));
+                    setDivisionList(merged);
+                }
+            } catch (err) {
+                console.warn('Could not fetch divisions from API, using default list:', err);
+            }
+        };
+        fetchDivisions();
+    }, []);
+
+    // Form state & modal states
     const [formData, setFormData] = useState({
         projectName: '',
-        division: '',
+        division: user?.department || 'Divisi Pengembangan TI',
         priority: 'Medium',
+        type: 'RBB', // Klasifikasi RBB / Non-RBB ditentukan sejak awal inisiasi divisi
         targetDate: '',
         description: '',
     });
 
-    // Default uploaded files kosong (hanya tampil jika user upload)
     const [uploadedFiles, setUploadedFiles] = useState([]);
     const [isSubmitting, setIsSubmitting] = useState(false);
+    const [submittedProject, setSubmittedProject] = useState(null);
+    const [errorMessage, setErrorMessage] = useState('');
+
+    const showError = (msg) => {
+        setErrorMessage(msg);
+        setTimeout(() => setErrorMessage(''), 4000);
+    };
 
     // Handle input changes
     const handleChange = (e) => {
         const { name, value } = e.target;
         setFormData((prev) => ({ ...prev, [name]: value }));
+        if (errorMessage) setErrorMessage('');
+    };
+
+    // Process files and convert to Data URL for in-browser PDF previewing
+    const processFiles = async (files) => {
+        const fileArray = Array.from(files);
+        const nonPdf = fileArray.filter(f => !f.name.toLowerCase().endsWith('.pdf'));
+        
+        if (nonPdf.length > 0) {
+            setErrorMessage('Demi integritas dokumen SDLC Bank Nagari & pratinjau langsung di browser, mohon unggah berkas berformat PDF (.pdf).');
+            setTimeout(() => setErrorMessage(''), 5000);
+        }
+
+        const validPdfFiles = fileArray.filter(f => f.name.toLowerCase().endsWith('.pdf'));
+        if (validPdfFiles.length === 0) return;
+
+        const filePromises = validPdfFiles.map((file) => {
+            return new Promise((resolve) => {
+                const reader = new FileReader();
+                let defaultType = 'brd';
+                const fn = file.name.toLowerCase();
+                if (fn.includes('fsd')) defaultType = 'fsd';
+                else if (fn.includes('qa') || fn.includes('test') || fn.includes('siber') || fn.includes('cyber')) defaultType = 'qa_report';
+                else if (fn.includes('uat')) defaultType = 'uat_doc';
+                else if (fn.includes('legal') || fn.includes('kontrak')) defaultType = 'legal';
+
+                reader.onload = (e) => {
+                    resolve({
+                        name: file.name,
+                        size: (file.size / 1024 / 1024).toFixed(1) + ' MB',
+                        type: defaultType,
+                        doc_type: defaultType,
+                        status: 'success',
+                        url: e.target.result,
+                    });
+                };
+                reader.onerror = () => {
+                    resolve({
+                        name: file.name,
+                        size: (file.size / 1024 / 1024).toFixed(1) + ' MB',
+                        type: defaultType,
+                        doc_type: defaultType,
+                        status: 'success',
+                        url: URL.createObjectURL(file),
+                    });
+                };
+                reader.readAsDataURL(file);
+            });
+        });
+
+        const newFiles = await Promise.all(filePromises);
+        setUploadedFiles((prev) => [...prev, ...newFiles]);
+    };
+
+    const handleFileTypeChange = (index, newDocType) => {
+        setUploadedFiles((prev) => prev.map((f, i) => i === index ? { ...f, doc_type: newDocType, type: newDocType } : f));
     };
 
     // Handle file upload
     const handleFileUpload = (e) => {
         const files = e.target.files;
         if (files && files.length > 0) {
-            const newFiles = Array.from(files).map((file) => ({
-                name: file.name,
-                size: (file.size / 1024 / 1024).toFixed(1) + ' MB',
-                type: file.name.split('.').pop().toLowerCase(),
-                status: 'success',
-            }));
-            setUploadedFiles((prev) => [...prev, ...newFiles]);
+            processFiles(files);
         }
         if (fileInputRef.current) {
             fileInputRef.current.value = '';
@@ -70,13 +163,7 @@ export default function ProjectNew() {
         e.preventDefault();
         const files = e.dataTransfer.files;
         if (files && files.length > 0) {
-            const newFiles = Array.from(files).map((file) => ({
-                name: file.name,
-                size: (file.size / 1024 / 1024).toFixed(1) + ' MB',
-                type: file.name.split('.').pop().toLowerCase(),
-                status: 'success',
-            }));
-            setUploadedFiles((prev) => [...prev, ...newFiles]);
+            processFiles(files);
         }
     };
 
@@ -88,7 +175,7 @@ export default function ProjectNew() {
     const handleSaveDraft = async (e) => {
         e.preventDefault();
         if (!formData.projectName.trim()) {
-            alert('Nama proyek wajib diisi untuk menyimpan draft!');
+            showError('Nama proyek wajib diisi untuk menyimpan draft!');
             return;
         }
 
@@ -99,39 +186,40 @@ export default function ProjectNew() {
                 division: formData.division || 'Divisi TI',
                 priority: formData.priority,
                 targetDate: formData.targetDate || 'TBD',
-                status: 'PENDING',
-                type: 'NON_RBB',
+                status: 'DRAFT',
+                type: formData.type || 'RBB',
                 documents: uploadedFiles,
-                isDraft: true,
             };
 
-            await addProject(draftProject);
+            const res = await addProject(draftProject);
 
             addNotification(
                 'Draft Proyek Tersimpan',
-                `Draft "${formData.projectName}" berhasil disimpan.`,
+                `Draft "${formData.projectName}" (${formData.type || 'RBB'}) berhasil disimpan.`,
                 'info',
                 '/projects'
             );
 
-            alert(`Draft proyek "${formData.projectName}" berhasil disimpan!`);
-            navigate('/projects');
+            setSubmittedProject({
+                ...draftProject,
+                id: res?.data?.id || `DRAFT-${Date.now()}`,
+                isDraft: true,
+            });
         } catch (err) {
             console.error(err);
-            alert('Gagal menyimpan draft proyek.');
+            showError('Gagal menyimpan draft proyek.');
         }
     };
 
     // Handle Submit Ajukan Proyek
     const handleSubmit = async (e) => {
         e.preventDefault();
-        setIsSubmitting(true);
-
         if (!formData.projectName.trim()) {
-            alert('Nama proyek wajib diisi!');
-            setIsSubmitting(false);
+            showError('Nama proyek wajib diisi!');
             return;
         }
+
+        setIsSubmitting(true);
 
         try {
             const newProject = {
@@ -141,11 +229,11 @@ export default function ProjectNew() {
                 priority: formData.priority,
                 targetDate: formData.targetDate || 'TBD',
                 status: 'PENDING',
-                type: 'NON_RBB',
+                type: formData.type || 'RBB',
                 documents: uploadedFiles,
             };
 
-            await addProject(newProject);
+            const res = await addProject(newProject);
 
             addNotification(
                 'Proyek Baru Diajukan',
@@ -155,12 +243,15 @@ export default function ProjectNew() {
             );
 
             setIsSubmitting(false);
-            alert(`Proyek "${formData.projectName}" berhasil diajukan!`);
-            navigate('/projects');
+            setSubmittedProject({
+                ...newProject,
+                id: res?.data?.id || `PRJ-${Date.now()}`,
+                isDraft: false,
+            });
         } catch (err) {
             console.error(err);
             setIsSubmitting(false);
-            alert('Gagal mengajukan proyek.');
+            showError('Gagal mengajukan proyek.');
         }
     };
 
@@ -219,6 +310,13 @@ export default function ProjectNew() {
                     </p>
                 </div>
 
+                {errorMessage && (
+                    <div className="mb-6 bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-xl flex items-center gap-3 text-sm font-semibold animate-shake shadow-xs">
+                        <AlertCircle size={18} className="text-red-500 shrink-0" />
+                        <span>{errorMessage}</span>
+                    </div>
+                )}
+
                 <form className="space-y-6" onSubmit={handleSubmit}>
                     {/* Section 0: Informasi Pengusul (PIC) */}
                     <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6 transition-all duration-300 hover:shadow-md">
@@ -239,17 +337,13 @@ export default function ProjectNew() {
                                 />
                             </div>
                             <div className="space-y-2">
-                                <label className="text-sm font-semibold text-gray-600">Unit Kerja / Divisi</label>
-                                <select
-                                    className="w-full px-4 py-3 bg-white border border-gray-200 rounded-lg focus:ring-2 focus:ring-[#1A56DB] focus:border-[#1A56DB] transition-all text-sm appearance-none"
-                                    value={formData.division || user?.department || 'Lead Group / IT Strategy'}
-                                    onChange={(e) => setFormData({ ...formData, division: e.target.value })}
-                                >
-                                    <option value="Lead Group / IT Strategy">Lead Group / IT Strategy</option>
-                                    {divisions.map((div) => (
-                                        <option key={div} value={div}>{div}</option>
-                                    ))}
-                                </select>
+                                <label className="text-sm font-semibold text-gray-600">Unit Kerja PIC</label>
+                                <input
+                                    className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-lg text-sm text-gray-500 cursor-not-allowed font-medium"
+                                    disabled
+                                    type="text"
+                                    value={user?.department || 'Divisi Pengembangan TI'}
+                                />
                             </div>
                             <div className="space-y-2 md:col-span-2">
                                 <label className="text-sm font-semibold text-gray-600">Email</label>
@@ -280,11 +374,63 @@ export default function ProjectNew() {
                                     name="projectName"
                                     value={formData.projectName}
                                     onChange={handleChange}
-                                    className="w-full px-4 py-3 bg-white border border-gray-200 rounded-lg focus:ring-2 focus:ring-[#1A56DB] focus:border-[#1A56DB] transition-all text-sm"
+                                    className="w-full px-4 py-3 bg-white border border-gray-200 rounded-lg focus:ring-2 focus:ring-[#1A56DB] focus:border-[#1A56DB] transition-all text-sm font-medium"
                                     placeholder="Contoh: Digital Loan Enhancement Phase II"
                                     type="text"
                                     required
                                 />
+                            </div>
+
+                            {/* Seksi Klasifikasi Tipe Proyek (RBB / Non-RBB) dari Awal Inisiasi */}
+                            <div className="space-y-2 md:col-span-2 bg-gradient-to-r from-purple-50/70 to-blue-50/50 p-4 sm:p-5 rounded-xl border border-purple-100/90 shadow-2xs">
+                                <div className="mb-1">
+                                    <label className="text-sm font-extrabold text-gray-800 flex items-center gap-1.5">
+                                        Klasifikasi Tipe Proyek SDLC <span className="text-red-500">*</span>
+                                    </label>
+                                </div>
+                                <p className="text-xs text-gray-600 mb-3">
+                                    Pilih tipe pengajuan proyek Anda. Klasifikasi ini akan menjadi acuan prioritas penanganan dari Fase Inisiasi hingga Go-Live.
+                                </p>
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                    <label className={`flex items-start gap-3 p-3.5 rounded-xl border-2 cursor-pointer transition-all ${formData.type === 'RBB' ? 'border-purple-600 bg-purple-50/80 shadow-xs' : 'border-gray-200 bg-white hover:border-purple-200'}`}>
+                                        <input
+                                            type="radio"
+                                            name="type"
+                                            value="RBB"
+                                            checked={formData.type === 'RBB'}
+                                            onChange={handleChange}
+                                            className="mt-1 text-purple-600 focus:ring-purple-500"
+                                        />
+                                        <div>
+                                            <div className="flex items-center gap-2">
+                                                <span className="font-extrabold text-xs text-purple-900 uppercase tracking-wider bg-purple-200/90 text-purple-900 px-2 py-0.5 rounded border border-purple-300">RBB</span>
+                                                <span className="font-bold text-xs text-gray-800">Rencana Bisnis Bank</span>
+                                            </div>
+                                            <p className="text-[11px] text-gray-600 mt-1 leading-relaxed">
+                                                Proyek strategis prioritas utama yang terdaftar dalam Rencana Bisnis Bank Nagari dengan target jadwal yang ketat.
+                                            </p>
+                                        </div>
+                                    </label>
+                                    <label className={`flex items-start gap-3 p-3.5 rounded-xl border-2 cursor-pointer transition-all ${formData.type === 'Non-RBB' ? 'border-slate-600 bg-slate-50/80 shadow-xs' : 'border-gray-200 bg-white hover:border-slate-200'}`}>
+                                        <input
+                                            type="radio"
+                                            name="type"
+                                            value="Non-RBB"
+                                            checked={formData.type === 'Non-RBB'}
+                                            onChange={handleChange}
+                                            className="mt-1 text-slate-600 focus:ring-slate-500"
+                                        />
+                                        <div>
+                                            <div className="flex items-center gap-2">
+                                                <span className="font-extrabold text-xs text-slate-700 uppercase tracking-wider bg-slate-200 text-slate-800 px-2 py-0.5 rounded border border-slate-300">Non-RBB</span>
+                                                <span className="font-bold text-xs text-gray-800">Non-RBB (Insidental)</span>
+                                            </div>
+                                            <p className="text-[11px] text-gray-600 mt-1 leading-relaxed">
+                                                Proyek operasional rutin, insidental, atau penyempurnaan sistem internal divisi dengan target fleksibel.
+                                            </p>
+                                        </div>
+                                    </label>
+                                </div>
                             </div>
                             <div className="space-y-2">
                                 <label className="text-sm font-semibold text-gray-600">Unit Kerja / Divisi Inisiator</label>
@@ -295,7 +441,7 @@ export default function ProjectNew() {
                                     className="w-full px-4 py-3 bg-white border border-gray-200 rounded-lg focus:ring-2 focus:ring-[#1A56DB] focus:border-[#1A56DB] transition-all text-sm appearance-none"
                                 >
                                     <option value="">Pilih Divisi</option>
-                                    {divisions.map((div) => (
+                                    {divisionList.map((div) => (
                                         <option key={div} value={div}>{div}</option>
                                     ))}
                                 </select>
@@ -380,16 +526,17 @@ export default function ProjectNew() {
                                 <Upload size={28} />
                             </div>
                             <p className="text-lg font-semibold text-gray-800">
-                                Tarik file ke sini atau <span className="text-[#1A56DB] font-bold">Cari File</span>
+                                Tarik file PDF ke sini atau <span className="text-[#1A56DB] font-bold">Pilih Dokumen PDF</span>
                             </p>
-                            <p className="text-gray-500 text-xs mt-2">
-                                Dukungan: PDF, DOCX, XLSX (Maks. 5MB per file)
+                            <p className="text-blue-600 text-xs font-semibold mt-2.5 flex items-center justify-center gap-1.5 bg-blue-50 py-1.5 px-3 rounded-lg border border-blue-200">
+                                <CheckCircle2 size={14} className="text-blue-600 shrink-0" />
+                                Format Resmi SDLC: Berkas PDF (.pdf) untuk Pratinjau Langsung di Browser (Maks 10MB per file)
                             </p>
                             <input
                                 ref={fileInputRef}
                                 type="file"
                                 multiple
-                                accept=".pdf,.docx,.xlsx,.pptx,.zip"
+                                accept=".pdf,application/pdf"
                                 className="hidden"
                                 onChange={handleFileUpload}
                             />
@@ -398,26 +545,44 @@ export default function ProjectNew() {
                         {/* File List */}
                         {uploadedFiles.length > 0 && (
                             <div className="mt-8 space-y-3">
+                                <p className="text-xs font-bold text-gray-700 uppercase tracking-wider">
+                                    Tentukan Jenis Dokumen SDLC untuk Setiap File:
+                                </p>
                                 {uploadedFiles.map((file, index) => (
                                     <div
                                         key={index}
-                                        className="flex items-center justify-between p-4 bg-gray-50 border border-gray-200 rounded-lg group"
+                                        className="flex flex-col sm:flex-row sm:items-center justify-between p-4 bg-gray-50 border border-gray-200 rounded-xl gap-4 group"
                                     >
-                                        <div className="flex items-center gap-4">
-                                            <div className={`w-10 h-10 rounded flex items-center justify-center font-bold text-[10px] ${getFileIcon(file.type)}`}>
-                                                {getFileLabel(file.type)}
+                                        <div className="flex items-center gap-3.5 min-w-0">
+                                            <div className="w-10 h-10 rounded-xl bg-red-50 text-red-600 border border-red-200 flex items-center justify-center font-bold text-xs shrink-0">
+                                                PDF
                                             </div>
-                                            <div>
-                                                <p className="text-sm font-bold text-gray-800">{file.name}</p>
-                                                <p className="text-[10px] text-gray-500">{file.size} • Upload Berhasil</p>
+                                            <div className="min-w-0">
+                                                <p className="text-sm font-bold text-gray-800 truncate">{file.name}</p>
+                                                <p className="text-[11px] text-gray-500">{file.size} • Siap Dipratinjau</p>
                                             </div>
                                         </div>
-                                        <div className="flex items-center gap-4">
-                                            <CheckCircle size={18} className="text-emerald-600" />
+
+                                        <div className="flex items-center gap-3 shrink-0">
+                                            {/* Selector Kategori Dokumen SDLC */}
+                                            <select
+                                                value={file.doc_type || 'brd'}
+                                                onChange={(e) => handleFileTypeChange(index, e.target.value)}
+                                                className="px-3 py-1.5 bg-white border border-gray-300 rounded-lg text-xs font-bold text-gray-700 focus:ring-2 focus:ring-[#1A56DB] outline-none shadow-2xs"
+                                            >
+                                                <option value="brd">BRD (Business Requirement Document)</option>
+                                                <option value="fsd">FSD (Functional Specification Document)</option>
+                                                <option value="qa_report">Laporan Testing QA &amp; Siber</option>
+                                                <option value="uat_doc">Berita Acara UAT</option>
+                                                <option value="legal">Dokumen Kontrak &amp; Legal</option>
+                                            </select>
+
+                                            <CheckCircle size={18} className="text-emerald-600 shrink-0" />
                                             <button
                                                 type="button"
                                                 onClick={() => handleDeleteFile(index)}
                                                 className="text-gray-400 hover:text-red-500 transition-colors p-1"
+                                                title="Hapus File"
                                             >
                                                 <Trash2 size={18} />
                                             </button>
@@ -468,6 +633,80 @@ export default function ProjectNew() {
                     <HelpCircle size={28} className="group-hover:scale-110 transition-transform" />
                 </button>
             </div>
+
+            {/* Modal Sukses Enterprise */}
+            {submittedProject && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/70 backdrop-blur-md animate-fade-in">
+                    <div className="bg-white rounded-3xl max-w-md w-full p-8 shadow-2xl border border-gray-100 transform transition-all animate-scale-up text-center relative overflow-hidden">
+                        {/* Light ambient glow */}
+                        <div className="absolute -top-24 -right-24 w-48 h-48 bg-emerald-500/10 rounded-full blur-3xl pointer-events-none" />
+                        <div className="absolute -bottom-24 -left-24 w-48 h-48 bg-blue-500/10 rounded-full blur-3xl pointer-events-none" />
+
+                        {/* Animated Icon */}
+                        <div className="mx-auto w-20 h-20 rounded-full bg-emerald-50 border-4 border-emerald-100 flex items-center justify-center mb-5 shadow-lg shadow-emerald-500/20">
+                            <CheckCircle className="w-10 h-10 text-emerald-600 animate-pulse" />
+                        </div>
+
+                        <h3 className="text-2xl font-black text-gray-800 mb-2">
+                            {submittedProject.isDraft ? 'Draft Berhasil Disimpan!' : 'Proyek Berhasil Diajukan!'}
+                        </h3>
+                        <p className="text-sm text-gray-500 mb-6 leading-relaxed">
+                            {submittedProject.isDraft
+                                ? 'Draft proyek Anda telah tersimpan. Anda dapat melanjutkannya kapan saja.'
+                                : 'Pengajuan proyek Anda telah tercatat dan masuk ke antrean review Lead Group.'}
+                        </p>
+
+                        {/* Summary Card */}
+                        <div className="bg-gray-50 rounded-2xl p-4 text-left border border-gray-100 mb-6 space-y-2 text-xs">
+                            <div className="flex justify-between items-center pb-2 border-b border-gray-200/60">
+                                <span className="text-gray-400 font-semibold">NAMA PROYEK</span>
+                                <span className="font-bold text-gray-800 text-sm truncate max-w-[180px]">{submittedProject.name}</span>
+                            </div>
+                            <div className="flex justify-between items-center py-1">
+                                <span className="text-gray-400 font-semibold">DIVISI</span>
+                                <span className="font-semibold text-gray-700">{submittedProject.division}</span>
+                            </div>
+                            <div className="flex justify-between items-center py-1">
+                                <span className="text-gray-400 font-semibold">STATUS</span>
+                                <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-emerald-100 text-emerald-800">
+                                    {submittedProject.isDraft ? 'DRAFT' : 'PENDING (Menunggu Review)'}
+                                </span>
+                            </div>
+                            {submittedProject.documents && submittedProject.documents.length > 0 && (
+                                <div className="flex justify-between items-center pt-1">
+                                    <span className="text-gray-400 font-semibold">DOKUMEN</span>
+                                    <span className="font-bold text-[#1A56DB]">
+                                        📄 {submittedProject.documents.length} File Terlampir
+                                    </span>
+                                </div>
+                            )}
+                        </div>
+
+                        {/* Navigation Actions */}
+                        <div className="flex flex-col gap-2.5">
+                            <button
+                                onClick={() => navigate(`/pm/tracker?projectId=${submittedProject.id}`, { state: { projectId: submittedProject.id } })}
+                                className="w-full py-3 px-5 bg-gradient-to-r from-[#1A56DB] to-[#003a73] text-white font-bold rounded-xl shadow-lg shadow-blue-900/20 hover:opacity-95 transition-all flex items-center justify-center gap-2 cursor-pointer text-sm"
+                            >
+                                <span>Lacak Status Proyek</span>
+                                <ChevronRight size={16} />
+                            </button>
+                            <button
+                                onClick={() => navigate('/documents')}
+                                className="w-full py-2.5 px-5 bg-emerald-50 text-emerald-700 font-bold rounded-xl border border-emerald-200 hover:bg-emerald-100 transition-all text-sm cursor-pointer"
+                            >
+                                Manajemen Dokumen Terpusat
+                            </button>
+                            <button
+                                onClick={() => navigate('/projects')}
+                                className="w-full py-2.5 px-5 bg-white text-gray-600 font-bold rounded-xl border border-gray-200 hover:bg-gray-50 transition-all text-sm cursor-pointer"
+                            >
+                                Lihat Daftar Semua Proyek
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
-}
+}

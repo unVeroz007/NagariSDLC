@@ -122,9 +122,9 @@ export default function Queue() {
     } else if (project.status === 'IN_REVIEW') {
       return (
         <button
-          onClick={() => alert(`Proyek ${project.name} sedang direview oleh Analyst`)}
           className="px-3 py-1.5 bg-gray-100 text-gray-600 rounded-lg text-xs font-medium cursor-not-allowed flex items-center gap-1"
           disabled
+          title={`Proyek ${project.name} sedang direview oleh Analyst`}
         >
           <Hourglass size={14} />
           Menunggu

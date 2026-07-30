@@ -24,56 +24,7 @@ import {
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 
-const DEFAULT_DEV_TASKS = [
-    {
-        id: 'TSK-DEV-001',
-        title: 'Setup Core Database Schema & Migrations',
-        projectName: 'Aplikasi LOS Baru',
-        projectId: 'PRJ-2023-001',
-        status: 'To Do',
-        priority: 'High',
-        deadline: '30 Agustus 2026',
-        assignee: 'Dimas Anggara',
-        assigneeEmail: 'dimas@banknagari.com',
-        type: 'RBB'
-    },
-    {
-        id: 'TSK-DEV-002',
-        title: 'Integrasi API Gateway & Auth JWT SSO',
-        projectName: 'Modul Pelaporan OJK Terpusat',
-        projectId: 'PRJ-2026-099',
-        status: 'In Progress',
-        priority: 'High',
-        deadline: '15 September 2026',
-        assignee: 'Dimas Anggara',
-        assigneeEmail: 'dimas@banknagari.com',
-        type: 'RBB'
-    },
-    {
-        id: 'TSK-DEV-003',
-        title: 'Pengembangan Form Input Data Nasabah & Validation',
-        projectName: 'Aplikasi Manajemen Inventaris',
-        projectId: 'PRJ-2026-100',
-        status: 'Code Review',
-        priority: 'Medium',
-        deadline: '20 September 2026',
-        assignee: 'Eka Putri',
-        assigneeEmail: 'eka@banknagari.com',
-        type: 'NON_RBB'
-    },
-    {
-        id: 'TSK-DEV-004',
-        title: 'Optimasi Query Export Excel & PDF Pelaporan',
-        projectName: 'Modul Pelaporan OJK Terpusat',
-        projectId: 'PRJ-2026-099',
-        status: 'Done',
-        priority: 'Low',
-        deadline: '10 Agustus 2026',
-        assignee: 'Dimas Anggara',
-        assigneeEmail: 'dimas@banknagari.com',
-        type: 'RBB'
-    }
-];
+const DEFAULT_DEV_TASKS = [];
 
 export default function MyTasksDev() {
     const { user } = useAuth();

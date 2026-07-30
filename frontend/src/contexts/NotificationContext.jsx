@@ -4,10 +4,29 @@ import { mockNotifications } from '../data/mockData';
 const NotificationContext = createContext();
 
 export function NotificationProvider({ children }) {
-    const [notifications, setNotifications] = useState(mockNotifications);
-    const [unreadCount, setUnreadCount] = useState(
-        mockNotifications.filter(n => !n.isRead).length
-    );
+    const [notifications, setNotifications] = useState(() => {
+        const saved = localStorage.getItem('nagari_sdlc_notifications');
+        if (saved) {
+            try { return JSON.parse(saved); } catch { }
+        }
+        return [];
+    });
+
+    const [unreadCount, setUnreadCount] = useState(() => {
+        const saved = localStorage.getItem('nagari_sdlc_notifications');
+        if (saved) {
+            try {
+                const list = JSON.parse(saved);
+                return list.filter(n => !n.isRead).length;
+            } catch { }
+        }
+        return 0;
+    });
+
+    useEffect(() => {
+        localStorage.setItem('nagari_sdlc_notifications', JSON.stringify(notifications));
+    }, [notifications]);
+
 
     // Fungsi untuk menambah notifikasi baru
     const addNotification = (title, message, type = 'info', relatedUrl = null) => {

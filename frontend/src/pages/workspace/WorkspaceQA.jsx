@@ -60,81 +60,19 @@ export default function WorkspaceQA() {
 
     // Tab 1 (Disposisi): proyek dari PM yang sudah diajukan ke QA Lead untuk ditunjuk testernya
     const qaProjects = useMemo(() => {
-        const filtered = (projects || []).filter(p =>
-            ['READY_FOR_QA'].includes(p.status)
-        );
-        return filtered.length > 0 ? filtered : [
-            {
-                id: 'PRJ-2026-088',
-                name: 'Pengembangan Modul QRIS Cross-Border',
-                division: 'Divisi Digital Banking',
-                status: 'READY_FOR_QA',
-                type: 'RBB',
-                targetDate: '2026-09-30',
-                stagingUrl: 'https://staging-qris.banknagari.co.id',
-                pm: { name: 'Andi Wijaya', department: 'Divisi TI' },
-                description: 'Pengembangan sistem penerimaan transaksi QRIS pembayaran luar negeri dan enkripsi HSM.'
-            },
-            {
-                id: 'PRJ-2026-090',
-                name: 'Pembaruan Arsitektur Core Banking H2H',
-                division: 'Divisi Teknologi Informasi',
-                status: 'READY_FOR_QA',
-                type: 'RBB',
-                targetDate: '2026-10-15',
-                stagingUrl: 'https://staging-h2h.banknagari.co.id',
-                pm: { name: 'Siti Aminah', department: 'Divisi TI' },
-                description: 'Refactoring arsitektur microservices core banking untuk efisiensi beban transaksi.'
-            }
-        ];
+        return (projects || []).filter(p => ['READY_FOR_QA'].includes(p.status));
     }, [projects]);
 
+
     // Tab 2 (Review Lead): proyek yang sedang diuji oleh QA Tester (QA_IN_PROGRESS)
-    // Lead QA meninjau laporan tester dan memberikan sign-off untuk dikembalikan ke Dev/PM
     const reviewLeadProjects = useMemo(() => {
-        const filtered = (projects || []).filter(p =>
-            ['QA_IN_PROGRESS'].includes(p.status)
-        );
-        if (filtered.length > 0) return filtered;
-        return [
-            {
-                id: 'PRJ-2026-088',
-                name: 'Pengembangan Modul QRIS Cross-Border',
-                division: 'Divisi Digital Banking',
-                status: 'QA_IN_PROGRESS',
-                type: 'RBB',
-                targetDate: '2026-09-30',
-                stagingUrl: 'https://staging-qris.banknagari.co.id',
-                pm: { name: 'Andi Wijaya', department: 'Divisi TI' },
-                description: 'Pengembangan sistem penerimaan transaksi QRIS pembayaran luar negeri dan enkripsi HSM.',
-                testerResult: {
-                    testerName: 'Siti Rahmawati (Senior QA Engineer)',
-                    decision: 'PASSED (LULUS QA)',
-                    defectSeverity: 'Minor / Low',
-                    notes: 'Seluruh 10 skenario pengujian fungsional (happy path & error handling) telah dites 100% Lulus. Tidak ada defect kritis.'
-                }
-            },
-            {
-                id: 'PRJ-2026-090',
-                name: 'Pembaruan Arsitektur Core Banking H2H',
-                division: 'Divisi Teknologi Informasi',
-                status: 'QA_IN_PROGRESS',
-                type: 'RBB',
-                targetDate: '2026-10-15',
-                stagingUrl: 'https://staging-h2h.banknagari.co.id',
-                pm: { name: 'Siti Aminah', department: 'Divisi TI' },
-                description: 'Refactoring arsitektur microservices core banking untuk efisiensi beban transaksi.',
-                testerResult: {
-                    testerName: 'Rahmat Hidayat (Automation QA Specialist)',
-                    decision: 'PASSED (LULUS QA)',
-                    defectSeverity: 'None',
-                    notes: 'Pengujian integrasi API dan stress test 500 req/sec berhasil dijalankan tanpa timeout.'
-                }
-            }
-        ];
+        return (projects || []).filter(p => ['QA_IN_PROGRESS'].includes(p.status));
     }, [projects]);
 
     const activeList = activeTab === 'DISPOSITION' ? qaProjects : reviewLeadProjects;
+
+
+
     const [selectedProject, setSelectedProject] = useState(null);
     const activeProject = selectedProject || activeList[0] || null;
 

@@ -72,33 +72,7 @@ export default function QARequest() {
     let list = projects.filter(
       p => ['IN_DEVELOPMENT', 'READY_FOR_QA', 'CYBER_IN_PROGRESS', 'CYBER_PASSED', 'RETURN_TO_DEV'].includes(p.status)
     );
-    
-    if (list.length === 0) {
-      list = [
-        {
-          id: 'PRJ-2026-088',
-          name: 'Pengembangan Modul QRIS Cross-Border',
-          division: 'Divisi Digital Banking',
-          status: 'READY_FOR_QA',
-          type: 'RBB',
-          targetDate: '2026-09-30',
-          stagingUrl: 'https://staging-qris.banknagari.co.id',
-          pm: { name: 'Andi Wijaya', department: 'Divisi TI' },
-          description: 'Pengembangan sistem penerimaan transaksi QRIS pembayaran luar negeri dan enkripsi HSM.'
-        },
-        {
-          id: 'PRJ-2026-090',
-          name: 'Pembaruan Arsitektur Core Banking H2H',
-          division: 'Divisi Teknologi Informasi',
-          status: 'READY_FOR_QA',
-          type: 'RBB',
-          targetDate: '2026-10-15',
-          stagingUrl: 'https://staging-h2h.banknagari.co.id',
-          pm: { name: 'Siti Aminah', department: 'Divisi TI' },
-          description: 'Refactoring arsitektur microservices core banking untuk efisiensi beban transaksi.'
-        }
-      ];
-    }
+
 
     if (searchTerm.trim()) {
       const term = searchTerm.toLowerCase();

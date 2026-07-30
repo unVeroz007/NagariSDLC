@@ -6,116 +6,130 @@ const MODE = import.meta.env.VITE_API_MODE || 'mock';
 
 const AuthContext = createContext();
 
-// Mock user database untuk simulasi login
+/**
+ * MOCK_USERS — Credential sesuai dengan UserSeeder di Backend.
+ * Digunakan saat VITE_API_MODE=mock.
+ * Login mode API: gunakan email & password yang sama ke endpoint /auth/login.
+ */
 const MOCK_USERS = [
     {
         id: 1,
-        name: 'Ahmad Fauzi',
-        email: 'admin@banknagari.com',
-        password: 'admin123',
+        name: 'Admin NagariSDLC',
+        email: 'admin@nagari.co.id',
+        password: 'password123',
         role: 'super_admin',
-        department: 'IT',
-        nip: '199001011234',
+        division: { code: 'DSI', name: 'Divisi Sistem Informasi' },
+        phone_number: '081234567890',
         avatar_url: null,
     },
     {
         id: 2,
-        name: 'Budi Santoso',
-        email: 'pm@banknagari.com',
-        password: 'pm123',
-        role: 'project_manager',
-        department: 'IT Core',
-        nip: '198505051234',
+        name: 'Head of IT',
+        email: 'headit@nagari.co.id',
+        password: 'password123',
+        role: 'head_of_it',
+        division: { code: 'DSI', name: 'Divisi Sistem Informasi' },
+        phone_number: '081234567891',
         avatar_url: null,
     },
     {
         id: 3,
-        name: 'Citra Kirana',
-        email: 'analyst@banknagari.com',
-        password: 'analyst123',
-        role: 'analyst',
-        department: 'IT',
-        nip: '199203031234',
+        name: 'Lead Group / Kadiv IT',
+        email: 'lead@nagari.co.id',
+        password: 'password123',
+        role: 'lead_group',
+        division: { code: 'IT-DEV', name: 'IT Development' },
+        phone_number: '081234567892',
         avatar_url: null,
     },
     {
         id: 4,
-        name: 'Dewi Lestari',
-        email: 'lead@banknagari.com',
-        password: 'lead123',
-        role: 'lead_group',
-        department: 'IT',
-        nip: '198801011234',
+        name: 'System Analyst',
+        email: 'analyst@nagari.co.id',
+        password: 'password123',
+        role: 'analyst',
+        division: { code: 'IT-DEV', name: 'IT Development' },
+        phone_number: '081234567893',
         avatar_url: null,
     },
     {
         id: 5,
-        name: 'Eko Prasetyo',
-        email: 'qa@banknagari.com',
-        password: 'qa123',
-        role: 'qa_lead',
-        department: 'IT Quality',
-        nip: '199104041234',
+        name: 'Development Lead',
+        email: 'devlead@nagari.co.id',
+        password: 'password123',
+        role: 'development_lead',
+        division: { code: 'IT-DEV', name: 'IT Development' },
+        phone_number: '081234567894',
         avatar_url: null,
     },
     {
         id: 6,
-        name: 'Fajar Nugroho',
-        email: 'devlead@banknagari.com',
-        password: 'dev123',
-        role: 'development_lead',
-        department: 'IT Development',
-        nip: '199006061234',
+        name: 'Project Manager',
+        email: 'pm@nagari.co.id',
+        password: 'password123',
+        role: 'project_manager',
+        division: { code: 'IT-DEV', name: 'IT Development' },
+        phone_number: '081234567895',
         avatar_url: null,
     },
     {
         id: 7,
-        name: 'Gita Savitri',
-        email: 'cyber@banknagari.com',
-        password: 'cyber123',
-        role: 'cyber_team',
-        department: 'IT Security',
-        nip: '199307071234',
+        name: 'Developer',
+        email: 'developer@nagari.co.id',
+        password: 'password123',
+        role: 'developer',
+        division: { code: 'IT-DEV', name: 'IT Development' },
+        phone_number: '081234567896',
         avatar_url: null,
     },
     {
         id: 8,
-        name: 'Dimas Anggara',
-        email: 'dimas@banknagari.com',
-        password: 'dev123',
-        role: 'developer',
-        department: 'Divisi TI (Backend)',
-        nip: '199401011234',
+        name: 'QA Lead',
+        email: 'qalead@nagari.co.id',
+        password: 'password123',
+        role: 'qa_lead',
+        division: { code: 'IT-QA', name: 'IT Quality Assurance' },
+        phone_number: '081234567897',
         avatar_url: null,
     },
     {
         id: 9,
-        name: 'Eka Putri',
-        email: 'eka@banknagari.com',
-        password: 'dev123',
-        role: 'developer',
-        department: 'Divisi TI (Frontend)',
-        nip: '199502021234',
+        name: 'QA Tester',
+        email: 'qatester@nagari.co.id',
+        password: 'password123',
+        role: 'qa_tester',
+        division: { code: 'IT-QA', name: 'IT Quality Assurance' },
+        phone_number: '081234567898',
         avatar_url: null,
     },
     {
         id: 10,
-        name: 'Pengusul Proyek (Business User)',
-        email: 'user@banknagari.com',
-        password: 'user123',
-        role: 'business_user',
-        department: 'Divisi Kredit',
-        nip: '199601011234',
+        name: 'Cyber Security Lead',
+        email: 'cyberlead@nagari.co.id',
+        password: 'password123',
+        role: 'cyber_lead',
+        division: { code: 'IT-SEC', name: 'IT Security' },
+        phone_number: '081234567899',
         avatar_url: null,
     },
     {
         id: 11,
-        name: 'Test Pengusul',
-        email: 'test@nagari.co.id',
-        password: 'test1234',
+        name: 'Pentester',
+        email: 'pentester@nagari.co.id',
+        password: 'password123',
+        role: 'pentester',
+        division: { code: 'IT-SEC', name: 'IT Security' },
+        phone_number: '081234567800',
+        avatar_url: null,
+    },
+    {
+        id: 12,
+        name: 'Business User / Pemohon',
+        email: 'user@nagari.co.id',
+        password: 'password123',
         role: 'business_user',
-        department: 'Divisi Kredit',
-        nip: '199801011234',
+        division: { code: 'IT-OPS', name: 'IT Operations' },
+        phone_number: '081234567801',
         avatar_url: null,
     },
 ];
@@ -147,43 +161,34 @@ export function AuthProvider({ children }) {
 
             try {
                 const parsed = JSON.parse(savedSession);
-                if (MODE === 'api') {
-                    // Jika token berupa mock token atau tidak valid, hapus session lama
-                    if (!parsed.token || parsed.token === 'mock_token') {
-                        localStorage.removeItem(SESSION_KEY);
-                        setUser(null);
-                        setIsLoggedIn(false);
-                        setIsLoading(false);
-                        return;
-                    }
+                const sessionUser = parsed.user || parsed;
 
-                    // Verifikasi token dengan backend
-                    const meRes = await authService.getCurrentUser();
-                    if (meRes && meRes.status === 'success' && meRes.data) {
-                        const userData = {
-                            ...meRes.data,
-                            role: meRes.data.role?.name || 'super_admin',
-                        };
-                        setUser(userData);
-                        setIsLoggedIn(true);
-                    } else {
-                        localStorage.removeItem(SESSION_KEY);
-                        setUser(null);
-                        setIsLoggedIn(false);
-                    }
-                } else {
-                    const sessionUser = parsed.user || parsed;
-                    if (sessionUser && (sessionUser.id || sessionUser.email)) {
-                        setUser(sessionUser);
-                        setIsLoggedIn(true);
-                    } else {
-                        localStorage.removeItem(SESSION_KEY);
-                    }
+                if (sessionUser && (sessionUser.id || sessionUser.email)) {
+                    setUser(sessionUser);
+                    setIsLoggedIn(true);
+                }
+                setIsLoading(false);
+
+                // Verifikasi token di background secara independen (silent sync)
+                if (MODE === 'api' && parsed.token && parsed.token !== 'mock_token') {
+                    authService.getCurrentUser()
+                        .then(meRes => {
+                            if (meRes && meRes.status === 'success' && meRes.data) {
+                                const userData = {
+                                    ...meRes.data,
+                                    role: meRes.data.role?.name || sessionUser.role || 'super_admin',
+                                };
+                                setUser(userData);
+                                localStorage.setItem(SESSION_KEY, JSON.stringify({ token: parsed.token, user: userData }));
+                            }
+                        })
+                        .catch(err => {
+                            console.warn('[AuthContext] Background sync notice:', err);
+                        });
                 }
             } catch (err) {
-                localStorage.removeItem(SESSION_KEY);
-                setUser(null);
-                setIsLoggedIn(false);
+                console.error('[AuthContext] Parse session error:', err);
+                setIsLoading(false);
             } finally {
                 setIsLoading(false);
             }
@@ -270,7 +275,10 @@ export function AuthProvider({ children }) {
     const updateProfile = (updates) => {
         const updatedUser = { ...user, ...updates };
         setUser(updatedUser);
-        localStorage.setItem(SESSION_KEY, JSON.stringify({ user: updatedUser }));
+        // Ambil token lama dari localStorage agar tidak hilang
+        const existing = localStorage.getItem(SESSION_KEY);
+        const token = existing ? (JSON.parse(existing).token || null) : null;
+        localStorage.setItem(SESSION_KEY, JSON.stringify({ user: updatedUser, token }));
     };
 
     return (

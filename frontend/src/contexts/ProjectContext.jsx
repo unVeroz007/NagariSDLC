@@ -9,13 +9,27 @@ const MODE = import.meta.env.VITE_API_MODE || 'mock';
 const STORAGE_PROJECTS_KEY = 'nagari_sdlc_projects';
 const STORAGE_DOCS_KEY = 'nagari_sdlc_documents';
 
+if (typeof window !== 'undefined') {
+    window.__nagariFileStore = window.__nagariFileStore || new Map();
+}
+
+export const saveFileToStore = (key, url) => {
+    if (typeof window !== 'undefined' && window.__nagariFileStore && key && url) {
+        window.__nagariFileStore.set(String(key), url);
+    }
+};
+
+export const getFileFromStore = (key) => {
+    if (typeof window !== 'undefined' && window.__nagariFileStore && key) {
+        return window.__nagariFileStore.get(String(key));
+    }
+    return null;
+};
+
 const defaultFields = {
     priority: 'Medium',
     submittedAt: new Date().toISOString(),
-    documents: [
-        { type: 'brd', name: 'BRD_Document.pdf', size: '2.4 MB' },
-        { type: 'fsd', name: 'FSD_Technical.docx', size: '1.1 MB' }
-    ],
+    documents: [],
     phases: [
         { name: 'Fase 1: Inisiasi & Persetujuan', completed: true, items: [] },
         { name: 'Fase 2: Desain & Arsitektur', completed: false, items: [] },
@@ -27,8 +41,30 @@ const defaultFields = {
     team: []
 };
 
-const normalizeProject = (p) => {
+const normalizeProject = (p, storedDocs = []) => {
     if (!p) return p;
+    const pId = p.id;
+    const pTitle = (p.title || p.name || '').toLowerCase();
+
+    const matchedDocs = (storedDocs || []).filter(d =>
+        (d.projectId && String(d.projectId) === String(pId)) ||
+        (d.project_name && d.project_name.toLowerCase() === pTitle) ||
+        (d.project && d.project.toLowerCase() === pTitle)
+    );
+
+    const existingDocs = Array.isArray(p.documents) ? p.documents : [];
+    const mergedDocs = [...existingDocs, ...matchedDocs];
+
+    const uniqueDocs = [];
+    const seen = new Set();
+    mergedDocs.forEach(d => {
+        const key = d.id || `${d.name || d.file_name}-${d.size}`;
+        if (!seen.has(key)) {
+            seen.add(key);
+            uniqueDocs.push(d);
+        }
+    });
+
     return {
         ...defaultFields,
         ...p,
@@ -37,8 +73,14 @@ const normalizeProject = (p) => {
         id: p.id,
         division: typeof p.division === 'object' ? (p.division?.name || 'Divisi TI') : (p.division || 'Divisi TI'),
         pm: typeof p.pm === 'object' && p.pm ? p.pm : { name: p.pmName || 'Belum Dialokasi', initial: 'BD' },
-        type: p.type || 'Non-RBB',
+        type: (() => {
+            const rawType = p.type || p.project_type;
+            if (rawType && String(rawType).toUpperCase().includes('NON')) return 'Non-RBB';
+            if (rawType && String(rawType).toUpperCase().includes('RBB')) return 'RBB';
+            return 'RBB'; // Default presisi RBB dari awal inisiasi divisi
+        })(),
         targetDate: p.target_date || p.targetDate || 'TBD',
+        documents: uniqueDocs,
     };
 };
 
@@ -47,11 +89,7 @@ const getMockProjects = () => {
     if (saved) {
         try { return JSON.parse(saved); } catch { localStorage.removeItem(STORAGE_PROJECTS_KEY); }
     }
-    return mockProjects.map(p => ({
-        ...defaultFields, ...p,
-        documents: p.documents || defaultFields.documents,
-        phases: p.phases || defaultFields.phases
-    }));
+    return [];
 };
 
 const getMockDocs = () => {
@@ -59,53 +97,91 @@ const getMockDocs = () => {
     if (saved) {
         try { return JSON.parse(saved); } catch { localStorage.removeItem(STORAGE_DOCS_KEY); }
     }
-    return mockDocuments || [];
+    return [];
 };
 
 export function ProjectProvider({ children }) {
-    const [projects, setProjects] = useState([]);
-    const [documents, setDocuments] = useState([]);
+    const [projects, setProjects] = useState(() => {
+        const cached = getMockProjects();
+        const docs = getMockDocs();
+        return cached.map(p => normalizeProject(p, docs));
+    });
+    const [documents, setDocuments] = useState(() => getMockDocs());
     const [users, setUsers] = useState([]);
-    const [isLoading, setIsLoading] = useState(true);
+    const [isLoading, setIsLoading] = useState(false);
     const [lastUpdated, setLastUpdated] = useState(null);
     const [meta, setMeta] = useState(null);
 
     // ─────────────────────────────────────────────────────────
-    // DATA LOADING (Support Silent Realtime Refresh)
+    // DATA LOADING (Silent Realtime Background Refresh — Instant UI)
     // ─────────────────────────────────────────────────────────
+    // Data loading dengan penggabungan cerdas (API + Cache Lokal)
     const loadProjects = useCallback(async (showSpinner = false) => {
-        if (showSpinner) setIsLoading(true);
+        if (showSpinner && projects.length === 0) setIsLoading(true);
         try {
+            const storedDocs = getMockDocs();
+            const localProjects = getMockProjects();
+            setDocuments(storedDocs);
+
             if (MODE === 'api') {
-                const res = await projectService.getAll();
-                const list = res?.data ?? [];
-                setProjects(list.map(normalizeProject));
-                setMeta(res?.meta ?? null);
+                try {
+                    const res = await projectService.getAll();
+                    const apiList = res?.data ?? [];
+                    
+                    // Gabungkan API dan Local Cache tanpa menimpa pembaruan tipe RBB/Non-RBB lokal
+                    const map = new Map();
+                    localProjects.forEach(p => {
+                        const norm = normalizeProject(p, storedDocs);
+                        const key = norm.req_id || norm.reqId || norm.id || norm.title || norm.name;
+                        if (key) map.set(String(key), norm);
+                    });
+
+                    apiList.forEach(p => {
+                        const norm = normalizeProject(p, storedDocs);
+                        const key = norm.req_id || norm.reqId || norm.id || norm.title || norm.name;
+                        if (key) {
+                            const localMatch = map.get(String(key));
+                            if (localMatch) {
+                                map.set(String(key), normalizeProject({
+                                    ...norm,
+                                    ...localMatch,
+                                    type: localMatch.type && localMatch.type !== 'Belum Diklasifikasi' ? localMatch.type : norm.type,
+                                }, storedDocs));
+                            } else {
+                                map.set(String(key), norm);
+                            }
+                        }
+                    });
+
+                    const merged = Array.from(map.values());
+                    setProjects(merged);
+                    if (merged.length > 0) {
+                        localStorage.setItem(STORAGE_PROJECTS_KEY, JSON.stringify(merged));
+                    }
+                    setMeta(res?.meta ?? null);
+                } catch (apiErr) {
+                    console.warn('[ProjectContext] API load failed, using local cache:', apiErr);
+                    setProjects(localProjects.map(p => normalizeProject(p, storedDocs)));
+                }
             } else {
-                if (showSpinner) await new Promise(r => setTimeout(r, 200));
-                setProjects(getMockProjects().map(normalizeProject));
-                setDocuments(getMockDocs());
+                setProjects(localProjects.map(p => normalizeProject(p, storedDocs)));
             }
             setLastUpdated(new Date());
         } catch (err) {
-            console.error('[ProjectContext] Failed to load projects from API:', err);
-            if (MODE === 'api') {
-                setProjects([]);
-            } else {
-                setProjects(getMockProjects().map(normalizeProject));
-            }
+            console.error('[ProjectContext] Load projects error:', err);
         } finally {
-            if (showSpinner) setIsLoading(false);
+            setIsLoading(false);
         }
-    }, []);
+    }, [projects.length]);
 
-    // Initial load
+    // Initial load silently
     useEffect(() => {
-        loadProjects(true);
+        loadProjects(false);
     }, [loadProjects]);
 
+
     // ─────────────────────────────────────────────────────────
-    // MOCK helpers (localStorage sync — used in mock mode only)
+    // MOCK helpers (localStorage sync)
     // ─────────────────────────────────────────────────────────
     const saveProjects = (newProjects) => {
         setProjects(newProjects);
@@ -123,6 +199,18 @@ export function ProjectProvider({ children }) {
     // CRUD Proyek (Maju / Mundur Status Instant Update)
     // ─────────────────────────────────────────────────────────
     const addProject = async (projectData) => {
+        const uploadedDocs = (projectData.documents || []).map((doc, idx) => ({
+            id: doc.id || `DOC-UP-${Date.now()}-${idx}`,
+            name: doc.name || doc.file_name || 'Dokumen.pdf',
+            size: doc.size || doc.file_size || '1.5 MB',
+            type: doc.type || 'brd',
+            url: doc.url || doc.fileUrl || null,
+            project: projectData.name || projectData.title,
+            projectId: null,
+            uploadedBy: 'PIC Proyek',
+            date: new Date().toISOString(),
+        }));
+
         if (MODE === 'api') {
             const res = await projectService.create({
                 title: projectData.name || projectData.title,
@@ -130,29 +218,60 @@ export function ProjectProvider({ children }) {
                 division_id: projectData.division_id || 1,
                 target_date: projectData.targetDate || projectData.target_date || null,
             });
+            const created = res?.data;
+            if (created && uploadedDocs.length > 0) {
+                const docsWithProjectId = uploadedDocs.map(d => ({ ...d, projectId: created.id }));
+                const currentDocs = getMockDocs();
+                saveDocuments([...docsWithProjectId, ...currentDocs]);
+            }
             await loadProjects(false);
             return res;
+        } else {
+            const newProject = normalizeProject(projectData, uploadedDocs);
+            const updatedProjects = [newProject, ...projects];
+            saveProjects(updatedProjects);
+            if (uploadedDocs.length > 0) {
+                const currentDocs = getMockDocs();
+                saveDocuments([...uploadedDocs, ...currentDocs]);
+            }
         }
-        const newProject = normalizeProject(projectData);
-        const updated = [newProject, ...projects];
-        saveProjects(updated);
     };
 
+
+
     const updateProject = async (id, updates) => {
-        if (MODE === 'api') {
-            let res;
-            if (updates.status) {
-                res = await projectService.updateStatus(id, updates.status, updates.notes || updates.rejection_reason || '');
-            } else {
-                res = await projectService.update(id, updates);
-            }
-            const updated = normalizeProject(res?.data ?? updates);
-            setProjects(prev => prev.map(p => (p.id === id ? { ...p, ...updated } : p)));
-            await loadProjects(false);
-            return res;
+        // Cache FSD document URL in file store if present
+        if (updates.fsdDocument && updates.fsdDocument.url) {
+            saveFileToStore(updates.fsdDocument.name, updates.fsdDocument.url);
+            saveFileToStore(updates.fsdDocument.id, updates.fsdDocument.url);
+            if (id) saveFileToStore(`fsd_${id}`, updates.fsdDocument.url);
         }
-        const updated = projects.map(p => p.id === id ? { ...p, ...updates } : p);
-        saveProjects(updated);
+        if (updates.analystResult && updates.analystResult.fsdUrl) {
+            saveFileToStore(updates.analystResult.fsdFile, updates.analystResult.fsdUrl);
+        }
+        if (Array.isArray(updates.documents)) {
+            updates.documents.forEach(doc => {
+                if (doc.url && doc.name) saveFileToStore(doc.name, doc.url);
+            });
+        }
+
+        // Simpan pembaruan lokal terlebih dahulu (termasuk penentuan tipe RBB/Non-RBB)
+        const updatedList = projects.map(p => (String(p.id) === String(id) || p.reqId === id ? { ...p, ...updates } : p));
+        setProjects(updatedList);
+        saveProjects(updatedList);
+
+        if (MODE === 'api') {
+            try {
+                if (updates.status) {
+                    await projectService.updateStatus(id, updates.status, updates.notes || updates.rejection_reason || '');
+                } else {
+                    await projectService.update(id, updates);
+                }
+            } catch (e) {
+                console.warn('[ProjectContext] API update fallback to local:', e);
+            }
+            await loadProjects(false);
+        }
     };
 
     const updateProjectStatus = async (id, newStatus, notes = '') => {

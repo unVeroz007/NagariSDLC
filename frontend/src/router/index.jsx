@@ -1,6 +1,7 @@
 import { createBrowserRouter, Navigate } from 'react-router-dom';
 import MainLayout from '../layouts/MainLayout';
 import ProtectedRoute from '../components/ProtectedRoute';
+import PublicRoute from '../components/PublicRoute';
 
 // Auth pages (public)
 import Login from '../pages/Login';
@@ -25,6 +26,7 @@ import Documents from '../pages/projects/Documents';
 import WorkspaceLead from '../pages/workspace/WorkspaceLead';
 import WorkspaceAnalyst from '../pages/workspace/WorkspaceAnalyst';
 import WorkspaceDevLead from '../pages/workspace/WorkspaceDevLead';
+import WorkspaceDevAnalyst from '../pages/workspace/WorkspaceDevAnalyst';
 import WorkspaceQA from '../pages/workspace/WorkspaceQA';
 import WorkspaceCyber from '../pages/workspace/WorkspaceCyber';
 
@@ -69,7 +71,7 @@ const ADMIN_ROLES = ['super_admin'];
 
 const router = createBrowserRouter([
     // ─────────────────────────────────────────────
-    // Halaman publik (tidak perlu login)
+    // Halaman publik (hanya bisa dibuka jika BELUM login)
     // ─────────────────────────────────────────────
     {
         path: '/',
@@ -77,19 +79,35 @@ const router = createBrowserRouter([
     },
     {
         path: '/login',
-        element: <Login />,
+        element: (
+            <PublicRoute>
+                <Login />
+            </PublicRoute>
+        ),
     },
     {
         path: '/register',
-        element: <Register />,
+        element: (
+            <PublicRoute>
+                <Register />
+            </PublicRoute>
+        ),
     },
     {
         path: '/forgot-password',
-        element: <ForgotPassword />,
+        element: (
+            <PublicRoute>
+                <ForgotPassword />
+            </PublicRoute>
+        ),
     },
     {
         path: '/reset-password',
-        element: <ResetPassword />,
+        element: (
+            <PublicRoute>
+                <ResetPassword />
+            </PublicRoute>
+        ),
     },
     {
         path: '/unauthorized',
@@ -166,6 +184,14 @@ const router = createBrowserRouter([
                 element: (
                     <ProtectedRoute allowedRoles={DEV_LEAD_ROLES}>
                         <WorkspaceDevLead />
+                    </ProtectedRoute>
+                ),
+            },
+            {
+                path: '/workspace/dev-analyst',
+                element: (
+                    <ProtectedRoute allowedRoles={ANALYST_ROLES}>
+                        <WorkspaceDevAnalyst />
                     </ProtectedRoute>
                 ),
             },
