@@ -215,29 +215,29 @@ export default function WorkspaceDevAnalyst() {
                 </div>
             </div>
 
-            {/* Content Body */}
-            {reviewQueue.length === 0 ? (
-                <div className="bg-white p-12 rounded-2xl border border-gray-200 shadow-sm text-center">
-                    <CheckCircle2 size={56} className="text-emerald-500 mx-auto mb-4 animate-bounce" />
-                    <h3 className="text-xl font-black text-gray-800">Tidak Ada Proyek Menunggu Kajian Teknis</h3>
-                    <p className="text-sm text-gray-500 mt-2 max-w-md mx-auto">
-                        Semua proyek yang ditugaskan oleh Ketua Grup Pengembangan telah selesai dikaji dan diteruskan ke tahap penunjukan Project Manager (PM).
-                    </p>
-                </div>
-            ) : (
-                <div className="flex flex-col lg:flex-row gap-6 h-[calc(100vh-220px)] min-h-[600px]">
-                    {/* LEFT PANEL: Antrean Tugas Analyst Dev */}
-                    <div className="w-full lg:w-1/3 flex flex-col bg-white border border-gray-200 rounded-2xl shadow-sm overflow-hidden">
-                        <div className="p-4 border-b border-gray-100 flex justify-between items-center shrink-0 bg-slate-50/60">
-                            <div>
-                                <h2 className="text-base font-bold text-gray-800">Tugas Kajian Teknis</h2>
-                                <p className="text-xs text-gray-500 mt-0.5">{reviewQueue.length} proyek menunggu analisa</p>
-                            </div>
-                            <Filter size={16} className="text-gray-400" />
+            {/* Content Body (Standard 2-Column Split Layout) */}
+            <div className="flex flex-col lg:flex-row gap-6 h-[calc(100vh-220px)] min-h-[600px]">
+                {/* LEFT PANEL: Antrean Tugas Analyst Dev */}
+                <div className="w-full lg:w-1/3 flex flex-col bg-white border border-gray-200 rounded-2xl shadow-sm overflow-hidden">
+                    <div className="p-4 border-b border-gray-100 flex justify-between items-center shrink-0 bg-slate-50/60">
+                        <div>
+                            <h2 className="text-base font-bold text-gray-800">Tugas Kajian Teknis</h2>
+                            <p className="text-xs text-gray-500 mt-0.5">{reviewQueue.length} proyek menunggu analisa</p>
                         </div>
+                        <Filter size={16} className="text-gray-400" />
+                    </div>
 
-                        <div className="flex-1 overflow-y-auto p-3 space-y-3 bg-gray-50/40">
-                            {reviewQueue.map((project) => (
+                    <div className="flex-1 overflow-y-auto p-3 space-y-3 bg-gray-50/40 flex flex-col justify-start">
+                        {reviewQueue.length === 0 ? (
+                            <div className="p-8 text-center text-gray-400 my-auto">
+                                <CheckCircle2 size={36} className="mx-auto mb-2 opacity-50 text-emerald-600" />
+                                <h4 className="text-xs font-bold text-gray-700">Tidak Ada Proyek Menunggu Kajian</h4>
+                                <p className="text-[11px] text-gray-500 mt-1 leading-relaxed">
+                                    Belum ada proyek yang ditugaskan oleh Ketua Grup Pengembangan.
+                                </p>
+                            </div>
+                        ) : (
+                            reviewQueue.map((project) => (
                                 <div
                                     key={project.id}
                                     onClick={() => setSelectedProject(project)}
@@ -271,13 +271,24 @@ export default function WorkspaceDevAnalyst() {
                                         </span>
                                     </div>
                                 </div>
-                            ))}
+                            ))
+                        )}
+                    </div>
+                </div>
+
+                {/* RIGHT PANEL: Form & Detail Kajian Teknis */}
+                {!selectedProject ? (
+                    <div className="w-full lg:w-2/3 flex flex-col bg-white border border-gray-200 rounded-2xl shadow-sm overflow-hidden items-center justify-center p-12 text-center text-gray-400">
+                        <div>
+                            <FileText size={48} className="mx-auto mb-3 opacity-40 text-blue-600" />
+                            <h3 className="font-bold text-gray-700 text-base">Pilih Proyek dari Antrean</h3>
+                            <p className="text-xs text-gray-500 mt-1 max-w-sm">
+                                Pilih proyek pada antrean sebelah kiri untuk meninjau dokumen kelengkapan dan mengisi kajian arsitektur teknis IT.
+                            </p>
                         </div>
                     </div>
-
-                    {/* RIGHT PANEL: Form & Detail Kajian Teknis */}
-                    {selectedProject && (
-                        <div className="w-full lg:w-2/3 flex flex-col bg-white border border-gray-200 rounded-2xl shadow-sm overflow-hidden">
+                ) : (
+                    <div className="w-full lg:w-2/3 flex flex-col bg-white border border-gray-200 rounded-2xl shadow-sm overflow-hidden">
                             {/* Detail Header */}
                             <div className="p-5 border-b border-gray-100 shrink-0 bg-slate-50/50 flex items-start justify-between">
                                 <div>
@@ -466,7 +477,6 @@ export default function WorkspaceDevAnalyst() {
                         </div>
                     )}
                 </div>
-            )}
 
             {/* MODAL VIEWER DOKUMEN (Analyst Dev Viewer) */}
             {previewDoc && (
