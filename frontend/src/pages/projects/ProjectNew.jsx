@@ -237,6 +237,10 @@ export default function ProjectNew() {
             showError('Nama proyek wajib diisi!');
             return;
         }
+        if (!formData.targetDate) {
+            showError('Target tanggal selesai wajib diisi!');
+            return;
+        }
 
         setIsSubmitting(true);
 
@@ -502,15 +506,15 @@ export default function ProjectNew() {
                                 </div>
                             </div>
                             <div className="space-y-2">
-                                <div className="flex justify-between items-center">
-                                    <label className="text-sm font-semibold text-gray-600">Target Selesai (Estimasi)</label>
-                                    <span className="text-[11px] text-gray-400 font-normal">Opsional (Kosongkan jika TBD)</span>
-                                </div>
+                                <label className="text-sm font-semibold text-gray-600">
+                                    Target Selesai (Estimasi) <span className="text-red-500">*</span>
+                                </label>
                                 <input
                                     name="targetDate"
                                     value={formData.targetDate}
                                     onChange={handleChange}
                                     min={new Date().toISOString().split('T')[0]}
+                                    required
                                     className="w-full px-4 py-3 bg-white border border-gray-200 rounded-lg focus:ring-2 focus:ring-[#1A56DB] focus:border-[#1A56DB] transition-all text-sm cursor-pointer"
                                     type="date"
                                 />
