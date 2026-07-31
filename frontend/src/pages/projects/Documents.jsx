@@ -24,6 +24,8 @@ import {
     ZoomIn,
     ZoomOut,
     ShieldCheck,
+    Verified,
+    FileCheck,
 } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { useProjects } from '../../contexts/ProjectContext';
@@ -201,6 +203,65 @@ export default function Documents() {
             { label: 'File PDF', value: pdf.toLocaleString(), icon: File, sub: 'BRD, FSD, Kontrak' },
             { label: 'File Word', value: word.toLocaleString(), icon: FileText, sub: 'Draft, Notulensi, UAT' },
             { label: 'File Excel', value: excel.toLocaleString(), icon: FileSpreadsheet, sub: 'Matrix, Timeline, Data' },
+        ];
+    }, [mappedDocs]);
+
+    // Interactive Folder Categories (Unified with Filter Navigation)
+    const folderCategories = useMemo(() => {
+        const total = mappedDocs.length;
+        const kebutuhan = mappedDocs.filter(d => d.category === 'Kebutuhan').length;
+        const teknis = mappedDocs.filter(d => d.category === 'Teknis' || d.category === 'Testing').length;
+        const legal = mappedDocs.filter(d => d.category === 'Legal').length;
+
+        return [
+            {
+                id: 'cat_all',
+                tabName: 'Semua File',
+                title: 'Semua Dokumen',
+                subtitle: 'Seluruh berkas SDLC',
+                count: total,
+                icon: FolderOpen,
+                activeClass: 'bg-gradient-to-r from-[#003a73] to-[#1A56DB] text-white border-[#003a73] shadow-md',
+                defaultClass: 'bg-white border-gray-200 text-gray-800 hover:border-blue-300 hover:bg-blue-50/40',
+                badgeClass: 'bg-white/20 text-white',
+                badgeDefaultClass: 'bg-blue-50 text-[#1A56DB]',
+            },
+            {
+                id: 'cat_brd',
+                tabName: 'Kebutuhan (BRD/FSD)',
+                title: 'BRD & FSD Kebutuhan',
+                subtitle: 'Spesifikasi sistem & bisnis',
+                count: kebutuhan,
+                icon: FileText,
+                activeClass: 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white border-blue-600 shadow-md',
+                defaultClass: 'bg-white border-gray-200 text-gray-800 hover:border-blue-300 hover:bg-blue-50/40',
+                badgeClass: 'bg-white/20 text-white',
+                badgeDefaultClass: 'bg-blue-50 text-[#1A56DB]',
+            },
+            {
+                id: 'cat_qa',
+                tabName: 'Teknis & UAT',
+                title: 'Laporan Test QA & Siber',
+                subtitle: 'Hasil pengujian & keamanan',
+                count: teknis,
+                icon: ShieldCheck,
+                activeClass: 'bg-gradient-to-r from-purple-600 to-indigo-700 text-white border-purple-600 shadow-md',
+                defaultClass: 'bg-white border-gray-200 text-gray-800 hover:border-purple-300 hover:bg-purple-50/40',
+                badgeClass: 'bg-white/20 text-white',
+                badgeDefaultClass: 'bg-purple-50 text-purple-700',
+            },
+            {
+                id: 'cat_legal',
+                tabName: 'Kontrak/Legal',
+                title: 'Berita Acara UAT & Legal',
+                subtitle: 'Kontrak, Notulensi & Legalitas',
+                count: legal,
+                icon: Verified,
+                activeClass: 'bg-gradient-to-r from-emerald-600 to-teal-700 text-white border-emerald-600 shadow-md',
+                defaultClass: 'bg-white border-gray-200 text-gray-800 hover:border-emerald-300 hover:bg-emerald-50/40',
+                badgeClass: 'bg-white/20 text-white',
+                badgeDefaultClass: 'bg-emerald-50 text-emerald-700',
+            },
         ];
     }, [mappedDocs]);
 
@@ -407,72 +468,56 @@ export default function Documents() {
                     })}
                 </div>
 
-                {/* Folder Grid Section */}
+                {/* Unified Interactive Folder Categories */}
                 <div className="bg-white rounded-xl p-5 shadow-sm border border-gray-100">
                     <div className="flex items-center justify-between mb-4">
-                        <h3 className="text-sm font-bold text-gray-800 flex items-center gap-2">
-                            <Folder size={18} className="text-[#1A56DB]" /> Folder Dokumen Kategori
-                        </h3>
+                        <div>
+                            <h3 className="text-sm font-bold text-gray-800 flex items-center gap-2">
+                                <Folder size={18} className="text-[#1A56DB]" /> Folder &amp; Kategori Dokumen
+                            </h3>
+                            <p className="text-xs text-gray-400 mt-0.5">Pilih folder kategori di bawah untuk memfilter berkas dokumen SDLC</p>
+                        </div>
                         <button onClick={() => setIsFolderModalOpen(true)} className="text-xs font-bold text-[#1A56DB] hover:underline flex items-center gap-1 cursor-pointer">
                             <Plus size={14} /> Tambah Folder
                         </button>
                     </div>
-                    {customFolders.length > 0 ? (
-                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                            {customFolders.map(folder => (
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3.5">
+                        {folderCategories.map((cat) => {
+                            const Icon = cat.icon;
+                            const isActive = activeTab === cat.tabName;
+                            return (
                                 <div
-                                    key={folder.id}
-                                    onClick={() => {
-                                        if (folder.name.includes('BRD')) setActiveTab('Kebutuhan (BRD/FSD)');
-                                        else if (folder.name.includes('Test')) setActiveTab('Teknis & UAT');
-                                        else if (folder.name.includes('UAT') || folder.name.includes('Legal')) setActiveTab('Kontrak/Legal');
-                                    }}
-                                    className={`p-4 rounded-xl border ${folder.color} flex items-center justify-between group hover:shadow-md transition-all cursor-pointer relative`}
+                                    key={cat.id}
+                                    onClick={() => setActiveTab(cat.tabName)}
+                                    className={`p-4 rounded-xl border transition-all cursor-pointer relative flex flex-col justify-between ${
+                                        isActive ? cat.activeClass : cat.defaultClass
+                                    }`}
                                 >
-                                    <div className="flex items-center gap-3 min-w-0 flex-1">
-                                        <Folder size={24} className="shrink-0" />
-                                        <div className="min-w-0 flex-1">
-                                            <p className="text-sm font-bold truncate">{folder.name}</p>
-                                            <p className="text-xs opacity-75">Klik untuk lihat dokumen</p>
+                                    <div className="flex items-start justify-between gap-2 mb-3">
+                                        <div className={`w-10 h-10 rounded-lg flex items-center justify-center shrink-0 ${
+                                            isActive ? 'bg-white/20 text-white' : 'bg-blue-50 text-[#1A56DB]'
+                                        }`}>
+                                            <Icon size={22} />
                                         </div>
+                                        <span className={`text-xs font-extrabold px-2.5 py-1 rounded-full ${
+                                            isActive ? cat.badgeClass : cat.badgeDefaultClass
+                                        }`}>
+                                            {cat.count} File
+                                        </span>
                                     </div>
-                                    <div className="flex items-center gap-1 shrink-0">
-                                        <button
-                                            onClick={(e) => handleDeleteFolder(folder.id, folder.name, e)}
-                                            title="Hapus Folder"
-                                            className="p-1 text-gray-400 hover:text-red-600 hover:bg-red-100/60 rounded-lg transition-colors"
-                                        >
-                                            <Trash2 size={16} />
-                                        </button>
-                                        <ChevronRight size={16} className="text-gray-400" />
+                                    <div>
+                                        <h4 className="text-sm font-bold truncate">{cat.title}</h4>
+                                        <p className={`text-xs mt-0.5 ${isActive ? 'text-white/80' : 'text-gray-400'}`}>{cat.subtitle}</p>
                                     </div>
                                 </div>
-                            ))}
-                        </div>
-                    ) : (
-                        <div className="text-center py-6 text-gray-400 text-xs italic bg-gray-50/50 rounded-xl border border-dashed border-gray-200">
-                            Belum ada folder kustom yang dibuat. Klik "Tambah Folder" untuk membuat folder baru.
-                        </div>
-                    )}
+                            );
+                        })}
+                    </div>
                 </div>
 
                 {/* Workspace Area */}
                 <div className="bg-white rounded-xl shadow-sm border border-gray-100 flex flex-col">
-                    {/* Tabs */}
-                    <div className="flex items-center px-4 border-b border-gray-100 overflow-x-auto">
-                        {tabs.map((tab) => (
-                            <button
-                                key={tab}
-                                onClick={() => setActiveTab(tab)}
-                                className={`px-6 py-4 text-sm font-semibold border-b-2 transition-colors whitespace-nowrap ${activeTab === tab
-                                    ? 'text-[#1A56DB] border-[#1A56DB]'
-                                    : 'text-gray-500 border-transparent hover:text-gray-700'
-                                    }`}
-                            >
-                                {tab}
-                            </button>
-                        ))}
-                    </div>
 
                     {/* Filters & Search */}
                     <div className="p-4 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 bg-gray-50/50 border-b border-gray-100">
