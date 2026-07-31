@@ -1,7 +1,7 @@
-// src/contexts/ProjectContext.jsx
 import { createContext, useState, useContext, useEffect, useCallback } from 'react';
 import { projectService } from '../services/api';
 import { mockProjects, mockDocuments } from '../data/mockData';
+import { useAuth } from './AuthContext';
 
 const ProjectContext = createContext();
 
@@ -87,9 +87,12 @@ const normalizeProject = (p, storedDocs = []) => {
 const getMockProjects = () => {
     const saved = localStorage.getItem(STORAGE_PROJECTS_KEY);
     if (saved) {
-        try { return JSON.parse(saved); } catch { localStorage.removeItem(STORAGE_PROJECTS_KEY); }
+        try { 
+            const parsed = JSON.parse(saved); 
+            if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+        } catch { localStorage.removeItem(STORAGE_PROJECTS_KEY); }
     }
-    return [];
+    return mockProjects || [];
 };
 
 const getMockDocs = () => {
@@ -104,6 +107,7 @@ const getMockDocs = () => {
 };
 
 export function ProjectProvider({ children }) {
+    const { isLoggedIn } = useAuth();
     const [projects, setProjects] = useState(() => {
         // Pada mode API, mulai dari array kosong agar tidak tampil data lama dari localStorage
         // Data nyata akan diambil dari server saat loadProjects() dipanggil
@@ -129,18 +133,33 @@ export function ProjectProvider({ children }) {
             setDocuments(storedDocs);
 
             if (MODE === 'api') {
+                // Pastikan session/token sudah ada sebelum panggil API
+                const session = localStorage.getItem('nagari_sdlc_session');
+                const token = session ? JSON.parse(session)?.token : null;
+                if (!token) {
+                    console.warn('[ProjectContext] API token missing, waiting for auth...');
+                    setIsLoading(false);
+                    return;
+                }
+
                 try {
                     const res = await projectService.getAll();
                     const apiList = res?.data ?? [];
                     const normalized = apiList.map(p => normalizeProject(p, storedDocs));
                     setProjects(normalized);
-                    // Simpan ke localStorage sebagai cache fallback saja
                     localStorage.setItem(STORAGE_PROJECTS_KEY, JSON.stringify(normalized));
                     setMeta(res?.meta ?? null);
                 } catch (apiErr) {
-                    console.warn('[ProjectContext] API load failed, using local cache:', apiErr);
-                    const localProjects = getMockProjects();
-                    setProjects(localProjects.map(p => normalizeProject(p, storedDocs)));
+                    console.warn('[ProjectContext] API load failed:', apiErr.message);
+                    // Jangan fallback ke cache kosong jika sudah ada data
+                    // Hanya pakai cache jika array proyek saat ini memang kosong
+                    setProjects(prev => {
+                        if (prev.length === 0) {
+                            const local = getMockProjects();
+                            return local.map(p => normalizeProject(p, storedDocs));
+                        }
+                        return prev;
+                    });
                 }
             } else {
                 const localProjects = getMockProjects();
@@ -157,8 +176,12 @@ export function ProjectProvider({ children }) {
 
     // Initial load silently
     useEffect(() => {
-        loadProjects(false);
-    }, [loadProjects]);
+        if (isLoggedIn) {
+            loadProjects(false);
+        } else if (MODE !== 'api') {
+            loadProjects(false);
+        }
+    }, [loadProjects, isLoggedIn]);
 
 
     // ─────────────────────────────────────────────────────────

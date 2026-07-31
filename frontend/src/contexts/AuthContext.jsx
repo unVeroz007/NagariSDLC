@@ -195,6 +195,16 @@ export function AuthProvider({ children }) {
         };
 
         initAuth();
+
+        const handleUnauthorized = () => {
+            console.warn('[AuthContext] 401 Unauthorized detected, logging out...');
+            setUser(null);
+            setIsLoggedIn(false);
+            localStorage.removeItem(SESSION_KEY);
+        };
+
+        window.addEventListener('auth:unauthorized', handleUnauthorized);
+        return () => window.removeEventListener('auth:unauthorized', handleUnauthorized);
     }, []);
 
     const registerUser = (userData) => {

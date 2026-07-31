@@ -41,7 +41,9 @@ function authHeaders() {
 async function handleResponse(res) {
     if (!res.ok) {
         if (res.status === 401) {
+            // Token tidak valid atau kedaluwarsa -> hapus sesi dan beritahu aplikasi untuk logout
             localStorage.removeItem('nagari_sdlc_session');
+            window.dispatchEvent(new Event('auth:unauthorized'));
         }
         const err = await res.json().catch(() => ({ message: 'Terjadi kesalahan server.' }));
         throw new Error(err.message || `HTTP ${res.status}`);
