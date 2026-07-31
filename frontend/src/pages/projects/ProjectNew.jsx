@@ -13,7 +13,6 @@ import {
     CheckCircle2,
     Trash2,
     Send,
-    Save,
     HelpCircle,
     ChevronRight,
     AlertCircle,
@@ -189,50 +188,7 @@ export default function ProjectNew() {
         e.preventDefault();
     };
 
-    // Handle Save as Draft
-    const handleSaveDraft = async (e) => {
-        e.preventDefault();
-        if (isSubmitting) return;
-        if (!formData.projectName.trim()) {
-            showError('Nama proyek wajib diisi untuk menyimpan draft!');
-            return;
-        }
 
-        setIsSubmitting(true);
-        try {
-            const draftProject = {
-                name: formData.projectName,
-                description: formData.description || 'Draft pengajuan proyek',
-                division: formData.division || 'Divisi TI',
-                priority: formData.priority,
-                targetDate: formData.targetDate || 'TBD',
-                status: 'DRAFT',
-                type: formData.type || 'RBB',
-                documents: uploadedFiles,
-            };
-
-            const res = await addProject(draftProject);
-
-            addNotification(
-                'Draft Proyek Tersimpan',
-                `Draft "${formData.projectName}" (${formData.type || 'RBB'}) berhasil disimpan.`,
-                'info',
-                '/projects'
-            );
-
-            setIsSubmitting(false);
-            setSubmittedProject({
-                ...draftProject,
-                id: res?.data?.id || `DRAFT-${Date.now()}`,
-                isDraft: true,
-            });
-        } catch (err) {
-            console.error('[ProjectNew] Draft error:', err);
-            setIsSubmitting(false);
-            const msg = err?.response?.data?.message || err?.message || 'Gagal menyimpan draft proyek.';
-            showError(msg);
-        }
-    };
 
     // Handle Submit Ajukan Proyek
     const handleSubmit = async (e) => {
@@ -648,14 +604,6 @@ export default function ProjectNew() {
                     {/* Footer Actions */}
                     <div className="flex flex-col sm:flex-row items-center justify-end gap-3 pt-3 pb-2 border-t border-gray-200/60 mt-2">
                         <button
-                            type="button"
-                            onClick={handleSaveDraft}
-                            className="w-full sm:w-auto px-6 py-2.5 bg-white border border-gray-300 text-gray-700 font-bold rounded-xl hover:bg-gray-50 transition-all text-sm active:scale-95 flex items-center justify-center gap-2 shadow-xs cursor-pointer"
-                        >
-                            <Save size={16} />
-                            Simpan sebagai Draft
-                        </button>
-                        <button
                             type="submit"
                             disabled={isSubmitting}
                             className="w-full sm:w-auto px-6 py-2.5 bg-[#003a73] text-white font-bold rounded-xl hover:bg-[#002a5a] transition-all text-sm flex items-center justify-center gap-2 shadow-md shadow-blue-900/20 active:scale-95 disabled:opacity-70 disabled:cursor-not-allowed cursor-pointer"
@@ -715,12 +663,10 @@ export default function ProjectNew() {
                         </div>
 
                         <h3 className="text-2xl font-black text-gray-800 mb-2">
-                            {submittedProject.isDraft ? 'Draft Berhasil Disimpan!' : 'Proyek Berhasil Diajukan!'}
+                            Proyek Berhasil Diajukan!
                         </h3>
                         <p className="text-sm text-gray-500 mb-6 leading-relaxed">
-                            {submittedProject.isDraft
-                                ? 'Draft proyek Anda telah tersimpan. Anda dapat melanjutkannya kapan saja.'
-                                : 'Pengajuan proyek Anda telah tercatat dan masuk ke antrean review Lead Group.'}
+                            Pengajuan proyek Anda telah tercatat dan masuk ke antrean review Lead Group.
                         </p>
 
                         {/* Summary Card */}
@@ -736,7 +682,7 @@ export default function ProjectNew() {
                             <div className="flex justify-between items-center py-1">
                                 <span className="text-gray-400 font-semibold">STATUS</span>
                                 <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-emerald-100 text-emerald-800">
-                                    {submittedProject.isDraft ? 'DRAFT' : 'PENDING (Menunggu Review)'}
+                                    PENDING (Menunggu Review)
                                 </span>
                             </div>
                             {submittedProject.documents && submittedProject.documents.length > 0 && (
