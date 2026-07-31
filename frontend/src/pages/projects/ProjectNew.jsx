@@ -17,6 +17,7 @@ import {
     HelpCircle,
     ChevronRight,
     AlertCircle,
+    X,
 } from 'lucide-react';
 import { mockProjects, dispositionQueue } from '../../data/mockData';
 
@@ -78,6 +79,20 @@ export default function ProjectNew() {
     const showError = (msg) => {
         setErrorMessage(msg);
         setTimeout(() => setErrorMessage(''), 4000);
+    };
+
+    const handleCloseModal = () => {
+        setSubmittedProject(null);
+        setFormData({
+            projectName: '',
+            division: user?.department || 'Divisi Pengembangan TI',
+            priority: 'Medium',
+            type: 'RBB',
+            targetDate: '',
+            description: '',
+        });
+        setUploadedFiles([]);
+        window.scrollTo({ top: 0, behavior: 'smooth' });
     };
 
     // Handle input changes
@@ -636,8 +651,23 @@ export default function ProjectNew() {
 
             {/* Modal Sukses Enterprise */}
             {submittedProject && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/70 backdrop-blur-md animate-fade-in">
-                    <div className="bg-white rounded-3xl max-w-md w-full p-8 shadow-2xl border border-gray-100 transform transition-all animate-scale-up text-center relative overflow-hidden">
+                <div
+                    onClick={handleCloseModal}
+                    className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/70 backdrop-blur-md animate-fade-in"
+                >
+                    <div
+                        onClick={(e) => e.stopPropagation()}
+                        className="bg-white rounded-3xl max-w-md w-full p-8 shadow-2xl border border-gray-100 transform transition-all animate-scale-up text-center relative overflow-hidden"
+                    >
+                        {/* Close X Button */}
+                        <button
+                            onClick={handleCloseModal}
+                            className="absolute top-4 right-4 p-2 text-gray-400 hover:text-gray-700 hover:bg-gray-100 rounded-full transition-colors z-20 cursor-pointer"
+                            title="Tutup Modal &amp; Kembali ke Form"
+                        >
+                            <X size={20} />
+                        </button>
+
                         {/* Light ambient glow */}
                         <div className="absolute -top-24 -right-24 w-48 h-48 bg-emerald-500/10 rounded-full blur-3xl pointer-events-none" />
                         <div className="absolute -bottom-24 -left-24 w-48 h-48 bg-blue-500/10 rounded-full blur-3xl pointer-events-none" />
@@ -702,6 +732,13 @@ export default function ProjectNew() {
                                 className="w-full py-2.5 px-5 bg-white text-gray-600 font-bold rounded-xl border border-gray-200 hover:bg-gray-50 transition-all text-sm cursor-pointer"
                             >
                                 Lihat Daftar Semua Proyek
+                            </button>
+                            <button
+                                onClick={handleCloseModal}
+                                className="w-full py-2.5 px-5 bg-gray-100 text-gray-700 font-bold rounded-xl hover:bg-gray-200 transition-all text-sm cursor-pointer flex items-center justify-center gap-1.5"
+                            >
+                                <X size={16} />
+                                <span>Tutup &amp; Buat Pengajuan Baru</span>
                             </button>
                         </div>
                     </div>
