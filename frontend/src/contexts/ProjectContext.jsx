@@ -1,5 +1,5 @@
 import { createContext, useState, useContext, useEffect, useCallback } from 'react';
-import { projectService } from '../services/api';
+import { projectService, documentService } from '../services/api';
 import { mockProjects, mockDocuments } from '../data/mockData';
 import { useAuth } from './AuthContext';
 
@@ -65,6 +65,16 @@ const normalizeProject = (p, storedDocs = []) => {
         }
     });
 
+    const fsdDoc = p.fsdDocument || uniqueDocs.find(d => d.type === 'fsd' || d.doc_type === 'fsd' || (d.name && d.name.toLowerCase().includes('fsd'))) || null;
+    const fsdDevDoc = p.fsdDevDocument || uniqueDocs.find(d => d.type === 'fsd_dev' || d.doc_type === 'fsd_dev' || (d.name && d.name.toLowerCase().includes('arsitektur'))) || null;
+
+    const analystNotes = p.analystNotes || p.analyst_notes || p.analystResult?.notes || null;
+    const analystDecision = p.analystDecision || p.analyst_decision || p.analystResult?.decision || null;
+
+    const devAnalystNotes = p.devAnalystNotes || p.dev_analyst_notes || p.devAnalystResult?.notes || null;
+    const devAnalystDecision = p.devAnalystDecision || p.dev_analyst_decision || p.devAnalystResult?.decision || null;
+    const techStack = p.techStack || p.tech_stack || p.devAnalystResult?.techStack || null;
+
     return {
         ...defaultFields,
         ...p,
@@ -81,6 +91,15 @@ const normalizeProject = (p, storedDocs = []) => {
         })(),
         targetDate: p.target_date || p.targetDate || 'TBD',
         documents: uniqueDocs,
+        fsdDocument: fsdDoc,
+        fsdDevDocument: fsdDevDoc,
+        analystNotes: analystNotes,
+        analystDecision: analystDecision,
+        analystResult: p.analystResult || (analystNotes ? { decision: analystDecision, notes: analystNotes, fsdFile: fsdDoc?.name, fsdUrl: fsdDoc?.url } : null),
+        devAnalystNotes: devAnalystNotes,
+        devAnalystDecision: devAnalystDecision,
+        techStack: techStack,
+        devAnalystResult: p.devAnalystResult || (devAnalystNotes ? { decision: devAnalystDecision, techStack: techStack, notes: devAnalystNotes, estimation: p.devAnalystResult?.estimation || '30 Hari Kerja', analystName: p.devAnalystResult?.analystName || 'System Analyst Dev' } : null),
     };
 };
 
@@ -89,10 +108,10 @@ const getMockProjects = () => {
     if (saved) {
         try { 
             const parsed = JSON.parse(saved); 
-            if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+            if (Array.isArray(parsed)) return parsed;
         } catch { localStorage.removeItem(STORAGE_PROJECTS_KEY); }
     }
-    return mockProjects || [];
+    return MODE === 'api' ? [] : (mockProjects || []);
 };
 
 const getMockDocs = () => {
@@ -100,7 +119,7 @@ const getMockDocs = () => {
     if (saved) {
         try {
             const parsed = JSON.parse(saved);
-            if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+            if (Array.isArray(parsed)) return parsed;
         } catch { localStorage.removeItem(STORAGE_DOCS_KEY); }
     }
     return [];
@@ -109,9 +128,6 @@ const getMockDocs = () => {
 export function ProjectProvider({ children }) {
     const { isLoggedIn } = useAuth();
     const [projects, setProjects] = useState(() => {
-        // Pada mode API, mulai dari array kosong agar tidak tampil data lama dari localStorage
-        // Data nyata akan diambil dari server saat loadProjects() dipanggil
-        if (MODE === 'api') return [];
         const cached = getMockProjects();
         const docs = getMockDocs();
         return cached.map(p => normalizeProject(p, docs));
@@ -137,7 +153,6 @@ export function ProjectProvider({ children }) {
                 const session = localStorage.getItem('nagari_sdlc_session');
                 const token = session ? JSON.parse(session)?.token : null;
                 if (!token) {
-                    console.warn('[ProjectContext] API token missing, waiting for auth...');
                     setIsLoading(false);
                     return;
                 }
@@ -145,21 +160,29 @@ export function ProjectProvider({ children }) {
                 try {
                     const res = await projectService.getAll();
                     const apiList = res?.data ?? [];
-                    const normalized = apiList.map(p => normalizeProject(p, storedDocs));
-                    setProjects(normalized);
-                    localStorage.setItem(STORAGE_PROJECTS_KEY, JSON.stringify(normalized));
-                    setMeta(res?.meta ?? null);
+                    if (Array.isArray(apiList)) {
+                        const normalized = apiList.map(p => normalizeProject(p, storedDocs));
+                        setProjects(normalized);
+                        if (normalized.length === 0) {
+                            localStorage.removeItem(STORAGE_PROJECTS_KEY);
+                        } else {
+                            try {
+                                const sanitized = normalized.map(p => ({
+                                    ...p,
+                                    documents: Array.isArray(p.documents) ? p.documents.map(d => ({
+                                        ...d,
+                                        url: (d.url && String(d.url).startsWith('data:')) ? null : d.url
+                                    })) : []
+                                }));
+                                localStorage.setItem(STORAGE_PROJECTS_KEY, JSON.stringify(sanitized));
+                            } catch (e) {
+                                console.warn('[ProjectContext] Failed to save projects to localStorage:', e);
+                            }
+                        }
+                        setMeta(res?.meta ?? null);
+                    }
                 } catch (apiErr) {
                     console.warn('[ProjectContext] API load failed:', apiErr.message);
-                    // Jangan fallback ke cache kosong jika sudah ada data
-                    // Hanya pakai cache jika array proyek saat ini memang kosong
-                    setProjects(prev => {
-                        if (prev.length === 0) {
-                            const local = getMockProjects();
-                            return local.map(p => normalizeProject(p, storedDocs));
-                        }
-                        return prev;
-                    });
                 }
             } else {
                 const localProjects = getMockProjects();
@@ -176,9 +199,8 @@ export function ProjectProvider({ children }) {
 
     // Initial load silently
     useEffect(() => {
-        if (isLoggedIn) {
-            loadProjects(false);
-        } else if (MODE !== 'api') {
+        const session = localStorage.getItem('nagari_sdlc_session');
+        if (session || isLoggedIn || MODE !== 'api') {
             loadProjects(false);
         }
     }, [loadProjects, isLoggedIn]);
@@ -189,13 +211,32 @@ export function ProjectProvider({ children }) {
     // ─────────────────────────────────────────────────────────
     const saveProjects = (newProjects) => {
         setProjects(newProjects);
-        localStorage.setItem(STORAGE_PROJECTS_KEY, JSON.stringify(newProjects));
+        try {
+            const sanitized = newProjects.map(p => ({
+                ...p,
+                documents: Array.isArray(p.documents) ? p.documents.map(d => ({
+                    ...d,
+                    url: (d.url && String(d.url).startsWith('data:')) ? null : d.url
+                })) : []
+            }));
+            localStorage.setItem(STORAGE_PROJECTS_KEY, JSON.stringify(sanitized));
+        } catch (e) {
+            console.warn('[ProjectContext] saveProjects localStorage error:', e);
+        }
         setLastUpdated(new Date());
     };
 
     const saveDocuments = (newDocs) => {
         setDocuments(newDocs);
-        localStorage.setItem(STORAGE_DOCS_KEY, JSON.stringify(newDocs));
+        try {
+            const sanitized = newDocs.map(d => ({
+                ...d,
+                url: (d.url && String(d.url).startsWith('data:')) ? null : d.url
+            }));
+            localStorage.setItem(STORAGE_DOCS_KEY, JSON.stringify(sanitized));
+        } catch (e) {
+            console.warn('[ProjectContext] saveDocuments localStorage error:', e);
+        }
         setLastUpdated(new Date());
     };
 
@@ -217,7 +258,12 @@ export function ProjectProvider({ children }) {
 
         if (MODE === 'api') {
             const rawTargetDate = projectData.targetDate || projectData.target_date;
-            const validTargetDate = (rawTargetDate && rawTargetDate !== 'TBD') ? rawTargetDate : null;
+            let validTargetDate = (rawTargetDate && rawTargetDate !== 'TBD') ? rawTargetDate : null;
+            if (!validTargetDate) {
+                const defaultDate = new Date();
+                defaultDate.setDate(defaultDate.getDate() + 30);
+                validTargetDate = defaultDate.toISOString().split('T')[0];
+            }
             const res = await projectService.create({
                 title: projectData.name || projectData.title,
                 description: projectData.description || '',
@@ -229,6 +275,20 @@ export function ProjectProvider({ children }) {
             });
             const created = res?.data;
             if (created) {
+                if (Array.isArray(projectData.documents) && projectData.documents.length > 0) {
+                    for (const doc of projectData.documents) {
+                        if (doc.rawFile) {
+                            try {
+                                await documentService.upload(doc.rawFile, {
+                                    project_id: created.id,
+                                    document_type: doc.type || doc.doc_type || 'brd'
+                                });
+                            } catch (upErr) {
+                                console.warn('[ProjectContext] DB Document Upload notice:', upErr.message);
+                            }
+                        }
+                    }
+                }
                 const normCreated = normalizeProject(created, uploadedDocs);
                 setProjects(prev => [normCreated, ...prev]);
                 if (uploadedDocs.length > 0) {
@@ -269,22 +329,51 @@ export function ProjectProvider({ children }) {
             });
         }
 
-        // Simpan pembaruan lokal terlebih dahulu (termasuk penentuan tipe RBB/Non-RBB)
-        const updatedList = projects.map(p => (String(p.id) === String(id) || p.reqId === id ? { ...p, ...updates } : p));
-        setProjects(updatedList);
-        saveProjects(updatedList);
+        let updatedList = [];
+        setProjects(prev => {
+            updatedList = prev.map(p => (String(p.id) === String(id) || p.reqId === id ? { ...p, ...updates } : p));
+            saveProjects(updatedList);
+            return updatedList;
+        });
 
         if (MODE === 'api') {
             try {
                 if (updates.status) {
-                    await projectService.updateStatus(id, updates.status, updates.notes || updates.rejection_reason || '');
+                    await projectService.updateStatus(id, updates.status, updates.notes || updates.analystNotes || updates.rejection_reason || '');
                 } else {
                     await projectService.update(id, updates);
                 }
             } catch (e) {
                 console.warn('[ProjectContext] API update fallback to local:', e);
             }
-            await loadProjects(false);
+
+            try {
+                const res = await projectService.getAll();
+                const apiList = res?.data ?? [];
+                if (Array.isArray(apiList)) {
+                    const storedDocs = getMockDocs();
+                    const merged = apiList.map(apiP => {
+                        const localMatch = updatedList.find(lp => String(lp.id) === String(apiP.id));
+                        const norm = normalizeProject(apiP, storedDocs);
+                        return {
+                            ...norm,
+                            analystNotes: localMatch?.analystNotes || norm.analystNotes || null,
+                            analystDecision: localMatch?.analystDecision || norm.analystDecision || null,
+                            analystResult: localMatch?.analystResult || norm.analystResult || null,
+                            fsdDocument: localMatch?.fsdDocument || norm.fsdDocument || null,
+                            devAnalystNotes: localMatch?.devAnalystNotes || norm.devAnalystNotes || null,
+                            devAnalystDecision: localMatch?.devAnalystDecision || norm.devAnalystDecision || null,
+                            devAnalystResult: localMatch?.devAnalystResult || norm.devAnalystResult || null,
+                            techStack: localMatch?.techStack || norm.techStack || null,
+                            fsdDevDocument: localMatch?.fsdDevDocument || norm.fsdDevDocument || null,
+                        };
+                    });
+                    setProjects(merged);
+                    saveProjects(merged);
+                }
+            } catch (loadErr) {
+                console.warn('[ProjectContext] Reload after update error:', loadErr.message);
+            }
         }
     };
 

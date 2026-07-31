@@ -137,20 +137,111 @@ export default function Documents() {
         return rawUrl;
     }, [previewDoc, isPdfDoc, isImageDoc]);
 
-    // Map context documents + documents attached to projects
+    // Map context documents + documents attached to projects across all SDLC phases
     const allDocs = useMemo(() => {
-        const projectDocs = (projects || []).flatMap(p =>
-            (p.documents || []).map((doc, idx) => ({
-                id: doc.id || `DOC-PRJ-${p.id}-${idx}`,
-                name: doc.name || doc.file_name || 'Dokumen.pdf',
-                size: doc.size || doc.file_size || '1.5 MB',
-                type: doc.type || 'brd',
-                url: doc.url || doc.fileUrl || doc.dataUrl || null,
-                project: p.name || p.title,
-                uploadedBy: p.creator?.name || user?.name || 'PIC Proyek',
-                date: doc.uploadedAt || p.submittedAt || 'Terbaru',
-            }))
-        );
+        const projectDocs = (projects || []).flatMap(p => {
+            const list = [];
+            const pName = p.name || p.title || 'Proyek SDLC';
+
+            // 1. Documents inside p.documents array
+            if (Array.isArray(p.documents)) {
+                p.documents.forEach((doc, idx) => {
+                    list.push({
+                        id: doc.id || `DOC-PRJ-${p.id}-${idx}`,
+                        name: doc.name || doc.file_name || 'Dokumen.pdf',
+                        size: doc.size || doc.file_size || '1.5 MB',
+                        type: doc.type || doc.doc_type || 'brd',
+                        url: doc.url || doc.fileUrl || doc.dataUrl || null,
+                        project: pName,
+                        uploadedBy: doc.uploadedBy || doc.uploaded_by_name || p.creator?.name || user?.name || 'PIC Proyek',
+                        date: doc.uploadedAt || doc.created_at || p.submittedAt || 'Terbaru',
+                    });
+                });
+            }
+
+            // 2. FSD Document from Phase 1 Planning Analyst
+            if (p.fsdDocument && (p.fsdDocument.name || p.fsdDocument.file_name)) {
+                list.push({
+                    id: p.fsdDocument.id || `FSD-${p.id}`,
+                    name: p.fsdDocument.name || p.fsdDocument.file_name,
+                    size: p.fsdDocument.size || p.fsdDocument.file_size || '1.8 MB',
+                    type: 'fsd',
+                    url: p.fsdDocument.url || p.fsdDocument.fileUrl || null,
+                    project: pName,
+                    uploadedBy: p.fsdDocument.uploadedBy || 'System Analyst Perencanaan',
+                    date: p.fsdDocument.uploadedAt || 'Terbaru'
+                });
+            } else if (p.analystResult?.fsdFile) {
+                list.push({
+                    id: `FSD-${p.id}`,
+                    name: p.analystResult.fsdFile,
+                    size: '1.8 MB',
+                    type: 'fsd',
+                    url: p.analystResult.fsdUrl || null,
+                    project: pName,
+                    uploadedBy: 'System Analyst Perencanaan',
+                    date: 'Terbaru'
+                });
+            }
+
+            // 3. FSD Dev Document from Phase 2 Dev Analyst
+            if (p.fsdDevDocument && (p.fsdDevDocument.name || p.fsdDevDocument.file_name)) {
+                list.push({
+                    id: p.fsdDevDocument.id || `FSD-DEV-${p.id}`,
+                    name: p.fsdDevDocument.name || p.fsdDevDocument.file_name,
+                    size: p.fsdDevDocument.size || p.fsdDevDocument.file_size || '2.1 MB',
+                    type: 'fsd',
+                    url: p.fsdDevDocument.url || p.fsdDevDocument.fileUrl || null,
+                    project: pName,
+                    uploadedBy: p.fsdDevDocument.uploadedBy || 'System Analyst Dev',
+                    date: p.fsdDevDocument.uploadedAt || 'Terbaru'
+                });
+            }
+
+            // 4. QA Report Document from QA Phase
+            if (p.qaDocument && (p.qaDocument.name || p.qaDocument.file_name)) {
+                list.push({
+                    id: p.qaDocument.id || `QA-${p.id}`,
+                    name: p.qaDocument.name || p.qaDocument.file_name,
+                    size: p.qaDocument.size || p.qaDocument.file_size || '2.4 MB',
+                    type: 'qa_report',
+                    url: p.qaDocument.url || p.qaDocument.fileUrl || null,
+                    project: pName,
+                    uploadedBy: p.qaDocument.uploadedBy || 'Lead QA Tester',
+                    date: p.qaDocument.uploadedAt || 'Terbaru'
+                });
+            }
+
+            // 5. Cyber Security Document from Cyber Phase
+            if (p.cyberDocument && (p.cyberDocument.name || p.cyberDocument.file_name)) {
+                list.push({
+                    id: p.cyberDocument.id || `CYBER-${p.id}`,
+                    name: p.cyberDocument.name || p.cyberDocument.file_name,
+                    size: p.cyberDocument.size || p.cyberDocument.file_size || '3.1 MB',
+                    type: 'cyber_report',
+                    url: p.cyberDocument.url || p.cyberDocument.fileUrl || null,
+                    project: pName,
+                    uploadedBy: p.cyberDocument.uploadedBy || 'Tim Audit Siber',
+                    date: p.cyberDocument.uploadedAt || 'Terbaru'
+                });
+            }
+
+            // 6. Release / Deployment Package from Infra Release Phase
+            if (p.releaseDocument && (p.releaseDocument.name || p.releaseDocument.file_name)) {
+                list.push({
+                    id: p.releaseDocument.id || `REL-${p.id}`,
+                    name: p.releaseDocument.name || p.releaseDocument.file_name,
+                    size: p.releaseDocument.size || p.releaseDocument.file_size || '5.0 MB',
+                    type: 'release_pack',
+                    url: p.releaseDocument.url || p.releaseDocument.fileUrl || null,
+                    project: pName,
+                    uploadedBy: p.releaseDocument.uploadedBy || 'Tim Rilis Infra',
+                    date: p.releaseDocument.uploadedAt || 'Terbaru'
+                });
+            }
+
+            return list;
+        });
 
         const combined = [...(ctxDocs || []), ...projectDocs];
 
@@ -294,6 +385,12 @@ export default function Documents() {
     const handleFileChange = (e) => {
         const file = e.target.files[0];
         if (file) {
+            const MAX_SIZE = 5 * 1024 * 1024;
+            if (file.size > MAX_SIZE) {
+                showToast(`Dokumen "${file.name}" ditolak karena ukurannya melebihi batas maksimal 5MB!`, 'error');
+                e.target.value = '';
+                return;
+            }
             if (!file.name.toLowerCase().endsWith('.pdf')) {
                 showToast('Mohon unggah berkas PDF (.pdf) untuk pratinjau langsung di browser!', 'error');
                 e.target.value = '';
@@ -329,32 +426,22 @@ export default function Documents() {
         const projName = uploadProject || (projects[0]?.name || 'Modul Pelaporan OJK Terpusat');
         const calcSize = selectedFile ? `${(selectedFile.size / (1024 * 1024)).toFixed(1)} MB` : '1.8 MB';
 
-        const saveAndClose = (dataUrl = null) => {
-            addDocument({
-                id: Date.now(),
-                file_name: docName,
-                file_size: calcSize,
-                project_name: projName,
-                doc_type: uploadDocType,
-                url: dataUrl,
-                uploaded_by_name: user?.name || 'Super Admin',
-                created_at: new Date().toISOString(),
-            });
+        const dataUrl = selectedFile ? URL.createObjectURL(selectedFile) : null;
+        addDocument({
+            id: Date.now(),
+            file_name: docName,
+            file_size: calcSize,
+            project_name: projName,
+            doc_type: uploadDocType,
+            url: dataUrl,
+            uploaded_by_name: user?.name || 'Super Admin',
+            created_at: new Date().toISOString(),
+        });
 
-            showToast(`Dokumen "${docName}" berhasil diunggah!`);
-            setIsUploadModalOpen(false);
-            setUploadFileName('');
-            setSelectedFile(null);
-        };
-
-        if (selectedFile) {
-            const reader = new FileReader();
-            reader.onload = (ev) => saveAndClose(ev.target.result);
-            reader.onerror = () => saveAndClose(URL.createObjectURL(selectedFile));
-            reader.readAsDataURL(selectedFile);
-        } else {
-            saveAndClose(null);
-        }
+        showToast(`Dokumen "${docName}" berhasil diunggah!`);
+        setIsUploadModalOpen(false);
+        setUploadFileName('');
+        setSelectedFile(null);
     };
 
     // Download & Delete handlers

@@ -4,6 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import { useNotifications } from '../../contexts/NotificationContext';
 import { useProjects } from '../../contexts/ProjectContext';
 import { divisionService } from '../../services/api';
+import toast from 'react-hot-toast';
 import {
     User,
     Info,
@@ -110,19 +111,28 @@ export default function ProjectNew() {
     // Process files and convert to Data URL for in-browser PDF previewing
     const processFiles = async (files) => {
         const fileArray = Array.from(files);
+        const MAX_SIZE_MB = 5;
+        const MAX_SIZE_BYTES = MAX_SIZE_MB * 1024 * 1024;
+
+        const oversizedFiles = fileArray.filter(f => f.size > MAX_SIZE_BYTES);
+        if (oversizedFiles.length > 0) {
+            const fileNames = oversizedFiles.map(f => `"${f.name}"`).join(', ');
+            const errorMsg = `Dokumen ${fileNames} ditolak karena ukurannya melebihi batas maksimal 5MB.`;
+            toast.error(errorMsg);
+            showError(errorMsg);
+        }
+
         const nonPdf = fileArray.filter(f => !f.name.toLowerCase().endsWith('.pdf'));
-        
         if (nonPdf.length > 0) {
             setErrorMessage('Demi integritas dokumen SDLC Bank Nagari & pratinjau langsung di browser, mohon unggah berkas berformat PDF (.pdf).');
             setTimeout(() => setErrorMessage(''), 5000);
         }
 
-        const validPdfFiles = fileArray.filter(f => f.name.toLowerCase().endsWith('.pdf'));
+        const validPdfFiles = fileArray.filter(f => f.name.toLowerCase().endsWith('.pdf') && f.size <= MAX_SIZE_BYTES);
         if (validPdfFiles.length === 0) return;
 
         const filePromises = validPdfFiles.map((file) => {
             return new Promise((resolve) => {
-                const reader = new FileReader();
                 let defaultType = 'brd';
                 const fn = file.name.toLowerCase();
                 if (fn.includes('fsd')) defaultType = 'fsd';
@@ -130,27 +140,16 @@ export default function ProjectNew() {
                 else if (fn.includes('uat')) defaultType = 'uat_doc';
                 else if (fn.includes('legal') || fn.includes('kontrak')) defaultType = 'legal';
 
-                reader.onload = (e) => {
-                    resolve({
-                        name: file.name,
-                        size: (file.size / 1024 / 1024).toFixed(1) + ' MB',
-                        type: defaultType,
-                        doc_type: defaultType,
-                        status: 'success',
-                        url: e.target.result,
-                    });
-                };
-                reader.onerror = () => {
-                    resolve({
-                        name: file.name,
-                        size: (file.size / 1024 / 1024).toFixed(1) + ' MB',
-                        type: defaultType,
-                        doc_type: defaultType,
-                        status: 'success',
-                        url: URL.createObjectURL(file),
-                    });
-                };
-                reader.readAsDataURL(file);
+                const objectUrl = URL.createObjectURL(file);
+                resolve({
+                    name: file.name,
+                    size: (file.size / 1024 / 1024).toFixed(1) + ' MB',
+                    type: defaultType,
+                    doc_type: defaultType,
+                    status: 'success',
+                    url: objectUrl,
+                    rawFile: file,
+                });
             });
         });
 
@@ -200,10 +199,12 @@ export default function ProjectNew() {
         if (isSubmittingRef.current || isSubmitting) return;
 
         if (!formData.projectName.trim()) {
+            toast.error('Nama proyek wajib diisi!');
             showError('Nama proyek wajib diisi!');
             return;
         }
         if (!formData.targetDate) {
+            toast.error('Target tanggal selesai wajib diisi!');
             showError('Target tanggal selesai wajib diisi!');
             return;
         }
@@ -212,6 +213,7 @@ export default function ProjectNew() {
         setIsSubmitting(true);
 
         try {
+            const submittedName = formData.projectName;
             const newProject = {
                 name: formData.projectName,
                 description: formData.description || 'Pengajuan proyek baru oleh ' + (user?.name || 'PIC'),
@@ -225,18 +227,36 @@ export default function ProjectNew() {
 
             const res = await addProject(newProject);
 
+            // Pop-up Toast Notification
+            toast.success(`Pengajuan proyek "${submittedName}" berhasil diajukan!`);
+
+            // Notifikasi Sistem
             addNotification(
                 'Proyek Baru Diajukan',
-                `Proyek "${formData.projectName}" menunggu review dari Lead Group.`,
+                `Proyek "${submittedName}" menunggu review dari Lead Group.`,
                 'info',
                 '/queue'
             );
 
+            // Tampilkan Modal Popup Sukses Enterprise
             setSubmittedProject({
                 ...newProject,
                 id: res?.data?.id || `PRJ-${Date.now()}`,
                 isDraft: false,
             });
+
+            // 🔄 RESET FORM & UNGGAHAN AGAR LAMAN KOSONG DAN SIAP UNTUK PENGAJUAN PROYEK BARU
+            setFormData({
+                projectName: '',
+                division: user?.department || 'Divisi Pengembangan TI',
+                priority: 'Medium',
+                type: 'RBB',
+                targetDate: '',
+                description: '',
+            });
+            setUploadedFiles([]);
+            setIsSubmitting(false);
+            isSubmittingRef.current = false;
         } catch (err) {
             console.error('[ProjectNew] Submit error:', err);
             isSubmittingRef.current = false;
@@ -250,6 +270,7 @@ export default function ProjectNew() {
                     detail = `${detail}: ${valErrors[firstKey][0]}`;
                 }
             }
+            toast.error(detail);
             showError(detail);
         }
     };
@@ -533,7 +554,7 @@ export default function ProjectNew() {
                             </p>
                             <p className="text-blue-600 text-xs font-semibold mt-2.5 flex items-center justify-center gap-1.5 bg-blue-50 py-1.5 px-3 rounded-lg border border-blue-200">
                                 <CheckCircle2 size={14} className="text-blue-600 shrink-0" />
-                                Format Resmi SDLC: Berkas PDF (.pdf) untuk Pratinjau Langsung di Browser (Maks 10MB per file)
+                                Format Resmi SDLC: Berkas PDF (.pdf) untuk Pratinjau Langsung di Browser (Maks 5MB per file)
                             </p>
                             <input
                                 ref={fileInputRef}

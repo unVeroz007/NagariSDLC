@@ -42,6 +42,10 @@ import {
     Award,
     Target,
     BarChart,
+    Send,
+    Shield,
+    FileCheck,
+    Rocket,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 
@@ -61,22 +65,28 @@ export default function PMWorkspace() {
         return () => clearInterval(interval);
     }, [refreshData]);
 
-    // 🔍 Filter proyek yang dikelola oleh PM ini
+    // 🔍 Filter proyek yang dikelola oleh PM ini (fallback ke semua proyek jika super_admin / awal)
     const myProjects = useMemo(() => {
-        // Asumsikan PM adalah user yang login, dan proyek yang dikelola memiliki field pm atau pmId
-        return projects.filter(p =>
+        if (!projects || projects.length === 0) return [];
+        if (user?.role === 'super_admin' || user?.role === 'head_of_it' || user?.role === 'development_lead') {
+            return projects;
+        }
+        const filtered = projects.filter(p =>
             p.pm?.name === user?.name ||
             p.pmId === user?.id ||
-            p.assignedPM === user?.name
+            p.assignedPM === user?.name ||
+            p.pmName === user?.name ||
+            (typeof p.pm === 'string' && p.pm === user?.name)
         );
+        return filtered.length > 0 ? filtered : projects;
     }, [projects, user]);
 
     // 📊 Statistik
     const stats = useMemo(() => {
         const total = myProjects.length;
-        const inProgress = myProjects.filter(p => p.status === 'IN_DEVELOPMENT').length;
+        const inProgress = myProjects.filter(p => p.status === 'IN_DEVELOPMENT' || p.status === 'DEV_ANALYSIS_DONE' || p.status === 'ANALYSIS_APPROVED').length;
         const inReview = myProjects.filter(p => p.status === 'READY_FOR_QA' || p.status === 'QA_IN_PROGRESS' || p.status === 'CYBER_IN_PROGRESS').length;
-        const completed = myProjects.filter(p => p.status === 'LIVE_PRODUCTION' || p.status === 'UAT_PASSED').length;
+        const completed = myProjects.filter(p => p.status === 'LIVE_PRODUCTION' || p.status === 'UAT_PASSED' || p.status === 'CYBER_PASSED' || p.status === 'QA_PASSED').length;
         const onHold = myProjects.filter(p => p.status === 'ON_HOLD').length;
         const rbbCount = myProjects.filter(p => p.type === 'RBB').length;
         const nearDeadline = myProjects.filter(p => {
@@ -231,19 +241,6 @@ export default function PMWorkspace() {
         return <LoadingSpinner text="Memuat workspace PM..." />;
     }
 
-    if (myProjects.length === 0) {
-        return (
-            <div className="flex-1 overflow-y-auto p-6 md:p-8 bg-[#f8f9fb]">
-                <EmptyState
-                    title="Belum Ada Proyek"
-                    description="Anda belum ditugaskan sebagai Project Manager untuk proyek apapun. Tunggu alokasi dari Development Lead."
-                    icon={Briefcase}
-                    actionText="Refresh Data"
-                    onAction={refreshData}
-                />
-            </div>
-        );
-    }
 
     return (
         <div className="flex-1 overflow-hidden bg-[#f8f9fb] flex flex-col">
@@ -288,16 +285,91 @@ export default function PMWorkspace() {
                                 PM Workspace
                             </h1>
                             <p className="text-sm text-gray-500 mt-1">
-                                Selamat datang, {user?.name}! Kelola semua proyek dan tugas yang Anda awasi.
+                                Selamat datang, {user?.name}! Kelola semua proyek dan alur tugas yang Anda awasi.
                             </p>
                         </div>
                         <div className="flex items-center gap-3">
                             <button
                                 onClick={() => navigate('/pm/kanban')}
-                                className="flex items-center gap-2 px-4 py-2 bg-[#003a73] text-white rounded-lg font-medium hover:bg-[#002a5a] transition-colors shadow-sm"
+                                className="flex items-center gap-2 px-4 py-2 bg-[#003a73] text-white rounded-lg font-medium hover:bg-[#002a5a] transition-colors shadow-sm cursor-pointer"
                             >
                                 <LayoutDashboard size={18} />
-                                Buka Kanban
+                                Buka Kanban Board
+                            </button>
+                        </div>
+                    </div>
+
+                    {/* Quick SDLC Action Bar */}
+                    <div className="bg-gradient-to-r from-[#003a73] to-[#1A56DB] p-4 rounded-2xl text-white shadow-md space-y-3">
+                        <div className="flex items-center justify-between">
+                            <h3 className="text-xs font-bold uppercase tracking-wider text-blue-100 flex items-center gap-1.5">
+                                <Zap size={15} className="text-amber-400" />
+                                Navigasi Cepat Tahapan SDLC (Project Manager)
+                            </h3>
+                            <span className="text-[11px] bg-white/20 text-white px-2.5 py-0.5 rounded-full font-semibold">
+                                {myProjects.length} Proyek SDLC
+                            </span>
+                        </div>
+                        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-2.5">
+                            <button
+                                onClick={() => navigate('/pm/allocation')}
+                                className="bg-white/10 hover:bg-white/20 p-2.5 rounded-xl border border-white/15 text-left transition-all group cursor-pointer active:scale-95"
+                            >
+                                <div className="flex items-center gap-2 text-xs font-bold text-white group-hover:text-amber-300">
+                                    <Users size={14} />
+                                    <span>1. Alokasi Tim</span>
+                                </div>
+                                <p className="text-[10px] text-blue-200 mt-0.5">Tunjuk Dev &amp; QA</p>
+                            </button>
+                            <button
+                                onClick={() => navigate('/pm/kanban')}
+                                className="bg-white/10 hover:bg-white/20 p-2.5 rounded-xl border border-white/15 text-left transition-all group cursor-pointer active:scale-95"
+                            >
+                                <div className="flex items-center gap-2 text-xs font-bold text-white group-hover:text-amber-300">
+                                    <LayoutDashboard size={14} />
+                                    <span>2. Kanban Board</span>
+                                </div>
+                                <p className="text-[10px] text-blue-200 mt-0.5">Sprint &amp; Task Dev</p>
+                            </button>
+                            <button
+                                onClick={() => navigate('/pm/qa-request')}
+                                className="bg-white/10 hover:bg-white/20 p-2.5 rounded-xl border border-white/15 text-left transition-all group cursor-pointer active:scale-95"
+                            >
+                                <div className="flex items-center gap-2 text-xs font-bold text-white group-hover:text-amber-300">
+                                    <Send size={14} />
+                                    <span>3. Pengajuan QA</span>
+                                </div>
+                                <p className="text-[10px] text-blue-200 mt-0.5">Uji Perangkat Lunak</p>
+                            </button>
+                            <button
+                                onClick={() => navigate('/pm/cyber-request')}
+                                className="bg-white/10 hover:bg-white/20 p-2.5 rounded-xl border border-white/15 text-left transition-all group cursor-pointer active:scale-95"
+                            >
+                                <div className="flex items-center gap-2 text-xs font-bold text-white group-hover:text-amber-300">
+                                    <Shield size={14} />
+                                    <span>4. Audit Siber</span>
+                                </div>
+                                <p className="text-[10px] text-blue-200 mt-0.5">Pentest Keamanan</p>
+                            </button>
+                            <button
+                                onClick={() => navigate('/pm/review-docs')}
+                                className="bg-white/10 hover:bg-white/20 p-2.5 rounded-xl border border-white/15 text-left transition-all group cursor-pointer active:scale-95"
+                            >
+                                <div className="flex items-center gap-2 text-xs font-bold text-white group-hover:text-amber-300">
+                                    <FileCheck size={14} />
+                                    <span>5. Terima Hasil QA</span>
+                                </div>
+                                <p className="text-[10px] text-blue-200 mt-0.5">Review Sign-Off</p>
+                            </button>
+                            <button
+                                onClick={() => navigate('/pm/release-request')}
+                                className="bg-white/10 hover:bg-white/20 p-2.5 rounded-xl border border-white/15 text-left transition-all group cursor-pointer active:scale-95"
+                            >
+                                <div className="flex items-center gap-2 text-xs font-bold text-white group-hover:text-amber-300">
+                                    <Rocket size={14} />
+                                    <span>6. Rilis INFRA</span>
+                                </div>
+                                <p className="text-[10px] text-blue-200 mt-0.5">Deploy Production</p>
                             </button>
                         </div>
                     </div>

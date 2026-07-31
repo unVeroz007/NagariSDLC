@@ -184,19 +184,6 @@ export default function Track() {
         );
     };
 
-    if (listProjects.length === 0) {
-        return (
-            <div className="flex-1 overflow-y-auto px-6 py-4 md:px-8 md:py-5 bg-[#f8f9fb]">
-                <div className="max-w-4xl mx-auto text-center py-20">
-                    <div className="w-20 h-20 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center mx-auto mb-4">
-                        <FileText size={40} />
-                    </div>
-                    <h2 className="text-2xl font-bold text-gray-800">Tidak Ada Pengajuan</h2>
-                    <p className="text-gray-500 mt-2">Anda belum memiliki pengajuan proyek.</p>
-                </div>
-            </div>
-        );
-    }
 
     return (
         <div className="flex-1 flex flex-col h-screen bg-[#f8f9fb] overflow-hidden">{/* Split Panel Layout */}

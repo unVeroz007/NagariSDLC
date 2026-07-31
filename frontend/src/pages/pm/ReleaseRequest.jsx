@@ -101,9 +101,17 @@ export default function ReleaseRequest() {
     const handleFileUpload = (e) => {
         const file = e.target.files[0];
         if (file) {
+            const MAX_SIZE = 5 * 1024 * 1024;
+            if (file.size > MAX_SIZE) {
+                toast.error(`Dokumen "${file.name}" ditolak karena ukurannya melebihi batas maksimal 5MB!`);
+                e.target.value = '';
+                return;
+            }
             setUploadedFile({
                 name: file.name,
                 size: (file.size / 1024 / 1024).toFixed(1) + ' MB',
+                rawFile: file,
+                url: URL.createObjectURL(file),
             });
             toast.success(`File paket migrasi ${file.name} berhasil diunggah!`);
         }
@@ -389,7 +397,7 @@ export default function ReleaseRequest() {
                                 <div className="border-2 border-dashed border-gray-200 hover:border-emerald-400 bg-gray-50/50 rounded-2xl p-5 text-center transition-all">
                                     <CloudUpload size={32} className="text-emerald-600 mx-auto mb-2" />
                                     <p className="text-xs font-bold text-gray-700">Tarik &amp; lepas file zip paket migrasi di sini, atau klik untuk memilih</p>
-                                    <p className="text-[10px] text-gray-400 mt-1">Format dukungan: ZIP, TAR.GZ, SQL, DDL (Maksimal 50 MB)</p>
+                                    <p className="text-[10px] text-gray-400 mt-1">Format dukungan: ZIP, TAR.GZ, SQL, DDL (Maksimal 5 MB)</p>
                                     <input
                                         type="file"
                                         onChange={handleFileUpload}

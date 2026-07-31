@@ -38,7 +38,9 @@ class DocumentController extends Controller
         $request->validate([
             'project_id' => ['required', 'exists:projects,id'],
             'document_type' => ['required', 'string'],
-            'file' => ['required', 'file', 'max:10240', 'mimes:pdf,doc,docx,xls,xlsx,png,jpg'],
+            'file' => ['required', 'file', 'max:5120', 'mimes:pdf,doc,docx,xls,xlsx,png,jpg'],
+        ], [
+            'file.max' => 'Ukuran berkas dokumen melebihi batas maksimal 5 MB.',
         ]);
 
         $project = Project::findOrFail($request->project_id);

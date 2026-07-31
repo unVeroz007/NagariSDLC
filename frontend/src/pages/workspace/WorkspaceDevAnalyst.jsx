@@ -29,6 +29,39 @@ import LoadingSpinner from '../../components/LoadingSpinner';
 import EmptyState from '../../components/EmptyState';
 import toast from 'react-hot-toast';
 
+const resolveAllProjectDocs = (project) => {
+    if (!project) return [];
+    
+    // 1. If project has actual uploaded documents, preserve their exact names and properties
+    if (Array.isArray(project.documents) && project.documents.length > 0) {
+        return project.documents.map((d, idx) => ({
+            ...d,
+            name: d.name || d.file_name || 'Dokumen_SDLC.pdf',
+            size: d.size || d.file_size || '2.0 MB',
+            label: (d.type === 'brd' || d.doc_type === 'brd' || d.category === 'brd') 
+                ? 'Dokumen BRD Inisiasi' 
+                : (d.type === 'fsd' || d.doc_type === 'fsd') 
+                ? 'Dokumen FSD Perencanaan TI' 
+                : (d.label || 'Dokumen SDLC Terlampir')
+        }));
+    }
+
+    // 2. Dedicated phase document properties
+    const list = [];
+    if (project.fsdDocument && (project.fsdDocument.name || project.fsdDocument.file_name)) {
+        list.push({ ...project.fsdDocument, name: project.fsdDocument.name || project.fsdDocument.file_name, label: 'Hasil Kajian FSD (Perencanaan TI)' });
+    }
+    if (project.fsdDevDocument && (project.fsdDevDocument.name || project.fsdDevDocument.file_name)) {
+        list.push({ ...project.fsdDevDocument, name: project.fsdDevDocument.name || project.fsdDevDocument.file_name, label: 'Spesifikasi Arsitektur (Dev)' });
+    }
+
+    if (list.length > 0) return list;
+
+    return [
+        { id: 'DOC-01', name: 'Dokumen_SDLC_Terlampir.pdf', size: '2.4 MB', label: 'Dokumen SDLC Terlampir' }
+    ];
+};
+
 export default function WorkspaceDevAnalyst() {
     const { user } = useAuth();
     const { projects, updateProject, isLoading } = useProjects();
@@ -57,24 +90,28 @@ export default function WorkspaceDevAnalyst() {
         const files = e.target.files;
         if (files && files.length > 0) {
             const file = files[0];
-            const reader = new FileReader();
-            reader.onload = (evt) => {
-                const fileObj = {
-                    name: file.name,
-                    size: (file.size / 1024 / 1024).toFixed(1) + ' MB',
-                    type: 'fsd_dev',
-                    doc_type: 'fsd_dev',
-                    url: evt.target.result,
-                    uploadedAt: new Date().toISOString()
-                };
-                saveFileToStore(file.name, evt.target.result);
-                if (selectedProject?.id) {
-                    saveFileToStore(`fsd_dev_${selectedProject.id}`, evt.target.result);
-                }
-                setUploadedFile(fileObj);
-                toast.success(`Dokumen Arsitektur Teknis "${file.name}" berhasil diunggah.`);
+            const MAX_SIZE = 5 * 1024 * 1024;
+            if (file.size > MAX_SIZE) {
+                toast.error(`Dokumen "${file.name}" ditolak karena ukurannya melebihi batas maksimal 5MB!`);
+                e.target.value = '';
+                return;
+            }
+            const objectUrl = URL.createObjectURL(file);
+            const fileObj = {
+                name: file.name,
+                size: (file.size / 1024 / 1024).toFixed(1) + ' MB',
+                type: 'fsd_dev',
+                doc_type: 'fsd_dev',
+                url: objectUrl,
+                rawFile: file,
+                uploadedAt: new Date().toISOString()
             };
-            reader.readAsDataURL(file);
+            saveFileToStore(file.name, objectUrl);
+            if (selectedProject?.id) {
+                saveFileToStore(`fsd_dev_${selectedProject.id}`, objectUrl);
+            }
+            setUploadedFile(fileObj);
+            toast.success(`Dokumen Arsitektur Teknis "${file.name}" berhasil diunggah.`);
         }
     };
 
@@ -306,17 +343,67 @@ export default function WorkspaceDevAnalyst() {
 
                             {/* Scrollable Form Body */}
                             <div className="flex-1 overflow-y-auto p-6 space-y-6">
+                                {/* Card Hasil Kajian Perencanaan TI (Fase 1) */}
+                                <div className="bg-emerald-50/80 p-4.5 rounded-xl border border-emerald-200 space-y-3 shadow-2xs">
+                                    <div className="flex items-center justify-between">
+                                        <p className="font-bold text-emerald-900 uppercase tracking-wider flex items-center gap-1.5 text-xs">
+                                            <CheckCircle2 size={16} className="text-emerald-600" />
+                                            Hasil Kajian &amp; Berkas Perencanaan TI (Fase 1)
+                                        </p>
+                                        <span className="bg-emerald-100 text-emerald-800 text-xs font-bold px-2.5 py-0.5 rounded-full border border-emerald-200">
+                                            {selectedProject.analystDecision || selectedProject.analystResult?.decision || 'Disetujui (Layak Develop)'}
+                                        </span>
+                                    </div>
+                                    
+                                    {/* Display FSD Document from Planning */}
+                                    {(() => {
+                                        const fsd = selectedProject.fsdDocument || 
+                                            (selectedProject.documents && selectedProject.documents.find(d => d.type === 'fsd' || d.doc_type === 'fsd')) ||
+                                            (selectedProject.analystResult?.fsdFile ? { name: selectedProject.analystResult.fsdFile, size: '1.8 MB', url: selectedProject.analystResult.fsdUrl } : null) ||
+                                            (selectedProject.documents && selectedProject.documents[0] ? selectedProject.documents[0] : null);
+                                        
+                                        if (!fsd) return null;
+
+                                        return (
+                                            <div className="bg-white p-3 rounded-lg border border-emerald-200 flex items-center justify-between gap-2 shadow-2xs">
+                                                <div className="flex items-center gap-2.5 min-w-0">
+                                                    <div className="w-8 h-8 bg-emerald-100 text-emerald-700 rounded-lg flex items-center justify-center font-bold text-[10px] shrink-0 border border-emerald-200">
+                                                        FSD
+                                                    </div>
+                                                    <div className="min-w-0">
+                                                        <p className="text-xs font-bold text-gray-800 truncate">{fsd.name || fsd.file_name}</p>
+                                                        <p className="text-[10px] text-gray-500">{fsd.size || '1.8 MB'} • Dokumen FSD Perencanaan TI</p>
+                                                    </div>
+                                                </div>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => setPreviewDoc(fsd)}
+                                                    className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold transition-all flex items-center gap-1 shrink-0 cursor-pointer active:scale-95 shadow-2xs"
+                                                >
+                                                    <Eye size={12} />
+                                                    <span>View FSD</span>
+                                                </button>
+                                            </div>
+                                        );
+                                    })()}
+
+                                    {/* Notes from System Analyst Perencanaan */}
+                                    {(selectedProject.analystNotes || selectedProject.analystResult?.notes) && (
+                                        <div className="bg-white/90 p-3 rounded-lg border border-emerald-100 text-xs">
+                                            <span className="font-bold text-gray-500 text-[10px] uppercase block mb-0.5">Catatan &amp; Rekomendasi Analyst Perencanaan:</span>
+                                            <p className="text-gray-700 italic text-[11px] leading-relaxed">{selectedProject.analystNotes || selectedProject.analystResult?.notes}</p>
+                                        </div>
+                                    )}
+                                </div>
+
                                 {/* 1. Dokumen Kelengkapan Proyek (BRD & FSD Perencanaan) */}
                                 <div className="bg-slate-50 p-4.5 rounded-xl border border-slate-200 space-y-3">
                                     <h3 className="text-xs font-extrabold text-[#1a365d] uppercase tracking-wider flex items-center gap-1.5">
                                         <FolderOpen size={16} className="text-[#1A56DB]" />
-                                        1. Dokumen Kelengkapan Proyek (BRD &amp; FSD Perencanaan)
+                                        1. Berkas &amp; Dokumen SDLC Proyek (Semua Tahap: Inisiasi &amp; Perencanaan)
                                     </h3>
                                     <div className="space-y-2">
-                                        {((selectedProject.documents && selectedProject.documents.length > 0)
-                                            ? selectedProject.documents
-                                            : [{ id: 'BRD-01', name: `${selectedProject.name}_BRD_Inisiasi.pdf`, size: '2.4 MB', type: 'pdf' }]
-                                        ).map((doc, idx) => (
+                                        {resolveAllProjectDocs(selectedProject).map((doc, idx) => (
                                             <div key={idx} className="flex items-center justify-between p-3 border border-gray-200 rounded-xl bg-white hover:border-blue-300 transition-colors shadow-2xs">
                                                 <div className="flex items-center gap-3 overflow-hidden min-w-0">
                                                     <div className="w-9 h-9 bg-red-100 text-red-600 rounded-lg flex items-center justify-center shrink-0 font-bold text-[10px]">
@@ -324,7 +411,7 @@ export default function WorkspaceDevAnalyst() {
                                                     </div>
                                                     <div className="truncate min-w-0">
                                                         <p className="text-xs font-semibold text-gray-800 truncate">{doc.name}</p>
-                                                        <p className="text-[11px] text-gray-500">{doc.size || '2.4 MB'} • Dokumen SDLC Terlampir</p>
+                                                        <p className="text-[11px] text-gray-500">{doc.size || '2.4 MB'} • {doc.label || 'Dokumen SDLC Terlampir'}</p>
                                                     </div>
                                                 </div>
                                                 <div className="flex items-center gap-1.5 shrink-0">

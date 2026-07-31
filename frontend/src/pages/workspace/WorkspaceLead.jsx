@@ -110,6 +110,41 @@ export default function WorkspaceLead() {
         return rawUrl;
     }, [previewFsdDoc, currentSelected]);
 
+    const currentFsdDoc = useMemo(() => {
+        if (!currentSelected) return null;
+        if (currentSelected.fsdDocument?.name || currentSelected.fsdDocument?.file_name) {
+            return {
+                name: currentSelected.fsdDocument.name || currentSelected.fsdDocument.file_name,
+                size: currentSelected.fsdDocument.size || currentSelected.fsdDocument.file_size || '1.8 MB',
+                url: currentSelected.fsdDocument.url || currentSelected.fsdDocument.fileUrl || null
+            };
+        }
+        if (Array.isArray(currentSelected.documents) && currentSelected.documents.length > 0) {
+            const found = currentSelected.documents.find(d => 
+                d.type === 'fsd' || d.doc_type === 'fsd' || (d.name && d.name.toLowerCase().includes('fsd'))
+            ) || currentSelected.documents[0];
+            if (found) {
+                return {
+                    name: found.name || found.file_name,
+                    size: found.size || found.file_size || '1.8 MB',
+                    url: found.url || found.fileUrl || null
+                };
+            }
+        }
+        if (currentSelected.analystResult?.fsdFile) {
+            return {
+                name: currentSelected.analystResult.fsdFile,
+                size: '1.8 MB',
+                url: currentSelected.analystResult.fsdUrl || null
+            };
+        }
+        return {
+            name: currentSelected.documents?.[0]?.name || 'Dokumen_SDLC.pdf',
+            size: '1.8 MB',
+            url: null
+        };
+    }, [currentSelected]);
+
     const [selectedAnalyst, setSelectedAnalyst] = useState('');
     const [deadline, setDeadline] = useState('');
     const [notes, setNotes] = useState('');
@@ -529,21 +564,17 @@ export default function WorkspaceLead() {
                                             <div className="min-w-0">
                                                 <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">BERKAS KAJIAN TEKNIS (FSD)</p>
                                                 <p className="font-bold text-gray-800 text-sm truncate">
-                                                    {currentSelected.fsdDocument?.name || currentSelected.analystResult?.fsdFile || 'FSD_SpesifikasiTeknis.pdf'}
+                                                    {currentFsdDoc?.name || `FSD_${currentSelected?.name?.replace(/\s+/g, '_') || 'Dokumen'}.pdf`}
                                                 </p>
                                                 <p className="text-[11px] text-gray-500">
-                                                    {currentSelected.fsdDocument?.size || '1.8 MB'} • Terlampir Hasil Kajian Analis
+                                                    {currentFsdDoc?.size || '1.8 MB'} • Terlampir Hasil Kajian Analis
                                                 </p>
                                             </div>
                                         </div>
                                         <div className="flex items-center gap-2 shrink-0">
                                             <button
                                                 type="button"
-                                                onClick={() => setPreviewFsdDoc(currentSelected.fsdDocument || {
-                                                    name: currentSelected.analystResult?.fsdFile || 'FSD_SpesifikasiTeknis.pdf',
-                                                    url: currentSelected.fsdDocument?.url || currentSelected.analystResult?.fsdUrl || null,
-                                                    size: currentSelected.fsdDocument?.size || '1.8 MB'
-                                                })}
+                                                onClick={() => setPreviewFsdDoc(currentFsdDoc)}
                                                 className="px-3 py-1.5 border border-[#1A56DB] text-[#1A56DB] rounded-lg font-bold hover:bg-blue-50 transition-colors flex items-center gap-1.5 text-xs cursor-pointer"
                                             >
                                                 <Eye size={14} />
@@ -552,12 +583,9 @@ export default function WorkspaceLead() {
                                             <button
                                                 type="button"
                                                 onClick={() => {
-                                                    const doc = currentSelected.fsdDocument || {
-                                                        name: currentSelected.analystResult?.fsdFile || 'FSD_SpesifikasiTeknis.pdf',
-                                                        url: currentSelected.fsdDocument?.url || currentSelected.analystResult?.fsdUrl || null
-                                                    };
-                                                    const rawUrl = doc.url || doc.fileUrl || doc.dataUrl;
-                                                    const fileName = doc.name || 'FSD_SpesifikasiTeknis.pdf';
+                                                    const doc = currentFsdDoc;
+                                                    const rawUrl = doc?.url;
+                                                    const fileName = doc?.name || `FSD_${currentSelected?.name?.replace(/\s+/g, '_') || 'Dokumen'}.pdf`;
                                                     if (rawUrl) {
                                                         const link = document.createElement('a');
                                                         link.href = rawUrl;
@@ -590,11 +618,11 @@ export default function WorkspaceLead() {
 
                                     <div className="bg-white p-4 rounded-xl border border-emerald-100 shadow-xs">
                                         <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-1">Keputusan Analis</p>
-                                        <p className="font-bold text-emerald-800 text-base">{currentSelected.analystResult?.decision || 'Disetujui'}</p>
+                                        <p className="font-bold text-emerald-800 text-base">{currentSelected.analystDecision || currentSelected.analystResult?.decision || 'Disetujui'}</p>
                                     </div>
                                     <div className="bg-white p-4 rounded-xl border border-emerald-100 shadow-xs">
                                         <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-1">Catatan &amp; Rekomendasi Analis</p>
-                                        <p className="text-gray-700 text-sm">{currentSelected.analystResult?.notes || 'Spesifikasi teknis telah lengkap dan valid.'}</p>
+                                        <p className="text-gray-700 text-sm leading-relaxed italic">{currentSelected.analystNotes || currentSelected.analystResult?.notes || currentSelected.notes || '(System Analyst tidak memberikan catatan khusus)'}</p>
                                     </div>
                                     {currentSelected.analystResult?.estimation && (
                                         <div className="bg-white p-4 rounded-xl border border-emerald-100 shadow-xs">

@@ -120,10 +120,23 @@ export default function QARequest() {
 
   const handleFileUpload = (e) => {
     const files = Array.from(e.target.files);
-    const newFiles = files.map((file) => ({
+    const MAX_SIZE = 5 * 1024 * 1024;
+    const oversizedFiles = files.filter(f => f.size > MAX_SIZE);
+    if (oversizedFiles.length > 0) {
+      const fileNames = oversizedFiles.map(f => `"${f.name}"`).join(', ');
+      toast.error(`Dokumen ${fileNames} ditolak karena ukurannya melebihi batas maksimal 5MB!`);
+    }
+    const validFiles = files.filter(f => f.size <= MAX_SIZE);
+    if (validFiles.length === 0) {
+      if (e.target) e.target.value = '';
+      return;
+    }
+    const newFiles = validFiles.map((file) => ({
       name: file.name,
       size: (file.size / 1024 / 1024).toFixed(1) + ' MB',
       type: file.type,
+      rawFile: file,
+      url: URL.createObjectURL(file),
     }));
     setUploadedFiles(prev => [...prev, ...newFiles]);
     if (e.target) e.target.value = '';
@@ -428,7 +441,7 @@ export default function QARequest() {
                 <div className="border-2 border-dashed border-gray-200 hover:border-blue-400 bg-gray-50/50 rounded-2xl p-5 text-center transition-all">
                   <CloudUpload size={32} className="text-blue-600 mx-auto mb-2" />
                   <p className="text-xs font-bold text-gray-700">Tarik &amp; lepas file di sini, atau klik untuk memilih file</p>
-                  <p className="text-[10px] text-gray-400 mt-1">Format dukungan: PDF, DOCX, XLSX, JSON (Maksimal 10 MB)</p>
+                  <p className="text-[10px] text-gray-400 mt-1">Format dukungan: PDF, DOCX, XLSX, JSON (Maksimal 5 MB)</p>
                   <input
                     type="file"
                     multiple

@@ -23,6 +23,7 @@ export const menuSections = {
         {
             label: 'Fase 2 (Pengembangan IT)',
             items: [
+                { label: 'PM Workspace', path: '/pm/workspace', icon: 'Briefcase' },
                 { label: 'Alokasi Tim', path: '/pm/allocation', icon: 'Users' },
                 { label: 'Kanban Board', path: '/pm/kanban', icon: 'Kanban' },
                 { label: 'Manajemen Task', path: '/pm/tasks', icon: 'ClipboardList' },
@@ -97,6 +98,7 @@ export const menuSections = {
             items: [
                 { label: 'Dashboard Utama', path: '/dashboard', icon: 'LayoutDashboard' },
                 { label: 'Workspace Development', path: '/workspace/dev-lead', icon: 'Users' },
+                { label: 'PM Workspace', path: '/pm/workspace', icon: 'Briefcase' },
             ],
         },
     ],

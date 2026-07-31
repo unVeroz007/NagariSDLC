@@ -46,7 +46,12 @@ async function handleResponse(res) {
             window.dispatchEvent(new Event('auth:unauthorized'));
         }
         const err = await res.json().catch(() => ({ message: 'Terjadi kesalahan server.' }));
-        throw new Error(err.message || `HTTP ${res.status}`);
+        let errMsg = err.message || `HTTP ${res.status}`;
+        if (err.errors && typeof err.errors === 'object') {
+            const messages = Object.values(err.errors).flat().join(', ');
+            if (messages) errMsg = `${errMsg}: ${messages}`;
+        }
+        throw new Error(errMsg);
     }
     return res.json();
 }
@@ -403,10 +408,16 @@ export const documentService = {
         if (MODE === 'api') {
             const formData = new FormData();
             formData.append('file', file);
-            Object.entries(metadata).forEach(([k, v]) => formData.append(k, v));
+            Object.entries(metadata).forEach(([k, v]) => {
+                if (v !== undefined && v !== null) {
+                    formData.append(k, v);
+                }
+            });
+            const headers = { ...authHeaders() };
+            delete headers['Content-Type'];
             const res = await fetch(`${BASE_URL}/documents`, {
                 method: 'POST',
-                headers: { Authorization: authHeaders().Authorization },
+                headers,
                 body: formData,
             });
             return handleResponse(res);

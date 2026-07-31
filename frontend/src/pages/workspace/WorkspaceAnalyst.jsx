@@ -62,24 +62,28 @@ export default function WorkspaceAnalyst() {
         const files = e.target.files;
         if (files && files.length > 0) {
             const file = files[0];
-            const reader = new FileReader();
-            reader.onload = (evt) => {
-                const fileObj = {
-                    name: file.name,
-                    size: (file.size / 1024 / 1024).toFixed(1) + ' MB',
-                    type: 'fsd',
-                    doc_type: 'fsd',
-                    url: evt.target.result,
-                    uploadedAt: new Date().toISOString()
-                };
-                saveFileToStore(file.name, evt.target.result);
-                if (selectedProject?.id) {
-                    saveFileToStore(`fsd_${selectedProject.id}`, evt.target.result);
-                }
-                setUploadedFile(fileObj);
-                toast.success(`Dokumen FSD "${file.name}" berhasil diunggah.`);
+            const MAX_SIZE = 5 * 1024 * 1024;
+            if (file.size > MAX_SIZE) {
+                toast.error(`Dokumen "${file.name}" ditolak karena ukurannya melebihi batas maksimal 5MB!`);
+                e.target.value = '';
+                return;
+            }
+            const objectUrl = URL.createObjectURL(file);
+            const fileObj = {
+                name: file.name,
+                size: (file.size / 1024 / 1024).toFixed(1) + ' MB',
+                type: 'fsd',
+                doc_type: 'fsd',
+                url: objectUrl,
+                rawFile: file,
+                uploadedAt: new Date().toISOString()
             };
-            reader.readAsDataURL(file);
+            saveFileToStore(file.name, objectUrl);
+            if (selectedProject?.id) {
+                saveFileToStore(`fsd_${selectedProject.id}`, objectUrl);
+            }
+            setUploadedFile(fileObj);
+            toast.success(`Dokumen FSD "${file.name}" berhasil diunggah.`);
         }
     };
 
@@ -168,14 +172,18 @@ export default function WorkspaceAnalyst() {
                 doc_type: 'fsd',
                 url: uploadedFile.url,
                 uploadedAt: uploadedFile.uploadedAt || new Date().toISOString()
+            } : (selectedProject?.documents?.[0] ? {
+                ...selectedProject.documents[0],
+                type: 'fsd',
+                doc_type: 'fsd'
             } : {
                 id: `FSD-${Date.now()}`,
-                name: 'FSD_SpesifikasiTeknis.pdf',
+                name: 'Dokumen_SDLC.pdf',
                 size: '1.8 MB',
                 type: 'fsd',
                 doc_type: 'fsd',
                 uploadedAt: new Date().toISOString()
-            };
+            });
 
             const existingDocs = selectedProject?.documents || [];
             const newDocs = [fsdDoc, ...existingDocs.filter(d => d.type !== 'fsd')];
@@ -431,7 +439,6 @@ export default function WorkspaceAnalyst() {
                                     </span>
                                     <div className="flex items-center gap-2 flex-wrap">
                                         <RBBBadge type={selectedProject?.type} deadline={selectedProject?.rbbDeadline} />
-                                        <span className="text-xs text-gray-500 font-medium">(Telah ditentukan sejak pengajuan inisiasi divisi)</span>
                                     </div>
                                 </div>
 
@@ -463,7 +470,7 @@ export default function WorkspaceAnalyst() {
                             >
                                 <CloudUpload size={40} className="text-gray-400 group-hover:text-[#1A56DB] group-hover:scale-110 transition-all mb-2" />
                                 <p className="font-semibold text-gray-700 group-hover:text-[#1A56DB] transition-colors">Tarik &amp; Lepas file di sini, atau klik untuk unggah</p>
-                                <p className="text-xs text-gray-500 mt-1">Format Berkas PDF Resmi SDLC Bank Nagari (Maksimal 10MB)</p>
+                                <p className="text-xs text-gray-500 mt-1">Format Berkas PDF Resmi SDLC Bank Nagari (Maksimal 5MB)</p>
                                 <input
                                     ref={fileInputRef}
                                     type="file"

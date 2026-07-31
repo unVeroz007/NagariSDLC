@@ -3,7 +3,6 @@ import { useProjects } from '../contexts/ProjectContext';
 import { useNotifications } from '../contexts/NotificationContext';
 import { useNavigate } from 'react-router-dom';
 import LoadingSpinner from '../components/LoadingSpinner';
-import EmptyState from '../components/EmptyState';
 import {
     Building2,
     Briefcase,
