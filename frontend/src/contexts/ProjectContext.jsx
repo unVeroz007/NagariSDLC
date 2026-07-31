@@ -187,11 +187,16 @@ export function ProjectProvider({ children }) {
         }));
 
         if (MODE === 'api') {
+            const rawTargetDate = projectData.targetDate || projectData.target_date;
+            const validTargetDate = (rawTargetDate && rawTargetDate !== 'TBD') ? rawTargetDate : null;
             const res = await projectService.create({
                 title: projectData.name || projectData.title,
                 description: projectData.description || '',
-                division_id: projectData.division_id || 1,
-                target_date: projectData.targetDate || projectData.target_date || null,
+                division: projectData.division,
+                division_id: projectData.division_id,
+                target_date: validTargetDate,
+                type: projectData.type || 'RBB',
+                status: projectData.status || 'PENDING',
             });
             const created = res?.data;
             if (created && uploadedDocs.length > 0) {

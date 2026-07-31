@@ -11,6 +11,14 @@ class StoreProjectRequest extends FormRequest
         return true;
     }
 
+    protected function prepareForValidation(): void
+    {
+        $targetDate = $this->target_date ?? $this->targetDate;
+        if ($targetDate === 'TBD' || empty($targetDate)) {
+            $this->merge(['target_date' => null]);
+        }
+    }
+
     public function rules(): array
     {
         return [
@@ -18,10 +26,11 @@ class StoreProjectRequest extends FormRequest
             'title'       => ['nullable', 'string', 'max:255'],
             'name'        => ['nullable', 'string', 'max:255'],
             'description' => ['nullable', 'string'],
-            // FE bisa kirim 'division_id' (int) ATAU 'division_name' (string)
+            // FE bisa kirim 'division_id' (int) ATAU 'division' (string)
             'division_id' => ['nullable', 'exists:divisions,id'],
+            'division'    => ['nullable', 'string'],
             'target_date' => ['nullable', 'date'],
-            'type'        => ['nullable', 'string', 'in:RBB,Non-RBB,NON_RBB'],
+            'type'        => ['nullable', 'string'],
             'rbb_deadline'=> ['nullable', 'date'],
         ];
     }

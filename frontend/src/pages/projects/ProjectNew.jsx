@@ -224,8 +224,9 @@ export default function ProjectNew() {
                 isDraft: true,
             });
         } catch (err) {
-            console.error(err);
-            showError('Gagal menyimpan draft proyek.');
+            console.error('[ProjectNew] Draft error:', err);
+            const msg = err?.response?.data?.message || err?.message || 'Gagal menyimpan draft proyek.';
+            showError(msg);
         }
     };
 
@@ -267,9 +268,18 @@ export default function ProjectNew() {
                 isDraft: false,
             });
         } catch (err) {
-            console.error(err);
+            console.error('[ProjectNew] Submit error:', err);
             setIsSubmitting(false);
-            showError('Gagal mengajukan proyek.');
+            const serverMsg = err?.response?.data?.message;
+            const valErrors = err?.response?.data?.errors;
+            let detail = serverMsg || err?.message || 'Gagal mengajukan proyek.';
+            if (valErrors && typeof valErrors === 'object') {
+                const firstKey = Object.keys(valErrors)[0];
+                if (firstKey && valErrors[firstKey][0]) {
+                    detail = `${detail}: ${valErrors[firstKey][0]}`;
+                }
+            }
+            showError(detail);
         }
     };
 
