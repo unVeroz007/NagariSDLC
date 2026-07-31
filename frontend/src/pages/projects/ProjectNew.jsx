@@ -339,10 +339,10 @@ export default function ProjectNew() {
                             <div className="space-y-2">
                                 <label className="text-sm font-semibold text-gray-600">Unit Kerja PIC</label>
                                 <input
-                                    className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-lg text-sm text-gray-500 cursor-not-allowed font-medium"
+                                    className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-lg text-sm text-gray-700 cursor-not-allowed font-semibold transition-all"
                                     disabled
                                     type="text"
-                                    value={user?.department || 'Divisi Pengembangan TI'}
+                                    value={formData.division || user?.department || 'Divisi Pengembangan TI'}
                                 />
                             </div>
                             <div className="space-y-2 md:col-span-2">
