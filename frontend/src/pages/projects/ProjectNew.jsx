@@ -192,11 +192,13 @@ export default function ProjectNew() {
     // Handle Save as Draft
     const handleSaveDraft = async (e) => {
         e.preventDefault();
+        if (isSubmitting) return;
         if (!formData.projectName.trim()) {
             showError('Nama proyek wajib diisi untuk menyimpan draft!');
             return;
         }
 
+        setIsSubmitting(true);
         try {
             const draftProject = {
                 name: formData.projectName,
@@ -218,6 +220,7 @@ export default function ProjectNew() {
                 '/projects'
             );
 
+            setIsSubmitting(false);
             setSubmittedProject({
                 ...draftProject,
                 id: res?.data?.id || `DRAFT-${Date.now()}`,
@@ -225,6 +228,7 @@ export default function ProjectNew() {
             });
         } catch (err) {
             console.error('[ProjectNew] Draft error:', err);
+            setIsSubmitting(false);
             const msg = err?.response?.data?.message || err?.message || 'Gagal menyimpan draft proyek.';
             showError(msg);
         }
@@ -233,6 +237,7 @@ export default function ProjectNew() {
     // Handle Submit Ajukan Proyek
     const handleSubmit = async (e) => {
         e.preventDefault();
+        if (isSubmitting) return;
         if (!formData.projectName.trim()) {
             showError('Nama proyek wajib diisi!');
             return;
