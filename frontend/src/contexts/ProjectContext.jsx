@@ -105,6 +105,9 @@ const getMockDocs = () => {
 
 export function ProjectProvider({ children }) {
     const [projects, setProjects] = useState(() => {
+        // Pada mode API, mulai dari array kosong agar tidak tampil data lama dari localStorage
+        // Data nyata akan diambil dari server saat loadProjects() dipanggil
+        if (MODE === 'api') return [];
         const cached = getMockProjects();
         const docs = getMockDocs();
         return cached.map(p => normalizeProject(p, docs));
@@ -120,10 +123,9 @@ export function ProjectProvider({ children }) {
     // ─────────────────────────────────────────────────────────
     // Data loading dengan penggabungan cerdas (API + Cache Lokal)
     const loadProjects = useCallback(async (showSpinner = false) => {
-        if (showSpinner && projects.length === 0) setIsLoading(true);
+        if (showSpinner) setIsLoading(true);
         try {
             const storedDocs = getMockDocs();
-            const localProjects = getMockProjects();
             setDocuments(storedDocs);
 
             if (MODE === 'api') {
@@ -132,13 +134,16 @@ export function ProjectProvider({ children }) {
                     const apiList = res?.data ?? [];
                     const normalized = apiList.map(p => normalizeProject(p, storedDocs));
                     setProjects(normalized);
+                    // Simpan ke localStorage sebagai cache fallback saja
                     localStorage.setItem(STORAGE_PROJECTS_KEY, JSON.stringify(normalized));
                     setMeta(res?.meta ?? null);
                 } catch (apiErr) {
                     console.warn('[ProjectContext] API load failed, using local cache:', apiErr);
+                    const localProjects = getMockProjects();
                     setProjects(localProjects.map(p => normalizeProject(p, storedDocs)));
                 }
             } else {
+                const localProjects = getMockProjects();
                 setProjects(localProjects.map(p => normalizeProject(p, storedDocs)));
             }
             setLastUpdated(new Date());
@@ -147,7 +152,8 @@ export function ProjectProvider({ children }) {
         } finally {
             setIsLoading(false);
         }
-    }, [projects.length]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
 
     // Initial load silently
     useEffect(() => {
