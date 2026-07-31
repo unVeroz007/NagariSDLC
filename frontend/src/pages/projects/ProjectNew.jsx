@@ -502,12 +502,16 @@ export default function ProjectNew() {
                                 </div>
                             </div>
                             <div className="space-y-2">
-                                <label className="text-sm font-semibold text-gray-600">Target Selesai (Estimasi)</label>
+                                <div className="flex justify-between items-center">
+                                    <label className="text-sm font-semibold text-gray-600">Target Selesai (Estimasi)</label>
+                                    <span className="text-[11px] text-gray-400 font-normal">Opsional (Kosongkan jika TBD)</span>
+                                </div>
                                 <input
                                     name="targetDate"
                                     value={formData.targetDate}
                                     onChange={handleChange}
-                                    className="w-full px-4 py-3 bg-white border border-gray-200 rounded-lg focus:ring-2 focus:ring-[#1A56DB] focus:border-[#1A56DB] transition-all text-sm"
+                                    min={new Date().toISOString().split('T')[0]}
+                                    className="w-full px-4 py-3 bg-white border border-gray-200 rounded-lg focus:ring-2 focus:ring-[#1A56DB] focus:border-[#1A56DB] transition-all text-sm cursor-pointer"
                                     type="date"
                                 />
                             </div>
