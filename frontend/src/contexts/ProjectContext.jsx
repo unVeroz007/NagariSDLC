@@ -95,7 +95,10 @@ const getMockProjects = () => {
 const getMockDocs = () => {
     const saved = localStorage.getItem(STORAGE_DOCS_KEY);
     if (saved) {
-        try { return JSON.parse(saved); } catch { localStorage.removeItem(STORAGE_DOCS_KEY); }
+        try {
+            const parsed = JSON.parse(saved);
+            if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+        } catch { localStorage.removeItem(STORAGE_DOCS_KEY); }
     }
     return [];
 };
@@ -127,37 +130,9 @@ export function ProjectProvider({ children }) {
                 try {
                     const res = await projectService.getAll();
                     const apiList = res?.data ?? [];
-                    
-                    // Gabungkan API dan Local Cache tanpa menimpa pembaruan tipe RBB/Non-RBB lokal
-                    const map = new Map();
-                    localProjects.forEach(p => {
-                        const norm = normalizeProject(p, storedDocs);
-                        const key = norm.req_id || norm.reqId || norm.id || norm.title || norm.name;
-                        if (key) map.set(String(key), norm);
-                    });
-
-                    apiList.forEach(p => {
-                        const norm = normalizeProject(p, storedDocs);
-                        const key = norm.req_id || norm.reqId || norm.id || norm.title || norm.name;
-                        if (key) {
-                            const localMatch = map.get(String(key));
-                            if (localMatch) {
-                                map.set(String(key), normalizeProject({
-                                    ...norm,
-                                    ...localMatch,
-                                    type: localMatch.type && localMatch.type !== 'Belum Diklasifikasi' ? localMatch.type : norm.type,
-                                }, storedDocs));
-                            } else {
-                                map.set(String(key), norm);
-                            }
-                        }
-                    });
-
-                    const merged = Array.from(map.values());
-                    setProjects(merged);
-                    if (merged.length > 0) {
-                        localStorage.setItem(STORAGE_PROJECTS_KEY, JSON.stringify(merged));
-                    }
+                    const normalized = apiList.map(p => normalizeProject(p, storedDocs));
+                    setProjects(normalized);
+                    localStorage.setItem(STORAGE_PROJECTS_KEY, JSON.stringify(normalized));
                     setMeta(res?.meta ?? null);
                 } catch (apiErr) {
                     console.warn('[ProjectContext] API load failed, using local cache:', apiErr);

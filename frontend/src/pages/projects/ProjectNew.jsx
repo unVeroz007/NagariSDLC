@@ -295,9 +295,9 @@ export default function ProjectNew() {
     const priorities = ['Rendah', 'Medium', 'Urgent'];
 
     return (
-        <div className="flex-1 overflow-y-auto px-6 py-4 md:px-8 md:py-5 relative bg-[#f8f9fb]">
+        <div className="flex-1 overflow-y-auto overflow-x-hidden px-6 py-4 md:px-8 md:py-5 relative bg-[#f8f9fb]">
             {/* Background effect */}
-            <div className="absolute top-0 right-0 w-[600px] h-[400px] bg-blue-500/5 blur-[100px] rounded-full pointer-events-none -z-10 transform translate-x-1/3 -translate-y-1/4"></div>
+            <div className="absolute top-0 right-0 w-[600px] h-[400px] bg-blue-500/5 blur-[100px] rounded-full pointer-events-none -z-10 transform translate-x-1/4 -translate-y-1/4"></div>
 
             <div className="max-w-4xl mx-auto">
                 {/* Header */}

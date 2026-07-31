@@ -88,11 +88,7 @@ export default function ProjectList() {
     ];
 
     if (isLoading) return <LoadingSpinner text="Memuat daftar proyek..." />;
-    if (projects.length === 0) return (
-        <div className="px-6 py-4 md:px-8 md:py-5">
-            <EmptyState title="Belum Ada Proyek" description="Belum ada proyek yang terdaftar." actionText="Buat Proyek Baru" onAction={() => navigate('/projects/new')} />
-        </div>
-    );
+
 
     return (
         <div className="px-6 py-4 md:px-8 md:py-5 animate-slide-up">
@@ -279,13 +275,20 @@ export default function ProjectList() {
                                     })
                                 ) : (
                                     <tr>
-                                        <td colSpan="7" className="px-6 py-16 text-center">
-                                            <div className="flex flex-col items-center gap-3">
-                                                <div className="w-16 h-16 bg-gray-100 rounded-2xl flex items-center justify-center">
-                                                    <Folder size={32} className="text-gray-400" />
+                                        <td colSpan="7" className="px-6 py-14 text-center">
+                                            <div className="flex flex-col items-center gap-2">
+                                                <div className="w-14 h-14 bg-blue-50 text-[#1A56DB] rounded-2xl flex items-center justify-center mb-1">
+                                                    <Folder size={28} />
                                                 </div>
-                                                <p className="text-gray-500 font-medium">Tidak ada proyek yang ditemukan</p>
-                                                <p className="text-gray-400 text-sm">Coba ubah filter pencarian Anda</p>
+                                                <p className="text-gray-800 font-bold text-base">Belum Ada Proyek</p>
+                                                <p className="text-gray-500 text-xs">Belum ada proyek yang terdaftar di sistem. Mulai dengan membuat proyek SDLC pertama Anda.</p>
+                                                <button
+                                                    onClick={() => navigate('/projects/new')}
+                                                    className="mt-2 inline-flex items-center gap-2 px-4 py-2 bg-[#003a73] text-white text-xs font-bold rounded-xl shadow-sm hover:bg-[#002a5a] transition-all"
+                                                >
+                                                    <Plus size={15} />
+                                                    <span>Buat Proyek Baru</span>
+                                                </button>
                                             </div>
                                         </td>
                                     </tr>

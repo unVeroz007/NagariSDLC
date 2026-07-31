@@ -99,4 +99,9 @@ class Project extends Model
     {
         return $this->hasMany(ReleaseRequest::class);
     }
+
+    public function documents(): HasMany
+    {
+        return $this->hasMany(DocumentVault::class);
+    }
 }

@@ -232,7 +232,7 @@ export default function MainLayout() {
                     </div>
                 </header>
 
-                <main className="flex-1 overflow-y-auto w-full relative">
+                <main className="flex-1 overflow-y-auto overflow-x-hidden w-full relative">
                     <Outlet />
                 </main>
             </div>

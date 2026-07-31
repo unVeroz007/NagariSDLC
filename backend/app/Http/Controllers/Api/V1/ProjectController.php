@@ -23,7 +23,7 @@ class ProjectController extends Controller
 
     public function index(Request $request): JsonResponse
     {
-        $query = Project::with(['creator', 'pm', 'analyst', 'division']);
+        $query = Project::with(['creator', 'pm', 'analyst', 'division', 'documents']);
 
         if ($request->filled('status')) {
             $query->where('status', $request->status);

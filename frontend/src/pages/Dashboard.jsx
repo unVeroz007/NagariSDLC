@@ -305,20 +305,7 @@ export default function Dashboard() {
         return <LoadingSpinner text="Memuat dashboard..." />;
     }
 
-    // 📭 Empty state
-    if (projects.length === 0) {
-        return (
-            <div className="flex-1 overflow-y-auto px-6 py-4 md:px-8 md:py-5 bg-[#f8f9fb]">
-                <EmptyState
-                    title="Belum Ada Proyek"
-                    description="Mulai dengan membuat proyek SDLC pertama Anda."
-                    icon={Inbox}
-                    actionText="Buat Proyek Baru"
-                    onAction={() => navigate('/projects/new')}
-                />
-            </div>
-        );
-    }
+
 
     return (
         <div className="flex flex-col gap-6 px-6 py-4 lg:px-8 lg:py-5 animate-slide-up">
