@@ -18,6 +18,8 @@ import {
     ChevronRight,
     AlertCircle,
     X,
+    Eye,
+    Download,
 } from 'lucide-react';
 import { mockProjects, dispositionQueue } from '../../data/mockData';
 
@@ -74,6 +76,7 @@ export default function ProjectNew() {
     const [uploadedFiles, setUploadedFiles] = useState([]);
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [submittedProject, setSubmittedProject] = useState(null);
+    const [previewFile, setPreviewFile] = useState(null);
     const [errorMessage, setErrorMessage] = useState('');
 
     const showError = (msg) => {
@@ -578,7 +581,18 @@ export default function ProjectNew() {
                                             </div>
                                         </div>
 
-                                        <div className="flex items-center gap-3 shrink-0">
+                                        <div className="flex items-center gap-2.5 shrink-0">
+                                            {/* Tombol Lihat / Pratinjau Dokumen PDF */}
+                                            <button
+                                                type="button"
+                                                onClick={() => setPreviewFile(file)}
+                                                className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-50 hover:bg-blue-100 text-[#1A56DB] rounded-lg border border-blue-200 transition-all text-xs font-bold shadow-2xs active:scale-95 cursor-pointer"
+                                                title="Lihat / Pratinjau Dokumen PDF"
+                                            >
+                                                <Eye size={15} />
+                                                <span>Lihat Dokumen</span>
+                                            </button>
+
                                             {/* Selector Kategori Dokumen SDLC */}
                                             <select
                                                 value={file.doc_type || 'brd'}
@@ -739,6 +753,83 @@ export default function ProjectNew() {
                             >
                                 <X size={16} />
                                 <span>Tutup &amp; Buat Pengajuan Baru</span>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Modal Pratinjau Dokumen PDF */}
+            {previewFile && (
+                <div
+                    onClick={() => setPreviewFile(null)}
+                    className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/80 backdrop-blur-md animate-fade-in"
+                >
+                    <div
+                        onClick={(e) => e.stopPropagation()}
+                        className="bg-white rounded-2xl max-w-5xl w-full h-[85vh] shadow-2xl border border-gray-100 flex flex-col relative overflow-hidden animate-scale-up"
+                    >
+                        {/* Modal Header */}
+                        <div className="px-6 py-4 bg-white border-b border-gray-200 flex items-center justify-between shrink-0">
+                            <div className="flex items-center gap-3 min-w-0">
+                                <div className="w-9 h-9 rounded-lg bg-red-50 text-red-600 border border-red-200 flex items-center justify-center font-bold text-xs shrink-0">
+                                    PDF
+                                </div>
+                                <div className="min-w-0">
+                                    <h3 className="text-base font-bold text-gray-800 truncate max-w-lg">{previewFile.name}</h3>
+                                    <p className="text-xs text-gray-500">{previewFile.size} • Pratinjau Berkas PDF</p>
+                                </div>
+                            </div>
+
+                            <div className="flex items-center gap-2">
+                                {previewFile.url && (
+                                    <a
+                                        href={previewFile.url}
+                                        download={previewFile.name}
+                                        className="p-2 text-gray-600 hover:text-[#1A56DB] hover:bg-blue-50 rounded-lg transition-colors flex items-center gap-1.5 text-xs font-semibold border border-gray-200"
+                                        title="Unduh File"
+                                    >
+                                        <Download size={16} />
+                                        <span className="hidden sm:inline">Unduh</span>
+                                    </a>
+                                )}
+                                <button
+                                    onClick={() => setPreviewFile(null)}
+                                    className="p-2 text-gray-400 hover:text-gray-700 hover:bg-gray-100 rounded-lg transition-colors cursor-pointer"
+                                    title="Tutup Pratinjau"
+                                >
+                                    <X size={20} />
+                                </button>
+                            </div>
+                        </div>
+
+                        {/* Modal Body (PDF Viewer) */}
+                        <div className="flex-1 bg-gray-100 p-2 sm:p-4 overflow-hidden relative">
+                            {previewFile.url ? (
+                                <iframe
+                                    src={previewFile.url}
+                                    title={previewFile.name}
+                                    className="w-full h-full rounded-xl border border-gray-200 bg-white shadow-inner"
+                                />
+                            ) : (
+                                <div className="w-full h-full flex flex-col items-center justify-center text-center p-6 bg-white rounded-xl">
+                                    <AlertCircle size={40} className="text-amber-500 mb-3" />
+                                    <p className="text-gray-800 font-bold">Pratinjau tidak tersedia</p>
+                                    <p className="text-gray-500 text-xs mt-1">Berkas PDF tidak dapat dimuat di browser.</p>
+                                </div>
+                            )}
+                        </div>
+
+                        {/* Modal Footer */}
+                        <div className="px-6 py-3 bg-white border-t border-gray-200 flex items-center justify-between shrink-0">
+                            <span className="text-xs text-gray-500 font-medium flex items-center gap-1.5">
+                                <CheckCircle2 size={14} className="text-emerald-600" /> Dokumen siap terlampir dalam pengajuan
+                            </span>
+                            <button
+                                onClick={() => setPreviewFile(null)}
+                                className="px-5 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 font-bold rounded-xl text-xs transition-all cursor-pointer"
+                            >
+                                Tutup Pratinjau
                             </button>
                         </div>
                     </div>
