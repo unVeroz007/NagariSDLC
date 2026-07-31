@@ -74,6 +74,7 @@ export default function ProjectNew() {
 
     const [uploadedFiles, setUploadedFiles] = useState([]);
     const [isSubmitting, setIsSubmitting] = useState(false);
+    const isSubmittingRef = useRef(false);
     const [submittedProject, setSubmittedProject] = useState(null);
     const [previewFile, setPreviewFile] = useState(null);
     const [errorMessage, setErrorMessage] = useState('');
@@ -84,6 +85,8 @@ export default function ProjectNew() {
     };
 
     const handleCloseModal = () => {
+        isSubmittingRef.current = false;
+        setIsSubmitting(false);
         setSubmittedProject(null);
         setFormData({
             projectName: '',
@@ -193,7 +196,9 @@ export default function ProjectNew() {
     // Handle Submit Ajukan Proyek
     const handleSubmit = async (e) => {
         e.preventDefault();
-        if (isSubmitting) return;
+        // 🛑 SYNCHRONOUS REF GUARD — Instantly blocks any secondary/rapid clicks with 0ms latency
+        if (isSubmittingRef.current || isSubmitting) return;
+
         if (!formData.projectName.trim()) {
             showError('Nama proyek wajib diisi!');
             return;
@@ -203,6 +208,7 @@ export default function ProjectNew() {
             return;
         }
 
+        isSubmittingRef.current = true;
         setIsSubmitting(true);
 
         try {
@@ -226,7 +232,6 @@ export default function ProjectNew() {
                 '/queue'
             );
 
-            setIsSubmitting(false);
             setSubmittedProject({
                 ...newProject,
                 id: res?.data?.id || `PRJ-${Date.now()}`,
@@ -234,6 +239,7 @@ export default function ProjectNew() {
             });
         } catch (err) {
             console.error('[ProjectNew] Submit error:', err);
+            isSubmittingRef.current = false;
             setIsSubmitting(false);
             const serverMsg = err?.response?.data?.message;
             const valErrors = err?.response?.data?.errors;

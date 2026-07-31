@@ -199,12 +199,17 @@ export function ProjectProvider({ children }) {
                 status: projectData.status || 'PENDING',
             });
             const created = res?.data;
-            if (created && uploadedDocs.length > 0) {
-                const docsWithProjectId = uploadedDocs.map(d => ({ ...d, projectId: created.id }));
-                const currentDocs = getMockDocs();
-                saveDocuments([...docsWithProjectId, ...currentDocs]);
+            if (created) {
+                const normCreated = normalizeProject(created, uploadedDocs);
+                setProjects(prev => [normCreated, ...prev]);
+                if (uploadedDocs.length > 0) {
+                    const docsWithProjectId = uploadedDocs.map(d => ({ ...d, projectId: created.id }));
+                    const currentDocs = getMockDocs();
+                    saveDocuments([...docsWithProjectId, ...currentDocs]);
+                }
             }
-            await loadProjects(false);
+            // Trigger background reload without delaying caller
+            loadProjects(false);
             return res;
         } else {
             const newProject = normalizeProject(projectData, uploadedDocs);
