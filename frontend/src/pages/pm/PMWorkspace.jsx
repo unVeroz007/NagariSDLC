@@ -52,7 +52,7 @@ import toast from 'react-hot-toast';
 export default function PMWorkspace() {
     const { user } = useAuth();
     const { projects, isLoading, refreshData } = useProjects();
-    const { notifications, unreadCount } = useNotifications();
+    const { notifications } = useNotifications();
     const navigate = useNavigate();
 
     const [activeTab, setActiveTab] = useState('overview'); // 'overview' | 'projects' | 'tasks'
@@ -241,42 +241,9 @@ export default function PMWorkspace() {
         return <LoadingSpinner text="Memuat workspace PM..." />;
     }
 
-
     return (
-        <div className="flex-1 overflow-hidden bg-[#f8f9fb] flex flex-col">
-            {/* Topbar */}
-            <header className="h-16 bg-white border-b border-gray-200 flex justify-between items-center px-6 shrink-0 z-10">
-                <div className="flex items-center text-sm text-gray-500">
-                    <span className="hover:text-[#1A56DB] cursor-pointer">Beranda</span>
-                    <ChevronRight size={16} className="mx-2 text-gray-300" />
-                    <span className="font-semibold text-gray-800">PM Workspace</span>
-                </div>
-                <div className="flex items-center gap-4">
-                    <div className="relative hidden md:block">
-                        <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-                        <input
-                            type="text"
-                            value={searchTerm}
-                            onChange={(e) => setSearchTerm(e.target.value)}
-                            placeholder="Cari proyek..."
-                            className="pl-10 pr-4 py-2 w-64 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-[#1A56DB] outline-none bg-gray-50"
-                        />
-                    </div>
-                    <button className="relative p-2 text-gray-500 hover:text-[#1A56DB] hover:bg-gray-100 rounded-full transition-colors">
-                        <Bell size={20} />
-                        {unreadCount > 0 && (
-                            <span className="absolute top-1.5 right-1.5 w-2.5 h-2.5 bg-red-500 rounded-full border-2 border-white"></span>
-                        )}
-                    </button>
-                    <div className="w-8 h-8 rounded-full bg-[#003a73] text-white flex items-center justify-center font-bold text-sm">
-                        {user?.name?.charAt(0) || 'P'}
-                    </div>
-                </div>
-            </header>
-
-            {/* Content */}
-            <div className="flex-1 overflow-y-auto p-6 md:p-8">
-                <div className="max-w-7xl mx-auto space-y-6">
+        <div className="p-6 md:p-8 bg-[#f8f9fb] min-h-full">
+            <div className="max-w-7xl mx-auto space-y-6">
                     {/* Greeting */}
                     <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
                         <div>
@@ -510,6 +477,19 @@ export default function PMWorkspace() {
 
                     {activeTab === 'projects' && (
                         <div className="bg-white rounded-xl border border-gray-200 overflow-hidden shadow-sm">
+                            <div className="p-4 border-b border-gray-200 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 bg-gray-50/50">
+                                <h3 className="font-bold text-gray-800 text-sm">Daftar Proyek</h3>
+                                <div className="relative w-full sm:w-64">
+                                    <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                                    <input
+                                        type="text"
+                                        value={searchTerm}
+                                        onChange={(e) => setSearchTerm(e.target.value)}
+                                        placeholder="Cari nama, ID, atau status..."
+                                        className="pl-9 pr-4 py-1.5 text-xs border border-gray-200 rounded-xl focus:ring-2 focus:ring-[#1A56DB] outline-none bg-white w-full shadow-xs"
+                                    />
+                                </div>
+                            </div>
                             <div className="overflow-x-auto">
                                 <table className="w-full text-left border-collapse">
                                     <thead>
@@ -643,6 +623,5 @@ export default function PMWorkspace() {
                     )}
                 </div>
             </div>
-        </div>
     );
 }
