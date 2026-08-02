@@ -253,9 +253,9 @@ export default function WorkspaceDevAnalyst() {
             </div>
 
             {/* Content Body (Standard 2-Column Split Layout) */}
-            <div className="flex flex-col lg:flex-row gap-6 h-[calc(100vh-220px)] min-h-[600px]">
+            <div className="flex flex-col lg:flex-row gap-6 lg:h-[calc(100vh-220px)] lg:min-h-[600px]">
                 {/* LEFT PANEL: Antrean Tugas Analyst Dev */}
-                <div className="w-full lg:w-1/3 flex flex-col bg-white border border-gray-200 rounded-2xl shadow-sm overflow-hidden">
+                <div className="w-full lg:w-1/3 flex flex-col bg-white border border-gray-200 rounded-2xl shadow-sm overflow-hidden shrink-0 lg:h-full">
                     <div className="p-4 border-b border-gray-100 flex justify-between items-center shrink-0 bg-slate-50/60">
                         <div>
                             <h2 className="text-base font-bold text-gray-800">Tugas Kajian Teknis</h2>
@@ -264,7 +264,7 @@ export default function WorkspaceDevAnalyst() {
                         <Filter size={16} className="text-gray-400" />
                     </div>
 
-                    <div className="flex-1 overflow-y-auto p-3 space-y-3 bg-gray-50/40 flex flex-col justify-start">
+                    <div className="max-lg:max-h-[280px] flex-1 overflow-y-auto p-3 space-y-3 bg-gray-50/40 flex flex-col justify-start">
                         {reviewQueue.length === 0 ? (
                             <div className="p-8 text-center text-gray-400 my-auto">
                                 <CheckCircle2 size={36} className="mx-auto mb-2 opacity-50 text-emerald-600" />
@@ -325,7 +325,7 @@ export default function WorkspaceDevAnalyst() {
                         </div>
                     </div>
                 ) : (
-                    <div className="w-full lg:w-2/3 flex flex-col bg-white border border-gray-200 rounded-2xl shadow-sm overflow-hidden">
+                    <div className="w-full lg:w-2/3 flex flex-col bg-white border border-gray-200 rounded-2xl shadow-sm overflow-hidden lg:h-full">
                             {/* Detail Header */}
                             <div className="p-5 border-b border-gray-100 shrink-0 bg-slate-50/50 flex items-start justify-between">
                                 <div>
@@ -342,7 +342,7 @@ export default function WorkspaceDevAnalyst() {
                             </div>
 
                             {/* Scrollable Form Body */}
-                            <div className="flex-1 overflow-y-auto p-6 space-y-6">
+                            <div className="lg:flex-1 lg:overflow-y-auto p-6 space-y-6">
                                 {/* Card Hasil Kajian Perencanaan TI (Fase 1) */}
                                 <div className="bg-emerald-50/80 p-4.5 rounded-xl border border-emerald-200 space-y-3 shadow-2xs">
                                     <div className="flex items-center justify-between">

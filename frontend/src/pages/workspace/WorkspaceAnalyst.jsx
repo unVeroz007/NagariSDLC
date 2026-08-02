@@ -275,9 +275,9 @@ export default function WorkspaceAnalyst() {
             </div>
 
             {/* Split Layout */}
-            <div className="flex flex-col lg:flex-row gap-6 h-[calc(100vh-220px)] min-h-[600px]">
+            <div className="flex flex-col lg:flex-row gap-6 lg:h-[calc(100vh-220px)] lg:min-h-[600px]">
                 {/* LEFT PANEL: Inbox */}
-                <div className="w-full lg:w-1/3 flex flex-col bg-white border border-gray-100 rounded-2xl shadow-sm overflow-hidden">
+                <div className="w-full lg:w-1/3 flex flex-col bg-white border border-gray-100 rounded-2xl shadow-sm overflow-hidden shrink-0 lg:h-full">
                     <div className="p-4 border-b border-gray-100 flex justify-between items-center shrink-0">
                         <div>
                             <h2 className="text-base font-bold text-gray-800">Tugas Review</h2>
@@ -287,7 +287,7 @@ export default function WorkspaceAnalyst() {
                             <Filter size={16} />
                         </button>
                     </div>
-                    <div className="flex-1 overflow-y-auto p-3 space-y-2.5 bg-gray-50/40">
+                    <div className="max-lg:max-h-[280px] flex-1 overflow-y-auto p-3 space-y-2.5 bg-gray-50/40">
                         {reviewQueue.map((project) => (
                             <div
                                 key={project.id}
@@ -327,7 +327,7 @@ export default function WorkspaceAnalyst() {
                 </div>
 
                 {/* RIGHT PANEL: Review Form */}
-                <div className="w-full lg:w-2/3 bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden flex flex-col">
+                <div className="w-full lg:w-2/3 bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden flex flex-col lg:h-full">
                     {!selectedProject ? (
                         <div className="flex-1 flex flex-col items-center justify-center p-8 text-center animate-scale-in">
                             <div className="w-24 h-24 rounded-3xl bg-emerald-100 text-emerald-600 flex items-center justify-center mb-6 shadow-sm">
@@ -364,7 +364,7 @@ export default function WorkspaceAnalyst() {
                         )}
                     </div>
 
-                    <div className="flex-1 overflow-y-auto p-6">
+                    <div className="lg:flex-1 lg:overflow-y-auto p-6">
                         {/* Documents Inisiasi Peminta (Dynamic & Interactive) */}
                         <div className="mb-6 border-b border-gray-200 pb-6">
                             <h3 className="text-lg font-semibold text-gray-800 mb-3 flex items-center gap-2">
