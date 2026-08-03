@@ -7,6 +7,7 @@ import toast from 'react-hot-toast';
 import LoadingSpinner from '../../components/LoadingSpinner';
 import EmptyState from '../../components/EmptyState';
 import RBBBadge from '../../components/RBBBadge';
+import DocumentViewerModal from '../../components/DocumentViewerModal';
 import {
     Search,
     Filter,
@@ -975,117 +976,11 @@ export default function ProjectTracker() {
 
             {/* ── MODAL VIEWER DOKUMEN RESMI SDLC BANK NAGARI ── */}
             {previewDoc && (
-                <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-xs z-50 flex items-center justify-center p-4 overflow-y-auto">
-                    <div className="bg-white rounded-2xl max-w-3xl w-full p-6 sm:p-8 shadow-2xl animate-scale-up border border-gray-200 my-8">
-                        {/* Top Action Bar */}
-                        <div className="flex justify-between items-center mb-6 pb-4 border-b border-gray-200">
-                            <div className="flex items-center gap-3">
-                                <div className="w-10 h-10 bg-[#003a73] text-white rounded-xl flex items-center justify-center font-black text-sm shadow-sm">
-                                    BN
-                                </div>
-                                <div>
-                                    <h3 className="font-bold text-gray-800 text-sm sm:text-base">{previewDoc.name}</h3>
-                                    <p className="text-xs text-gray-500">Tipe File: {previewDoc.size || '2.4 MB'} • {previewDoc.type || 'Dokumen SDLC'}</p>
-                                </div>
-                            </div>
-                            <div className="flex items-center gap-2">
-                                <button
-                                    onClick={() => handleDownloadFile(previewDoc)}
-                                    className="px-3.5 py-1.5 bg-[#1A56DB] text-white rounded-xl text-xs font-bold hover:bg-blue-700 transition-colors flex items-center gap-1.5 shadow-xs cursor-pointer"
-                                >
-                                    <Download size={14} /> Unduh File
-                                </button>
-                                <button onClick={() => setPreviewDoc(null)} className="text-gray-400 hover:text-gray-600 p-1.5 rounded-lg hover:bg-gray-100 transition-colors cursor-pointer">
-                                    <X size={20} />
-                                </button>
-                            </div>
-                        </div>
-
-                        {/* Document Body */}
-                        <div className="bg-[#f8f9fb] border border-gray-200 rounded-xl p-3 sm:p-6 max-h-[70vh] overflow-y-auto space-y-6 text-gray-800 font-sans shadow-inner flex justify-center items-start">
-                            {previewBlobUrl ? (
-                                <object
-                                    data={previewBlobUrl}
-                                    type="application/pdf"
-                                    className="w-full h-full min-h-[600px] bg-white rounded-xl shadow-md border border-gray-200"
-                                >
-                                    <iframe
-                                        src={previewBlobUrl}
-                                        title={previewDoc.name}
-                                        className="w-full h-full min-h-[600px] bg-white rounded-xl border-0"
-                                    />
-                                </object>
-                            ) : (
-                                <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-xs space-y-6 w-full">
-                                    {/* Header Kop Surat Dokumen */}
-                                    <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-xs flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-                                        <div>
-                                            <span className="text-[10px] font-bold text-[#1A56DB] tracking-widest uppercase bg-blue-50 px-2.5 py-1 rounded border border-blue-100">
-                                                SDLC BANK NAGARI ENTERPRISE
-                                            </span>
-                                            <h2 className="text-xl font-extrabold text-gray-900 mt-2">
-                                                {previewDoc.type ? `${previewDoc.type} DOKUMEN RESMI` : 'DOKUMEN SPESIFIKASI SDLC'}
-                                            </h2>
-                                            <p className="text-xs text-gray-500 mt-0.5">
-                                                Proyek: <span className="font-semibold text-gray-800">{selectedProject?.name || 'Proyek SDLC'}</span> ({selectedProject?.reqId || selectedProject?.id || 'PRJ-2026'})
-                                            </p>
-                                        </div>
-                                        <div className="text-right text-xs text-gray-500 border-l sm:border-l-0 border-gray-200 pl-3 sm:pl-0">
-                                            <p><strong>Status:</strong> <span className="text-emerald-600 font-bold">TERVERIFIKASI SDLC</span></p>
-                                            <p><strong>Kategori:</strong> {previewDoc.category || 'Dokumen Resmi'}</p>
-                                            <p><strong>Tanggal:</strong> {new Date().toLocaleDateString('id-ID')}</p>
-                                        </div>
-                                    </div>
-
-                                    {/* Bab 1: Identitas & Lingkup */}
-                                    <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-xs space-y-3">
-                                        <h4 className="font-bold text-sm text-[#003a73] uppercase tracking-wider border-b border-gray-100 pb-2">
-                                            1. RINGKASAN &amp; SPESIFIKASI DOKUMEN
-                                        </h4>
-                                        <p className="text-xs sm:text-sm text-gray-700 leading-relaxed">
-                                            Dokumen <strong className="text-gray-900">{previewDoc.name}</strong> disusun secara resmi untuk memenuhi standar tata kelola teknologi informasi Bank Nagari pada fase pengembangan sistem <strong className="text-gray-900">{selectedProject?.name}</strong>.
-                                        </p>
-                                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2 text-xs">
-                                            <div className="bg-gray-50 p-3 rounded-lg border border-gray-100">
-                                                <span className="font-bold text-gray-500 uppercase block mb-1">Divisi Peminta</span>
-                                                <span className="font-semibold text-gray-800">{selectedProject?.division || 'Divisi TI'}</span>
-                                            </div>
-                                            <div className="bg-gray-50 p-3 rounded-lg border border-gray-100">
-                                                <span className="font-bold text-gray-500 uppercase block mb-1">Status Proyek Saat Ini</span>
-                                                <span className="font-semibold text-[#1A56DB]">{selectedProject?.status || 'Active'}</span>
-                                            </div>
-                                        </div>
-                                    </div>
-
-                                    {/* Bab 2: Ketentuan & Verifikasi */}
-                                    <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-xs space-y-3">
-                                        <h4 className="font-bold text-sm text-[#003a73] uppercase tracking-wider border-b border-gray-100 pb-2">
-                                            2. KETENTUAN KHUSUS &amp; QUALITY GATE
-                                        </h4>
-                                        <ul className="list-disc list-inside text-xs sm:text-sm text-gray-700 space-y-1.5 font-medium">
-                                            <li>Seluruh item kebutuhan fungsional dan teknis telah diperiksa oleh Lead Analyst.</li>
-                                            <li>Arsitektur dan spesifikasi keamanan informasi memenuhi kepatuhan regulasi perbankan.</li>
-                                            <li>Dokumen ini dapat diunduh secara resmi untuk kebutuhan audit internal &amp; eksternal.</li>
-                                        </ul>
-                                    </div>
-                                </div>
-                            )}
-                        </div>
-
-                        {/* Footer Modal */}
-                        <div className="flex justify-between items-center mt-6 pt-4 border-t border-gray-200 text-xs">
-                            <span className="text-gray-400 font-medium">SDLC Bank Nagari Enterprise • Dokumen Viewer</span>
-                            <div className="flex gap-2">
-                                <button
-                                    onClick={() => setPreviewDoc(null)}
-                                    className="px-5 py-2 bg-gray-100 text-gray-700 font-bold rounded-xl hover:bg-gray-200 transition-colors cursor-pointer"
-                                >
-                                    Tutup Viewer
-                                </button>
-                            </div>
-                        </div>
-                    </div>
-                </div>
+                <DocumentViewerModal
+                    doc={previewDoc}
+                    project={selectedProject}
+                    onClose={() => setPreviewDoc(null)}
+                />
             )}
         </div>
     );

@@ -23,10 +23,13 @@ import {
     File,
     Edit3,
     X,
+    MessageSquare,
+    UserCheck,
 } from 'lucide-react';
 import { useProjects, saveFileToStore } from '../../contexts/ProjectContext';
 import LoadingSpinner from '../../components/LoadingSpinner';
 import EmptyState from '../../components/EmptyState';
+import DocumentViewerModal from '../../components/DocumentViewerModal';
 import toast from 'react-hot-toast';
 
 export default function WorkspaceAnalyst() {
@@ -249,17 +252,22 @@ export default function WorkspaceAnalyst() {
     };
 
     const getFileIcon = (type) => {
+        if (!type) return 'bg-gray-100 text-gray-600';
         const icons = {
             pdf: 'bg-red-100 text-red-600',
             docx: 'bg-blue-100 text-blue-600',
             xlsx: 'bg-green-100 text-green-600',
+            pptx: 'bg-orange-100 text-orange-600',
+            zip: 'bg-purple-100 text-purple-600',
         };
-        return icons[type] || 'bg-gray-100 text-gray-600';
+        return icons[String(type).toLowerCase()] || 'bg-gray-100 text-gray-600';
     };
 
     const getFileLabel = (type) => {
-        const labels = { pdf: 'PDF', docx: 'DOCX', xlsx: 'XLSX' };
-        return labels[type] || type.toUpperCase();
+        if (!type) return 'DOC';
+        const labels = { pdf: 'PDF', docx: 'DOCX', xlsx: 'XLSX', pptx: 'PPTX', zip: 'ZIP' };
+        const key = String(type).toLowerCase();
+        return labels[key] || String(type).toUpperCase();
     };
 
     // Hapus full-screen empty state return
@@ -275,9 +283,9 @@ export default function WorkspaceAnalyst() {
             </div>
 
             {/* Split Layout */}
-            <div className="flex flex-col lg:flex-row gap-6 lg:h-[calc(100vh-220px)] lg:min-h-[600px]">
+            <div className="flex flex-col lg:flex-row gap-6 items-start">
                 {/* LEFT PANEL: Inbox */}
-                <div className="w-full lg:w-1/3 flex flex-col bg-white border border-gray-100 rounded-2xl shadow-sm overflow-hidden shrink-0 lg:h-full">
+                <div className="w-full lg:w-1/3 flex flex-col bg-white border border-gray-100 rounded-2xl shadow-sm overflow-hidden shrink-0 lg:sticky lg:top-4 lg:max-h-[calc(100vh-100px)]">
                     <div className="p-4 border-b border-gray-100 flex justify-between items-center shrink-0">
                         <div>
                             <h2 className="text-base font-bold text-gray-800">Tugas Review</h2>
@@ -313,11 +321,11 @@ export default function WorkspaceAnalyst() {
                                 <div className="mb-2"><RBBBadge type={project.type} deadline={project.rbbDeadline} /></div>
                                 <h4 className="font-semibold text-gray-800 text-sm mb-1 group-hover:text-[#1A56DB] transition-colors">{project.name}</h4>
                                 <p className="text-xs text-gray-500 mb-2.5">Peminta: {project.division}</p>
-                                {project.leadNote && (
-                                    <div className="bg-amber-50 p-2 rounded-lg border border-amber-200">
-                                        <p className="text-xs italic text-gray-600 flex items-start gap-1.5">
-                                            <AlertCircle size={13} className="text-amber-600 shrink-0 mt-0.5" />
-                                            "{project.leadNote}"
+                                {(project.leadNote || project.leadNotes || project.notes || project.dispositionNotes || project.assignmentNote) && (
+                                    <div className="bg-amber-50/90 p-2.5 rounded-lg border border-amber-200 text-xs">
+                                        <p className="text-[11px] italic text-amber-900 flex items-start gap-1.5 font-medium leading-relaxed">
+                                            <MessageSquare size={13} className="text-amber-600 shrink-0 mt-0.5" />
+                                            "{project.leadNote || project.leadNotes || project.notes || project.dispositionNotes || project.assignmentNote}"
                                         </p>
                                     </div>
                                 )}
@@ -327,9 +335,9 @@ export default function WorkspaceAnalyst() {
                 </div>
 
                 {/* RIGHT PANEL: Review Form */}
-                <div className="w-full lg:w-2/3 bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden flex flex-col lg:h-full">
+                <div className="w-full lg:w-2/3 bg-white border border-gray-200 rounded-xl shadow-sm flex flex-col">
                     {!selectedProject ? (
-                        <div className="flex-1 flex flex-col items-center justify-center p-8 text-center animate-scale-in">
+                        <div className="flex-1 flex flex-col items-center justify-center p-8 text-center animate-scale-in min-h-[400px]">
                             <div className="w-24 h-24 rounded-3xl bg-emerald-100 text-emerald-600 flex items-center justify-center mb-6 shadow-sm">
                                 <CheckCircle size={48} />
                             </div>
@@ -356,15 +364,34 @@ export default function WorkspaceAnalyst() {
                                 </span>
                             </div>
                         </div>
-                        {selectedProject.leadNote && (
-                            <div className="bg-amber-50 border border-amber-200 p-4 rounded-lg mt-4 flex gap-3 text-amber-900 text-sm shadow-sm">
-                                <AlertCircle size={20} className="text-amber-600 shrink-0" />
-                                <p className="text-sm"><strong>Instruksi Lead:</strong> {selectedProject.leadNote}</p>
+
+                        {/* Pesan & Catatan Disposisi dari Lead Perencanaan TI */}
+                        {(selectedProject.leadNote || selectedProject.leadNotes || selectedProject.notes || selectedProject.dispositionNotes || selectedProject.assignmentNote) ? (
+                            <div className="bg-amber-50/90 border border-amber-200 p-4 rounded-xl mt-4 space-y-1.5 shadow-2xs">
+                                <div className="flex items-center gap-2 font-bold text-amber-950 text-xs">
+                                    <MessageSquare size={16} className="text-amber-600" />
+                                    Pesan &amp; Catatan Disposisi dari Lead Perencanaan TI:
+                                </div>
+                                <div className="bg-white p-3 rounded-lg border border-amber-100 text-xs">
+                                    <p className="text-gray-800 font-semibold italic text-xs sm:text-sm leading-relaxed">
+                                        "{selectedProject.leadNote || selectedProject.leadNotes || selectedProject.notes || selectedProject.dispositionNotes || selectedProject.assignmentNote}"
+                                    </p>
+                                    {(selectedProject.assignedAnalyst || selectedProject.analyst) && (
+                                        <p className="text-[10px] text-gray-400 mt-1.5 font-mono">
+                                            Disposisi untuk Analyst: <span className="font-bold text-gray-700">{selectedProject.assignedAnalyst || selectedProject.analyst}</span>
+                                        </p>
+                                    )}
+                                </div>
+                            </div>
+                        ) : (
+                            <div className="bg-slate-50 border border-slate-200 p-3.5 rounded-xl mt-4 text-xs text-slate-500 flex items-center gap-2 italic">
+                                <MessageSquare size={14} className="text-slate-400 shrink-0" />
+                                <span>Tidak ada catatan tambahan khusus dari Lead Perencanaan untuk penugasan proyek ini.</span>
                             </div>
                         )}
                     </div>
 
-                    <div className="lg:flex-1 lg:overflow-y-auto p-6">
+                    <div className="p-6 space-y-6">
                         {/* Documents Inisiasi Peminta (Dynamic & Interactive) */}
                         <div className="mb-6 border-b border-gray-200 pb-6">
                             <h3 className="text-lg font-semibold text-gray-800 mb-3 flex items-center gap-2">
@@ -535,117 +562,11 @@ export default function WorkspaceAnalyst() {
 
             {/* ── MODAL VIEWER DOKUMEN RESMI SDLC BANK NAGARI ── */}
             {previewDoc && (
-                <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-xs z-50 flex items-center justify-center p-4 overflow-y-auto">
-                    <div className="bg-white rounded-2xl max-w-3xl w-full p-6 sm:p-8 shadow-2xl animate-scale-up border border-gray-200 my-8">
-                        {/* Top Action Bar */}
-                        <div className="flex justify-between items-center mb-6 pb-4 border-b border-gray-200">
-                            <div className="flex items-center gap-3">
-                                <div className="w-10 h-10 bg-[#003a73] text-white rounded-xl flex items-center justify-center font-black text-sm shadow-sm">
-                                    BN
-                                </div>
-                                <div>
-                                    <h3 className="font-bold text-gray-800 text-sm sm:text-base">{previewDoc.name}</h3>
-                                    <p className="text-xs text-gray-500">Tipe File: {previewDoc.size || '2.4 MB'} • Lembar Kerja Resmi SDLC</p>
-                                </div>
-                            </div>
-                            <div className="flex items-center gap-2">
-                                <button
-                                    onClick={() => handleDownloadFile(previewDoc)}
-                                    className="px-3.5 py-1.5 bg-[#1A56DB] text-white rounded-xl text-xs font-bold hover:bg-blue-700 transition-colors flex items-center gap-1.5 shadow-xs cursor-pointer"
-                                >
-                                    <Download size={14} /> Unduh File Asli
-                                </button>
-                                <button onClick={() => setPreviewDoc(null)} className="text-gray-400 hover:text-gray-600 p-1.5 rounded-lg hover:bg-gray-100 transition-colors">
-                                    <X size={20} />
-                                </button>
-                            </div>
-                        </div>
-
-                        {/* Document Body (Render Real PDF Canvas or Formatted Reader Container) */}
-                        <div className="bg-[#f8f9fb] border border-gray-200 rounded-xl p-3 sm:p-6 max-h-[70vh] overflow-y-auto space-y-6 text-gray-800 font-sans shadow-inner flex justify-center items-start">
-                            {previewBlobUrl ? (
-                                <object
-                                    data={previewBlobUrl}
-                                    type="application/pdf"
-                                    className="w-full h-full min-h-[600px] bg-white rounded-xl shadow-md border border-gray-200"
-                                >
-                                    <iframe
-                                        src={previewBlobUrl}
-                                        title={previewDoc.name}
-                                        className="w-full h-full min-h-[600px] bg-white rounded-xl border-0"
-                                    />
-                                </object>
-                            ) : (
-                                <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-xs space-y-6 w-full">
-                                    {/* Header Kop Surat Dokumen */}
-                                    <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-xs flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-                                        <div>
-                                            <span className="text-[10px] font-bold text-[#1A56DB] tracking-widest uppercase bg-blue-50 px-2.5 py-1 rounded border border-blue-100">
-                                                SDLC BANK NAGARI ENTERPRISE
-                                            </span>
-                                            <h2 className="text-xl font-extrabold text-gray-900 mt-2">
-                                                BUSINESS REQUIREMENT DOCUMENT (BRD)
-                                            </h2>
-                                            <p className="text-xs text-gray-500 mt-0.5">
-                                                Proyek: <span className="font-semibold text-gray-800">{selectedProject?.name || 'Proyek SDLC'}</span> ({selectedProject?.id || 'PRJ-2026-095'})
-                                            </p>
-                                        </div>
-                                        <div className="text-right text-xs text-gray-500 border-l sm:border-l-0 border-gray-200 pl-3 sm:pl-0">
-                                            <p><strong>Status:</strong> <span className="text-emerald-600 font-bold">DRAFT KAJIAN</span></p>
-                                            <p><strong>Versi:</strong> v1.0.2</p>
-                                            <p><strong>Tanggal:</strong> {new Date().toLocaleDateString('id-ID')}</p>
-                                        </div>
-                                    </div>
-
-                                    {/* Bab 1: Latar Belakang */}
-                                    <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-xs space-y-3">
-                                        <h4 className="font-bold text-sm text-[#003a73] uppercase tracking-wider border-b border-gray-100 pb-2">
-                                            1. LATAR BELAKANG &amp; TUJUAN BISNIS
-                                        </h4>
-                                        <p className="text-xs sm:text-sm text-gray-700 leading-relaxed">
-                                            {selectedProject?.description || 'Pengajuan kebutuhan pengembangan sistem baru untuk meningkatkan efisiensi operasional dan kualitas pelayanan nasabah di Bank Nagari.'}
-                                        </p>
-                                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2 text-xs">
-                                            <div className="bg-gray-50 p-3 rounded-lg border border-gray-100">
-                                                <span className="font-bold text-gray-500 uppercase block mb-1">Divisi Pengusul</span>
-                                                <span className="font-semibold text-gray-800">{selectedProject?.division || 'Divisi TI'}</span>
-                                            </div>
-                                            <div className="bg-gray-50 p-3 rounded-lg border border-gray-100">
-                                                <span className="font-bold text-gray-500 uppercase block mb-1">Prioritas Pelaksanaan</span>
-                                                <span className="font-semibold text-[#1A56DB]">{selectedProject?.priority || 'High Priority'}</span>
-                                            </div>
-                                        </div>
-                                    </div>
-
-                                    {/* Bab 2: Spesifikasi Persyaratan */}
-                                    <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-xs space-y-3">
-                                        <h4 className="font-bold text-sm text-[#003a73] uppercase tracking-wider border-b border-gray-100 pb-2">
-                                            2. SPESIFIKASI PERSYARATAN FUNGSI
-                                        </h4>
-                                        <ul className="list-disc list-inside text-xs sm:text-sm text-gray-700 space-y-1.5 font-medium">
-                                            <li>Integrasi modul pelaporan dengan infrastruktur Core Banking Bank Nagari.</li>
-                                            <li>Otomatisasi pengiriman laporan dan notifikasi persetujuan secara *real-time*.</li>
-                                            <li>Penerapan mekanisme enkripsi data sensitif nasabah dan jejak audit (*audit trail*).</li>
-                                        </ul>
-                                    </div>
-                                </div>
-                            )}
-                        </div>
-
-                        {/* Footer Modal */}
-                        <div className="flex justify-between items-center mt-6 pt-4 border-t border-gray-200 text-xs">
-                            <span className="text-gray-400 font-medium">SDLC Bank Nagari Enterprise • Viewer Dokumen</span>
-                            <div className="flex gap-2">
-                                <button
-                                    onClick={() => setPreviewDoc(null)}
-                                    className="px-5 py-2 bg-gray-100 text-gray-700 font-bold rounded-xl hover:bg-gray-200 transition-colors cursor-pointer"
-                                >
-                                    Tutup Viewer
-                                </button>
-                            </div>
-                        </div>
-                    </div>
-                </div>
+                <DocumentViewerModal
+                    doc={previewDoc}
+                    project={selectedProject}
+                    onClose={() => setPreviewDoc(null)}
+                />
             )}
         </div>
     );

@@ -26,6 +26,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useNotifications } from '../../contexts/NotificationContext';
 import LoadingSpinner from '../../components/LoadingSpinner';
 import EmptyState from '../../components/EmptyState';
+import DocumentViewerModal from '../../components/DocumentViewerModal';
 import toast from 'react-hot-toast';
 
 export default function WorkspaceLead() {
@@ -184,11 +185,18 @@ export default function WorkspaceLead() {
         }
         setIsSubmitting(true);
         
+        const assignedNote = notes && notes.trim() !== '' ? notes.trim() : null;
+
         updateProject(currentSelected.id, {
             analyst: selectedAnalyst,
+            assignedAnalyst: selectedAnalyst,
             status: 'IN_REVIEW',
             deadline: deadline || new Date().toISOString(),
-            leadNote: notes
+            leadNote: assignedNote,
+            leadNotes: assignedNote,
+            notes: assignedNote,
+            assignmentNote: assignedNote,
+            dispositionNotes: assignedNote
         });
 
         addNotification(
@@ -222,17 +230,22 @@ export default function WorkspaceLead() {
     };
 
     const getFileIcon = (type) => {
+        if (!type) return 'bg-gray-100 text-gray-600';
         const icons = {
             pdf: 'bg-red-100 text-red-600',
             docx: 'bg-blue-100 text-blue-600',
             xlsx: 'bg-green-100 text-green-600',
+            pptx: 'bg-orange-100 text-orange-600',
+            zip: 'bg-purple-100 text-purple-600',
         };
-        return icons[type] || 'bg-gray-100 text-gray-600';
+        return icons[String(type).toLowerCase()] || 'bg-gray-100 text-gray-600';
     };
 
     const getFileLabel = (type) => {
-        const labels = { pdf: 'PDF', docx: 'DOCX', xlsx: 'XLSX' };
-        return labels[type] || type.toUpperCase();
+        if (!type) return 'DOC';
+        const labels = { pdf: 'PDF', docx: 'DOCX', xlsx: 'XLSX', pptx: 'PPTX', zip: 'ZIP' };
+        const key = String(type).toLowerCase();
+        return labels[key] || String(type).toUpperCase();
     };
 
     // Hapus full-screen empty state return
@@ -282,9 +295,9 @@ export default function WorkspaceLead() {
             </div>
 
             {/* Split Layout */}
-            <div className="flex flex-col lg:flex-row gap-6 lg:h-[calc(100vh-220px)] lg:min-h-[600px]">
+            <div className="flex flex-col lg:flex-row gap-6 items-start">
                 {/* LEFT PANEL: Antrean */}
-                <div className="w-full lg:w-1/3 flex flex-col bg-white border border-gray-100 rounded-2xl shadow-sm overflow-hidden shrink-0 lg:h-full">
+                <div className="w-full lg:w-1/3 flex flex-col bg-white border border-gray-100 rounded-2xl shadow-sm overflow-hidden shrink-0 lg:sticky lg:top-4 lg:max-h-[calc(100vh-100px)]">
                     <div className="p-4 border-b border-gray-100 flex justify-between items-center shrink-0">
                         <div>
                             <h2 className="text-base font-bold text-gray-800">
@@ -334,9 +347,9 @@ export default function WorkspaceLead() {
                 </div>
 
                 {/* RIGHT PANEL: Detail & Form */}
-                <div className="w-full lg:w-2/3 bg-white border border-gray-100 rounded-2xl shadow-sm overflow-hidden flex flex-col lg:h-full">
+                <div className="w-full lg:w-2/3 bg-white border border-gray-100 rounded-2xl shadow-sm">
                     {!currentSelected ? (
-                        <div className="flex-1 flex flex-col items-center justify-center p-8 text-center animate-scale-in">
+                        <div className="flex-1 flex flex-col items-center justify-center p-8 text-center animate-scale-in min-h-[400px]">
                             <div className="w-24 h-24 rounded-3xl bg-emerald-100 text-emerald-600 flex items-center justify-center mb-6 shadow-sm">
                                 <Check size={48} />
                             </div>
@@ -391,7 +404,7 @@ export default function WorkspaceLead() {
                         </div>
                     </div>
 
-                    <div className="lg:flex-1 lg:overflow-y-auto p-6">
+                    <div className="p-6 space-y-6">
                         {/* Documents */}
                         <div className="mb-6">
                             <h3 className="text-lg font-semibold text-gray-800 mb-3 flex items-center gap-2">
@@ -724,122 +737,11 @@ export default function WorkspaceLead() {
 
             {/* ── MODAL VIEWER DOKUMEN FSD (Lead Perencanaan) ── */}
             {previewFsdDoc && (
-                <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-xs z-50 flex items-center justify-center p-4 overflow-y-auto">
-                    <div className="bg-white rounded-2xl max-w-3xl w-full p-6 sm:p-8 shadow-2xl animate-scale-up border border-gray-200 my-8">
-                        <div className="flex justify-between items-center mb-6 pb-4 border-b border-gray-200">
-                            <div className="flex items-center gap-3">
-                                <div className="w-10 h-10 bg-emerald-700 text-white rounded-xl flex items-center justify-center font-extrabold text-xs shadow-sm">
-                                    FSD
-                                </div>
-                                <div>
-                                    <h3 className="font-bold text-gray-800 text-sm sm:text-base">{previewFsdDoc.name}</h3>
-                                    <p className="text-xs text-gray-500">Hasil Kajian Analisis Teknis • Terverifikasi SDLC</p>
-                                </div>
-                            </div>
-                            <button onClick={() => setPreviewFsdDoc(null)} className="text-gray-400 hover:text-gray-600 p-1.5 rounded-lg hover:bg-gray-100 transition-colors">
-                                <X size={20} />
-                            </button>
-                        </div>
-
-                        <div className="bg-[#f8f9fb] border border-gray-200 rounded-xl p-3 sm:p-6 max-h-[70vh] overflow-y-auto space-y-6 text-gray-800 font-sans shadow-inner flex justify-center items-start">
-                            {previewFsdBlobUrl ? (
-                                <object
-                                    data={previewFsdBlobUrl}
-                                    type="application/pdf"
-                                    className="w-full h-full min-h-[650px] w-full bg-white rounded-xl shadow-md border border-gray-200"
-                                >
-                                    <embed
-                                        src={previewFsdBlobUrl}
-                                        type="application/pdf"
-                                        className="w-full h-full min-h-[650px]"
-                                    />
-                                    <iframe
-                                        src={previewFsdBlobUrl}
-                                        title={previewFsdDoc.name}
-                                        className="w-full h-full min-h-[650px] bg-white rounded-xl border-0"
-                                    />
-                                </object>
-                            ) : (
-                                <div className="bg-white p-6 sm:p-8 rounded-xl border border-gray-200 shadow-xs space-y-6 w-full text-gray-800">
-                                    {/* Kop Surat Dokumen Resmi SDLC */}
-                                    <div className="bg-[#003a73] text-white p-6 rounded-xl shadow-sm flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-                                        <div>
-                                            <span className="text-[10px] font-extrabold tracking-widest uppercase bg-white/20 px-2.5 py-1 rounded text-white border border-white/30">
-                                                SDLC BANK NAGARI ENTERPRISE
-                                            </span>
-                                            <h2 className="text-lg sm:text-xl font-black mt-2 text-white">
-                                                FUNCTIONAL SPECIFICATION DOCUMENT (FSD)
-                                            </h2>
-                                            <p className="text-xs text-blue-100 mt-1 font-medium">
-                                                Proyek: <span className="font-bold text-white">{currentSelected?.name}</span> ({currentSelected?.id})
-                                            </p>
-                                        </div>
-                                        <div className="text-right text-xs text-blue-100 border-l sm:border-l-0 border-white/20 pl-3 sm:pl-0 font-mono">
-                                            <p>STATUS: <span className="font-bold text-emerald-300">DIVERIFIKASI</span></p>
-                                            <p>VERSI: v1.0.0-FSD</p>
-                                            <p>TANGGAL: {new Date().toLocaleDateString('id-ID')}</p>
-                                        </div>
-                                    </div>
-
-                                    {/* Bab 1: Latar Belakang & Ringkasan Kajian */}
-                                    <div className="bg-gray-50/70 p-5 rounded-xl border border-gray-200 space-y-2">
-                                        <h4 className="font-bold text-xs text-[#003a73] uppercase tracking-wider border-b border-gray-200 pb-2">
-                                            1. RINGKASAN KAJIAN ANALISIS TEKNIS (ANALYST RESULT)
-                                        </h4>
-                                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2 text-xs">
-                                            <div className="bg-white p-3 rounded-lg border border-gray-200 shadow-2xs">
-                                                <span className="font-bold text-gray-400 uppercase block mb-1 text-[10px]">Keputusan Analyst</span>
-                                                <span className="font-extrabold text-emerald-700 text-sm">{currentSelected?.analystResult?.decision || 'Disetujui (Layak Develop)'}</span>
-                                            </div>
-                                            <div className="bg-white p-3 rounded-lg border border-gray-200 shadow-2xs">
-                                                <span className="font-bold text-gray-400 uppercase block mb-1 text-[10px]">Estimasi Pengerjaan</span>
-                                                <span className="font-extrabold text-[#1A56DB] text-sm">{currentSelected?.analystResult?.estimation || '30 Hari Kerja'}</span>
-                                            </div>
-                                        </div>
-                                        <div className="bg-white p-3 rounded-lg border border-gray-200 shadow-2xs mt-2 text-xs">
-                                            <span className="font-bold text-gray-400 uppercase block mb-1 text-[10px]">Catatan & Instuksi Analis</span>
-                                            <p className="text-gray-700 font-medium leading-relaxed">
-                                                {currentSelected?.analystResult?.notes || 'Spesifikasi teknis telah lengkap dan divalidasi sesuai standar arsitektur perbankan.'}
-                                            </p>
-                                        </div>
-                                    </div>
-
-                                    {/* Bab 2: Ruang Lingkup Arsitektur Sistem */}
-                                    <div className="bg-white p-5 rounded-xl border border-gray-200 space-y-3 text-xs sm:text-sm">
-                                        <h4 className="font-bold text-xs text-[#003a73] uppercase tracking-wider border-b border-gray-100 pb-2">
-                                            2. SPESIFIKASI ARSITEKTUR & INTEGRASI SISTEM
-                                        </h4>
-                                        <ul className="list-disc pl-5 text-gray-700 space-y-2">
-                                            <li>Integrasi API Middleware Gateway dengan infrastruktur Core Banking Bank Nagari.</li>
-                                            <li>Penerapan autentikasi dua faktor (2FA) & mekanisme SSL Pinning pada jalur komunikasi data.</li>
-                                            <li>Fitur otorisasi akses bertingkat (*Role-Based Access Control*) untuk menjaga integritas data nasabah.</li>
-                                        </ul>
-                                    </div>
-
-                                    {/* Bab 3: Kepatuhan Keamanan Siber */}
-                                    <div className="bg-white p-5 rounded-xl border border-gray-200 space-y-2 text-xs sm:text-sm">
-                                        <h4 className="font-bold text-xs text-[#003a73] uppercase tracking-wider border-b border-gray-100 pb-2">
-                                            3. KEPATUHAN KEAMANAN SIBER & REGULASI POJK
-                                        </h4>
-                                        <p className="text-gray-600 leading-relaxed">
-                                            Seluruh rancangan spesifikasi teknis dalam dokumen FSD ini telah memenuhi ketentuan POJK No.11/POJK.03/2022 tentang Penyelenggaraan Teknologi Informasi oleh Bank Umum serta petunjuk teknis Siber Divisi TI Bank Nagari.
-                                        </p>
-                                    </div>
-                                </div>
-                            )}
-                        </div>
-
-                        <div className="flex justify-between items-center mt-6 pt-4 border-t border-gray-200 text-xs">
-                            <span className="text-gray-400 font-medium">SDLC Bank Nagari Enterprise • Viewer FSD</span>
-                            <button
-                                onClick={() => setPreviewFsdDoc(null)}
-                                className="px-5 py-2 bg-gray-100 text-gray-700 font-bold rounded-xl hover:bg-gray-200 transition-colors cursor-pointer"
-                            >
-                                Tutup Viewer
-                            </button>
-                        </div>
-                    </div>
-                </div>
+                <DocumentViewerModal
+                    doc={previewFsdDoc}
+                    project={currentSelected}
+                    onClose={() => setPreviewFsdDoc(null)}
+                />
             )}
         </div>
     );

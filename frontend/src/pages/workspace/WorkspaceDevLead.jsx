@@ -5,6 +5,7 @@ import { useNotifications } from '../../contexts/NotificationContext';
 import { useNavigate } from 'react-router-dom';
 import RBBBadge from '../../components/RBBBadge';
 import LoadingSpinner from '../../components/LoadingSpinner';
+import DocumentViewerModal from '../../components/DocumentViewerModal';
 import {
     Inbox,
     Search as SearchIcon,
@@ -37,15 +38,17 @@ const resolveAllProjectDocs = (project) => {
     // 1. Initial BRD & documents in project.documents
     if (Array.isArray(project.documents) && project.documents.length > 0) {
         project.documents.forEach(d => {
-            const key = d.id || d.name || d.file_name;
+            const docName = d.name || d.file_name || 'Dokumen_SDLC.pdf';
+            const key = d.id || docName;
+            const isFsd = (d.type === 'fsd' || d.doc_type === 'fsd' || docName.toLowerCase().includes('fsd') || docName.toLowerCase().includes('kajian'));
             docsMap.set(key, {
                 ...d,
-                name: d.name || d.file_name || 'Dokumen_SDLC.pdf',
+                name: docName,
                 size: d.size || d.file_size || '2.0 MB',
-                label: (d.type === 'brd' || d.doc_type === 'brd' || d.category === 'brd') 
+                label: isFsd 
+                    ? 'Hasil Kajian FSD (Perencanaan TI)' 
+                    : (d.type === 'brd' || d.doc_type === 'brd' || d.category === 'brd' || docName.toLowerCase().includes('brd') || docName.toLowerCase().includes('laprak') || docName.toLowerCase().includes('form') || docName.toLowerCase().includes('kebutuhan') || docName.toLowerCase().includes('bimbingan')) 
                     ? 'Dokumen BRD Inisiasi' 
-                    : (d.type === 'fsd' || d.doc_type === 'fsd') 
-                    ? 'Dokumen FSD Perencanaan TI' 
                     : (d.type === 'fsd_dev' || d.doc_type === 'fsd_dev')
                     ? 'Spesifikasi Arsitektur (Dev)'
                     : (d.label || 'Dokumen SDLC Terlampir')
@@ -56,25 +59,41 @@ const resolveAllProjectDocs = (project) => {
     // 2. FSD Perencanaan Document
     if (project.fsdDocument && (project.fsdDocument.name || project.fsdDocument.file_name)) {
         const name = project.fsdDocument.name || project.fsdDocument.file_name;
-        if (!docsMap.has(name)) {
-            docsMap.set(name, { ...project.fsdDocument, name, label: 'Hasil Kajian FSD (Perencanaan TI)' });
-        }
+        docsMap.set(name, {
+            ...project.fsdDocument,
+            name,
+            size: project.fsdDocument.size || project.fsdDocument.file_size || '1.8 MB',
+            label: 'Hasil Kajian FSD (Perencanaan TI)'
+        });
     }
 
-    // 3. FSD Dev / Spesifikasi Arsitektur Document
+    // 3. FSD File from Analyst Result / Planning Phase (Guaranteed Minimum 2 Docs)
+    const analystFsdName = project.analystResult?.fsdFile || `Mustafa Fathur Rahman - FSD Kajian Perencanaan.pdf`;
+    let hasFsd = false;
+    for (const doc of docsMap.values()) {
+        if (doc.label?.includes('FSD') || doc.name?.toLowerCase().includes('fsd') || doc.type === 'fsd') {
+            hasFsd = true;
+            break;
+        }
+    }
+    if (!hasFsd) {
+        docsMap.set(analystFsdName, {
+            id: `FSD-PLN-${project.id}`,
+            name: analystFsdName,
+            size: '1.8 MB',
+            type: 'fsd',
+            url: project.analystResult?.fsdUrl || null,
+            label: 'Hasil Kajian FSD (Perencanaan TI)'
+        });
+    }
+
+    // 4. FSD Dev / Spesifikasi Arsitektur Document
     if (project.fsdDevDocument && (project.fsdDevDocument.name || project.fsdDevDocument.file_name)) {
         const name = project.fsdDevDocument.name || project.fsdDevDocument.file_name;
-        if (!docsMap.has(name)) {
-            docsMap.set(name, { ...project.fsdDevDocument, name, label: 'Spesifikasi Arsitektur (Dev)' });
-        }
+        docsMap.set(name, { ...project.fsdDevDocument, name, label: 'Spesifikasi Arsitektur (Dev)' });
     }
 
-    const list = Array.from(docsMap.values());
-    if (list.length > 0) return list;
-
-    return [
-        { id: 'DOC-01', name: 'Dokumen_SDLC_Terlampir.pdf', size: '2.4 MB', label: 'Dokumen SDLC Terlampir' }
-    ];
+    return Array.from(docsMap.values());
 };
 
 export default function WorkspaceDevLead() {
@@ -906,54 +925,22 @@ export default function WorkspaceDevLead() {
                             </div>
 
                             {/* Card Hasil Kajian Perencanaan TI (Fase 1) */}
-                            <div className="bg-emerald-50/70 p-4 rounded-xl border border-emerald-200 space-y-2.5">
+                            <div className="bg-emerald-50/80 p-4 rounded-xl border border-emerald-200 space-y-2.5">
                                 <div className="flex items-center justify-between">
                                     <p className="font-bold text-emerald-900 uppercase tracking-wider flex items-center gap-1.5 text-[11px]">
                                         <CheckCircle2 size={14} className="text-emerald-600" />
-                                        Hasil Kajian &amp; Berkas Perencanaan TI (Fase 1)
+                                        Hasil Kajian Perencanaan TI (Fase 1)
                                     </p>
-                                    <span className="bg-emerald-100 text-emerald-800 text-[10px] font-bold px-2 py-0.5 rounded-full border border-emerald-200">
+                                    <span className="bg-emerald-100 text-emerald-800 text-[10px] font-bold px-2.5 py-0.5 rounded-full border border-emerald-200">
                                         {targetProjectForAnalyst.analystDecision || targetProjectForAnalyst.analystResult?.decision || 'Disetujui (Layak Develop)'}
                                     </span>
                                 </div>
-                                
-                                {/* Display FSD Document from Planning */}
-                                {(() => {
-                                    const fsd = targetProjectForAnalyst.fsdDocument || 
-                                        (targetProjectForAnalyst.documents && targetProjectForAnalyst.documents.find(d => d.type === 'fsd' || d.doc_type === 'fsd')) ||
-                                        (targetProjectForAnalyst.analystResult?.fsdFile ? { name: targetProjectForAnalyst.analystResult.fsdFile, size: '1.8 MB', url: targetProjectForAnalyst.analystResult.fsdUrl } : null) ||
-                                        (targetProjectForAnalyst.documents && targetProjectForAnalyst.documents[0] ? targetProjectForAnalyst.documents[0] : null);
-                                    
-                                    if (!fsd) return null;
-                                    
-                                    return (
-                                        <div className="bg-white p-3 rounded-lg border border-emerald-200 flex items-center justify-between gap-2 shadow-2xs">
-                                            <div className="flex items-center gap-2.5 min-w-0">
-                                                <div className="w-8 h-8 bg-emerald-100 text-emerald-700 rounded-lg flex items-center justify-center font-bold text-[10px] shrink-0 border border-emerald-200">
-                                                    FSD
-                                                </div>
-                                                <div className="min-w-0">
-                                                    <p className="text-xs font-bold text-gray-800 truncate">{fsd.name}</p>
-                                                    <p className="text-[10px] text-gray-500">{fsd.size || '1.8 MB'} • Dokumen FSD Perencanaan TI</p>
-                                                </div>
-                                            </div>
-                                            <button
-                                                type="button"
-                                                onClick={() => setPreviewDoc(fsd)}
-                                                className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold transition-all flex items-center gap-1 shrink-0 cursor-pointer active:scale-95 shadow-2xs"
-                                            >
-                                                <Eye size={12} />
-                                                <span>View FSD</span>
-                                            </button>
-                                        </div>
-                                    );
-                                })()}
 
                                 {/* Notes from System Analyst & Lead Perencanaan */}
                                 {(targetProjectForAnalyst.analystNotes || targetProjectForAnalyst.analystResult?.notes) && (
-                                    <div className="bg-white/80 p-2.5 rounded-lg border border-emerald-100 text-xs">
-                                        <span className="font-bold text-gray-500 text-[10px] uppercase block">Catatan System Analyst Perencanaan:</span>
-                                        <p className="text-gray-700 italic text-[11px] mt-0.5">{targetProjectForAnalyst.analystNotes || targetProjectForAnalyst.analystResult?.notes}</p>
+                                    <div className="bg-white/90 p-3 rounded-lg border border-emerald-100 text-xs">
+                                        <span className="font-bold text-gray-500 text-[10px] uppercase block mb-0.5">Catatan System Analyst Perencanaan:</span>
+                                        <p className="text-gray-700 italic text-[11px] leading-relaxed">{targetProjectForAnalyst.analystNotes || targetProjectForAnalyst.analystResult?.notes}</p>
                                     </div>
                                 )}
                             </div>
@@ -1081,84 +1068,11 @@ export default function WorkspaceDevLead() {
 
             {/* MODAL VIEWER DOKUMEN (Ketua Grup Pengembangan) */}
             {previewDoc && (
-                <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-xs z-50 flex items-center justify-center p-4 overflow-y-auto">
-                    <div className="bg-white rounded-2xl max-w-3xl w-full p-6 sm:p-8 shadow-2xl animate-scale-up border border-gray-200 my-8">
-                        <div className="flex justify-between items-center mb-6 pb-4 border-b border-gray-200">
-                            <div className="flex items-center gap-3">
-                                <div className="w-10 h-10 bg-blue-700 text-white rounded-xl flex items-center justify-center font-extrabold text-xs shadow-sm">
-                                    PDF
-                                </div>
-                                <div>
-                                    <h3 className="font-bold text-gray-800 text-sm sm:text-base">{previewDoc.name}</h3>
-                                    <p className="text-xs text-gray-500">Dokumen Kelengkapan Proyek • Terverifikasi SDLC Bank Nagari</p>
-                                </div>
-                            </div>
-                            <button onClick={() => setPreviewDoc(null)} className="text-gray-400 hover:text-gray-600 p-1.5 rounded-lg hover:bg-gray-100 transition-colors">
-                                <X size={20} />
-                            </button>
-                        </div>
-
-                        <div className="bg-[#f8f9fb] border border-gray-200 rounded-xl p-3 sm:p-6 max-h-[70vh] overflow-y-auto space-y-6 text-gray-800 font-sans shadow-inner flex justify-center items-start">
-                            {previewBlobUrl ? (
-                                <object
-                                    data={previewBlobUrl}
-                                    type="application/pdf"
-                                    className="w-full h-full min-h-[650px] bg-white rounded-xl shadow-md border border-gray-200"
-                                >
-                                    <embed
-                                        src={previewBlobUrl}
-                                        type="application/pdf"
-                                        className="w-full h-full min-h-[650px]"
-                                    />
-                                    <iframe
-                                        src={previewBlobUrl}
-                                        title={previewDoc.name}
-                                        className="w-full h-full min-h-[650px] bg-white rounded-xl border-0"
-                                    />
-                                </object>
-                            ) : (
-                                <div className="bg-white p-6 sm:p-8 rounded-xl border border-gray-200 shadow-xs space-y-6 w-full text-gray-800">
-                                    <div className="bg-[#003a73] text-white p-6 rounded-xl shadow-sm flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-                                        <div>
-                                            <span className="text-[10px] font-extrabold tracking-widest uppercase bg-white/20 px-2.5 py-1 rounded text-white border border-white/30">
-                                                SDLC BANK NAGARI ENTERPRISE
-                                            </span>
-                                            <h2 className="text-lg sm:text-xl font-black mt-2 text-white">
-                                                BUSINESS REQUIREMENT DOCUMENT (BRD)
-                                            </h2>
-                                            <p className="text-xs text-blue-100 mt-1 font-medium">
-                                                Proyek: <span className="font-bold text-white">{targetProjectForAnalyst?.name}</span> ({targetProjectForAnalyst?.id})
-                                            </p>
-                                        </div>
-                                        <div className="text-right text-xs text-blue-100 font-mono">
-                                            <p>STATUS: <span className="font-bold text-emerald-300">INISIASI DISAMPAIKAN</span></p>
-                                            <p>PEMINTA: {targetProjectForAnalyst?.division}</p>
-                                        </div>
-                                    </div>
-
-                                    <div className="bg-gray-50/70 p-5 rounded-xl border border-gray-200 space-y-2 text-xs">
-                                        <h4 className="font-bold text-[#003a73] uppercase tracking-wider border-b border-gray-200 pb-2">
-                                            1. LINGKUP &amp; DESKRIPSI KEBUTUHAN SISTEM
-                                        </h4>
-                                        <p className="text-gray-700 leading-relaxed pt-1">
-                                            {targetProjectForAnalyst?.description || 'Pengajuan inisiasi kebutuhan sistem baru untuk mendukung operasional Divisi Bank Nagari.'}
-                                        </p>
-                                    </div>
-                                </div>
-                            )}
-                        </div>
-
-                        <div className="flex justify-between items-center mt-6 pt-4 border-t border-gray-200 text-xs">
-                            <span className="text-gray-400 font-medium">SDLC Bank Nagari Enterprise • Viewer Inisiasi BRD</span>
-                            <button
-                                onClick={() => setPreviewDoc(null)}
-                                className="px-5 py-2 bg-gray-100 text-gray-700 font-bold rounded-xl hover:bg-gray-200 transition-colors cursor-pointer"
-                            >
-                                Tutup Viewer
-                            </button>
-                        </div>
-                    </div>
-                </div>
+                <DocumentViewerModal
+                    doc={previewDoc}
+                    project={targetProjectForAnalyst || selectedProject}
+                    onClose={() => setPreviewDoc(null)}
+                />
             )}
         </div>
     );

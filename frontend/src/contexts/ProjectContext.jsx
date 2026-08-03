@@ -68,6 +68,8 @@ const normalizeProject = (p, storedDocs = []) => {
     const fsdDoc = p.fsdDocument || uniqueDocs.find(d => d.type === 'fsd' || d.doc_type === 'fsd' || (d.name && d.name.toLowerCase().includes('fsd'))) || null;
     const fsdDevDoc = p.fsdDevDocument || uniqueDocs.find(d => d.type === 'fsd_dev' || d.doc_type === 'fsd_dev' || (d.name && d.name.toLowerCase().includes('arsitektur'))) || null;
 
+    const leadNote = p.leadNote || p.lead_note || p.leadNotes || p.notes || p.assignmentNote || p.dispositionNotes || null;
+
     const analystNotes = p.analystNotes || p.analyst_notes || p.analystResult?.notes || null;
     const analystDecision = p.analystDecision || p.analyst_decision || p.analystResult?.decision || null;
 
@@ -90,6 +92,8 @@ const normalizeProject = (p, storedDocs = []) => {
             return 'RBB'; // Default presisi RBB dari awal inisiasi divisi
         })(),
         targetDate: p.target_date || p.targetDate || 'TBD',
+        leadNote: leadNote,
+        leadNotes: leadNote,
         documents: uniqueDocs,
         fsdDocument: fsdDoc,
         fsdDevDocument: fsdDevDoc,
@@ -173,7 +177,26 @@ export function ProjectProvider({ children }) {
                     const res = await projectService.getAll();
                     const apiList = res?.data ?? [];
                     if (Array.isArray(apiList)) {
-                        const normalized = apiList.map(p => normalizeProject(p, storedDocs));
+                        const cachedProjects = getMockProjects();
+                        const normalized = apiList.map(apiP => {
+                            const localMatch = cachedProjects.find(lp => String(lp.id) === String(apiP.id));
+                            const norm = normalizeProject(apiP, storedDocs);
+                            return {
+                                ...norm,
+                                leadNote: localMatch?.leadNote || localMatch?.leadNotes || norm.leadNote || null,
+                                leadNotes: localMatch?.leadNotes || localMatch?.leadNote || norm.leadNotes || null,
+                                assignedAnalyst: localMatch?.assignedAnalyst || norm.assignedAnalyst || null,
+                                analystNotes: localMatch?.analystNotes || norm.analystNotes || null,
+                                analystDecision: localMatch?.analystDecision || norm.analystDecision || null,
+                                analystResult: localMatch?.analystResult || norm.analystResult || null,
+                                fsdDocument: localMatch?.fsdDocument || norm.fsdDocument || null,
+                                devAnalystNotes: localMatch?.devAnalystNotes || norm.devAnalystNotes || null,
+                                devAnalystDecision: localMatch?.devAnalystDecision || norm.devAnalystDecision || null,
+                                devAnalystResult: localMatch?.devAnalystResult || norm.devAnalystResult || null,
+                                techStack: localMatch?.techStack || norm.techStack || null,
+                                fsdDevDocument: localMatch?.fsdDevDocument || norm.fsdDevDocument || null,
+                            };
+                        });
                         setProjects(normalized);
                         if (normalized.length === 0) {
                             localStorage.removeItem(STORAGE_PROJECTS_KEY);
@@ -258,8 +281,8 @@ export function ProjectProvider({ children }) {
     const addProject = async (projectData) => {
         const uploadedDocs = (projectData.documents || []).map((doc, idx) => ({
             id: doc.id || `DOC-UP-${Date.now()}-${idx}`,
-            name: doc.name || doc.file_name || 'Dokumen.pdf',
-            size: doc.size || doc.file_size || '1.5 MB',
+            name: doc.name || doc.file_name || 'Dokumen_Inisiasi.pdf',
+            size: doc.size || doc.file_size || '2.0 MB',
             type: doc.type || 'brd',
             url: doc.url || doc.fileUrl || null,
             project: projectData.name || projectData.title,
@@ -351,7 +374,7 @@ export function ProjectProvider({ children }) {
         if (MODE === 'api') {
             try {
                 if (updates.status) {
-                    await projectService.updateStatus(id, updates.status, updates.notes || updates.analystNotes || updates.rejection_reason || '');
+                    await projectService.updateStatus(id, updates.status, updates.notes || updates.leadNote || updates.analystNotes || updates.rejection_reason || '');
                 } else {
                     await projectService.update(id, updates);
                 }
@@ -369,6 +392,9 @@ export function ProjectProvider({ children }) {
                         const norm = normalizeProject(apiP, storedDocs);
                         return {
                             ...norm,
+                            leadNote: localMatch?.leadNote || localMatch?.leadNotes || norm.leadNote || null,
+                            leadNotes: localMatch?.leadNotes || localMatch?.leadNote || norm.leadNotes || null,
+                            assignedAnalyst: localMatch?.assignedAnalyst || norm.assignedAnalyst || null,
                             analystNotes: localMatch?.analystNotes || norm.analystNotes || null,
                             analystDecision: localMatch?.analystDecision || norm.analystDecision || null,
                             analystResult: localMatch?.analystResult || norm.analystResult || null,
