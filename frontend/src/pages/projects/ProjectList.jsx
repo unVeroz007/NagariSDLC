@@ -20,6 +20,7 @@ import {
     User,
     UserX,
     ArrowUpRight,
+    Building2,
 } from 'lucide-react';
 import { mockProjects, getProjectStats } from '../../data/mockData';
 import { PROJECT_STATUS_LABEL, PROJECT_STATUS_COLOR } from '../../constants/projectStatus';
@@ -192,16 +193,25 @@ export default function ProjectList() {
 
                     {/* Table */}
                     <div className="overflow-x-auto">
-                        <table className="w-full text-left border-collapse whitespace-nowrap">
+                        <table className="w-full text-left border-collapse whitespace-nowrap min-w-[1000px] table-fixed">
+                            <colgroup>
+                                <col className="w-[12%]" />
+                                <col className="w-[19%]" />
+                                <col className="w-[22%]" />
+                                <col className="w-[17%]" />
+                                <col className="w-[14%]" />
+                                <col className="w-[10%]" />
+                                <col className="w-[6%]" />
+                            </colgroup>
                             <thead>
                                 <tr className="bg-gray-50/50 text-gray-400 border-b border-gray-100 text-xs uppercase tracking-wider font-bold">
-                                    <th className="px-5 py-3.5">ID Proyek</th>
-                                    <th className="px-5 py-3.5">Nama Proyek</th>
-                                    <th className="px-5 py-3.5">Divisi Peminta</th>
-                                    <th className="px-5 py-3.5">Project Manager</th>
-                                    <th className="px-5 py-3.5">Fase / Status</th>
-                                    <th className="px-5 py-3.5">Target Selesai</th>
-                                    <th className="px-5 py-3.5 text-center">Aksi</th>
+                                    <th className="pl-5 pr-4 py-3.5">ID Proyek</th>
+                                    <th className="px-4 py-3.5">Nama Proyek</th>
+                                    <th className="px-3 py-3.5">Divisi Peminta</th>
+                                    <th className="px-3 py-3.5">Project Manager</th>
+                                    <th className="px-3 py-3.5">Fase / Status</th>
+                                    <th className="px-3 py-3.5">Target Selesai</th>
+                                    <th className="pr-5 pl-2 py-3.5 text-center">Aksi</th>
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-gray-50 text-sm">
@@ -219,34 +229,39 @@ export default function ProjectList() {
                                                 onClick={handleNavigate}
                                                 className="group hover:bg-blue-50/40 transition-colors cursor-pointer"
                                             >
-                                                <td className="px-5 py-4">
-                                                    <span className="font-bold text-[#1A56DB] bg-blue-50 px-2.5 py-1 rounded-lg text-xs">{project.reqId || project.id}</span>
+                                                <td className="pl-5 pr-4 py-4">
+                                                    <span className="font-bold text-[#1A56DB] bg-blue-50 px-2.5 py-1 rounded-lg text-xs border border-blue-100/80">{project.reqId || project.id}</span>
                                                 </td>
-                                                <td className="px-5 py-4">
+                                                <td className="px-4 py-4">
                                                     <div>
-                                                        <div className="font-semibold text-gray-800 group-hover:text-[#1A56DB] transition-colors">{project.name}</div>
-                                                        <div className="text-xs text-gray-400 truncate w-48 xl:w-64 mt-0.5">{project.description}</div>
+                                                        <div className="font-semibold text-gray-800 group-hover:text-[#1A56DB] transition-colors truncate">{project.name}</div>
+                                                        <div className="text-xs text-gray-400 truncate mt-0.5 font-normal">{project.description}</div>
                                                     </div>
                                                 </td>
-                                                <td className="px-5 py-4 text-gray-500 text-sm">{project.division}</td>
-                                                <td className="px-5 py-4">
+                                                <td className="px-3 py-4">
+                                                    <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-100/80 text-slate-700 text-xs font-medium border border-slate-200/60 max-w-full">
+                                                        <Building2 size={13} className="text-slate-400 shrink-0" />
+                                                        <span className="truncate">{project.division}</span>
+                                                    </div>
+                                                </td>
+                                                <td className="px-3 py-4">
                                                     {project.pm ? (
                                                         <div className="flex items-center gap-2">
-                                                            <div className="w-7 h-7 rounded-full bg-gradient-to-br from-[#1A56DB] to-indigo-600 text-white flex items-center justify-center text-[10px] font-bold shadow-sm">
+                                                            <div className="w-7 h-7 rounded-full bg-gradient-to-br from-[#1A56DB] to-indigo-600 text-white flex items-center justify-center text-[10px] font-bold shadow-sm shrink-0">
                                                                 {project.pm.initial || (project.pm.name || 'PM').substring(0, 2).toUpperCase()}
                                                             </div>
-                                                            <span className="text-gray-700 font-medium">{project.pm.name}</span>
+                                                            <span className="text-gray-700 font-medium truncate">{project.pm.name}</span>
                                                         </div>
                                                     ) : (
                                                         <div className="flex items-center gap-2 text-gray-400">
-                                                            <div className="w-7 h-7 rounded-full border-2 border-dashed border-gray-200 flex items-center justify-center">
+                                                            <div className="w-7 h-7 rounded-full border-2 border-dashed border-gray-200 flex items-center justify-center shrink-0">
                                                                 <UserX size={13} />
                                                             </div>
                                                             <span className="italic text-xs">Belum Dialokasi</span>
                                                         </div>
                                                     )}
                                                 </td>
-                                                <td className="px-5 py-4">
+                                                <td className="px-3 py-4">
                                                     <div className="flex flex-col gap-1.5 items-start">
                                                         <RBBBadge type={project.type} deadline={project.rbbDeadline} status={project.status} />
                                                         <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-semibold border ${
@@ -257,8 +272,8 @@ export default function ProjectList() {
                                                         </span>
                                                     </div>
                                                 </td>
-                                                <td className="px-5 py-4 text-gray-500 text-sm">{project.targetDate}</td>
-                                                <td className="px-5 py-4 text-center">
+                                                <td className="px-3 py-4 text-gray-500 text-sm">{project.targetDate}</td>
+                                                <td className="pr-5 pl-2 py-4 text-center">
                                                     <button
                                                         onClick={(e) => {
                                                             e.stopPropagation();

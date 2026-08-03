@@ -103,7 +103,15 @@ const normalizeProject = (p, storedDocs = []) => {
     };
 };
 
+const CLEAN_SLATE_VERSION = 'nagari_sdlc_reset_v3';
+
 const getMockProjects = () => {
+    if (!localStorage.getItem(CLEAN_SLATE_VERSION)) {
+        localStorage.setItem(STORAGE_PROJECTS_KEY, JSON.stringify([]));
+        localStorage.setItem(STORAGE_DOCS_KEY, JSON.stringify([]));
+        localStorage.setItem(CLEAN_SLATE_VERSION, 'true');
+        return [];
+    }
     const saved = localStorage.getItem(STORAGE_PROJECTS_KEY);
     if (saved) {
         try { 
@@ -111,10 +119,14 @@ const getMockProjects = () => {
             if (Array.isArray(parsed)) return parsed;
         } catch { localStorage.removeItem(STORAGE_PROJECTS_KEY); }
     }
-    return MODE === 'api' ? [] : (mockProjects || []);
+    return [];
 };
 
 const getMockDocs = () => {
+    if (!localStorage.getItem(CLEAN_SLATE_VERSION)) {
+        localStorage.setItem(STORAGE_DOCS_KEY, JSON.stringify([]));
+        return [];
+    }
     const saved = localStorage.getItem(STORAGE_DOCS_KEY);
     if (saved) {
         try {
@@ -423,9 +435,12 @@ export function ProjectProvider({ children }) {
     const refreshData = () => loadProjects(true);
 
     const resetToDefaultData = () => {
-        localStorage.removeItem(STORAGE_PROJECTS_KEY);
-        localStorage.removeItem(STORAGE_DOCS_KEY);
-        loadProjects(true);
+        localStorage.setItem(STORAGE_PROJECTS_KEY, JSON.stringify([]));
+        localStorage.setItem(STORAGE_DOCS_KEY, JSON.stringify([]));
+        setProjects([]);
+        setDocuments([]);
+        if (window.__nagariFileStore) window.__nagariFileStore.clear();
+        toast.success('Seluruh data proyek & dokumen telah dibersihkan!');
     };
 
     return (

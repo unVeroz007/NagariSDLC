@@ -528,13 +528,20 @@ export default function Dashboard() {
                     </button>
                 </div>
                 <div className="overflow-x-auto">
-                    <table className="w-full text-left border-collapse min-w-[700px]">
+                    <table className="w-full text-left border-collapse min-w-[700px] table-fixed">
+                        <colgroup>
+                            <col className="w-[32%]" />
+                            <col className="w-[24%]" />
+                            <col className="w-[20%]" />
+                            <col className="w-[14%]" />
+                            <col className="w-[10%]" />
+                        </colgroup>
                         <thead>
                             <tr className="text-xs font-semibold text-gray-400 uppercase tracking-wider bg-gray-50/60">
                                 <th className="py-3 px-5">Nama Proyek</th>
-                                <th className="py-3 px-5">Divisi</th>
-                                <th className="py-3 px-5">PM</th>
-                                <th className="py-3 px-5">Status</th>
+                                <th className="py-3 px-4">Divisi</th>
+                                <th className="py-3 px-4">PM</th>
+                                <th className="py-3 px-4">Status</th>
                                 <th className="py-3 px-5 text-center">Aksi</th>
                             </tr>
                         </thead>
@@ -542,12 +549,17 @@ export default function Dashboard() {
                             {priorityProjects.map((proj, idx) => (
                                 <tr key={idx} className="table-row-hover group">
                                     <td className="py-4 px-5">
-                                        <p className="font-semibold text-gray-800 group-hover:text-[#1A56DB] transition-colors">{proj.name}</p>
+                                        <p className="font-semibold text-gray-800 group-hover:text-[#1A56DB] transition-colors truncate">{proj.name}</p>
                                         <p className="text-xs text-gray-400 mt-0.5">{proj.id}</p>
                                     </td>
-                                    <td className="py-4 px-5 text-gray-500 text-sm">{proj.division || 'Divisi TI'}</td>
-                                    <td className="py-4 px-5 text-gray-500 text-sm">{proj.pm?.name || '—'}</td>
-                                    <td className="py-4 px-5">
+                                    <td className="py-4 px-4">
+                                        <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-100/80 text-slate-700 text-xs font-medium border border-slate-200/60 max-w-full">
+                                            <Building2 size={13} className="text-slate-400 shrink-0" />
+                                            <span className="truncate">{proj.division || 'Divisi TI'}</span>
+                                        </div>
+                                    </td>
+                                    <td className="py-4 px-4 text-gray-500 text-sm">{proj.pm?.name || '—'}</td>
+                                    <td className="py-4 px-4">
                                         <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold border ${
                                             PROJECT_STATUS_COLOR[proj.status] || 'bg-gray-50 text-gray-700 border-gray-200'
                                         }`}>
