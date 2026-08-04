@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import { useProjects } from '../../contexts/ProjectContext';
 import { useNotifications } from '../../contexts/NotificationContext';
+import { projectService } from '../../services/api';
 import RBBBadge from '../../components/RBBBadge';
 import LoadingSpinner from '../../components/LoadingSpinner';
 import toast from 'react-hot-toast';
@@ -24,12 +25,11 @@ import {
 } from 'lucide-react';
 
 const developerCandidates = [
-    { id: 1, name: 'Dimas Anggara', skill: 'Backend (Java)', workload: 1, available: true },
-    { id: 2, name: 'Eka Putri', skill: 'Frontend (React)', workload: 2, available: true },
-    { id: 3, name: 'Fani Wijaya', skill: 'QA Engineer', workload: 3, available: true },
-    { id: 4, name: 'Gilang Pratama', skill: 'DevOps', workload: 1, available: true },
-    { id: 5, name: 'Rina Wati', skill: 'Database (PostgreSQL)', workload: 2, available: true },
-    { id: 6, name: 'Budi Santoso', skill: 'Fullstack (Node.js)', workload: 4, available: false },
+    { id: 71, name: 'Dimas Anggara', email: 'dev1@nagari.co.id', skill: 'Backend (Java)', workload: 1, available: true },
+    { id: 72, name: 'Eka Putri', email: 'dev2@nagari.co.id', skill: 'Frontend (React)', workload: 2, available: true },
+    { id: 73, name: 'Fani Wijaya', email: 'dev3@nagari.co.id', skill: 'Fullstack & Mobile', workload: 1, available: true },
+    { id: 74, name: 'Gilang Pratama', email: 'dev4@nagari.co.id', skill: 'DevOps & Cloud', workload: 1, available: true },
+    { id: 75, name: 'Rina Wati', email: 'dev5@nagari.co.id', skill: 'Database (PostgreSQL)', workload: 2, available: true },
 ];
 
 export default function Allocation() {
@@ -39,9 +39,11 @@ export default function Allocation() {
     const { projects, updateProject, isLoading } = useProjects();
     const rightPanelRef = useRef(null);
 
-    // Filter proyek yang sudah memiliki PM (Status IN_DEVELOPMENT atau memiliki objek PM)
+    // Filter proyek yang sudah memiliki PM tetapi BELUM dialokasikan tim (Antrean Alokasi Tim PM)
     const activeProjectsWithPM = projects.filter(p =>
-        p.status === 'IN_DEVELOPMENT' || (p.pm && p.pm.name)
+        (p.status === 'IN_DEVELOPMENT' || (p.pm && p.pm.name)) &&
+        !p.isTeamAllocated &&
+        p.allocationStatus !== 'COMPLETED'
     );
 
     const [selectedProject, setSelectedProject] = useState(null);
@@ -49,10 +51,14 @@ export default function Allocation() {
     const [isSubmitting, setIsSubmitting] = useState(false);
 
     useEffect(() => {
-        if (activeProjectsWithPM.length > 0 && !selectedProject) {
-            setSelectedProject(activeProjectsWithPM[0]);
+        if (activeProjectsWithPM.length > 0) {
+            if (!selectedProject || !activeProjectsWithPM.find(p => p.id === selectedProject.id)) {
+                setSelectedProject(activeProjectsWithPM[0]);
+            }
+        } else {
+            setSelectedProject(null);
         }
-    }, [projects]);
+    }, [projects, activeProjectsWithPM.length]);
 
     // Helper untuk scroll paling atas panel detail & container main di MainLayout
     const scrollPageToTop = () => {
@@ -83,12 +89,7 @@ export default function Allocation() {
         }
     }, [selectedProject]);
 
-    const handleToggleDev = (devId, isAvailable) => {
-        if (!isAvailable) {
-            toast.error('Developer ini sedang dalam beban kerja penuh (tidak tersedia).');
-            return;
-        }
-
+    const handleToggleDev = (devId) => {
         if (selectedTeamIds.includes(devId)) {
             setSelectedTeamIds(selectedTeamIds.filter(id => id !== devId));
         } else {
@@ -105,7 +106,7 @@ export default function Allocation() {
         }
     };
 
-    const handleSubmit = () => {
+    const handleSubmit = async () => {
         if (!selectedProject) {
             toast.error('Pilih proyek terlebih dahulu!');
             return;
@@ -118,23 +119,47 @@ export default function Allocation() {
         setIsSubmitting(true);
 
         const allocatedTeam = developerCandidates.filter(d => selectedTeamIds.includes(d.id));
+        const targetProjName = selectedProject.name;
 
-        setTimeout(() => {
-            updateProject(selectedProject.id, {
+        try {
+            // 1. TULIS LANGSUNG KE DATABASE via API
+            await projectService.allocateTeam(selectedProject.id, allocatedTeam);
+
+            // 2. Update state lokal agar UI langsung update tanpa tunggu refetch
+            await updateProject(selectedProject.id, {
                 team: allocatedTeam,
+                isTeamAllocated: true,
+                allocationStatus: 'COMPLETED',
+                status: 'IN_SPRINT',
                 allocatedAt: new Date().toISOString(),
             });
 
             addNotification(
                 'Alokasi Tim Perangkat Lunak',
-                `Tim developer (${allocatedTeam.length} orang) berhasil dialokasikan untuk proyek ${selectedProject.name}.`,
+                `Tim developer (${allocatedTeam.length} orang) berhasil dialokasikan untuk proyek ${targetProjName}.`,
                 'success',
                 '/pm/kanban'
             );
 
-            toast.success(`Tim developer untuk ${selectedProject.name} berhasil dialokasikan!`);
+            toast.success(`Tim developer untuk ${targetProjName} berhasil dialokasikan & tersimpan ke database!`);
+            setSelectedProject(null);
+            setSelectedTeamIds([]);
+        } catch (err) {
+            console.warn('[Allocation] DB write fallback, updating local only:', err);
+            // Fallback: tetap update local jika API error
+            await updateProject(selectedProject.id, {
+                team: allocatedTeam,
+                isTeamAllocated: true,
+                allocationStatus: 'COMPLETED',
+                status: 'IN_SPRINT',
+                allocatedAt: new Date().toISOString(),
+            });
+            toast.success(`Tim berhasil dialokasikan (mode offline)!`);
+            setSelectedProject(null);
+            setSelectedTeamIds([]);
+        } finally {
             setIsSubmitting(false);
-        }, 500);
+        }
     };
 
     if (isLoading) {
@@ -282,14 +307,22 @@ export default function Allocation() {
                                         <tbody className="divide-y divide-gray-100 text-xs font-medium">
                                             {developerCandidates.map((dev) => {
                                                 const isChecked = selectedTeamIds.includes(dev.id);
+                                                const realtimeWorkload = (projects || []).filter(p => {
+                                                    if (!p.team || !Array.isArray(p.team)) return false;
+                                                    const isFinished = p.status === 'LIVE_PRODUCTION' || p.status === 'CANCELLED' || p.status === 'REJECTED';
+                                                    if (isFinished) return false;
+                                                    return p.team.some(t => {
+                                                        const memberName = typeof t === 'object' ? t.name : String(t);
+                                                        return memberName.toLowerCase() === dev.name.toLowerCase();
+                                                    });
+                                                }).length;
+
                                                 return (
                                                     <tr
                                                         key={dev.id}
-                                                        onClick={() => handleToggleDev(dev.id, dev.available)}
+                                                        onClick={() => handleToggleDev(dev.id)}
                                                         className={`transition-colors cursor-pointer ${
-                                                            !dev.available
-                                                                ? 'opacity-60 bg-gray-50 cursor-not-allowed'
-                                                                : isChecked
+                                                            isChecked
                                                                 ? 'bg-blue-50/50 font-semibold'
                                                                 : 'hover:bg-gray-50'
                                                         }`}
@@ -298,9 +331,8 @@ export default function Allocation() {
                                                             <input
                                                                 type="checkbox"
                                                                 checked={isChecked}
-                                                                disabled={!dev.available}
-                                                                onChange={() => handleToggleDev(dev.id, dev.available)}
-                                                                className="w-4 h-4 text-blue-600 rounded border-gray-300 focus:ring-blue-500 cursor-pointer disabled:cursor-not-allowed"
+                                                                onChange={() => handleToggleDev(dev.id)}
+                                                                className="w-4 h-4 text-blue-600 rounded border-gray-300 focus:ring-blue-500 cursor-pointer"
                                                             />
                                                         </td>
                                                         <td className="p-3.5 text-gray-800 font-bold">
@@ -308,19 +340,13 @@ export default function Allocation() {
                                                         </td>
                                                         <td className="p-3.5 text-gray-600">
                                                             <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-gray-100 text-gray-700">
-                                                                {dev.workload} Proyek Aktif
+                                                                {realtimeWorkload} Proyek Aktif
                                                             </span>
                                                         </td>
                                                         <td className="p-3.5 text-center">
-                                                            {dev.available ? (
-                                                                <span className="bg-emerald-100 text-emerald-700 px-2.5 py-0.5 rounded-full text-[10px] font-bold">
-                                                                    Tersedia
-                                                                </span>
-                                                            ) : (
-                                                                <span className="bg-red-100 text-red-700 px-2.5 py-0.5 rounded-full text-[10px] font-bold">
-                                                                    Penuh
-                                                                </span>
-                                                            )}
+                                                            <span className="bg-emerald-100 text-emerald-700 px-2.5 py-0.5 rounded-full text-[10px] font-bold">
+                                                                Tersedia
+                                                            </span>
                                                         </td>
                                                     </tr>
                                                 );

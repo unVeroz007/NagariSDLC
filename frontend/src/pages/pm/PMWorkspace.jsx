@@ -7,7 +7,6 @@ import { useNavigate } from 'react-router-dom';
 import LoadingSpinner from '../../components/LoadingSpinner';
 import EmptyState from '../../components/EmptyState';
 import RBBBadge from '../../components/RBBBadge';
-import ChatBox from '../../components/ChatBox';
 import {
     LayoutDashboard,
     Users,
@@ -58,6 +57,7 @@ export default function PMWorkspace() {
     const [activeTab, setActiveTab] = useState('overview'); // 'overview' | 'projects' | 'tasks'
     const [searchTerm, setSearchTerm] = useState('');
     const [selectedProject, setSelectedProject] = useState(null);
+    const [selectedPMFilter, setSelectedPMFilter] = useState('ALL');
 
     // Auto-refresh data
     useEffect(() => {
@@ -65,21 +65,57 @@ export default function PMWorkspace() {
         return () => clearInterval(interval);
     }, [refreshData]);
 
-    // 🔍 Filter proyek yang dikelola oleh PM ini (fallback ke semua proyek jika super_admin / awal)
+    // 📋 Ekstraksi 4 PM resmi (Budi Santoso, Dewi Lestari, Andi Wijaya, Citra Kirana)
+    const pmList = useMemo(() => {
+        return ['Budi Santoso', 'Dewi Lestari', 'Andi Wijaya', 'Citra Kirana'];
+    }, []);
+
+    // 🔍 Filter proyek khusus per akun PM (Strict 4 PM Personalization)
     const myProjects = useMemo(() => {
         if (!projects || projects.length === 0) return [];
-        if (user?.role === 'super_admin' || user?.role === 'head_of_it' || user?.role === 'development_lead') {
-            return projects;
+
+        // Jika akun yang login adalah PM (Project Manager), tampilkan HANYA proyek milik PM tersebut!
+        if (user?.role === 'project_manager' || user?.role === 'pm') {
+            const userName = (user?.name || '').toLowerCase();
+            const userEmail = (user?.email || '').toLowerCase();
+
+            return projects.filter(p => {
+                const pmName = typeof p.pm === 'object' ? (p.pm?.name || '') : String(p.pm || '');
+                const assignedPM = String(p.assignedPM || p.pmName || '');
+
+                const matchesBudi = (userEmail.includes('pm1') || userName.includes('budi')) && (pmName.toLowerCase().includes('budi') || assignedPM.toLowerCase().includes('budi'));
+                const matchesDewi = (userEmail.includes('pm2') || userName.includes('dewi')) && (pmName.toLowerCase().includes('dewi') || assignedPM.toLowerCase().includes('dewi'));
+                const matchesAndi = (userEmail.includes('pm3') || userEmail === 'pm@nagari.co.id' || userName.includes('andi')) && (pmName.toLowerCase().includes('andi') || assignedPM.toLowerCase().includes('andi'));
+                const matchesCitra = (userEmail.includes('pm4') || userName.includes('citra')) && (pmName.toLowerCase().includes('citra') || assignedPM.toLowerCase().includes('citra'));
+
+                if (userEmail.includes('pm1') || userName.includes('budi')) return matchesBudi;
+                if (userEmail.includes('pm2') || userName.includes('dewi')) return matchesDewi;
+                if (userEmail.includes('pm3') || userEmail === 'pm@nagari.co.id' || userName.includes('andi')) return matchesAndi;
+                if (userEmail.includes('pm4') || userName.includes('citra')) return matchesCitra;
+
+                return (
+                    (pmName && pmName.toLowerCase().includes(userName)) ||
+                    (assignedPM && assignedPM.toLowerCase().includes(userName)) ||
+                    p.pmId === user?.id
+                );
+            });
         }
-        const filtered = projects.filter(p =>
-            p.pm?.name === user?.name ||
-            p.pmId === user?.id ||
-            p.assignedPM === user?.name ||
-            p.pmName === user?.name ||
-            (typeof p.pm === 'string' && p.pm === user?.name)
-        );
-        return filtered.length > 0 ? filtered : projects;
-    }, [projects, user]);
+
+        // Jika role Admin / Lead, filter berdasarkan pilihan dropdown PM jika dipilih
+        if (selectedPMFilter && selectedPMFilter !== 'ALL') {
+            const targetName = selectedPMFilter.toLowerCase();
+            return projects.filter(p => {
+                const pmName = typeof p.pm === 'object' ? (p.pm?.name || '') : String(p.pm || '');
+                const assignedPM = String(p.assignedPM || p.pmName || '');
+                return (
+                    pmName.toLowerCase().includes(targetName) ||
+                    assignedPM.toLowerCase().includes(targetName)
+                );
+            });
+        }
+
+        return projects;
+    }, [projects, user, selectedPMFilter]);
 
     // 📊 Statistik
     const stats = useMemo(() => {
@@ -119,11 +155,18 @@ export default function PMWorkspace() {
     // ⏳ Task statistik
     const taskStats = useMemo(() => {
         const total = allTasks.length;
-        const done = allTasks.filter(t => t.status === 'done' || t.done === true).length;
-        const inProgress = allTasks.filter(t => t.status === 'in_progress' || t.status === 'todo').length;
+        const done = allTasks.filter(t => {
+            const st = String(t.status || '').toLowerCase();
+            return st === 'done' || st === 'selesai' || t.done === true;
+        }).length;
+        const inProgress = allTasks.filter(t => {
+            const st = String(t.status || '').toLowerCase();
+            return st === 'in progress' || st === 'in_progress' || st === 'to do' || st === 'todo' || st === 'belum mulai';
+        }).length;
         const overdue = allTasks.filter(t => {
             if (!t.deadline) return false;
-            return new Date(t.deadline) < new Date() && t.status !== 'done';
+            const st = String(t.status || '').toLowerCase();
+            return new Date(t.deadline) < new Date() && st !== 'done' && st !== 'selesai';
         }).length;
         return { total, done, inProgress, overdue };
     }, [allTasks]);
@@ -159,11 +202,17 @@ export default function PMWorkspace() {
         }
     }, [myProjects, selectedProject]);
 
-    // 📊 Progress proyek (untuk ditampilkan di card)
+    // 📊 Progress proyek (untuk ditampilkan di card & tabel)
     const getProjectProgress = (project) => {
-        if (!project.tasks || project.tasks.length === 0) return 0;
-        const done = project.tasks.filter(t => t.status === 'done' || t.done === true).length;
-        return Math.round((done / project.tasks.length) * 100);
+        if (!project || !Array.isArray(project.tasks) || project.tasks.length === 0) {
+            if (project?.status === 'LIVE_PRODUCTION' || project?.status === 'UAT_PASSED') return 100;
+            return 0;
+        }
+        const doneCount = project.tasks.filter(t => {
+            const st = String(t.status || '').toLowerCase();
+            return st === 'selesai' || st === 'done' || t.done === true;
+        }).length;
+        return Math.round((doneCount / project.tasks.length) * 100);
     };
 
     // 🎨 Warna status
@@ -255,12 +304,31 @@ export default function PMWorkspace() {
                                 Selamat datang, {user?.name}! Kelola semua proyek dan alur tugas yang Anda awasi.
                             </p>
                         </div>
-                        <div className="flex items-center gap-3">
+                        <div className="flex flex-wrap items-center gap-3">
+                            {(user?.role === 'super_admin' || user?.role === 'head_of_it' || user?.role === 'development_lead') && pmList.length > 0 && (
+                                <div className="flex items-center gap-2 bg-white border border-gray-300 px-3 py-2 rounded-xl shadow-2xs">
+                                    <Users size={16} className="text-[#1A56DB]" />
+                                    <span className="text-xs font-bold text-gray-600">Filter Akun PM:</span>
+                                    <select
+                                        value={selectedPMFilter}
+                                        onChange={(e) => setSelectedPMFilter(e.target.value)}
+                                        className="text-xs font-extrabold text-gray-800 bg-transparent outline-none cursor-pointer"
+                                    >
+                                        <option value="ALL">Semua Proyek PM (Global)</option>
+                                        {pmList.map((pmName, idx) => (
+                                            <option key={idx} value={pmName}>
+                                                {pmName}
+                                            </option>
+                                        ))}
+                                    </select>
+                                </div>
+                            )}
+
                             <button
                                 onClick={() => navigate('/pm/kanban')}
-                                className="flex items-center gap-2 px-4 py-2 bg-[#003a73] text-white rounded-lg font-medium hover:bg-[#002a5a] transition-colors shadow-sm cursor-pointer"
+                                className="flex items-center gap-2 px-4 py-2 bg-[#003a73] text-white text-xs font-bold rounded-xl hover:bg-[#002a5a] transition-colors shadow-sm cursor-pointer"
                             >
-                                <LayoutDashboard size={18} />
+                                <LayoutDashboard size={16} />
                                 Buka Kanban Board
                             </button>
                         </div>
@@ -507,9 +575,9 @@ export default function PMWorkspace() {
                                             const progress = getProjectProgress(project);
                                             return (
                                                 <tr key={project.id} className="hover:bg-gray-50 transition-colors group">
-                                                    <td className="px-6 py-4">
+                                                    <td className="px-6 py-4 cursor-pointer group-hover:bg-blue-50/40" onClick={() => navigate(`/pm/tasks/${project.id}`)}>
                                                         <div>
-                                                            <span className="font-semibold text-gray-800">{project.name}</span>
+                                                            <span className="font-semibold text-gray-800 group-hover:text-[#1A56DB] transition-colors">{project.name}</span>
                                                             <p className="text-xs text-gray-400">{project.id}</p>
                                                         </div>
                                                     </td>
@@ -534,8 +602,9 @@ export default function PMWorkspace() {
                                                     </td>
                                                     <td className="px-6 py-4 text-center">
                                                         <button
-                                                            onClick={() => navigate(`/projects/${project.id}`)}
-                                                            className="text-gray-400 hover:text-[#1A56DB] hover:bg-blue-50 p-1.5 rounded-lg transition-colors"
+                                                            onClick={() => navigate(`/pm/tasks/${project.id}`)}
+                                                            className="text-gray-400 hover:text-[#1A56DB] hover:bg-blue-50 p-1.5 rounded-lg transition-colors cursor-pointer"
+                                                            title="Lihat Detail Proyek & Manajemen Task"
                                                         >
                                                             <Eye size={18} />
                                                         </button>
@@ -569,19 +638,22 @@ export default function PMWorkspace() {
                                     <tbody className="divide-y divide-gray-200 text-sm">
                                         {allTasks.map((task, idx) => (
                                             <tr key={idx} className="hover:bg-gray-50 transition-colors group">
-                                                <td className="px-6 py-4">
-                                                    <span className="font-medium text-gray-800">{task.title || 'Task'}</span>
+                                                <td className="px-6 py-4 cursor-pointer group-hover:bg-blue-50/40" onClick={() => navigate(`/pm/tasks/${task.projectId}`)}>
+                                                    <span className="font-semibold text-gray-800 group-hover:text-[#1A56DB] transition-colors">{task.name || task.title || 'Task'}</span>
                                                 </td>
-                                                <td className="px-6 py-4 text-gray-500">{task.projectName || '-'}</td>
-                                                <td className="px-6 py-4">
-                                                    <span className="text-gray-600">{task.assignee || 'Unassigned'}</span>
+                                                <td className="px-6 py-4 text-gray-600 font-medium cursor-pointer hover:text-[#1A56DB]" onClick={() => navigate(`/pm/tasks/${task.projectId}`)}>
+                                                    {task.projectName || '-'}
                                                 </td>
                                                 <td className="px-6 py-4">
-                                                    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium ${task.status === 'done' || task.done === true
+                                                    <span className="text-gray-600">{task.assignee || 'Belum Dialokasi'}</span>
+                                                </td>
+                                                <td className="px-6 py-4">
+                                                    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium ${
+                                                        String(task.status || '').toLowerCase() === 'done' || String(task.status || '').toLowerCase() === 'selesai' || task.done === true
                                                         ? 'bg-emerald-100 text-emerald-700'
                                                         : 'bg-blue-100 text-blue-700'
                                                         }`}>
-                                                        {task.status === 'done' || task.done === true ? 'Selesai' : 'Dalam Pengerjaan'}
+                                                        {String(task.status || '').toLowerCase() === 'done' || String(task.status || '').toLowerCase() === 'selesai' || task.done === true ? 'Selesai' : (task.status || 'Dalam Pengerjaan')}
                                                     </span>
                                                 </td>
                                                 <td className="px-6 py-4">
@@ -594,8 +666,9 @@ export default function PMWorkspace() {
                                                 </td>
                                                 <td className="px-6 py-4 text-center">
                                                     <button
-                                                        onClick={() => navigate(`/pm/task-detail/${task.id}`)}
-                                                        className="text-gray-400 hover:text-[#1A56DB] hover:bg-blue-50 p-1.5 rounded-lg transition-colors"
+                                                        onClick={() => navigate(`/pm/tasks/${task.projectId}`)}
+                                                        className="text-gray-400 hover:text-[#1A56DB] hover:bg-blue-50 p-1.5 rounded-lg transition-colors cursor-pointer"
+                                                        title="Lihat Detail Proyek & Progress SDLC"
                                                     >
                                                         <Eye size={18} />
                                                     </button>
@@ -608,17 +681,6 @@ export default function PMWorkspace() {
                             {allTasks.length === 0 && (
                                 <div className="p-8 text-center text-gray-400">Belum ada task di proyek Anda.</div>
                             )}
-                        </div>
-                    )}
-
-                    {/* Seksi Chat Discussion Proyek (Inline di Bagian Bawah Halaman) */}
-                    {(selectedProject || filteredProjects[0]) && (
-                        <div className="mt-6">
-                            <ChatBox
-                                projectId={(selectedProject || filteredProjects[0]).id}
-                                projectName={(selectedProject || filteredProjects[0]).name}
-                                className="w-full max-h-[400px]"
-                            />
                         </div>
                     )}
                 </div>

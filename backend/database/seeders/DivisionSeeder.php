@@ -10,7 +10,7 @@ class DivisionSeeder extends Seeder
     public function run(): void
     {
         $divisions = [
-            ['code' => 'IT-DEV', 'name' => 'Divisi Pengembangan TI'],
+            ['code' => 'IT-DEV', 'name' => 'Divisi Teknologi dan Digitalisasi'],
             ['code' => 'IT-OPS', 'name' => 'Divisi Operasional & Infra TI'],
             ['code' => 'IT-SEC', 'name' => 'Divisi Cyber Security'],
             ['code' => 'IT-QA', 'name' => 'Divisi Quality Assurance TI'],

@@ -239,11 +239,7 @@ const router = createBrowserRouter([
             },
             {
                 path: '/pm/tasks',
-                element: (
-                    <ProtectedRoute allowedRoles={PM_ROLES}>
-                        <Task />
-                    </ProtectedRoute>
-                ),
+                element: <Navigate to="/pm/workspace" replace />,
             },
             {
                 path: '/pm/tasks/:id',

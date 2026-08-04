@@ -157,6 +157,14 @@ export default function WorkspaceDevLead() {
     const [estimationDays, setEstimationDays] = useState('');
     const [isSubmitting, setIsSubmitting] = useState(false);
 
+    // Helper ekstraksi angka durasi
+    const getNumericEstimation = (proj) => {
+        if (!proj) return '30';
+        const raw = proj.devAnalystResult?.estimation || proj.analystResult?.estimation || proj.estimation || '30';
+        const match = String(raw).match(/\d+/);
+        return match ? match[0] : '30';
+    };
+
     // Search filter helper
     const applySearch = (list) => {
         if (!searchTerm.trim()) return list;
@@ -193,6 +201,52 @@ export default function WorkspaceDevLead() {
         p.status === 'LIVE_PRODUCTION' || p.status === 'QA_PASSED' || p.status === 'CYBER_PASSED'
     ));
 
+    // 📊 Dynamic Real-Time PM Workload Calculation for Dev Lead Recommendation
+    const pmWorkloadStats = useMemo(() => {
+        const candidates = [
+            { id: 1, name: 'Budi Santoso', email: 'pm1@nagari.co.id', department: 'IT Core & Retail Banking', initial: 'BS' },
+            { id: 2, name: 'Dewi Lestari', email: 'pm2@nagari.co.id', department: 'Digital Banking & Mobile', initial: 'DL' },
+            { id: 3, name: 'Andi Wijaya', email: 'pm3@nagari.co.id', department: 'IT Infrastructure & Security', initial: 'AW' },
+            { id: 4, name: 'Citra Kirana', email: 'pm4@nagari.co.id', department: 'Enterprise Systems & Analytics', initial: 'CK' },
+        ];
+
+        return candidates.map(pm => {
+            const activeProjects = (projects || []).filter(p => {
+                const pmName = typeof p.pm === 'object' ? (p.pm?.name || '') : String(p.pm || '');
+                const assignedPM = String(p.assignedPM || p.pmName || '');
+                const matches = pmName.toLowerCase().includes(pm.name.toLowerCase()) || assignedPM.toLowerCase().includes(pm.name.toLowerCase());
+                const isFinished = p.status === 'LIVE_PRODUCTION' || p.status === 'CANCELLED' || p.status === 'REJECTED';
+                return matches && !isFinished;
+            });
+
+            const count = activeProjects.length;
+            let statusTag = 'Beban Ringan';
+            let badgeColor = 'bg-emerald-100 text-emerald-800 border-emerald-300';
+            let recommended = false;
+
+            if (count <= 1) {
+                statusTag = 'Beban Ringan (Sangat Rekomendasi)';
+                badgeColor = 'bg-emerald-100 text-emerald-800 border-emerald-300';
+                recommended = true;
+            } else if (count === 2) {
+                statusTag = 'Beban Sedang (Ideal)';
+                badgeColor = 'bg-blue-100 text-blue-800 border-blue-300';
+            } else {
+                statusTag = 'Beban Tinggi (Perlu Pertimbangan)';
+                badgeColor = 'bg-amber-100 text-amber-800 border-amber-300';
+            }
+
+            return {
+                ...pm,
+                activeCount: count,
+                statusTag,
+                badgeColor,
+                recommended,
+                activeProjectsList: activeProjects.map(p => p.name || p.title || `Proyek ${p.id}`)
+            };
+        });
+    }, [projects]);
+
 
     // Buka modal tugaskan analyst
     const handleOpenAnalystModal = (project) => {
@@ -219,6 +273,10 @@ export default function WorkspaceDevLead() {
                 status: 'DEV_ANALYSIS',
                 statusColor: 'bg-amber-100 text-amber-700 border-amber-200',
                 assignedAnalyst: chosenAnalyst,
+                analyst: chosenAnalyst.name,
+                analyst_id: chosenAnalyst.id,
+                devAnalyst: chosenAnalyst,
+                devAnalystName: chosenAnalyst.name,
                 leadNote: leadNote || 'Tolong kaji kelayakan arsitektur teknis dan estimasi mandays.',
                 assignedAnalystAt: new Date().toISOString()
             });
@@ -251,13 +309,25 @@ export default function WorkspaceDevLead() {
         setIsSubmitting(true);
 
         const pmDetails = pmCandidates.find(pm => pm.id === parseInt(selectedPM));
+        const chosenPMName = pmDetails?.name || selectedPM;
+        const estDays = parseInt(estimationDays || selectedProject.analystResult?.estimation || '30', 10) || 30;
+        
+        const calcDeadline = new Date();
+        calcDeadline.setDate(calcDeadline.getDate() + estDays);
+        const deadlineIso = calcDeadline.toISOString().split('T')[0];
 
         setTimeout(() => {
             updateProject(selectedProject.id, {
                 status: 'IN_DEVELOPMENT',
                 statusColor: 'bg-indigo-100 text-indigo-700 border-indigo-200',
-                pm: pmDetails,
-                estimation: estimationDays || selectedProject.analystResult?.estimation || '30',
+                pm: pmDetails ? { id: pmDetails.id, name: pmDetails.name, initial: pmDetails.name.split(' ').map(n=>n[0]).join('').slice(0, 2) } : { name: chosenPMName, initial: 'PM' },
+                pmName: chosenPMName,
+                assignedPM: chosenPMName,
+                pmId: pmDetails?.id || user?.id,
+                estimation: `${estDays} Hari Kerja`,
+                deadline: deadlineIso,
+                targetDate: deadlineIso,
+                rbbDeadline: deadlineIso,
                 assignedBy: user?.name,
                 assignedPMAt: new Date().toISOString()
             });
@@ -274,7 +344,6 @@ export default function WorkspaceDevLead() {
             setSelectedProject(null);
             setSelectedPM('');
             setEstimationDays('');
-            navigate('/pm/workspace');
         }, 600);
     };
 
@@ -496,28 +565,17 @@ export default function WorkspaceDevLead() {
                                             <h3 className="font-bold text-gray-800 text-base mb-1">{project.name}</h3>
                                             <p className="text-xs text-gray-500 line-clamp-2 mb-3">{project.description}</p>
                                             
-                                            {/* Info Analyst Tanpa Komentar Progress */}
+                                            {/* Status Pemantauan Analyst */}
                                             <div className="bg-amber-50/60 p-3 rounded-xl border border-amber-100 mb-2">
-                                                <div className="text-xs text-amber-900 font-semibold flex items-center gap-1.5">
+                                                <div className="text-xs text-amber-900 font-semibold flex items-center gap-1.5 mb-1.5">
                                                     <Users size={14} className="text-amber-700 shrink-0" />
                                                     Analyst Bertugas: <span className="font-bold text-amber-950">{project.assignedAnalyst?.name || 'Citra Kirana'}</span>
                                                 </div>
+                                                <div className="flex items-center gap-1.5 text-[11px] text-amber-700 font-medium pt-1.5 border-t border-amber-200/50">
+                                                    <Clock size={12} className="shrink-0 animate-pulse text-amber-600" />
+                                                    <span>Menunggu Analyst menyelesaikan kajian teknis</span>
+                                                </div>
                                             </div>
-
-                                            <button
-                                                onClick={() => {
-                                                    updateProject(project.id, {
-                                                        status: 'DEV_ANALYSIS_DONE',
-                                                        statusColor: 'bg-indigo-100 text-indigo-700 border-indigo-200',
-                                                        devAnalystCompletedAt: new Date().toISOString()
-                                                    });
-                                                    toast.success(`Kajian teknis untuk "${project.name}" disetujui! Proyek masuk ke Tab 3 (Siap Tunjuk PM).`);
-                                                }}
-                                                className="w-full mt-3 bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold py-2.5 px-4 rounded-xl transition-all flex items-center justify-center gap-2 shadow-sm cursor-pointer active:scale-95"
-                                            >
-                                                <CheckCircle2 size={15} />
-                                                <span>Selesaikan Kajian &amp; Lanjut ke Tunjuk PM</span>
-                                            </button>
                                         </div>
                                     </div>
                                 ))}
@@ -546,7 +604,7 @@ export default function WorkspaceDevLead() {
                                     readyForPMProjects.map(project => (
                                         <div
                                             key={project.id}
-                                            onClick={() => { setSelectedProject(project); setSelectedPM(''); setEstimationDays(''); }}
+                                            onClick={() => { setSelectedProject(project); setSelectedPM(''); setEstimationDays(getNumericEstimation(project)); }}
                                             className={`p-4 rounded-xl cursor-pointer transition-all border ${
                                                 selectedProject?.id === project.id
                                                     ? 'bg-blue-50 border-[#1a365d] ring-2 ring-[#1a365d]/10'
@@ -621,17 +679,6 @@ export default function WorkspaceDevLead() {
                                             <span className="font-semibold text-emerald-900">
                                                 Estimasi Waktu IT: <strong className="text-emerald-950">{selectedProject.devAnalystResult?.estimation || '30 Hari Kerja'}</strong>
                                             </span>
-
-                                            {(selectedProject.fsdDevDocument || selectedProject.documents?.find(d => d.type === 'fsd_dev')) && (
-                                                <button
-                                                    type="button"
-                                                    onClick={() => setPreviewDoc(selectedProject.fsdDevDocument || selectedProject.documents.find(d => d.type === 'fsd_dev'))}
-                                                    className="px-3 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold transition-all flex items-center gap-1 cursor-pointer active:scale-95 shadow-2xs"
-                                                >
-                                                    <Eye size={13} />
-                                                    <span>View FSD Dev</span>
-                                                </button>
-                                            )}
                                         </div>
                                     </div>
 
@@ -708,33 +755,70 @@ export default function WorkspaceDevLead() {
                                         </h3>
 
                                         <div>
-                                            <label className="block text-xs font-bold text-gray-700 mb-1.5">Pilih Project Manager <span className="text-red-500">*</span></label>
+                                            <label className="block text-xs font-bold text-gray-700 mb-1.5">
+                                                Pilih Project Manager <span className="text-red-500">*</span>
+                                            </label>
                                             <select
                                                 value={selectedPM}
                                                 onChange={(e) => setSelectedPM(e.target.value)}
-                                                className="w-full px-4 py-2.5 rounded-xl border border-gray-200 focus:border-blue-600 focus:ring-2 focus:ring-blue-100 outline-none transition-all text-sm font-medium bg-white"
+                                                className="w-full px-4 py-2.5 rounded-xl border border-gray-200 focus:border-blue-600 focus:ring-2 focus:ring-blue-100 outline-none transition-all text-sm font-medium bg-white text-gray-800"
                                             >
                                                 <option value="">-- Pilih Project Manager --</option>
-                                                {pmCandidates.map(pm => (
+                                                {pmWorkloadStats.map(pm => (
                                                     <option key={pm.id} value={pm.id}>
-                                                        {pm.name} - {pm.department} (Beban: {pm.workload} Proyek Aktif)
+                                                        {pm.name} (Beban: {pm.activeCount} Proyek Aktif)
                                                     </option>
                                                 ))}
                                             </select>
                                         </div>
 
                                         <div>
-                                            <label className="block text-xs font-bold text-gray-700 mb-1.5">Estimasi Pengerjaan Final (Hari)</label>
-                                            <input
-                                                type="number"
-                                                value={estimationDays || selectedProject.analystResult?.estimation || ''}
-                                                onChange={(e) => setEstimationDays(e.target.value)}
-                                                placeholder="Misal: 30"
-                                                className="w-full px-4 py-2.5 rounded-xl border border-gray-200 focus:border-blue-600 focus:ring-2 focus:ring-blue-100 outline-none transition-all text-sm bg-white"
-                                            />
+                                            <label className="block text-xs font-bold text-gray-700 mb-1.5">
+                                                Estimasi Pengerjaan Final (Hari) <span className="text-red-500">*</span>
+                                            </label>
+                                            <div className="relative">
+                                                <input
+                                                    type="number"
+                                                    min="1"
+                                                    step="1"
+                                                    value={estimationDays}
+                                                    onChange={(e) => {
+                                                        const val = e.target.value;
+                                                        if (val === '') {
+                                                            setEstimationDays('');
+                                                        } else {
+                                                            const num = parseInt(val, 10);
+                                                            if (!isNaN(num) && num > 0) {
+                                                                setEstimationDays(String(num));
+                                                            }
+                                                        }
+                                                    }}
+                                                    placeholder="Contoh: 30"
+                                                    className="w-full px-4 py-2.5 pr-12 rounded-xl border border-gray-200 focus:border-blue-600 focus:ring-2 focus:ring-blue-100 outline-none transition-all text-sm font-semibold text-gray-800 bg-white"
+                                                />
+                                                <span className="absolute right-4 top-1/2 -translate-y-1/2 text-xs font-bold text-gray-400 pointer-events-none">
+                                                    Hari
+                                                </span>
+                                            </div>
                                         </div>
 
-                                        <div className="pt-3">
+                                        {selectedPM && (
+                                            <div className="p-3.5 bg-blue-50/80 border border-blue-200 rounded-xl text-xs space-y-1.5 animate-fade-in">
+                                                <span className="font-bold text-blue-900 block text-[11px] uppercase tracking-wider">Ringkasan Penunjukan Dev Lead:</span>
+                                                <div className="flex flex-wrap items-center justify-between text-blue-950 font-semibold gap-2">
+                                                    <span>PM Terpilih: <strong className="text-[#1A56DB] font-bold">{pmWorkloadStats.find(p => String(p.id) === String(selectedPM))?.name}</strong></span>
+                                                    <span>Proyek Aktif: <strong className="text-gray-800 font-bold">{pmWorkloadStats.find(p => String(p.id) === String(selectedPM))?.activeCount} Proyek</strong></span>
+                                                    <span>Perkiraan Tenggat: <strong className="text-emerald-700 font-bold">{(() => {
+                                                        const days = parseInt(estimationDays || '30', 10) || 30;
+                                                        const d = new Date();
+                                                        d.setDate(d.getDate() + days);
+                                                        return d.toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' });
+                                                    })()}</strong></span>
+                                                </div>
+                                            </div>
+                                        )}
+
+                                        <div className="pt-2">
                                             <button
                                                 onClick={handleAssignPM}
                                                 disabled={isSubmitting}
@@ -1025,11 +1109,21 @@ export default function WorkspaceDevLead() {
                                         className="w-full px-4 py-2.5 rounded-xl border border-gray-200 text-sm outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-600 bg-white font-semibold"
                                     >
                                         <option value="">-- Pilih System Analyst --</option>
-                                        {analysts.map(a => (
-                                            <option key={a.id} value={a.id}>
-                                                {a.name} (Beban Kerja: {a.workload} Proyek Aktif)
-                                            </option>
-                                        ))}
+                                        {analysts.map(a => {
+                                            const activeCount = (projects || []).filter(p => {
+                                                const analystName = typeof p.assignedAnalyst === 'object' 
+                                                    ? (p.assignedAnalyst?.name || '') 
+                                                    : String(p.assignedAnalyst || p.devAnalyst || p.devAnalystName || p.analyst || '');
+                                                const matches = analystName.toLowerCase().includes(a.name.toLowerCase());
+                                                const isFinished = p.status === 'LIVE_PRODUCTION' || p.status === 'CANCELLED' || p.status === 'REJECTED';
+                                                return matches && !isFinished;
+                                            }).length;
+                                            return (
+                                                <option key={a.id} value={a.id}>
+                                                    {a.name} (Beban: {activeCount} Proyek Aktif)
+                                                </option>
+                                            );
+                                        })}
                                     </select>
                                 </div>
 

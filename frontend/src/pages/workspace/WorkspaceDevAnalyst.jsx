@@ -106,18 +106,41 @@ export default function WorkspaceDevAnalyst() {
 
     const [previewDoc, setPreviewDoc] = useState(null);
 
+    const [selectedAnalystFilter, setSelectedAnalystFilter] = useState(() => {
+        if (user?.role === 'super_admin' || user?.role === 'lead_group' || user?.role === 'development_lead') return 'ALL';
+        return user?.name || 'MY_PROJECTS';
+    });
+
     // Filter antrean proyek yang sedang ditugaskan ke Analyst Pengembangan (status DEV_ANALYSIS)
     const reviewQueue = useMemo(() => {
-        return projects.filter(p => p.status === 'DEV_ANALYSIS');
-    }, [projects]);
+        let list = projects.filter(p => p.status === 'DEV_ANALYSIS');
+
+        if (selectedAnalystFilter === 'MY_PROJECTS') {
+            const myName = user?.name || '';
+            list = list.filter(p => {
+                const analystName = typeof p.assignedAnalyst === 'object'
+                    ? (p.assignedAnalyst?.name || '')
+                    : String(p.assignedAnalyst || p.devAnalyst || p.devAnalystName || p.analyst || '');
+                return analystName.toLowerCase().includes(myName.toLowerCase());
+            });
+        } else if (selectedAnalystFilter !== 'ALL') {
+            list = list.filter(p => {
+                const analystName = typeof p.assignedAnalyst === 'object'
+                    ? (p.assignedAnalyst?.name || '')
+                    : String(p.assignedAnalyst || p.devAnalyst || p.devAnalystName || p.analyst || '');
+                return analystName.toLowerCase().includes(selectedAnalystFilter.toLowerCase());
+            });
+        }
+
+        return list;
+    }, [projects, selectedAnalystFilter, user]);
 
     const [selectedProjectState, setSelectedProject] = useState(null);
     const selectedProject = selectedProjectState || reviewQueue[0] || null;
-
     const [decision, setDecision] = useState('Disetujui (Layak Develop)');
     const [techStack, setTechStack] = useState('Microservices Java Spring Boot + React JS + PostgreSQL');
     const [notes, setNotes] = useState('');
-    const [estimationDays, setEstimationDays] = useState('30 Hari Kerja');
+    const [estimationDays, setEstimationDays] = useState('30');
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [uploadedFile, setUploadedFile] = useState(null);
     const fileInputRef = useRef(null);
@@ -252,7 +275,6 @@ export default function WorkspaceDevAnalyst() {
             setSelectedProject(null);
             setNotes('');
             setUploadedFile(null);
-            navigate('/workspace/dev-lead');
         } catch (err) {
             console.error('Error submitting dev analyst review:', err);
             toast.error('Gagal mengirim kajian teknis.');
@@ -288,19 +310,65 @@ export default function WorkspaceDevAnalyst() {
                 </div>
             </div>
 
-            {/* Content Body (Standard 2-Column Split Layout) */}
-            <div className="flex flex-col lg:flex-row gap-6 items-start">
+            {/* Top Filter Control Bar */}
+            <div className="bg-white border border-gray-200 rounded-2xl p-4 mb-6 shadow-2xs flex flex-col sm:flex-row items-center justify-between gap-4">
+                <div className="flex items-center gap-2">
+                    <Filter size={18} className="text-[#1A56DB]" />
+                    <span className="text-sm font-bold text-gray-800">Filter Antrean Proyek:</span>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
+                    <button
+                        onClick={() => setSelectedAnalystFilter('ALL')}
+                        className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                            selectedAnalystFilter === 'ALL'
+                                ? 'bg-[#1a365d] text-white shadow-xs'
+                                : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                        }`}
+                    >
+                        🌐 Semua Proyek Global
+                    </button>
+
+                    {user?.role !== 'super_admin' && (
+                        <button
+                            onClick={() => setSelectedAnalystFilter('MY_PROJECTS')}
+                            className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                                selectedAnalystFilter === 'MY_PROJECTS'
+                                    ? 'bg-[#1A56DB] text-white shadow-xs'
+                                    : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                            }`}
+                        >
+                            👤 Proyek Tugas Saya
+                        </button>
+                    )}
+
+                    <select
+                        value={['ALL', 'MY_PROJECTS'].includes(selectedAnalystFilter) ? '' : selectedAnalystFilter}
+                        onChange={(e) => setSelectedAnalystFilter(e.target.value || 'ALL')}
+                        className="px-3 py-1.5 rounded-xl text-xs font-semibold border border-gray-200 bg-white text-gray-700 outline-none focus:border-[#1A56DB]"
+                    >
+                        <option value="">-- Filter Per System Analyst --</option>
+                        <option value="Citra Kirana">Citra Kirana</option>
+                        <option value="Mustafa Fathur Rahman">Mustafa Fathur Rahman</option>
+                        <option value="Fajar Ramadhan">Fajar Ramadhan</option>
+                        <option value="Ahmad Fauzi">Ahmad Fauzi</option>
+                    </select>
+                </div>
+            </div>
+
+            {/* Content Body (Standard 2-Column Split Layout - Equalized Height) */}
+            <div className="flex flex-col lg:flex-row gap-6 items-stretch min-h-[650px]">
                 {/* LEFT PANEL: Antrean Tugas Analyst Dev */}
-                <div className="w-full lg:w-1/3 flex flex-col bg-white border border-gray-200 rounded-2xl shadow-sm overflow-hidden shrink-0 lg:sticky lg:top-4 lg:max-h-[calc(100vh-100px)]">
+                <div className="w-full lg:w-1/3 flex flex-col bg-white border border-gray-200 rounded-2xl shadow-sm overflow-hidden shrink-0 min-h-[600px] flex-1">
                     <div className="p-4 border-b border-gray-100 flex justify-between items-center shrink-0 bg-slate-50/60">
                         <div>
                             <h2 className="text-base font-bold text-gray-800">Tugas Kajian Teknis</h2>
-                            <p className="text-xs text-gray-500 mt-0.5">{reviewQueue.length} proyek menunggu analisa</p>
+                            <p className="text-xs text-gray-500 mt-0.5">{reviewQueue.length} proyek dalam antrean</p>
                         </div>
                         <Filter size={16} className="text-gray-400" />
                     </div>
 
-                    <div className="max-lg:max-h-[280px] flex-1 overflow-y-auto p-3 space-y-3 bg-gray-50/40 flex flex-col justify-start">
+                    <div className="flex-1 overflow-y-auto p-3 space-y-3 bg-gray-50/40 flex flex-col justify-start min-h-[500px]">
                         {reviewQueue.length === 0 ? (
                             <div className="p-8 text-center text-gray-400 my-auto">
                                 <CheckCircle2 size={36} className="mx-auto mb-2 opacity-50 text-emerald-600" />
@@ -522,15 +590,32 @@ export default function WorkspaceDevAnalyst() {
 
                                         <div>
                                             <label className="block text-xs font-bold text-gray-700 mb-1.5">
-                                                Estimasi Waktu Pengerjaan IT (Mandays) <span className="text-red-500">*</span>
+                                                Estimasi Waktu Pengerjaan IT (Hari) <span className="text-red-500">*</span>
                                             </label>
-                                            <input
-                                                type="text"
-                                                value={estimationDays}
-                                                onChange={(e) => setEstimationDays(e.target.value)}
-                                                placeholder="Contoh: 45 Hari Kerja (3 Sprint)"
-                                                className="w-full px-4 py-2.5 bg-white border border-gray-300 rounded-xl text-xs font-semibold focus:ring-2 focus:ring-blue-100 focus:border-[#1A56DB] outline-none"
-                                            />
+                                            <div className="relative">
+                                                <input
+                                                    type="number"
+                                                    min="1"
+                                                    step="1"
+                                                    value={estimationDays}
+                                                    onChange={(e) => {
+                                                        const val = e.target.value;
+                                                        if (val === '') {
+                                                            setEstimationDays('');
+                                                        } else {
+                                                            const num = parseInt(val, 10);
+                                                            if (!isNaN(num) && num > 0) {
+                                                                setEstimationDays(String(num));
+                                                            }
+                                                        }
+                                                    }}
+                                                    placeholder="Contoh: 30"
+                                                    className="w-full px-4 py-2.5 pr-12 bg-white border border-gray-300 rounded-xl text-xs font-semibold focus:ring-2 focus:ring-blue-100 focus:border-[#1A56DB] outline-none"
+                                                />
+                                                <span className="absolute right-4 top-1/2 -translate-y-1/2 text-xs font-bold text-gray-400 pointer-events-none">
+                                                    Hari
+                                                </span>
+                                            </div>
                                         </div>
 
                                         <div>

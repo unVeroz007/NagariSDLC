@@ -23,7 +23,7 @@ class ProjectController extends Controller
 
     public function index(Request $request): JsonResponse
     {
-        $query = Project::with(['creator', 'pm', 'analyst', 'division', 'documents']);
+        $query = Project::with(['creator', 'pm', 'analyst', 'division', 'documents', 'teamMembers.user']);
 
         if ($request->filled('status')) {
             $query->where('status', $request->status);
@@ -89,7 +89,7 @@ class ProjectController extends Controller
 
     public function show(int $id): JsonResponse
     {
-        $project = Project::with(['creator', 'pm', 'analyst', 'division', 'statusHistories.changedBy'])
+        $project = Project::with(['creator', 'pm', 'analyst', 'division', 'statusHistories.changedBy', 'teamMembers.user'])
             ->findOrFail($id);
 
         return response()->json([
@@ -123,10 +123,106 @@ class ProjectController extends Controller
             'staging_url', 'uat_notes',
         ]));
 
+        if ($request->has('team') || $request->has('team_ids') || $request->has('developers')) {
+            $teamData = $request->input('team') ?? $request->input('team_ids') ?? $request->input('developers');
+            if (is_array($teamData)) {
+                \App\Models\ProjectTeamMember::where('project_id', $project->id)->delete();
+                foreach ($teamData as $member) {
+                    $userId = null;
+                    $roleInProject = 'Developer';
+
+                    if (is_array($member) || is_object($member)) {
+                        $member = (array) $member;
+                        $userId = $member['id'] ?? null;
+                        $roleInProject = $member['skill'] ?? $member['role'] ?? 'Developer';
+                        if (!$userId && !empty($member['email'])) {
+                            $u = \App\Models\User::where('email', $member['email'])->first();
+                            $userId = $u?->id;
+                        }
+                        if (!$userId && !empty($member['name'])) {
+                            $u = \App\Models\User::where('name', 'like', "%{$member['name']}%")->first();
+                            $userId = $u?->id;
+                        }
+                    } elseif (is_numeric($member)) {
+                        $userId = (int) $member;
+                    }
+
+                    if ($userId) {
+                        \App\Models\ProjectTeamMember::create([
+                            'project_id'      => $project->id,
+                            'user_id'         => $userId,
+                            'role_in_project' => $roleInProject,
+                        ]);
+                    }
+                }
+            }
+        }
+
         return response()->json([
             'status'  => 'success',
-            'message' => 'Data proyek berhasil diperbarui.',
-            'data'    => new ProjectResource($project->fresh(['creator', 'pm', 'analyst', 'division'])),
+            'message' => 'Data proyek dan alokasi tim berhasil diperbarui.',
+            'data'    => new ProjectResource($project->fresh(['creator', 'pm', 'analyst', 'division', 'teamMembers.user'])),
+        ]);
+    }
+
+    /**
+     * Allocate team members to a project — writes directly to project_team_members table.
+     * POST/PUT /projects/{id}/team
+     */
+    public function allocateTeam(Request $request, int $id): JsonResponse
+    {
+        $project = Project::findOrFail($id);
+
+        $request->validate([
+            'team'   => ['required', 'array', 'min:1'],
+            'team.*' => ['array'],
+        ]);
+
+        $teamData = $request->input('team', []);
+
+        // Clear all existing team members for this project
+        \App\Models\ProjectTeamMember::where('project_id', $project->id)->delete();
+
+        $saved = 0;
+        foreach ($teamData as $member) {
+            $userId = null;
+            $roleInProject = 'Developer';
+
+            if (is_array($member)) {
+                $roleInProject = $member['skill'] ?? $member['role'] ?? 'Developer';
+
+                // 1. Resolve by email FIRST to guarantee exact DB user match
+                if (!empty($member['email'])) {
+                    $u = \App\Models\User::where('email', $member['email'])->first();
+                    if ($u) $userId = $u->id;
+                }
+                // 2. Resolve by name if email didn't match
+                if (!$userId && !empty($member['name'])) {
+                    $u = \App\Models\User::where('name', 'like', "%{$member['name']}%")->first();
+                    if ($u) $userId = $u->id;
+                }
+                // 3. Fallback to id if valid numeric ID
+                if (!$userId && !empty($member['id']) && is_numeric($member['id'])) {
+                    $userId = (int) $member['id'];
+                }
+            } elseif (is_numeric($member)) {
+                $userId = (int) $member;
+            }
+
+            if ($userId) {
+                // Skip duplicate (project_id + user_id combo)
+                \App\Models\ProjectTeamMember::firstOrCreate(
+                    ['project_id' => $project->id, 'user_id' => $userId],
+                    ['role_in_project' => $roleInProject]
+                );
+                $saved++;
+            }
+        }
+
+        return response()->json([
+            'status'  => 'success',
+            'message' => "{$saved} anggota tim berhasil dialokasikan ke proyek.",
+            'data'    => new ProjectResource($project->fresh(['creator', 'pm', 'analyst', 'division', 'teamMembers.user'])),
         ]);
     }
 
@@ -169,7 +265,7 @@ class ProjectController extends Controller
 
     public function timeline(int $id): JsonResponse
     {
-        $project  = Project::findOrFail($id);
+        $project   = Project::findOrFail($id);
         $histories = $project->statusHistories()->with('changedBy.role')->get();
 
         return response()->json([

@@ -31,14 +31,16 @@ export default function ChatBox({
 
     const [inputText, setInputText] = useState('');
     const [isCollapsed, setIsCollapsed] = useState(isFloating);
-    const messagesEndRef = useRef(null);
+    const chatContainerRef = useRef(null);
 
     const messages = getMessages(projectId);
     const unreadCount = getUnreadCount(projectId);
 
-    // Auto-scroll ke bawah saat pesan baru masuk
+    // Auto-scroll ke bawah di dalam wadah pesan saja (tanpa scroll halaman utama browser)
     const scrollToBottom = () => {
-        messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+        if (chatContainerRef.current) {
+            chatContainerRef.current.scrollTop = chatContainerRef.current.scrollHeight;
+        }
     };
 
     useEffect(() => {
@@ -154,6 +156,7 @@ export default function ChatBox({
                 <>
                     {/* Message Area */}
                     <div
+                        ref={chatContainerRef}
                         className="flex-1 p-4 overflow-y-auto space-y-4 bg-gray-50/50 text-xs"
                         style={{ height: maxHeight, maxHeight: maxHeight }}
                     >
@@ -238,7 +241,6 @@ export default function ChatBox({
                                 </div>
                             ))
                         )}
-                        <div ref={messagesEndRef} />
                     </div>
 
                     {/* INPUT AREA */}

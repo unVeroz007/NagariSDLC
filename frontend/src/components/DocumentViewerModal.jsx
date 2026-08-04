@@ -222,17 +222,17 @@ export default function DocumentViewerModal({ doc, project, onClose }) {
                 </div>
 
                 {/* ── CANVAS VIEW CONTAINER ── */}
-                <div className="flex-1 bg-slate-950 overflow-y-auto p-4 sm:p-6 md:p-10 flex justify-center items-start relative">
+                <div className="flex-1 bg-slate-950 overflow-y-auto p-3 sm:p-6 md:p-8 flex items-center justify-center relative min-h-0">
                     
                     {/* DIRECT FILE STREAM MODE (PDF / Image) */}
                     {viewMode === 'direct' && isValidDirectStream && !streamError ? (
                         isImage ? (
-                            <div className="flex items-center justify-center p-4 min-h-[500px]">
+                            <div className="flex items-center justify-center p-2 w-full h-full">
                                 <img
                                     src={rawUrl}
                                     alt={docName}
                                     onError={handleStreamError}
-                                    className="max-w-full max-h-[75vh] object-contain rounded-2xl shadow-2xl bg-white p-2 border border-slate-700"
+                                    className="max-w-full max-h-[78vh] object-contain rounded-2xl shadow-2xl bg-white p-2 border border-slate-700 mx-auto my-auto"
                                 />
                             </div>
                         ) : (
@@ -240,22 +240,23 @@ export default function DocumentViewerModal({ doc, project, onClose }) {
                                 data={rawUrl}
                                 type="application/pdf"
                                 onError={handleStreamError}
-                                className="w-full h-full min-h-[650px] bg-white rounded-2xl shadow-2xl border-0"
+                                className="w-full h-full min-h-[600px] bg-white rounded-2xl shadow-2xl border-0"
                             >
                                 <iframe
                                     src={rawUrl}
                                     title={docName}
                                     onError={handleStreamError}
-                                    className="w-full h-full min-h-[650px] bg-white rounded-2xl border-0"
+                                    className="w-full h-full min-h-[600px] bg-white rounded-2xl border-0"
                                 />
                             </object>
                         )
                     ) : (
                         /* ── PAPER READER SDLC MODE (OFFICIAL BANK NAGARI DOCUMENT) ── */
-                        <div
-                            className="bg-white text-slate-900 rounded-2xl shadow-2xl p-6 sm:p-10 md:p-14 max-w-4xl w-full border border-slate-200 transition-all duration-300 my-auto sm:my-4 print:shadow-none print:border-none"
-                            style={{ transform: `scale(${zoomLevel / 100})`, transformOrigin: 'top center' }}
-                        >
+                        <div className="w-full flex items-center justify-center py-4 my-auto">
+                            <div
+                                className="bg-white text-slate-900 rounded-2xl shadow-2xl p-6 sm:p-10 md:p-12 max-w-4xl w-full border border-slate-200 transition-all duration-300 mx-auto print:shadow-none print:border-none"
+                                style={{ zoom: `${zoomLevel}%` }}
+                            >
                             {/* Kop Surat Resmi Bank Nagari */}
                             <div className="border-b-2 border-slate-900 pb-6 mb-8 flex justify-between items-start gap-4">
                                 <div>
@@ -419,7 +420,8 @@ export default function DocumentViewerModal({ doc, project, onClose }) {
                                 <span>HALAMAN 1 DARI 1 • TERVERIFIKASI ELEKTRONIK</span>
                             </div>
                         </div>
-                    )}
+                    </div>
+                )}
                 </div>
 
                 {/* ── BOTTOM FOOTER BAR ── */}

@@ -26,7 +26,6 @@ export const menuSections = {
                 { label: 'PM Workspace', path: '/pm/workspace', icon: 'Briefcase' },
                 { label: 'Alokasi Tim', path: '/pm/allocation', icon: 'Users' },
                 { label: 'Kanban Board', path: '/pm/kanban', icon: 'Kanban' },
-                { label: 'Manajemen Task', path: '/pm/tasks', icon: 'ClipboardList' },
             ],
         },
         {
@@ -132,7 +131,6 @@ export const menuSections = {
             items: [
                 { label: 'Alokasi Tim', path: '/pm/allocation', icon: 'Users' },
                 { label: 'Kanban Board', path: '/pm/kanban', icon: 'Kanban' },
-                { label: 'Manajemen Task', path: '/pm/tasks', icon: 'ClipboardList' },
             ],
         },
         {

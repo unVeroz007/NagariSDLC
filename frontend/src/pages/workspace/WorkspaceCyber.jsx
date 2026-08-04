@@ -45,9 +45,10 @@ import {
 } from 'lucide-react';
 
 const pentestAuditors = [
-    { id: 1, name: 'Rian Hidayat, CISA', role: 'Senior Cybersecurity Auditor', email: 'rian.hidayat@banknagari.co.id', activeLoad: 1 },
-    { id: 2, name: 'Bambang Supriyadi, CEH', role: 'Penetration Testing Specialist', email: 'bambang.s@banknagari.co.id', activeLoad: 0 },
-    { id: 3, name: 'Maya Indah, CISSP', role: 'Application Security Engineer', email: 'maya.indah@banknagari.co.id', activeLoad: 2 },
+    { id: 1, name: 'Rizal Pratama, CEH', role: 'Lead Pentester & Security Auditor', email: 'pentester@nagari.co.id', activeLoad: 1 },
+    { id: 2, name: 'Kevin Sanjaya, OSCP', role: 'Web & API Security Specialist', email: 'kevin.cyber@nagari.co.id', activeLoad: 0 },
+    { id: 3, name: 'Nadia Utami, CISSP', role: 'Mobile Security Engineer', email: 'nadia.cyber@nagari.co.id', activeLoad: 1 },
+    { id: 4, name: 'Gita Savitri', role: 'Cyber Security Lead', email: 'cyberlead@nagari.co.id', activeLoad: 2 },
 ];
 
 export default function WorkspaceCyber() {

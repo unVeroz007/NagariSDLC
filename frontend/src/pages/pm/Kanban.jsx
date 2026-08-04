@@ -72,62 +72,100 @@ export default function Kanban() {
 
     const [viewMode, setViewMode] = useState('project'); // 'project' | 'task'
     const [selectedProjectId, setSelectedProjectId] = useState('');
+    const [selectedPmFilter, setSelectedPmFilter] = useState(() => {
+        if (user?.role === 'super_admin' || user?.role === 'lead_group' || user?.role === 'head_of_it' || user?.role === 'development_lead') return 'ALL';
+        if (user?.role === 'project_manager') return user?.name || 'MY_PROJECTS';
+        return 'ALL';
+    });
     const [searchTerm, setSearchTerm] = useState('');
     const [divisionFilter, setDivisionFilter] = useState('All');
     const [tasks, setTasks] = useState([]);
 
-    // SDLC Project Columns
+    // SDLC Project Columns with Comprehensive Status Lists
     const sdlcColumns = [
         {
             id: 'phase1',
             title: 'Fase 1: Inisiasi & Review',
             color: 'border-blue-500 bg-blue-50/30',
-            statuses: ['PENDING', 'IN_REVIEW', 'ANALYSIS_APPROVED'],
+            statuses: ['PENDING', 'DRAFT', 'SUBMITTED', 'NEW', 'IN_REVIEW', 'PLANNING_ANALYSIS', 'ANALYSIS', 'ANALYSIS_APPROVED', 'DISPOSITION', 'VERIFICATION_PENDING', 'ANALYST_SUBMITTED'],
         },
         {
             id: 'phase2',
             title: 'Fase 2: Analisis & Desain',
             color: 'border-indigo-500 bg-indigo-50/30',
-            statuses: ['DEV_ANALYSIS', 'DEV_ANALYSIS_DONE', 'READY_FOR_DEVELOPMENT'],
+            statuses: ['DEV_ANALYSIS', 'DEV_ANALYSIS_DONE', 'READY_FOR_DEVELOPMENT', 'READY_FOR_DEV', 'FSD_DEV_DONE', 'ARCHITECTURE_REVIEW'],
         },
         {
             id: 'phase3',
             title: 'Fase 3: Pengembangan IT',
             color: 'border-amber-500 bg-amber-50/30',
-            statuses: ['IN_DEVELOPMENT', 'RETURN_TO_DEV'],
+            statuses: ['IN_DEVELOPMENT', 'DEVELOPMENT', 'DEV_IN_PROGRESS', 'IN_SPRINT', 'RETURN_TO_DEV', 'SPRINT', 'CODING'],
         },
         {
             id: 'phase4',
             title: 'Fase 4: Pengujian QA & Cyber',
             color: 'border-purple-500 bg-purple-50/30',
-            statuses: ['READY_FOR_QA', 'QA_IN_PROGRESS', 'QA_PASSED', 'CYBER_IN_PROGRESS', 'CYBER_PASSED'],
+            statuses: ['READY_FOR_QA', 'QA_IN_PROGRESS', 'QA_PASSED', 'CYBER_IN_PROGRESS', 'CYBER_PASSED', 'TESTING', 'QA_CYBER'],
         },
         {
             id: 'phase5',
             title: 'Fase 5: Rilis & Quality Gate',
             color: 'border-emerald-500 bg-emerald-50/30',
-            statuses: ['READY_FOR_UAT', 'UAT_PASSED', 'PENDING_GOLIVE', 'LIVE_PRODUCTION'],
+            statuses: ['READY_FOR_UAT', 'UAT_IN_PROGRESS', 'UAT_PASSED', 'PENDING_GOLIVE', 'GOLIVE', 'LIVE_PRODUCTION', 'COMPLETED', 'RELEASED'],
         },
     ];
+
+    // Intelligent Phase Fallback Mapping Helper
+    const getProjectPhaseId = (projectStatus) => {
+        const statusUpper = String(projectStatus || '').toUpperCase();
+        for (const col of sdlcColumns) {
+            if (col.statuses.includes(statusUpper)) {
+                return col.id;
+            }
+        }
+        if (statusUpper.includes('DEV') || statusUpper.includes('SPRINT') || statusUpper.includes('CODE')) return 'phase3';
+        if (statusUpper.includes('QA') || statusUpper.includes('TEST') || statusUpper.includes('CYBER')) return 'phase4';
+        if (statusUpper.includes('UAT') || statusUpper.includes('LIVE') || statusUpper.includes('RELEASE')) return 'phase5';
+        if (statusUpper.includes('DESAIN') || statusUpper.includes('ARCH')) return 'phase2';
+        return 'phase1';
+    };
 
     // Filter projects for Project SDLC view
     const filteredProjects = useMemo(() => {
         let result = [...(projects || [])];
+
+        // Filter per PM
+        if (selectedPmFilter === 'MY_PROJECTS') {
+            const myName = user?.name || '';
+            result = result.filter(p => {
+                const pmName = typeof p.pm === 'object' ? (p.pm?.name || '') : String(p.pmName || p.pm || p.assignedPM || '');
+                return pmName.toLowerCase().includes(myName.toLowerCase());
+            });
+        } else if (selectedPmFilter !== 'ALL') {
+            result = result.filter(p => {
+                const pmName = typeof p.pm === 'object' ? (p.pm?.name || '') : String(p.pmName || p.pm || p.assignedPM || '');
+                return pmName.toLowerCase().includes(selectedPmFilter.toLowerCase());
+            });
+        }
+
         if (searchTerm) {
             const term = searchTerm.toLowerCase();
             result = result.filter(p =>
                 String(p.reqId || p.req_id || p.id || '').toLowerCase().includes(term) ||
-                String(p.name || p.title || '').toLowerCase().includes(term)
+                String(p.name || p.title || '').toLowerCase().includes(term) ||
+                String(p.division || '').toLowerCase().includes(term)
             );
         }
+
         if (divisionFilter !== 'All') {
             result = result.filter(p => {
                 const divStr = typeof p.division === 'object' ? p.division?.name : p.division;
                 return divStr === divisionFilter;
             });
         }
+
         return result;
-    }, [projects, searchTerm, divisionFilter]);
+    }, [projects, selectedPmFilter, user, searchTerm, divisionFilter]);
 
     // Fetch tasks if in task view
     useEffect(() => {
@@ -178,12 +216,58 @@ export default function Kanban() {
                 </div>
             </div>
 
+            {/* Top Filter Bar (PM Scope Selection) */}
+            <div className="bg-white border border-gray-200 rounded-2xl p-4 mb-6 shadow-2xs flex flex-col sm:flex-row items-center justify-between gap-4">
+                <div className="flex items-center gap-2">
+                    <Filter size={18} className="text-[#1A56DB]" />
+                    <span className="text-sm font-bold text-gray-800">Filter Tampilan Kanban Proyek:</span>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
+                    <button
+                        onClick={() => setSelectedPmFilter('ALL')}
+                        className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                            selectedPmFilter === 'ALL'
+                                ? 'bg-[#1a365d] text-white shadow-xs'
+                                : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                        }`}
+                    >
+                        🌐 Semua Proyek SDLC ({projects.length})
+                    </button>
+
+                    {user?.role === 'project_manager' && (
+                        <button
+                            onClick={() => setSelectedPmFilter('MY_PROJECTS')}
+                            className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                                selectedPmFilter === 'MY_PROJECTS'
+                                    ? 'bg-[#1A56DB] text-white shadow-xs'
+                                    : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                            }`}
+                        >
+                            👤 Proyek PM Saya
+                        </button>
+                    )}
+
+                    <select
+                        value={['ALL', 'MY_PROJECTS'].includes(selectedPmFilter) ? '' : selectedPmFilter}
+                        onChange={(e) => setSelectedPmFilter(e.target.value || 'ALL')}
+                        className="px-3 py-1.5 rounded-xl text-xs font-semibold border border-gray-200 bg-white text-gray-700 outline-none focus:border-[#1A56DB]"
+                    >
+                        <option value="">-- Filter Per Project Manager --</option>
+                        <option value="Budi Santoso">Budi Santoso</option>
+                        <option value="Dewi Lestari">Dewi Lestari</option>
+                        <option value="Andi Wijaya">Andi Wijaya</option>
+                        <option value="Citra Kirana">Citra Kirana</option>
+                    </select>
+                </div>
+            </div>
+
             {/* ======================================================== */}
             {/* SDLC PROJECT KANBAN BOARD (ALL PROJECTS PER PHASE)       */}
             {/* ======================================================== */}
             <div className="grid grid-cols-1 md:grid-cols-5 gap-4 overflow-x-auto pb-4">
                 {sdlcColumns.map(col => {
-                    const colProjects = filteredProjects.filter(p => col.statuses.includes(p.status));
+                    const colProjects = filteredProjects.filter(p => getProjectPhaseId(p.status) === col.id);
 
                     return (
                         <div
@@ -224,11 +308,13 @@ export default function Kanban() {
                                             <div className="text-[11px] text-gray-500 space-y-1 mb-3 pt-2 border-t border-gray-100">
                                                 <div className="flex items-center justify-between">
                                                     <span>Divisi:</span>
-                                                    <span className="font-medium text-gray-700">{p.division}</span>
+                                                    <span className="font-medium text-gray-700">{p.division?.name || p.division}</span>
                                                 </div>
                                                 <div className="flex items-center justify-between">
                                                     <span>PM:</span>
-                                                    <span className="font-semibold text-gray-800">{typeof p.pm === 'object' ? p.pm?.name : p.pm}</span>
+                                                    <span className="font-semibold text-gray-800">
+                                                        {typeof p.pm === 'object' ? (p.pm?.name || 'Belum Dialokasi') : (p.pmName || p.pm || p.assignedPM || 'Belum Dialokasi')}
+                                                    </span>
                                                 </div>
                                             </div>
 
@@ -238,7 +324,6 @@ export default function Kanban() {
                                             >
                                                 <List size={13} />
                                                 <span>Detail Task &amp; Pekerjaan Dev</span>
-                                                <ArrowRight size={13} />
                                             </button>
                                         </div>
                                     ))

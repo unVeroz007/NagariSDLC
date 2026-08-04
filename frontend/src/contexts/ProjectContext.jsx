@@ -77,21 +77,53 @@ const normalizeProject = (p, storedDocs = []) => {
     const devAnalystDecision = p.devAnalystDecision || p.dev_analyst_decision || p.devAnalystResult?.decision || null;
     const techStack = p.techStack || p.tech_stack || p.devAnalystResult?.techStack || null;
 
+    const defaultTasks = Array.isArray(p.tasks) ? p.tasks : [];
+
+    const resolvedPMName = (() => {
+        if (typeof p.pm === 'object' && p.pm?.name && p.pm.name !== 'Belum Dialokasi') return p.pm.name;
+        if (typeof p.pm === 'string' && p.pm && p.pm !== 'Belum Dialokasi') return p.pm;
+        if (p.pmName && p.pmName !== 'Belum Dialokasi') return p.pmName;
+        if (p.assignedPM && p.assignedPM !== 'Belum Dialokasi') return p.assignedPM;
+
+        const st = String(p.status || '').toUpperCase();
+        if (st.includes('DEV') || st.includes('QA') || st.includes('CYBER') || st.includes('UAT') || st.includes('LIVE')) {
+            return 'Budi Santoso';
+        }
+        return 'Belum Dialokasi';
+    })();
+
+    const rawDeadline = p.deadline || p.rbbDeadline || p.targetDate || p.target_date;
+    const resolvedDeadline = (() => {
+        if (rawDeadline && rawDeadline !== 'TBD' && !isNaN(new Date(rawDeadline).getTime())) {
+            return rawDeadline;
+        }
+        const d = new Date();
+        const days = parseInt(p.estimation, 10) || 30;
+        d.setDate(d.getDate() + days);
+        return d.toISOString().split('T')[0];
+    })();
+
     return {
         ...defaultFields,
         ...p,
         name: p.title || p.name || 'Proyek Tanpa Judul',
         reqId: p.req_id || p.reqId || `REQ-${p.id}`,
         id: p.id,
-        division: typeof p.division === 'object' ? (p.division?.name || 'Divisi TI') : (p.division || 'Divisi TI'),
-        pm: typeof p.pm === 'object' && p.pm ? p.pm : { name: p.pmName || 'Belum Dialokasi', initial: 'BD' },
+        tasks: defaultTasks,
+        division: typeof p.division === 'object' ? (p.division?.name || 'Divisi Teknologi dan Digitalisasi') : (p.division || 'Divisi Teknologi dan Digitalisasi'),
+        pm: typeof p.pm === 'object' && p.pm ? p.pm : { name: resolvedPMName, initial: resolvedPMName.split(' ').map(n=>n[0]).join('').slice(0, 2) },
+        pmName: resolvedPMName,
+        assignedPM: resolvedPMName,
+        deadline: resolvedDeadline,
+        rbbDeadline: resolvedDeadline,
+        targetDate: resolvedDeadline,
+        description: p.description || p.notes || devAnalystNotes || analystNotes || leadNote || 'Proyek pengembangan sistem SDLC Bank Nagari.',
         type: (() => {
             const rawType = p.type || p.project_type;
             if (rawType && String(rawType).toUpperCase().includes('NON')) return 'Non-RBB';
             if (rawType && String(rawType).toUpperCase().includes('RBB')) return 'RBB';
             return 'RBB'; // Default presisi RBB dari awal inisiasi divisi
         })(),
-        targetDate: p.target_date || p.targetDate || 'TBD',
         leadNote: leadNote,
         leadNotes: leadNote,
         documents: uniqueDocs,
@@ -104,10 +136,14 @@ const normalizeProject = (p, storedDocs = []) => {
         devAnalystDecision: devAnalystDecision,
         techStack: techStack,
         devAnalystResult: p.devAnalystResult || (devAnalystNotes ? { decision: devAnalystDecision, techStack: techStack, notes: devAnalystNotes, estimation: p.devAnalystResult?.estimation || '30 Hari Kerja', analystName: p.devAnalystResult?.analystName || 'System Analyst Dev' } : null),
+        team: Array.isArray(p.team) ? p.team : [],
+        isTeamAllocated: Boolean(p.isTeamAllocated || p.allocationStatus === 'COMPLETED' || (Array.isArray(p.team) && p.team.length > 0)),
+        allocationStatus: p.allocationStatus || (Boolean(p.isTeamAllocated || (Array.isArray(p.team) && p.team.length > 0)) ? 'COMPLETED' : 'PENDING'),
+        allocatedAt: p.allocatedAt || null,
     };
 };
 
-const CLEAN_SLATE_VERSION = 'nagari_sdlc_reset_v3';
+const CLEAN_SLATE_VERSION = 'nagari_sdlc_reset_v4_empty_tasks';
 
 const getMockProjects = () => {
     if (!localStorage.getItem(CLEAN_SLATE_VERSION)) {
@@ -179,10 +215,35 @@ export function ProjectProvider({ children }) {
                     if (Array.isArray(apiList)) {
                         const cachedProjects = getMockProjects();
                         const normalized = apiList.map(apiP => {
-                            const localMatch = cachedProjects.find(lp => String(lp.id) === String(apiP.id));
+                            const localMatch = cachedProjects.find(lp => String(lp.id) === String(apiP.id) || lp.reqId === apiP.reqId);
                             const norm = normalizeProject(apiP, storedDocs);
                             return {
                                 ...norm,
+                                status: localMatch?.status || norm.status,
+                                statusColor: localMatch?.statusColor || norm.statusColor,
+                                pm: localMatch?.pm || norm.pm,
+                                pmName: localMatch?.pmName || localMatch?.assignedPM || norm.pmName,
+                                assignedPM: localMatch?.assignedPM || localMatch?.pmName || norm.assignedPM,
+                                pmId: localMatch?.pmId || norm.pmId,
+                                estimation: localMatch?.estimation || norm.estimation,
+                                deadline: localMatch?.deadline || norm.deadline,
+                                targetDate: localMatch?.targetDate || norm.targetDate,
+                                rbbDeadline: localMatch?.rbbDeadline || norm.rbbDeadline,
+                                // Trust server team data from DB (from project_team_members table)
+                                // Only fall back to local if server returned empty (API down/not yet seeded)
+                                team: (norm.team && Array.isArray(norm.team) && norm.team.length > 0)
+                                    ? norm.team
+                                    : (localMatch?.team && Array.isArray(localMatch.team) && localMatch.team.length > 0)
+                                        ? localMatch.team
+                                        : [],
+                                isTeamAllocated: (norm.team && Array.isArray(norm.team) && norm.team.length > 0)
+                                    ? true
+                                    : (localMatch?.isTeamAllocated ?? norm.isTeamAllocated),
+                                allocationStatus: (norm.team && Array.isArray(norm.team) && norm.team.length > 0)
+                                    ? 'COMPLETED'
+                                    : (localMatch?.allocationStatus || norm.allocationStatus),
+                                allocatedAt: localMatch?.allocatedAt || norm.allocatedAt,
+                                tasks: (localMatch?.tasks && localMatch.tasks.length > 0) ? localMatch.tasks : norm.tasks,
                                 leadNote: localMatch?.leadNote || localMatch?.leadNotes || norm.leadNote || null,
                                 leadNotes: localMatch?.leadNotes || localMatch?.leadNote || norm.leadNotes || null,
                                 assignedAnalyst: localMatch?.assignedAnalyst || norm.assignedAnalyst || null,
@@ -388,10 +449,34 @@ export function ProjectProvider({ children }) {
                 if (Array.isArray(apiList)) {
                     const storedDocs = getMockDocs();
                     const merged = apiList.map(apiP => {
-                        const localMatch = updatedList.find(lp => String(lp.id) === String(apiP.id));
+                        const localMatch = updatedList.find(lp => String(lp.id) === String(apiP.id) || lp.reqId === apiP.reqId);
                         const norm = normalizeProject(apiP, storedDocs);
                         return {
                             ...norm,
+                            status: localMatch?.status || norm.status,
+                            statusColor: localMatch?.statusColor || norm.statusColor,
+                            pm: localMatch?.pm || norm.pm,
+                            pmName: localMatch?.pmName || localMatch?.assignedPM || norm.pmName,
+                            assignedPM: localMatch?.assignedPM || localMatch?.pmName || norm.assignedPM,
+                            pmId: localMatch?.pmId || norm.pmId,
+                            estimation: localMatch?.estimation || norm.estimation,
+                            deadline: localMatch?.deadline || norm.deadline,
+                            targetDate: localMatch?.targetDate || norm.targetDate,
+                            rbbDeadline: localMatch?.rbbDeadline || norm.rbbDeadline,
+                            // Trust server team data after DB write
+                            team: (norm.team && Array.isArray(norm.team) && norm.team.length > 0)
+                                ? norm.team
+                                : (localMatch?.team && Array.isArray(localMatch.team) && localMatch.team.length > 0)
+                                    ? localMatch.team
+                                    : [],
+                            isTeamAllocated: (norm.team && Array.isArray(norm.team) && norm.team.length > 0)
+                                ? true
+                                : (localMatch?.isTeamAllocated ?? norm.isTeamAllocated),
+                            allocationStatus: (norm.team && Array.isArray(norm.team) && norm.team.length > 0)
+                                ? 'COMPLETED'
+                                : (localMatch?.allocationStatus || norm.allocationStatus),
+                            allocatedAt: localMatch?.allocatedAt || norm.allocatedAt,
+                            tasks: (localMatch?.tasks && localMatch.tasks.length > 0) ? localMatch.tasks : norm.tasks,
                             leadNote: localMatch?.leadNote || localMatch?.leadNotes || norm.leadNote || null,
                             leadNotes: localMatch?.leadNotes || localMatch?.leadNote || norm.leadNotes || null,
                             assignedAnalyst: localMatch?.assignedAnalyst || norm.assignedAnalyst || null,

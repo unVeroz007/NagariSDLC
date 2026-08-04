@@ -1,6 +1,6 @@
 import RBBBadge from '../../components/RBBBadge';
 import ChatBox from '../../components/ChatBox';
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import toast from 'react-hot-toast';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
@@ -39,9 +39,14 @@ import { taskProjects } from '../../data/mockData';
 
 export default function TaskDetail() {
     const { user } = useAuth();
-    const { projects: contextProjects } = useProjects();
+    const { projects, updateProject } = useProjects();
     const { id: projectId } = useParams();
     const navigate = useNavigate();
+
+    // Reset posisi scroll browser ke paling atas (0, 0) saat laman dibuka
+    useEffect(() => {
+        window.scrollTo(0, 0);
+    }, [projectId]);
 
     const project = useMemo(() => {
         if (!projectId) return taskProjects[0];
@@ -51,32 +56,55 @@ export default function TaskDetail() {
         if (found) return found;
 
         // 2. Cari di ProjectContext
-        const ctxFound = (contextProjects || []).find((p) =>
+        const ctxFound = (projects || []).find((p) =>
             String(p.id).toLowerCase() === String(projectId).toLowerCase() ||
-            String(p.reqId || p.req_id).toLowerCase() === String(projectId).toLowerCase()
+            String(p.reqId || p.req_id || '').toLowerCase() === String(projectId).toLowerCase()
         );
 
         if (ctxFound) {
             return {
+                ...ctxFound,
                 id: ctxFound.id,
                 name: ctxFound.name,
                 code: ctxFound.id,
-                pm: typeof ctxFound.pm === 'object' ? ctxFound.pm?.name : ctxFound.pm || 'Budi Santoso',
-                division: ctxFound.division || 'Divisi TI',
+                pm: typeof ctxFound.pm === 'object' ? (ctxFound.pm?.name || 'Budi Santoso') : (ctxFound.pm || ctxFound.pmName || 'Budi Santoso'),
+                division: typeof ctxFound.division === 'object' ? (ctxFound.division?.name || 'Divisi TI') : (ctxFound.division || 'Divisi TI'),
                 status: ctxFound.status || 'IN_DEVELOPMENT',
-                progress: 60,
-                tasks: [
-                    { id: 1, name: 'Analisis Spesifikasi API & Database', assignee: 'Dimas Anggara', deadline: '2026-08-10', priority: 'High', status: 'Done', description: 'Perancangan skema database dan rute API.' },
-                    { id: 2, name: 'Pengembangan Modul Utama (Backend)', assignee: 'Dimas Anggara', deadline: '2026-08-20', priority: 'High', status: 'In Progress', description: 'Coding business logic dan arsitektur backend.' },
-                    { id: 3, name: 'Integrasi Antarmuka UI/UX Front-end', assignee: 'Eka Putri', deadline: '2026-08-25', priority: 'Medium', status: 'In Progress', description: 'Pembuatan komponen UI dan pengintegrasian REST API.' },
-                    { id: 4, name: 'Pengujian QA & Security Audit', assignee: 'Fani Wijaya', deadline: '2026-09-01', priority: 'Medium', status: 'To Do', description: 'Pengujian otomatis dan audit kepatuhan keamanan.' }
-                ]
+                progress: ctxFound.progress || 60,
+                tasks: Array.isArray(ctxFound.tasks) ? ctxFound.tasks : []
             };
         }
 
         // 3. Fallback default project
         return taskProjects[0] || null;
-    }, [projectId, contextProjects]);
+    }, [projectId, projects]);
+
+    // Filter Assignee anggota tim proyek (HANYA Pekerja Teknis/Dev/Analyst, tanpa Management Roles)
+    const validAssignees = useMemo(() => {
+        const isManagementOrLeader = (nameStr) => {
+            const n = String(nameStr || '').toLowerCase();
+            return (
+                n.includes('super admin') ||
+                n.includes('head of it') ||
+                n.includes('lead group') ||
+                n.includes('cyber lead') ||
+                n.includes('qa lead') ||
+                n.includes('budi santoso (head') ||
+                n.includes('dewi lestari (lead') ||
+                n.includes('fajar nugroho (dev lead')
+            );
+        };
+
+        const rawTeam = Array.isArray(project?.team) && project.team.length > 0 ? project.team : [];
+        const filtered = rawTeam
+            .map(m => (typeof m === 'object' ? m.name : String(m)))
+            .filter(name => name && !isManagementOrLeader(name));
+
+        if (filtered.length > 0) return filtered;
+
+        // Fallback default: 5 Developer resmi
+        return ['Dimas Anggara', 'Eka Putri', 'Fani Wijaya', 'Gilang Pratama', 'Rina Wati'];
+    }, [project?.team]);
 
     if (!project) {
         return (
@@ -88,10 +116,10 @@ export default function TaskDetail() {
                     <h2 className="text-2xl font-bold text-gray-800 mb-2">Proyek tidak ditemukan</h2>
                     <p className="text-gray-500 mb-6">Proyek yang Anda cari tidak ada atau sudah dihapus.</p>
                     <button
-                        onClick={() => navigate('/pm/tasks')}
+                        onClick={() => navigate('/pm/workspace')}
                         className="px-6 py-3 bg-[#1A56DB] text-white rounded-xl font-bold hover:bg-[#1346b3] transition-all shadow-md shadow-[#1A56DB]/20"
                     >
-                        Kembali ke Daftar Proyek
+                        Kembali ke PM Workspace
                     </button>
                 </div>
             </div>
@@ -100,7 +128,14 @@ export default function TaskDetail() {
 
     const [activeTab, setActiveTab] = useState('tasks'); // tasks, documents, activity
     const [searchTask, setSearchTask] = useState('');
-    const [tasks, setTasks] = useState(project ? project.tasks : []);
+    const [tasks, setTasks] = useState(project ? (project.tasks || []) : []);
+    
+    // Auto sync state tasks bila data project di ProjectContext ter-update
+    useEffect(() => {
+        if (project?.tasks && Array.isArray(project.tasks)) {
+            setTasks(project.tasks);
+        }
+    }, [project?.tasks]);
     
     const [isAddTaskModalOpen, setIsAddTaskModalOpen] = useState(false);
     const [newTask, setNewTask] = useState({
@@ -114,6 +149,61 @@ export default function TaskDetail() {
     const [isEditTaskModalOpen, setIsEditTaskModalOpen] = useState(false);
     const [editingTask, setEditingTask] = useState(null);
     
+    // Modal Edit Proyek & Alokasi PM
+    const [isEditProjectModalOpen, setIsEditProjectModalOpen] = useState(false);
+    const [editProjectForm, setEditProjectForm] = useState({
+        pmName: '',
+        description: '',
+        estimation: '30',
+    });
+
+    const handleOpenEditProjectModal = () => {
+        const rawPM = typeof project?.pm === 'object'
+            ? (project.pm?.name || '')
+            : String(project?.pm || project?.pmName || project?.assignedPM || '');
+
+        let resolvedPM = '';
+        if (rawPM && rawPM !== 'Belum Dialokasi') {
+            const pms = ['Budi Santoso', 'Dewi Lestari', 'Andi Wijaya', 'Citra Kirana'];
+            const foundPM = pms.find(name => rawPM.toLowerCase().includes(name.toLowerCase()));
+            resolvedPM = foundPM || rawPM;
+        }
+
+        setEditProjectForm({
+            pmName: resolvedPM,
+            description: project?.description || '',
+            estimation: project?.estimation ? String(project.estimation).replace(/[^0-9]/g, '') || '30' : '30',
+        });
+        setIsEditProjectModalOpen(true);
+    };
+
+    const handleSaveProjectEdit = (e) => {
+        e.preventDefault();
+        if (!editProjectForm.pmName) {
+            toast.error('Pilih Project Manager penanggung jawab!');
+            return;
+        }
+
+        const days = parseInt(editProjectForm.estimation || '30', 10) || 30;
+        const calcDeadline = new Date();
+        calcDeadline.setDate(calcDeadline.getDate() + days);
+        const deadlineIso = calcDeadline.toISOString().split('T')[0];
+
+        updateProject(project.id, {
+            pm: { name: editProjectForm.pmName, initial: editProjectForm.pmName.split(' ').map(n=>n[0]).join('').slice(0, 2) },
+            pmName: editProjectForm.pmName,
+            assignedPM: editProjectForm.pmName,
+            description: editProjectForm.description,
+            estimation: `${days} Hari Kerja`,
+            deadline: deadlineIso,
+            targetDate: deadlineIso,
+            rbbDeadline: deadlineIso,
+        });
+
+        toast.success('Informasi proyek & alokasi PM berhasil diperbarui!');
+        setIsEditProjectModalOpen(false);
+    };
+
     const [isProjectChatOpen, setIsProjectChatOpen] = useState(false);
     const [newChatMessage, setNewChatMessage] = useState('');
     const [chatMessages, setChatMessages] = useState([
@@ -130,21 +220,22 @@ export default function TaskDetail() {
         }
 
         const task = {
-            id: tasks.length + 1,
+            id: Date.now(),
             name: newTask.title,
+            title: newTask.title,
             description: newTask.description || '',
-            assignee: newTask.assignee || null,
+            assignee: newTask.assignee || 'Belum Dialokasi',
             deadline: newTask.deadline || new Date().toISOString().split('T')[0],
             priority: newTask.priority || 'Medium',
             status: 'Belum Mulai',
             statusColor: 'bg-gray-100 text-gray-600 border-gray-200'
         };
 
-        const newTasks = [...tasks, task];
+        const currentTasks = Array.isArray(project?.tasks) ? project.tasks : tasks;
+        const newTasks = [...currentTasks, task];
+
         setTasks(newTasks);
-        
-        // Mutate in-memory mock data
-        project.tasks = newTasks;
+        if (project?.id) updateProject(project.id, { tasks: newTasks });
 
         toast.success(`Task "${task.name}" berhasil ditambahkan!`);
         setIsAddTaskModalOpen(false);
@@ -159,27 +250,25 @@ export default function TaskDetail() {
             return;
         }
 
-        const updatedTasks = tasks.map(t => t.id === editingTask.id ? editingTask : t);
+        const currentTasks = Array.isArray(project?.tasks) ? project.tasks : tasks;
+        const updatedTasks = currentTasks.map(t => t.id === editingTask.id ? editingTask : t);
+
         setTasks(updatedTasks);
-        
-        // Mutate in-memory mock data
-        const projTaskIndex = project.tasks.findIndex(t => t.id === editingTask.id);
-        if(projTaskIndex !== -1) project.tasks[projTaskIndex] = editingTask;
+        if (project?.id) updateProject(project.id, { tasks: updatedTasks });
 
         toast.success(`Task "${editingTask.name}" berhasil diperbarui!`);
         setIsEditTaskModalOpen(false);
     };
 
-    const handleDeleteTask = (task) => {
-        if(window.confirm(`Apakah Anda yakin ingin menghapus task "${task.name}"?`)) {
-            const updatedTasks = tasks.filter(t => t.id !== task.id);
+    const handleDeleteTask = (taskToDelete) => {
+        if(window.confirm(`Apakah Anda yakin ingin menghapus task "${taskToDelete.name}"?`)) {
+            const currentTasks = Array.isArray(project?.tasks) ? project.tasks : tasks;
+            const updatedTasks = currentTasks.filter(t => t.id !== taskToDelete.id);
+
             setTasks(updatedTasks);
+            if (project?.id) updateProject(project.id, { tasks: updatedTasks });
             
-            // Mutate in-memory mock data
-            const projTaskIndex = project.tasks.findIndex(t => t.id === task.id);
-            if(projTaskIndex !== -1) project.tasks.splice(projTaskIndex, 1);
-            
-            toast.success(`Task "${task.name}" berhasil dihapus!`);
+            toast.success(`Task "${taskToDelete.name}" berhasil dihapus!`);
         }
     };
 
@@ -225,8 +314,11 @@ export default function TaskDetail() {
         }
     };
 
-    const completedTasks = tasks.filter((t) => t.status === 'Selesai').length;
-    const progress = Math.round((completedTasks / tasks.length) * 100);
+    const completedTasks = tasks.filter((t) => {
+        const st = String(t.status || '').toLowerCase();
+        return st === 'selesai' || st === 'done' || t.done === true;
+    }).length;
+    const progress = tasks.length === 0 ? 0 : Math.round((completedTasks / tasks.length) * 100);
 
     return (
         <div className="flex-1 overflow-y-auto px-6 py-4 md:px-8 md:py-5 bg-[#f8f9fb]">
@@ -265,13 +357,16 @@ export default function TaskDetail() {
                             <Share size={16} />
                             Bagikan
                         </button>
-                        <button 
-                            onClick={() => toast('Fitur Edit Proyek akan segera hadir di pembaruan berikutnya!', { icon: '🚧' })}
-                            className="px-4 py-2 rounded-lg bg-[#1A56DB] text-white hover:bg-[#1346b3] transition-colors text-sm font-semibold flex items-center gap-2 shadow-sm"
-                        >
-                            <Edit size={16} />
-                            Edit Proyek
-                        </button>
+                        {(user?.role === 'super_admin' || user?.role === 'head_of_it' || user?.role === 'development_lead') && (
+                            <button 
+                                onClick={handleOpenEditProjectModal}
+                                className="px-4 py-2 rounded-lg bg-[#1A56DB] text-white hover:bg-[#1346b3] transition-colors text-sm font-semibold flex items-center gap-2 shadow-sm cursor-pointer"
+                                title="Khusus Super Admin & Ketua Grup untuk penyesuaian alokasi PM"
+                            >
+                                <Edit size={16} />
+                                Edit Proyek & PM
+                            </button>
+                        )}
                     </div>
                 </div>
 
@@ -300,34 +395,60 @@ export default function TaskDetail() {
                     {/* Project Info Summary */}
                     <div className="col-span-1 bg-white rounded-xl shadow-sm border border-gray-200 p-6 flex flex-col justify-between">
                         <div>
-                            <h3 className="text-lg font-semibold text-gray-800 mb-4">Informasi Utama</h3>
-                            <p className="text-sm text-gray-600 mb-6 leading-relaxed">
+                            <div className="flex items-center justify-between mb-3">
+                                <h3 className="text-lg font-bold text-gray-800">Informasi Utama</h3>
+                                {project.estimation && (
+                                    <span className="text-xs px-2.5 py-1 bg-blue-50 text-[#1A56DB] border border-blue-200 rounded-full font-extrabold shadow-2xs">
+                                        {String(project.estimation).includes('Hari') ? project.estimation : `${project.estimation} Hari Kerja`}
+                                    </span>
+                                )}
+                            </div>
+                            <p className="text-sm text-gray-600 mb-4 leading-relaxed bg-gray-50/70 p-3.5 rounded-xl border border-gray-100/80">
                                 {project.description || "Proyek ini difokuskan pada peningkatan kualitas, penambahan fitur strategis, serta memastikan sistem berjalan sesuai dengan standar keamanan dan performa Bank Nagari."}
                             </p>
+
+                            {/* Tech Stack & Analyst Note Badge jika ada */}
+                            {(project.techStack || project.devAnalystResult?.techStack) && (
+                                <div className="mb-4 p-3 bg-emerald-50/70 border border-emerald-200/80 rounded-xl text-xs">
+                                    <span className="font-bold text-emerald-900 block mb-0.5">Rekomendasi Tech Stack:</span>
+                                    <span className="text-emerald-700 font-semibold">{project.techStack || project.devAnalystResult?.techStack}</span>
+                                </div>
+                            )}
                         </div>
-                        <div className="flex flex-col gap-4">
-                            <div className="flex items-start gap-3">
-                                <div className="p-2 rounded-lg bg-gray-100 text-gray-500">
+
+                        <div className="flex flex-col gap-3.5 pt-3 border-t border-gray-100">
+                            <div className="flex items-center gap-3">
+                                <div className="p-2 rounded-xl bg-blue-50 text-[#1A56DB] shrink-0">
                                     <Calendar size={18} />
                                 </div>
                                 <div>
-                                    <span className="block text-xs text-gray-500 font-semibold">TENGGAT WAKTU</span>
-                                    <span className="block text-sm font-semibold text-gray-800">
-                                        {new Date(project.deadline).toLocaleDateString('id-ID', {
-                                            day: 'numeric',
-                                            month: 'long',
-                                            year: 'numeric',
-                                        })}
+                                    <span className="block text-[10px] text-gray-400 font-bold uppercase tracking-wider">TENGGAT WAKTU PROYEK</span>
+                                    <span className="block text-sm font-bold text-gray-800">
+                                        {project.deadline && !isNaN(new Date(project.deadline).getTime()) ? (
+                                            new Date(project.deadline).toLocaleDateString('id-ID', {
+                                                day: 'numeric',
+                                                month: 'long',
+                                                year: 'numeric',
+                                            })
+                                        ) : (
+                                            (() => {
+                                                const d = new Date();
+                                                d.setDate(d.getDate() + 30);
+                                                return d.toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' });
+                                            })()
+                                        )}
                                     </span>
                                 </div>
                             </div>
-                            <div className="flex items-start gap-3">
-                                <div className="p-2 rounded-lg bg-gray-100 text-gray-500">
+                            <div className="flex items-center gap-3">
+                                <div className="p-2 rounded-xl bg-blue-50 text-[#1A56DB] shrink-0">
                                     <User size={18} />
                                 </div>
                                 <div>
-                                    <span className="block text-xs text-gray-500 font-semibold">PROJECT MANAGER</span>
-                                    <span className="block text-sm font-semibold text-gray-800">{project.pm}</span>
+                                    <span className="block text-[10px] text-gray-400 font-bold uppercase tracking-wider">PROJECT MANAGER</span>
+                                    <span className="block text-sm font-bold text-gray-800">
+                                        {typeof project.pm === 'object' ? (project.pm?.name || 'Belum Dialokasi') : (project.pm || project.pmName || project.assignedPM || 'Belum Dialokasi')}
+                                    </span>
                                 </div>
                             </div>
                         </div>
@@ -607,14 +728,17 @@ export default function TaskDetail() {
                                         <select
                                             value={newTask.assignee}
                                             onChange={(e) => setNewTask({...newTask, assignee: e.target.value})}
-                                            className="w-full px-4 py-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-[#1A56DB] focus:border-[#1A56DB] outline-none"
+                                            className="w-full px-4 py-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-[#1A56DB] focus:border-[#1A56DB] outline-none bg-white"
                                         >
-                                            <option value="">Pilih assignee...</option>
-                                            <option value="Budi Santoso">Budi Santoso</option>
-                                            <option value="Citra Kirana">Citra Kirana</option>
-                                            <option value="Dimas Anggara">Dimas Anggara</option>
-                                            <option value="Eka Putri">Eka Putri</option>
-                                            <option value="Fani Wijaya">Fani Wijaya</option>
+                                            <option value="">Pilih Anggota Tim...</option>
+                                            {validAssignees.map((memName, idx) => {
+                                                const activeCount = (project?.tasks || []).filter(t => (t.assignee || '').toLowerCase().includes(memName.toLowerCase()) && t.status !== 'Selesai' && t.status !== 'DONE').length;
+                                                return (
+                                                    <option key={idx} value={memName}>
+                                                        {memName} (Beban: {activeCount} Task Aktif)
+                                                    </option>
+                                                );
+                                            })}
                                         </select>
                                     </div>
                                     <div>
@@ -716,14 +840,17 @@ export default function TaskDetail() {
                                         <select
                                             value={editingTask.assignee || ''}
                                             onChange={(e) => setEditingTask({...editingTask, assignee: e.target.value})}
-                                            className="w-full px-4 py-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-[#1A56DB] focus:border-[#1A56DB] outline-none"
+                                            className="w-full px-4 py-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-[#1A56DB] focus:border-[#1A56DB] outline-none bg-white"
                                         >
-                                            <option value="">Pilih assignee...</option>
-                                            <option value="Budi Santoso">Budi Santoso</option>
-                                            <option value="Citra Kirana">Citra Kirana</option>
-                                            <option value="Dimas Anggara">Dimas Anggara</option>
-                                            <option value="Eka Putri">Eka Putri</option>
-                                            <option value="Fani Wijaya">Fani Wijaya</option>
+                                            <option value="">Pilih Anggota Tim...</option>
+                                            {validAssignees.map((memName, idx) => {
+                                                const activeCount = (project?.tasks || []).filter(t => (t.assignee || '').toLowerCase().includes(memName.toLowerCase()) && t.status !== 'Selesai' && t.status !== 'DONE').length;
+                                                return (
+                                                    <option key={idx} value={memName}>
+                                                        {memName} (Beban: {activeCount} Task Aktif)
+                                                    </option>
+                                                );
+                                            })}
                                         </select>
                                     </div>
                                     <div>
@@ -759,6 +886,101 @@ export default function TaskDetail() {
                                 </div>
                             </form>
                         </div>
+                    </div>
+                </div>
+            )}
+
+            {/* MODAL EDIT PROYEK & ALOKASI PM */}
+            {isEditProjectModalOpen && (
+                <div className="fixed inset-0 bg-black/50 backdrop-blur-xs flex items-center justify-center p-4 z-50 animate-fade-in">
+                    <div className="bg-white rounded-2xl max-w-lg w-full p-6 shadow-2xl border border-gray-100">
+                        <div className="flex justify-between items-center pb-4 border-b border-gray-100 mb-4">
+                            <div className="flex items-center gap-2">
+                                <User className="text-[#1A56DB]" size={20} />
+                                <h3 className="text-lg font-bold text-gray-800">Edit Proyek & Alokasi PM</h3>
+                            </div>
+                            <button
+                                onClick={() => setIsEditProjectModalOpen(false)}
+                                className="p-1 text-gray-400 hover:text-gray-600 rounded-lg cursor-pointer"
+                            >
+                                <X size={18} />
+                            </button>
+                        </div>
+                        <form onSubmit={handleSaveProjectEdit} className="space-y-4">
+                            <div>
+                                <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1.5">
+                                    Project Manager (PM) Penanggung Jawab *
+                                </label>
+                                <select
+                                    value={editProjectForm.pmName}
+                                    onChange={(e) => setEditProjectForm({...editProjectForm, pmName: e.target.value})}
+                                    className="w-full px-3.5 py-2.5 border border-gray-300 rounded-xl text-sm font-semibold focus:ring-2 focus:ring-[#1A56DB] outline-none bg-white"
+                                >
+                                    <option value="">-- Pilih Project Manager --</option>
+                                    {[
+                                        'Budi Santoso',
+                                        'Dewi Lestari',
+                                        'Andi Wijaya',
+                                        'Citra Kirana',
+                                    ].map(name => {
+                                        const activeCount = (projects || []).filter(p => {
+                                            const pmNameStr = typeof p.pm === 'object' ? (p.pm?.name || '') : String(p.pmName || p.pm || p.assignedPM || '');
+                                            return pmNameStr.toLowerCase().includes(name.toLowerCase()) && p.status !== 'LIVE_PRODUCTION' && p.status !== 'COMPLETED';
+                                        }).length;
+                                        return (
+                                            <option key={name} value={name}>
+                                                {name} (Beban: {activeCount} Proyek Aktif)
+                                            </option>
+                                        );
+                                    })}
+                                </select>
+                            </div>
+
+                            <div>
+                                <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1.5">
+                                    Estimasi Durasi Pengerjaan (Hari Kerja) *
+                                </label>
+                                <div className="relative">
+                                    <input
+                                        type="number"
+                                        min="1"
+                                        value={editProjectForm.estimation}
+                                        onChange={(e) => setEditProjectForm({...editProjectForm, estimation: e.target.value})}
+                                        className="w-full px-3.5 py-2.5 border border-gray-300 rounded-xl text-sm font-semibold focus:ring-2 focus:ring-[#1A56DB] outline-none"
+                                    />
+                                    <span className="absolute right-3.5 top-2.5 text-xs text-gray-400 font-bold">Hari</span>
+                                </div>
+                            </div>
+
+                            <div>
+                                <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1.5">
+                                    Deskripsi & Latar Belakang Proyek
+                                </label>
+                                <textarea
+                                    rows={3}
+                                    value={editProjectForm.description}
+                                    onChange={(e) => setEditProjectForm({...editProjectForm, description: e.target.value})}
+                                    className="w-full px-3.5 py-2.5 border border-gray-300 rounded-xl text-sm focus:ring-2 focus:ring-[#1A56DB] outline-none"
+                                    placeholder="Masukkan deskripsi ringkas proyek..."
+                                />
+                            </div>
+
+                            <div className="flex justify-end gap-3 pt-4 border-t border-gray-100">
+                                <button
+                                    type="button"
+                                    onClick={() => setIsEditProjectModalOpen(false)}
+                                    className="px-4 py-2 border border-gray-300 text-gray-700 rounded-xl font-bold text-xs hover:bg-gray-50 transition-colors cursor-pointer"
+                                >
+                                    Batal
+                                </button>
+                                <button
+                                    type="submit"
+                                    className="px-5 py-2 bg-[#1A56DB] text-white rounded-xl font-bold text-xs hover:bg-[#1346b3] transition-colors shadow-md shadow-[#1A56DB]/20 cursor-pointer"
+                                >
+                                    Simpan Perubahan
+                                </button>
+                            </div>
+                        </form>
                     </div>
                 </div>
             )}

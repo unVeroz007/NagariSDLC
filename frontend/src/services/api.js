@@ -41,9 +41,23 @@ function authHeaders() {
 async function handleResponse(res) {
     if (!res.ok) {
         if (res.status === 401) {
-            // Token tidak valid atau kedaluwarsa -> hapus sesi dan beritahu aplikasi untuk logout
-            localStorage.removeItem('nagari_sdlc_session');
-            window.dispatchEvent(new Event('auth:unauthorized'));
+            let isMockSession = false;
+            try {
+                const session = localStorage.getItem('nagari_sdlc_session');
+                if (session) {
+                    const parsed = JSON.parse(session);
+                    if (parsed?.token === 'mock_token' || parsed?.token === 'api_token' || !parsed?.token) {
+                        isMockSession = true;
+                    }
+                }
+            } catch {
+                isMockSession = true;
+            }
+
+            if (!isMockSession) {
+                localStorage.removeItem('nagari_sdlc_session');
+                window.dispatchEvent(new Event('auth:unauthorized'));
+            }
         }
         const err = await res.json().catch(() => ({ message: 'Terjadi kesalahan server.' }));
         let errMsg = err.message || `HTTP ${res.status}`;
@@ -177,6 +191,23 @@ export const projectService = {
             const res = await fetch(`${BASE_URL}/projects/${id}`, {
                 method: 'DELETE',
                 headers: authHeaders(),
+            });
+            return handleResponse(res);
+        }
+        return null;
+    },
+
+    /**
+     * Alokasikan anggota tim developer ke proyek — langsung tulis ke tabel project_team_members di DB.
+     * @param {number} projectId - ID proyek
+     * @param {Array} team - Array of { id, name, email, skill } objects
+     */
+    allocateTeam: async (projectId, team) => {
+        if (MODE === 'api') {
+            const res = await fetch(`${BASE_URL}/projects/${projectId}/team`, {
+                method: 'POST',
+                headers: authHeaders(),
+                body: JSON.stringify({ team }),
             });
             return handleResponse(res);
         }

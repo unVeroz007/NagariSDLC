@@ -24,7 +24,41 @@ import {
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 
-const DEFAULT_DEV_TASKS = [];
+const DEFAULT_DEV_TASKS = [
+    {
+        id: 'TSK-101',
+        title: 'Integrasi ISO8583 Message Parser & Payment Gateway Middleware',
+        projectId: 'PRJ-2026-001',
+        projectName: 'Sistem QRIS Dinamis Bank Nagari',
+        assignee: 'Dimas Anggara (Developer)',
+        assigneeEmail: 'developer@nagari.co.id',
+        priority: 'High',
+        deadline: '2026-08-15',
+        status: 'In Progress'
+    },
+    {
+        id: 'TSK-102',
+        title: 'Pengembangan Rest API Endpoint Transaction History & Filter',
+        projectId: 'PRJ-2026-002',
+        projectName: 'Portal Digital Core Banking Retail',
+        assignee: 'Dimas Anggara (Developer)',
+        assigneeEmail: 'developer@nagari.co.id',
+        priority: 'Medium',
+        deadline: '2026-08-20',
+        status: 'To Do'
+    },
+    {
+        id: 'TSK-103',
+        title: 'Pengujian Unit Test Middleware Security & JWT Authentication',
+        projectId: 'PRJ-2026-003',
+        projectName: 'Nagari Mobile Banking Revamp',
+        assignee: 'Dimas Anggara (Developer)',
+        assigneeEmail: 'developer@nagari.co.id',
+        priority: 'High',
+        deadline: '2026-08-25',
+        status: 'Code Review'
+    }
+];
 
 export default function MyTasksDev() {
     const { user } = useAuth();
@@ -48,14 +82,41 @@ export default function MyTasksDev() {
         localStorage.setItem('nagari_sdlc_dev_tasks', JSON.stringify(updated));
     };
 
+    // Extract tasks assigned to developer from projects in ProjectContext + local devTasks
+    const allCombinedTasks = useMemo(() => {
+        const list = [...devTasks];
+        (projects || []).forEach(p => {
+            if (Array.isArray(p.tasks)) {
+                p.tasks.forEach(t => {
+                    const exists = list.some(item => String(item.id) === String(t.id));
+                    if (!exists) {
+                        list.push({
+                            id: t.id || `TSK-${Math.floor(100 + Math.random() * 900)}`,
+                            title: t.title || t.name || 'Task Pengembangan',
+                            projectId: p.id,
+                            projectName: p.name,
+                            assignee: t.assignee || 'Dimas Anggara',
+                            assigneeEmail: t.assigneeEmail || 'developer@nagari.co.id',
+                            priority: t.priority || 'Medium',
+                            deadline: t.deadline || p.targetDate || '2026-08-30',
+                            status: t.status || 'In Progress'
+                        });
+                    }
+                });
+            }
+        });
+        return list;
+    }, [projects, devTasks]);
+
     // Filter tasks untuk developer yang sedang login
     const filteredTasks = useMemo(() => {
-        return devTasks.filter(task => {
+        return allCombinedTasks.filter(task => {
             const matchesUser =
                 !user?.name ||
                 task.assignee.toLowerCase().includes(user.name.toLowerCase()) ||
                 (user.email && task.assigneeEmail === user.email) ||
                 user.role === 'super_admin' ||
+                user.role === 'developer' ||
                 user.role === 'project_manager' ||
                 user.role === 'development_lead';
 
@@ -67,7 +128,7 @@ export default function MyTasksDev() {
 
             return matchesUser && matchesStatus && matchesSearch;
         });
-    }, [devTasks, user, statusFilter, searchTerm]);
+    }, [allCombinedTasks, user, statusFilter, searchTerm]);
 
     const handleUpdateStatus = (taskId, newStatus) => {
         const updated = devTasks.map(t =>

@@ -489,12 +489,22 @@ export default function WorkspaceLead() {
                                         <select
                                             value={selectedAnalyst}
                                             onChange={(e) => setSelectedAnalyst(e.target.value)}
-                                            className="w-full px-4 py-2.5 rounded-xl border border-gray-200 focus:border-[#1A56DB] focus:ring-2 focus:ring-blue-50 outline-none transition-all bg-white"
+                                            className="w-full px-4 py-2.5 rounded-xl border border-gray-200 focus:border-[#1A56DB] focus:ring-2 focus:ring-blue-50 outline-none transition-all bg-white font-medium text-sm"
                                         >
-                                            <option value="">-- Pilih Analyst --</option>
-                                            {analysts.map((a, i) => (
-                                                <option key={i} value={a.name}>{a.name} ({a.load} Proyek Aktif)</option>
-                                            ))}
+                                            <option value="">-- Pilih System Analyst --</option>
+                                            {analysts.map((a, i) => {
+                                                const activeCount = (projects || []).filter(p => {
+                                                    const analystName = typeof p.assignedAnalyst === 'object' ? (p.assignedAnalyst?.name || '') : String(p.assignedAnalyst || p.analyst || '');
+                                                    const matches = analystName.toLowerCase().includes(a.name.toLowerCase());
+                                                    const isFinished = p.status === 'LIVE_PRODUCTION' || p.status === 'CANCELLED' || p.status === 'REJECTED';
+                                                    return matches && !isFinished;
+                                                }).length;
+                                                return (
+                                                    <option key={i} value={a.name}>
+                                                        {a.name} (Beban: {activeCount} Proyek Aktif)
+                                                    </option>
+                                                );
+                                            })}
                                         </select>
                                     </div>
                                     <div>
@@ -515,6 +525,28 @@ export default function WorkspaceLead() {
                                             className="w-full px-4 py-2.5 rounded-xl border border-gray-200 focus:border-[#1A56DB] focus:ring-2 focus:ring-blue-50 outline-none transition-all min-h-[80px] resize-y bg-white text-sm"
                                         ></textarea>
                                     </div>
+
+                                    {selectedAnalyst && (
+                                        <div className="p-3.5 bg-blue-50/80 border border-blue-200 rounded-xl text-xs space-y-1.5 animate-fade-in">
+                                            <span className="font-bold text-blue-900 block text-[11px] uppercase tracking-wider">Ringkasan Penunjukan Analyst Plan:</span>
+                                            <div className="flex flex-wrap items-center justify-between text-blue-950 font-semibold gap-2">
+                                                <span>Analyst Terpilih: <strong className="text-[#1A56DB] font-bold">{selectedAnalyst}</strong></span>
+                                                <span>Beban Kerja Saat Ini: <strong className="text-gray-800 font-bold">{
+                                                    (projects || []).filter(p => {
+                                                        const analystName = typeof p.assignedAnalyst === 'object' ? (p.assignedAnalyst?.name || '') : String(p.assignedAnalyst || p.analyst || '');
+                                                        const matches = analystName.toLowerCase().includes(selectedAnalyst.toLowerCase());
+                                                        const isFinished = p.status === 'LIVE_PRODUCTION' || p.status === 'CANCELLED' || p.status === 'REJECTED';
+                                                        return matches && !isFinished;
+                                                    }).length
+                                                } Proyek Aktif</strong></span>
+                                                <span>Perkiraan Selesai Kajian: <strong className="text-emerald-700 font-bold">{(() => {
+                                                    const targetD = deadline ? new Date(deadline) : new Date(Date.now() + 14 * 24 * 60 * 60 * 1000);
+                                                    return targetD.toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' });
+                                                })()}</strong></span>
+                                            </div>
+                                        </div>
+                                    )}
+
                                     <div className="pt-2">
                                         <button
                                             onClick={handleAssign}

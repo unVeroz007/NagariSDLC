@@ -40,14 +40,38 @@ export default function WorkspaceAnalyst() {
 
     const [previewDoc, setPreviewDoc] = useState(null);
 
+    const [selectedAnalystFilter, setSelectedAnalystFilter] = useState(() => {
+        if (user?.role === 'super_admin' || user?.role === 'lead_group') return 'ALL';
+        return user?.name || 'MY_PROJECTS';
+    });
+
     // Filter antrean proyek yang HANYA SUDAH ditugaskan oleh Lead Perencanaan (Status IN_REVIEW)
     const reviewQueue = useMemo(() => {
-        return projects.filter(p =>
+        let list = projects.filter(p =>
             p.status === 'IN_REVIEW' ||
             p.status === 'PLANNING_ANALYSIS' ||
             p.status === 'ANALYSIS_IN_PROGRESS'
         );
-    }, [projects]);
+
+        if (selectedAnalystFilter === 'MY_PROJECTS') {
+            const myName = user?.name || '';
+            list = list.filter(p => {
+                const analystName = typeof p.assignedAnalyst === 'object'
+                    ? (p.assignedAnalyst?.name || '')
+                    : String(p.assignedAnalyst || p.analyst || '');
+                return analystName.toLowerCase().includes(myName.toLowerCase());
+            });
+        } else if (selectedAnalystFilter !== 'ALL') {
+            list = list.filter(p => {
+                const analystName = typeof p.assignedAnalyst === 'object'
+                    ? (p.assignedAnalyst?.name || '')
+                    : String(p.assignedAnalyst || p.analyst || '');
+                return analystName.toLowerCase().includes(selectedAnalystFilter.toLowerCase());
+            });
+        }
+
+        return list;
+    }, [projects, selectedAnalystFilter, user]);
 
 
     const [selectedProjectState, setSelectedProject] = useState(null);
@@ -216,7 +240,10 @@ export default function WorkspaceAnalyst() {
                 '/workspace/lead?tab=verification'
             );
             toast.success(`Kajian teknis ${selectedProject?.name} selesai! Dikirim ke Lead Perencanaan untuk Verifikasi.`);
-            navigate('/workspace/lead?tab=verification');
+            setSelectedProject(null);
+            setDecision('');
+            setNotes('');
+            setUploadedFile(null);
         } catch (err) {
             console.error('[WorkspaceAnalyst] Submit error:', err);
             toast.error('Terjadi kesalahan saat pengiriman: ' + (err?.message || 'Error'));
@@ -282,20 +309,66 @@ export default function WorkspaceAnalyst() {
                 </p>
             </div>
 
-            {/* Split Layout */}
-            <div className="flex flex-col lg:flex-row gap-6 items-start">
+            {/* Top Filter Control Bar */}
+            <div className="bg-white border border-gray-200 rounded-2xl p-4 mb-6 shadow-2xs flex flex-col sm:flex-row items-center justify-between gap-4">
+                <div className="flex items-center gap-2">
+                    <Filter size={18} className="text-[#1A56DB]" />
+                    <span className="text-sm font-bold text-gray-800">Filter Antrean Proyek:</span>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
+                    <button
+                        onClick={() => setSelectedAnalystFilter('ALL')}
+                        className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                            selectedAnalystFilter === 'ALL'
+                                ? 'bg-[#1a365d] text-white shadow-xs'
+                                : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                        }`}
+                    >
+                        🌐 Semua Proyek Global
+                    </button>
+
+                    {user?.role !== 'super_admin' && (
+                        <button
+                            onClick={() => setSelectedAnalystFilter('MY_PROJECTS')}
+                            className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                                selectedAnalystFilter === 'MY_PROJECTS'
+                                    ? 'bg-[#1A56DB] text-white shadow-xs'
+                                    : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                            }`}
+                        >
+                            👤 Proyek Tugas Saya
+                        </button>
+                    )}
+
+                    <select
+                        value={['ALL', 'MY_PROJECTS'].includes(selectedAnalystFilter) ? '' : selectedAnalystFilter}
+                        onChange={(e) => setSelectedAnalystFilter(e.target.value || 'ALL')}
+                        className="px-3 py-1.5 rounded-xl text-xs font-semibold border border-gray-200 bg-white text-gray-700 outline-none focus:border-[#1A56DB]"
+                    >
+                        <option value="">-- Filter Per System Analyst --</option>
+                        <option value="Citra Kirana">Citra Kirana</option>
+                        <option value="Mustafa Fathur Rahman">Mustafa Fathur Rahman</option>
+                        <option value="Fajar Ramadhan">Fajar Ramadhan</option>
+                        <option value="Ahmad Fauzi">Ahmad Fauzi</option>
+                    </select>
+                </div>
+            </div>
+
+            {/* Split Layout - Equalized Height */}
+            <div className="flex flex-col lg:flex-row gap-6 items-stretch min-h-[650px]">
                 {/* LEFT PANEL: Inbox */}
-                <div className="w-full lg:w-1/3 flex flex-col bg-white border border-gray-100 rounded-2xl shadow-sm overflow-hidden shrink-0 lg:sticky lg:top-4 lg:max-h-[calc(100vh-100px)]">
-                    <div className="p-4 border-b border-gray-100 flex justify-between items-center shrink-0">
+                <div className="w-full lg:w-1/3 flex flex-col bg-white border border-gray-200 rounded-2xl shadow-sm overflow-hidden shrink-0 min-h-[600px] flex-1">
+                    <div className="p-4 border-b border-gray-100 flex justify-between items-center shrink-0 bg-slate-50/60">
                         <div>
                             <h2 className="text-base font-bold text-gray-800">Tugas Review</h2>
-                            <p className="text-xs text-gray-400 mt-0.5">{reviewQueue.length} antrian menunggu</p>
+                            <p className="text-xs text-gray-500 mt-0.5">{reviewQueue.length} proyek dalam antrean</p>
                         </div>
                         <button className="p-2 text-gray-400 hover:text-[#1A56DB] hover:bg-blue-50 rounded-lg transition-colors">
                             <Filter size={16} />
                         </button>
                     </div>
-                    <div className="max-lg:max-h-[280px] flex-1 overflow-y-auto p-3 space-y-2.5 bg-gray-50/40">
+                    <div className="flex-1 overflow-y-auto p-3 space-y-2.5 bg-gray-50/40 min-h-[500px]">
                         {reviewQueue.map((project) => (
                             <div
                                 key={project.id}

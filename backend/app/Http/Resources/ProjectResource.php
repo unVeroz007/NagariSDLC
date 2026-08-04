@@ -30,6 +30,14 @@ class ProjectResource extends JsonResource
             'rejection_reason' => $this->rejection_reason,
             'uat_notes' => $this->uat_notes,
             'staging_url' => $this->staging_url,
+            'team' => $this->relationLoaded('teamMembers') && $this->teamMembers ? $this->teamMembers->map(function($m) {
+                return [
+                    'id' => $m->user_id,
+                    'name' => $m->user?->name ?? 'Developer',
+                    'email' => $m->user?->email,
+                    'role' => $m->role_in_project,
+                ];
+            }) : [],
             'status_histories' => ProjectStatusHistoryResource::collection($this->whenLoaded('statusHistories')),
             'created_at' => $this->created_at?->toIso8601String(),
             'updated_at' => $this->updated_at?->toIso8601String(),

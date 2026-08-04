@@ -51,6 +51,7 @@ Route::prefix('v1')->group(function () {
         Route::delete('/projects/{id}', [ProjectController::class, 'destroy']);         // hapus proyek
         Route::patch('/projects/{id}/status', [ProjectController::class, 'updateStatus']); // transisi status
         Route::get('/projects/{id}/timeline', [ProjectController::class, 'timeline']);  // audit trail
+        Route::post('/projects/{id}/team', [ProjectController::class, 'allocateTeam']); // alokasi tim developer
 
         // ----- TASK ROUTES -----
         Route::get('/projects/{projectId}/tasks', [TaskController::class, 'getByProject']);

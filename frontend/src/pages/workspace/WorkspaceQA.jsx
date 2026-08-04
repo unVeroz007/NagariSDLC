@@ -46,9 +46,10 @@ import {
 } from 'lucide-react';
 
 const qaTeamMembers = [
-    { id: 1, name: 'Siti Rahmawati', role: 'Senior QA Engineer', email: 'siti.rahmawati@banknagari.co.id', activeLoad: 2 },
-    { id: 2, name: 'Rahmat Hidayat', role: 'Automation QA Specialist', email: 'rahmat.hidayat@banknagari.co.id', activeLoad: 1 },
-    { id: 3, name: 'Dewi Lestari', role: 'Performance Test Engineer', email: 'dewi.lestari@banknagari.co.id', activeLoad: 0 },
+    { id: 1, name: 'Siti Rahmawati', role: 'Senior QA Automation', email: 'qatester@nagari.co.id', activeLoad: 1 },
+    { id: 2, name: 'Rian Hidayat', role: 'Functional QA Tester', email: 'rian.qa@nagari.co.id', activeLoad: 0 },
+    { id: 3, name: 'Bayu Perkasa', role: 'Mobile QA Specialist', email: 'bayu.qa@nagari.co.id', activeLoad: 1 },
+    { id: 4, name: 'Eko Prasetyo', role: 'Lead QA Engineer', email: 'qalead@nagari.co.id', activeLoad: 2 },
 ];
 
 export default function WorkspaceQA() {
