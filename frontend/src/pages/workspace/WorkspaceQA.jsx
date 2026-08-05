@@ -1,10 +1,12 @@
 import { useState, useMemo, useEffect, useRef } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
-import { useProjects } from '../../contexts/ProjectContext';
+import { useProjects, getProjectRealDocuments } from '../../contexts/ProjectContext';
 import { useNotifications } from '../../contexts/NotificationContext';
 import RBBBadge from '../../components/RBBBadge';
 import LoadingSpinner from '../../components/LoadingSpinner';
+import DocumentViewerModal from '../../components/DocumentViewerModal';
 import toast from 'react-hot-toast';
+
 import {
     Shield,
     FolderOpen,
@@ -42,7 +44,10 @@ import {
     CheckCircle2,
     Bug,
     Sparkles,
-    FileCheck
+    FileCheck,
+    Info,
+    Paperclip,
+    ClipboardList
 } from 'lucide-react';
 
 const qaTeamMembers = [
@@ -68,12 +73,11 @@ export default function WorkspaceQA() {
         });
     }, [projects]);
 
-    // Tab 2 (Review Lead): proyek yang sedang diuji oleh QA Tester (QA_IN_PROGRESS)
+    // Tab 2 (Review Lead): proyek yang laporan Analis-nya sudah masuk (qaStatus === 'REVIEW')
     const reviewLeadProjects = useMemo(() => {
         return (projects || []).filter(p => {
             const qaSt = String(p.qaStatus || p.qa_status || '').toUpperCase();
-            const st = String(p.status || '').toUpperCase();
-            return qaSt === 'IN_PROGRESS' || st === 'QA_IN_PROGRESS';
+            return qaSt === 'REVIEW';
         });
     }, [projects]);
 
@@ -120,6 +124,8 @@ export default function WorkspaceQA() {
             await updateProject(activeProject.id, {
                 qaStatus: 'IN_PROGRESS',
                 qaAssignee: assignee,
+                qaLeadNotes: notes,
+                qa_lead_notes: notes,
                 status: activeProject.status === 'READY_FOR_QA' ? 'QA_IN_PROGRESS' : activeProject.status
             });
             toast.success(`Proyek ${activeProject.name} berhasil didisposisikan ke QA Tester (${assignee})!`);
@@ -131,19 +137,33 @@ export default function WorkspaceQA() {
         }
     };
 
+
     // Lead QA menyetujui & mengembalikan hasil QA ke Tim Pengembangan / PM
     const handleApproveQAByLead = async () => {
         if (!activeProject) return;
         setIsSubmitting(true);
         try {
             const isCyberPassed = String(activeProject.cyberStatus || '').toUpperCase() === 'PASSED';
+            const testerIsPass = activeProject.testerResult?.isPass !== false;
+            const newQaStatus = testerIsPass ? 'PASSED' : 'FAILED';
+            const newStatus = !testerIsPass
+                ? 'RETURN_TO_DEV'
+                : isCyberPassed ? 'TESTING_PASSED' : 'QA_PASSED';
             await updateProject(activeProject.id, {
-                qaStatus: 'PASSED',
+                qaStatus: newQaStatus,
+                qa_status: newQaStatus,
                 qaPassedAt: new Date().toISOString(),
-                status: isCyberPassed ? 'TESTING_PASSED' : 'QA_PASSED'
+                qaLeadApprovalNote: leadApprovalNote,
+                qa_lead_approval_note: leadApprovalNote,
+                status: newStatus
             });
-            toast.success(`Laporan QA proyek ${activeProject.name} resmi disetujui Lead QA & dikembalikan ke Tim Pengembangan (Dev/PM)!`);
-            addNotification('Sign-off Lead QA Disetujui', `Proyek ${activeProject.name} telah resmi mengantongi Sign-off Lead QA.`, 'success', '/pm/release-request');
+            toast.success(`Sign-off Lead QA untuk proyek "${activeProject.name}" berhasil! Status: ${newQaStatus}.`);
+            addNotification(
+                'Sign-off Lead QA Disetujui',
+                `Proyek ${activeProject.name} mendapat sign-off Lead QA (${newQaStatus}). Hasil dikembalikan ke PM.`,
+                testerIsPass ? 'success' : 'warning',
+                '/pm/release-request'
+            );
             setLeadApprovalNote('');
         } catch (err) {
             toast.error(err.message || 'Gagal memproses approval Lead QA.');
@@ -153,39 +173,11 @@ export default function WorkspaceQA() {
     };
 
 
-    // Mock SDLC Documents List
+    // Real SDLC Documents List gathered from all phases
     const projectDocuments = useMemo(() => {
-        if (!activeProject) return [];
-        return [
-            {
-                id: 1,
-                name: `BRD_${activeProject.id}_Business_Requirement.pdf`,
-                type: 'BRD (Business Requirement Document)',
-                size: '2.4 MB',
-                uploadedAt: '2026-07-20',
-                author: 'Analyst TI Bank Nagari',
-                content: `DOKUMEN SPESIFIKASI KEBUTUHAN BISNIS (BRD)\nPT BANK PUMUDA KEBANGSAAN (BANK NAGARI)\n\nProyek: ${activeProject.name}\nKode ID: ${activeProject.id}\nDivisi Pengusul: ${activeProject.division || 'Divisi Teknologi Informasi'}\n\nBAB I: PENDAHULUAN\nSistem ini dirancang untuk memenuhi kebutuhan operasional dan integrasi layanan perbankan digital Bank Nagari.`
-            },
-            {
-                id: 2,
-                name: `FSD_${activeProject.id}_Functional_Spec.pdf`,
-                type: 'FSD (Functional Specification Document)',
-                size: '3.8 MB',
-                uploadedAt: '2026-07-22',
-                author: 'System Analyst TI',
-                content: `SPESIFIKASI FUNGSIONAL SISTEM (FSD)\nNomor: FSD/${activeProject.id}/2026\n\nStaging Endpoint: ${activeProject.stagingUrl || 'https://staging-app.banknagari.co.id'}\nTest Account: qa_tester_01 / Pass: NagariSafe#2026`
-            },
-            {
-                id: 3,
-                name: `QA_SignOff_Report_${activeProject.id}.pdf`,
-                type: 'Lembar Dokumen Sign-Off Resmi Lead QA',
-                size: '1.9 MB',
-                uploadedAt: '2026-07-28',
-                author: 'Siti Rahmawati (QA Lead)',
-                content: `LEMBAR VERIFIKASI & SIGN-OFF KUALITAS PENGUJIANKA (QA SIGN-OFF)\nBANK NAGARI IT GOVERNANCE\n\nNomor Surat: QA-PASS/${activeProject.id}/2026\nNama Proyek: ${activeProject.name}\nStatus Pengujian: PASSED (LULUS 100% SKENARIO FUNGSIONAL)\n\nDengan ini Lead QA menyatakan proyek tersebut telah memenuhi standar kualitas fungsional dan diserahkan kembali ke Tim Pengembangan untuk proses pengajuan migrasi ke Grup INFRA.`
-            }
-        ];
+        return getProjectRealDocuments(activeProject);
     }, [activeProject]);
+
 
     const handleCopyStagingUrl = (url) => {
         navigator.clipboard.writeText(url);
@@ -338,6 +330,32 @@ export default function WorkspaceQA() {
                                 </div>
                             </div>
 
+                            {/* Catatan Teknis PM / Lead */}
+                            {(activeProject.qaNotes || activeProject.qa_notes || activeProject.notes) && (
+                                <div className="p-4 bg-blue-50/80 border border-blue-200 rounded-xl space-y-1">
+                                    <h4 className="text-xs font-extrabold text-blue-900 uppercase tracking-wider flex items-center gap-1.5">
+                                        <Info size={14} className="text-blue-600" />
+                                        Catatan Teknis Pengajuan (PM / Pengaju Proyek)
+                                    </h4>
+                                    <p className="text-xs text-blue-950 font-medium leading-relaxed whitespace-pre-wrap">
+                                        {activeProject.qaNotes || activeProject.qa_notes || activeProject.notes}
+                                    </p>
+                                </div>
+                            )}
+
+                            {(activeProject.qaLeadNotes || activeProject.qa_lead_notes) && (
+                                <div className="p-4 bg-purple-50/80 border border-purple-200 rounded-xl space-y-1">
+                                    <h4 className="text-xs font-extrabold text-purple-900 uppercase tracking-wider flex items-center gap-1.5">
+                                        <Info size={14} className="text-purple-600" />
+                                        Arahan &amp; Instruksi Disposisi Lead QA
+                                    </h4>
+                                    <p className="text-xs text-purple-950 font-medium leading-relaxed whitespace-pre-wrap">
+                                        {activeProject.qaLeadNotes || activeProject.qa_lead_notes}
+                                    </p>
+                                </div>
+                            )}
+
+
                             {/* Dokumen SDLC & Sign-off */}
                             <div>
                                 <h4 className="text-xs font-extrabold text-gray-700 uppercase tracking-wider mb-2 flex items-center justify-between">
@@ -424,52 +442,102 @@ export default function WorkspaceQA() {
                                     </div>
                                 </div>
                             ) : (
-                                /* TAB 2: REVIEW & APPROVAL LEAD QA */
+                                /* TAB 2: REVIEW & APPROVAL LEAD QA — Membaca Laporan Nyata dari Analis */
                                 <div className="p-5 bg-emerald-50/60 rounded-2xl border border-emerald-200 space-y-4 shadow-xs">
                                     <div className="flex items-center justify-between border-b border-emerald-200/80 pb-3">
                                         <div className="flex items-center gap-2">
                                             <FileCheck size={18} className="text-emerald-700" />
-                                            <h4 className="font-extrabold text-sm text-emerald-900">Peninjauan Laporan Tester &amp; Sign-Off Lead QA</h4>
+                                            <h4 className="font-extrabold text-sm text-emerald-900">Review Laporan Analis QA &amp; Sign-Off Lead QA</h4>
                                         </div>
                                         <span className="bg-emerald-600 text-white text-[10px] font-bold px-2.5 py-0.5 rounded-full">
-                                            QA Testing Completed
+                                            Menunggu Review Lead
                                         </span>
                                     </div>
 
-                                    {/* Hasil Pengujian Tester */}
-                                    <div className="bg-white p-4 rounded-xl border border-emerald-200 space-y-2">
-                                        <div className="flex items-center justify-between text-xs font-bold text-gray-800">
-                                            <span>Penguji: {activeProject.testerResult?.testerName || 'Siti Rahmawati (Senior QA Engineer)'}</span>
-                                            <span className="px-2 py-0.5 bg-emerald-100 text-emerald-800 rounded font-extrabold">
-                                                {activeProject.testerResult?.decision || 'PASSED (LULUS QA)'}
-                                            </span>
+                                    {/* Laporan Nyata dari Analis QA */}
+                                    {activeProject.testerResult ? (
+                                        <div className="space-y-3">
+                                            {/* Info Tester & Keputusan */}
+                                            <div className="bg-white p-4 rounded-xl border border-emerald-200 space-y-2.5">
+                                                <div className="flex items-center justify-between text-xs">
+                                                    <span className="font-bold text-gray-700 flex items-center gap-1.5"><User size={13} className="text-emerald-600" /> Analis: <strong>{activeProject.testerResult.testerName}</strong></span>
+                                                    <span className={`px-2.5 py-0.5 rounded-full font-extrabold text-[11px] ${activeProject.testerResult.isPass ? 'bg-emerald-100 text-emerald-800' : 'bg-red-100 text-red-800'}`}>
+                                                        {activeProject.testerResult.decision}
+                                                    </span>
+                                                </div>
+                                                <div className="flex items-center gap-3 text-[10px] text-gray-500">
+                                                    <span>Severity: <strong className="text-gray-700">{activeProject.testerResult.severity}</strong></span>
+                                                    <span>•</span>
+                                                    <span>Checklist: <strong className="text-gray-700">{activeProject.testerResult.checklistSummary}</strong></span>
+                                                    <span>•</span>
+                                                    <span>Dikirim: <strong className="text-gray-700">{activeProject.testerResult.submittedAt ? new Date(activeProject.testerResult.submittedAt).toLocaleString('id-ID') : '-'}</strong></span>
+                                                </div>
+                                                <div className="bg-gray-50 p-3 rounded-lg border border-gray-100">
+                                                    <p className="text-xs font-bold text-gray-600 mb-1">Catatan Temuan:</p>
+                                                    <p className="text-xs text-gray-700 leading-relaxed whitespace-pre-wrap">{activeProject.testerResult.notes}</p>
+                                                </div>
+                                            </div>
+
+                                            {/* Evidence Files */}
+                                            {activeProject.testerResult.evidence?.length > 0 && (
+                                                <div>
+                                                    <h5 className="text-xs font-extrabold text-gray-700 uppercase tracking-wider mb-2 flex items-center gap-1.5">
+                                                        <Paperclip size={13} className="text-emerald-600" /> Bukti Pengujian / Evidence ({activeProject.testerResult.evidence.length})
+                                                    </h5>
+                                                    <div className="space-y-2">
+                                                        {activeProject.testerResult.evidence.map(ev => (
+                                                            <div key={ev.id} className="flex items-center justify-between p-2.5 bg-white border border-gray-200 rounded-xl">
+                                                                <div className="flex items-center gap-2 overflow-hidden">
+                                                                    <Paperclip size={13} className="text-emerald-600 shrink-0" />
+                                                                    <div className="overflow-hidden">
+                                                                        <p className="text-xs font-bold text-gray-800 truncate">{ev.name}</p>
+                                                                        <p className="text-[10px] text-gray-400">{ev.size} • {ev.uploadedAt}</p>
+                                                                    </div>
+                                                                </div>
+                                                                <div className="flex items-center gap-1.5 shrink-0">
+                                                                    <button onClick={() => setSelectedDocPreview(ev)}
+                                                                        className="px-2 py-1 bg-[#1a365d] text-white rounded-lg text-xs font-bold hover:bg-[#0f2342] transition-all flex items-center gap-1 cursor-pointer">
+                                                                        <Eye size={11} /> Lihat
+                                                                    </button>
+                                                                    <button onClick={() => { if (ev.url) { const a = document.createElement('a'); a.href = ev.url; a.download = ev.name; a.click(); } else toast.error('File tidak tersedia untuk diunduh.'); }}
+                                                                        className="px-2 py-1 bg-emerald-600 text-white rounded-lg text-xs font-bold hover:bg-emerald-700 transition-all flex items-center gap-1 cursor-pointer">
+                                                                        <Download size={11} /> Unduh
+                                                                    </button>
+                                                                </div>
+                                                            </div>
+                                                        ))}
+                                                    </div>
+                                                </div>
+                                            )}
                                         </div>
-                                        <p className="text-xs text-gray-700 leading-relaxed font-medium bg-gray-50 p-3 rounded-lg border border-gray-100">
-                                            {activeProject.testerResult?.notes || 'Seluruh skenario pengujian fungsional telah dites 100% Lulus. Tidak ada defect kritis.'}
-                                        </p>
-                                    </div>
+                                    ) : (
+                                        <div className="p-4 bg-gray-50 border border-gray-200 rounded-xl text-center text-xs text-gray-400 italic">
+                                            Laporan dari Analis QA belum masuk. Proyek ini belum selesai diuji.
+                                        </div>
+                                    )}
 
                                     {/* Action Review Lead QA */}
-                                    <div className="space-y-3 pt-2">
+                                    <div className="space-y-3 pt-2 border-t border-emerald-200">
                                         <div>
                                             <label className="block text-xs font-bold text-gray-800 mb-1.5">Catatan Verifikasi &amp; Approval Lead QA</label>
                                             <textarea
                                                 rows={2}
                                                 value={leadApprovalNote}
                                                 onChange={(e) => setLeadApprovalNote(e.target.value)}
-                                                placeholder="Tuliskan catatan verifikasi Lead QA sebelum dikembalikan ke Tim Pengembangan..."
+                                                placeholder="Tuliskan catatan verifikasi & keputusan sign-off Lead QA sebelum dikembalikan ke PM..."
                                                 className="w-full px-3.5 py-2.5 bg-white border border-gray-200 rounded-xl text-xs md:text-sm focus:outline-none focus:ring-2 focus:ring-emerald-200"
                                             />
                                         </div>
 
                                         <button
                                             onClick={handleApproveQAByLead}
-                                            disabled={isSubmitting}
+                                            disabled={isSubmitting || !activeProject.testerResult}
                                             className="w-full py-3.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-extrabold text-xs md:text-sm shadow-md transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
                                         >
                                             <CheckCircle size={18} />
-                                            <span>Setujui Sign-Off Lead QA &amp; Teruskan ke Tim Pengembangan (Dev/PM)</span>
+                                            <span>Sign-Off Lead QA &amp; Kembalikan Hasil ke PM</span>
                                         </button>
+                                        <p className="text-[10px] text-gray-400 text-center">Hasil akan diteruskan ke PM Proyek. Jika keduanya (QA &amp; Cyber) PASSED, PM bisa ajukan ke Infrastruktur.</p>
                                     </div>
                                 </div>
                             )}
@@ -478,53 +546,15 @@ export default function WorkspaceQA() {
                 </div>
             </div>
 
-            {/* MODAL PRATINJAU DOKUMEN SDLC */}
+            {/* MODAL PRATINJAU DOKUMEN SDLC RESMI */}
             {selectedDocPreview && (
-                <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-50 animate-scale-up overflow-y-auto">
-                    <div className="bg-white rounded-2xl max-w-3xl w-full p-6 shadow-2xl space-y-4 border border-gray-100 my-8">
-                        <div className="flex items-center justify-between border-b border-gray-200 pb-3">
-                            <div className="flex items-center gap-3">
-                                <div className="w-10 h-10 rounded-xl bg-blue-600 text-white font-bold flex items-center justify-center text-sm shadow-sm">
-                                    BN
-                                </div>
-                                <div>
-                                    <span className="text-[10px] font-bold text-blue-600 uppercase tracking-widest bg-blue-50 px-2 py-0.5 rounded border border-blue-100">
-                                        Dokumen Resmi SDLC Bank Nagari
-                                    </span>
-                                    <h3 className="font-extrabold text-gray-800 text-base mt-0.5">
-                                        {selectedDocPreview.name}
-                                    </h3>
-                                </div>
-                            </div>
-                            <button onClick={() => setSelectedDocPreview(null)} className="text-gray-400 hover:text-gray-600 p-1.5 rounded-lg cursor-pointer">
-                                <X size={20} />
-                            </button>
-                        </div>
-
-                        <div className="bg-gray-50 border border-gray-200 p-6 rounded-xl space-y-4 max-h-[60vh] overflow-y-auto font-mono text-xs text-gray-800 whitespace-pre-wrap leading-relaxed">
-                            {selectedDocPreview.content}
-                        </div>
-
-                        <div className="flex items-center justify-end gap-3 pt-2 border-t border-gray-100">
-                            <button
-                                onClick={() => {
-                                    toast.success(`Dokumen ${selectedDocPreview.name} berhasil diunduh!`);
-                                }}
-                                className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 shadow-sm cursor-pointer"
-                            >
-                                <Download size={14} />
-                                Unduh Dokumen (PDF)
-                            </button>
-                            <button
-                                onClick={() => setSelectedDocPreview(null)}
-                                className="px-4 py-2 bg-gray-200 hover:bg-gray-300 text-gray-800 rounded-xl text-xs font-bold transition-all cursor-pointer"
-                            >
-                                Tutup
-                            </button>
-                        </div>
-                    </div>
-                </div>
+                <DocumentViewerModal
+                    doc={selectedDocPreview}
+                    project={activeProject}
+                    onClose={() => setSelectedDocPreview(null)}
+                />
             )}
+
         </div>
     );
 }

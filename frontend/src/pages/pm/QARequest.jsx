@@ -1,9 +1,11 @@
 import { useState, useMemo, useEffect, useRef } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
-import { useProjects } from '../../contexts/ProjectContext';
+import { useProjects, getProjectRealDocuments, saveFileToStore } from '../../contexts/ProjectContext';
 import { useNotifications } from '../../contexts/NotificationContext';
 import LoadingSpinner from '../../components/LoadingSpinner';
+import DocumentViewerModal from '../../components/DocumentViewerModal';
 import toast from 'react-hot-toast';
+
 import { useNavigate } from 'react-router-dom';
 import RBBBadge from '../../components/RBBBadge';
 import {
@@ -71,8 +73,10 @@ export default function QARequest() {
   const readyProjects = useMemo(() => {
     let list = projects.filter(p => {
       const qaSt = String(p.qaStatus || p.qa_status || '').toUpperCase();
-      const isEligibleStage = ['DEV_COMPLETED', 'SIT_PASSED', 'UAT_PASSED', 'IN_DEVELOPMENT', 'READY_FOR_QA', 'CYBER_IN_PROGRESS', 'CYBER_PASSED', 'RETURN_TO_DEV', 'TESTING_IN_PROGRESS'].includes(p.status);
-      return isEligibleStage && qaSt !== 'PASSED';
+      const st = String(p.status || '').toUpperCase();
+      const isEligibleStage = ['DEV_COMPLETED', 'SIT_PASSED', 'UAT_PASSED', 'IN_DEVELOPMENT', 'CYBER_IN_PROGRESS', 'CYBER_PASSED', 'RETURN_TO_DEV'].includes(st);
+      const isAlreadySubmittedQA = ['SUBMITTED', 'IN_PROGRESS', 'PASSED'].includes(qaSt) || st === 'READY_FOR_QA' || st === 'QA_IN_PROGRESS';
+      return isEligibleStage && !isAlreadySubmittedQA;
     });
 
     if (searchTerm.trim()) {
@@ -86,6 +90,7 @@ export default function QARequest() {
 
     return list;
   }, [projects, searchTerm]);
+
 
 
   // Auto Select Proyek Pertama jika belum ada yang terpilih
@@ -133,13 +138,17 @@ export default function QARequest() {
       if (e.target) e.target.value = '';
       return;
     }
-    const newFiles = validFiles.map((file) => ({
-      name: file.name,
-      size: (file.size / 1024 / 1024).toFixed(1) + ' MB',
-      type: file.type,
-      rawFile: file,
-      url: URL.createObjectURL(file),
-    }));
+    const newFiles = validFiles.map((file) => {
+      const url = URL.createObjectURL(file);
+      saveFileToStore(file.name, url);
+      return {
+        name: file.name,
+        size: (file.size / 1024 / 1024).toFixed(1) + ' MB',
+        type: file.type || 'Dokumen Tambahan Pengajuan QA',
+        rawFile: file,
+        url: url,
+      };
+    });
     setUploadedFiles(prev => [...prev, ...newFiles]);
     if (e.target) e.target.value = '';
     toast.success(`${newFiles.length} file dokumen pengujian berhasil diunggah!`);
@@ -163,16 +172,32 @@ export default function QARequest() {
 
     setIsSubmitting(true);
     try {
-      const isCyberActive = ['SUBMITTED', 'IN_PROGRESS'].includes(String(selectedProject.cyberStatus || '').toUpperCase());
+      const liveProj = (projects || []).find(p => String(p.id) === String(selectedProject.id)) || selectedProject;
+      const isCyberActive = ['SUBMITTED', 'IN_PROGRESS'].includes(String(liveProj.cyberStatus || liveProj.cyber_status || '').toUpperCase()) || liveProj.status === 'CYBER_IN_PROGRESS';
+
+      const newUploadedDocs = uploadedFiles.map(f => ({
+        id: `qa-doc-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
+        name: f.name,
+        type: 'Dokumen Tambahan Pengajuan QA',
+        size: f.size,
+        uploadedAt: new Date().toISOString(),
+        author: user?.name || 'Project Manager',
+        url: f.url
+      }));
+
+      const existingDocs = Array.isArray(liveProj.documents) ? liveProj.documents : [];
+      const updatedDocs = [...existingDocs, ...newUploadedDocs];
+
       await updateProject(selectedProject.id, {
         status: isCyberActive ? 'TESTING_IN_PROGRESS' : 'READY_FOR_QA',
         qaStatus: 'SUBMITTED',
+        ...(liveProj.cyberStatus ? { cyberStatus: liveProj.cyberStatus } : {}),
         qaSubmittedAt: new Date().toISOString(),
         qaTargetDate: formData.targetDate,
         qaStagingUrl: formData.stagingUrl,
-        qaNotes: formData.technicalNotes
+        qaNotes: formData.technicalNotes,
+        documents: updatedDocs
       });
-
 
       addNotification(
         'Pengajuan QA Berhasil',
@@ -199,24 +224,9 @@ export default function QARequest() {
   };
 
   const projectDocsList = useMemo(() => {
-    if (!selectedProject) return [];
-    return [
-      {
-        id: 1,
-        name: `BRD_${selectedProject.id}_Business_Requirement.pdf`,
-        type: 'BRD (Business Requirement Document)',
-        size: '2.4 MB',
-        content: `DOKUMEN BISNIS (BRD) BANK NAGARI\nProyek: ${selectedProject.name}\nID: ${selectedProject.id}\nStatus: Terverifikasi oleh System Analyst.\n\nCatatan Pengujian QA: Lakukan pengujian pada seluruh skenario utama (happy path) dan error handling.`
-      },
-      {
-        id: 2,
-        name: `FSD_${selectedProject.id}_Functional_Specification.pdf`,
-        type: 'FSD (Functional Specification Document)',
-        size: '3.1 MB',
-        content: `SPESIFIKASI FUNGSIONAL SISTEM (FSD)\nNomor: FSD/${selectedProject.id}/2026\n\n1. Endpoint Staging: ${formData.stagingUrl || selectedProject.stagingUrl}\n2. Test Account: qa_user_01 / Pass: NagariSafe#2026`
-      }
-    ];
-  }, [selectedProject, formData.stagingUrl]);
+    return getProjectRealDocuments(selectedProject);
+  }, [selectedProject]);
+
 
   if (isLoading) {
     return <LoadingSpinner text="Memuat Laman Pengajuan QA..." />;
@@ -465,65 +475,48 @@ export default function QARequest() {
                 {uploadedFiles.length > 0 && (
                   <div className="mt-3 space-y-2">
                     {uploadedFiles.map((file, idx) => (
-                      <div key={idx} className="p-2.5 bg-blue-50/60 border border-blue-200 rounded-xl flex items-center justify-between text-xs">
-                        <div className="flex items-center gap-2 truncate">
+                      <div key={idx} className="p-2.5 bg-blue-50/60 border border-blue-200 rounded-xl flex items-center justify-between text-xs shadow-2xs">
+                        <div className="flex items-center gap-2 truncate pr-2">
                           <FileText size={15} className="text-blue-600 shrink-0" />
                           <span className="font-semibold text-gray-800 truncate">{file.name}</span>
                           <span className="text-[10px] text-gray-500">({file.size})</span>
                         </div>
-                        <button
-                          type="button"
-                          onClick={() => handleRemoveFile(idx)}
-                          className="text-red-500 hover:text-red-700 p-1 rounded cursor-pointer"
-                        >
-                          <X size={14} />
-                        </button>
+                        <div className="flex items-center gap-1.5 shrink-0">
+                          <button
+                            type="button"
+                            onClick={() => setSelectedDocPreview(file)}
+                            className="px-2.5 py-1 bg-white hover:bg-blue-100 text-blue-700 border border-blue-200 rounded-lg text-[10px] font-bold transition-all flex items-center gap-1 cursor-pointer shadow-2xs"
+                          >
+                            <Eye size={12} /> Pratinjau
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleRemoveFile(idx)}
+                            className="text-red-500 hover:text-red-700 p-1.5 hover:bg-red-50 rounded-lg cursor-pointer transition-all"
+                            title="Hapus file"
+                          >
+                            <X size={14} />
+                          </button>
+                        </div>
                       </div>
                     ))}
                   </div>
                 )}
+
               </div>
 
-              {/* Technical Notes & Preset Template Buttons */}
+              {/* Technical Notes & Instructions */}
               <div className="space-y-2">
-                <div className="flex items-center justify-between">
-                  <label className="block text-xs font-bold text-gray-800 uppercase tracking-wider">
-                    Catatan Teknis &amp; Instruksi Pengujian QA
-                  </label>
-                  <span className="text-[10px] text-gray-400">Klik preset untuk pengisian cepat:</span>
-                </div>
-
-                {/* Preset Buttons */}
-                <div className="flex flex-wrap gap-1.5 mb-2">
-                  <button
-                    type="button"
-                    onClick={() => handleApplyPresetNote('Lakukan Stress Test & Pengujian Beban hingga 500 TPS.')}
-                    className="px-2.5 py-1 bg-blue-50 text-blue-700 hover:bg-blue-100 rounded-lg text-[10px] font-bold transition-all border border-blue-200 flex items-center gap-1 cursor-pointer"
-                  >
-                    <Zap size={11} /> + Stress Test 500 TPS
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => handleApplyPresetNote('Uji skenario penanganan error API Gateway & Timeout DB.')}
-                    className="px-2.5 py-1 bg-purple-50 text-purple-700 hover:bg-purple-100 rounded-lg text-[10px] font-bold transition-all border border-purple-200 flex items-center gap-1 cursor-pointer"
-                  >
-                    <CheckCircle2 size={11} /> + API Error Handling
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => handleApplyPresetNote('Pastikan pengujian UAT bersama divisi pemohon telah lengkap.')}
-                    className="px-2.5 py-1 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 rounded-lg text-[10px] font-bold transition-all border border-emerald-200 flex items-center gap-1 cursor-pointer"
-                  >
-                    <Check size={11} /> + Verifikasi UAT
-                  </button>
-                </div>
+                <label className="block text-xs font-bold text-gray-800 uppercase tracking-wider">
+                  Catatan Teknis &amp; Instruksi Pengujian QA
+                </label>
 
                 <textarea
                   name="technicalNotes"
                   rows={4}
                   value={formData.technicalNotes}
                   onChange={handleChange}
-                  placeholder="Tuliskan catatan teknis, instruksi khusus, atau informasi akun pengujian..."
+                  placeholder="Tuliskan catatan teknis, instruksi khusus, atau informasi akun pengujian untuk QA Tester..."
                   className="w-full px-3.5 py-2.5 bg-white border border-gray-200 rounded-xl text-xs md:text-sm focus:outline-none focus:ring-2 focus:ring-[#1a365d]/20 focus:border-[#1a365d] transition-all"
                 />
               </div>
@@ -544,53 +537,15 @@ export default function QARequest() {
         </div>
       </div>
 
-      {/* MODAL PRATINJAU DOKUMEN SDLC */}
+      {/* MODAL PRATINJAU DOKUMEN SDLC RESMI */}
       {selectedDocPreview && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-50 animate-scale-up overflow-y-auto">
-          <div className="bg-white rounded-2xl max-w-3xl w-full p-6 shadow-2xl space-y-4 border border-gray-100 my-8">
-            <div className="flex items-center justify-between border-b border-gray-200 pb-3">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-blue-600 text-white font-bold flex items-center justify-center text-sm shadow-sm">
-                  BN
-                </div>
-                <div>
-                  <span className="text-[10px] font-bold text-blue-600 uppercase tracking-widest bg-blue-50 px-2 py-0.5 rounded border border-blue-100">
-                    Dokumen Resmi SDLC Bank Nagari
-                  </span>
-                  <h3 className="font-extrabold text-gray-800 text-base mt-0.5">
-                    {selectedDocPreview.name}
-                  </h3>
-                </div>
-              </div>
-              <button onClick={() => setSelectedDocPreview(null)} className="text-gray-400 hover:text-gray-600 p-1.5 rounded-lg cursor-pointer">
-                <X size={20} />
-              </button>
-            </div>
-
-            <div className="bg-gray-50 border border-gray-200 p-6 rounded-xl space-y-4 max-h-[60vh] overflow-y-auto font-mono text-xs text-gray-800 whitespace-pre-wrap leading-relaxed">
-              {selectedDocPreview.content}
-            </div>
-
-            <div className="flex items-center justify-end gap-3 pt-2 border-t border-gray-100">
-              <button
-                onClick={() => {
-                  toast.success(`Dokumen ${selectedDocPreview.name} berhasil diunduh!`);
-                }}
-                className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 shadow-sm cursor-pointer"
-              >
-                <Download size={14} />
-                Unduh Dokumen (PDF)
-              </button>
-              <button
-                onClick={() => setSelectedDocPreview(null)}
-                className="px-4 py-2 bg-gray-200 hover:bg-gray-300 text-gray-800 rounded-xl text-xs font-bold transition-all cursor-pointer"
-              >
-                Tutup
-              </button>
-            </div>
-          </div>
-        </div>
+        <DocumentViewerModal
+          doc={selectedDocPreview}
+          project={selectedProject}
+          onClose={() => setSelectedDocPreview(null)}
+        />
       )}
+
     </div>
   );
 }

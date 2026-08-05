@@ -45,12 +45,19 @@ export default function ReleaseRequest() {
     const rightPanelRef = useRef(null);
 
     // Filter proyek siap diajukan ke Grup INFRA:
-    // - CYBER_PASSED: sudah lulus kedua jalur QA & Cyber, siap diajukan ke INFRA
-    // - PENDING_GOLIVE: sudah diajukan ke INFRA, menunggu approval quality gate
+    // Syarat: QA PASSED && Cyber PASSED (status = TESTING_PASSED atau CYBER_PASSED dengan qaStatus=PASSED)
+    // - TESTING_PASSED: kedua jalur QA & Cyber sudah lulus semua
+    // - CYBER_PASSED: Cyber lulus, QA lulus (dicek secara manual pada qaStatus)
+    // - PENDING_GOLIVE: sudah diajukan ke INFRA, menunggu proses quality gate
     const readyProjects = useMemo(() => {
-        return projects.filter(p =>
-            ['CYBER_PASSED', 'PENDING_GOLIVE'].includes(p.status)
-        );
+        return projects.filter(p => {
+            const st = String(p.status || '').toUpperCase();
+            const qaSt = String(p.qaStatus || p.qa_status || '').toUpperCase();
+            const cyberSt = String(p.cyberStatus || p.cyber_status || '').toUpperCase();
+            // Keduanya PASSED, atau status sudah TESTING_PASSED, atau sudah PENDING_GOLIVE
+            const bothPassed = qaSt === 'PASSED' && cyberSt === 'PASSED';
+            return bothPassed || st === 'TESTING_PASSED' || st === 'PENDING_GOLIVE';
+        });
     }, [projects]);
 
 

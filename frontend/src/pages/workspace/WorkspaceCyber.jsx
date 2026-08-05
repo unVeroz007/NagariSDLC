@@ -1,10 +1,12 @@
 import { useState, useMemo, useEffect, useRef } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
-import { useProjects } from '../../contexts/ProjectContext';
+import { useProjects, getProjectRealDocuments } from '../../contexts/ProjectContext';
 import { useNotifications } from '../../contexts/NotificationContext';
 import RBBBadge from '../../components/RBBBadge';
 import LoadingSpinner from '../../components/LoadingSpinner';
+import DocumentViewerModal from '../../components/DocumentViewerModal';
 import toast from 'react-hot-toast';
+
 import {
     Shield,
     FolderOpen,
@@ -41,7 +43,9 @@ import {
     Check,
     FileCheck,
     ShieldCheck,
-    CheckCircle2
+    CheckCircle2,
+    Info,
+    Paperclip
 } from 'lucide-react';
 
 const pentestAuditors = [
@@ -67,11 +71,11 @@ export default function WorkspaceCyber() {
         });
     }, [projects]);
 
-    // Tab 2 (Review Lead): laporan pentest masuk, Cyber Lead meninjau
+    // Tab 2 (Review Lead): laporan pentest dari Pentester sudah masuk (cyberStatus === 'REVIEW')
     const reviewLeadProjects = useMemo(() => {
         return (projects || []).filter(p => {
             const cyberSt = String(p.cyberStatus || p.cyber_status || '').toUpperCase();
-            return cyberSt === 'IN_PROGRESS' || p.status === 'CYBER_IN_PROGRESS';
+            return cyberSt === 'REVIEW';
         });
     }, [projects]);
 
@@ -117,6 +121,8 @@ export default function WorkspaceCyber() {
             await updateProject(activeProject.id, {
                 cyberStatus: 'IN_PROGRESS',
                 cyberAssignee: selectedPentester,
+                cyberLeadNotes: instructions,
+                cyber_lead_notes: instructions,
                 status: activeProject.status === 'CYBER_IN_PROGRESS' ? 'CYBER_IN_PROGRESS' : activeProject.status
             });
             toast.success(`Proyek ${activeProject.name} berhasil didisposisikan ke Security Auditor (${selectedPentester})!`);
@@ -128,19 +134,33 @@ export default function WorkspaceCyber() {
         }
     };
 
+
     // Lead Cyber menyetujui & mengembalikan hasil Pentest ke Tim Pengembangan / PM
     const handleApproveCyberByLead = async () => {
         if (!activeProject) return;
         setIsSubmitting(true);
         try {
             const isQAPassed = String(activeProject.qaStatus || '').toUpperCase() === 'PASSED';
+            const auditorIsPass = activeProject.auditorResult?.isPass !== false;
+            const newCyberStatus = auditorIsPass ? 'PASSED' : 'FAILED';
+            const newStatus = !auditorIsPass
+                ? 'RETURN_TO_DEV'
+                : isQAPassed ? 'TESTING_PASSED' : 'CYBER_PASSED';
             await updateProject(activeProject.id, {
-                cyberStatus: 'PASSED',
+                cyberStatus: newCyberStatus,
+                cyber_status: newCyberStatus,
                 cyberPassedAt: new Date().toISOString(),
-                status: isQAPassed ? 'TESTING_PASSED' : 'CYBER_PASSED'
+                cyberLeadApprovalNote: leadApprovalNote,
+                cyber_lead_approval_note: leadApprovalNote,
+                status: newStatus
             });
-            toast.success(`Laporan Pentest proyek ${activeProject.name} resmi disetujui Lead Cyber Security & dikembalikan ke Tim Pengembangan (Dev/PM)!`);
-            addNotification('Sign-off Lead Cyber Disetujui', `Proyek ${activeProject.name} telah resmi mengantongi Sign-off Lead Cyber Security.`, 'success', '/pm/release-request');
+            toast.success(`Sign-off Lead Cyber untuk proyek "${activeProject.name}" berhasil! Status: ${newCyberStatus}.`);
+            addNotification(
+                'Sign-off Lead Cyber Disetujui',
+                `Proyek ${activeProject.name} mendapat sign-off Lead Cyber (${newCyberStatus}). Hasil dikembalikan ke PM.`,
+                auditorIsPass ? 'success' : 'warning',
+                '/pm/release-request'
+            );
             setLeadApprovalNote('');
         } catch (err) {
             toast.error(err.message || 'Gagal memproses approval Lead Cyber.');
@@ -150,38 +170,9 @@ export default function WorkspaceCyber() {
     };
 
 
-    // Mock SDLC Documents List
+    // Real SDLC Documents List gathered from all phases
     const projectDocuments = useMemo(() => {
-        if (!activeProject) return [];
-        return [
-            {
-                id: 1,
-                name: `BRD_${activeProject.id}_Business_Requirement.pdf`,
-                type: 'BRD (Business Requirement Document)',
-                size: '2.4 MB',
-                uploadedAt: '2026-07-20',
-                author: 'Analyst TI Bank Nagari',
-                content: `DOKUMEN SPESIFIKASI KEBUTUHAN BISNIS (BRD)\nPT BANK PUMUDA KEBANGSAAN (BANK NAGARI)\n\nProyek: ${activeProject.name}\nKode ID: ${activeProject.id}\nDivisi Pengusul: ${activeProject.division || 'Divisi Teknologi Informasi'}\n\nBAB I: KEBUTUHAN KEAMANAN SIBER (CYBERSECURITY REQUIREMENTS)\nSistem ini memproses transaksi perbankan digital dan data nasabah sensitif, sehingga wajib melalui uji kerentanan (Vulnerability Assessment & Penetration Test) berbasis OWASP Top 10.`
-            },
-            {
-                id: 2,
-                name: `QA_Testing_Report_${activeProject.id}.pdf`,
-                type: 'Laporan Pengujian QA (Lulus QA)',
-                size: '1.8 MB',
-                uploadedAt: '2026-07-26',
-                author: 'Siti Rahmawati (QA Tester)',
-                content: `LAPORAN HASIL PENGUJIANKA (QA TEST REPORT)\nBANK NAGARI IT GOVERNANCE\n\nNomor Dokumen: QA-PASS/${activeProject.id}/2026\nStatus QA: PASSED (LULUS 100% Skenario Fungsional)`
-            },
-            {
-                id: 3,
-                name: `Cyber_SignOff_Report_${activeProject.id}.pdf`,
-                type: 'Lembar Dokumen Sign-Off Resmi Lead Cyber Security',
-                size: '2.1 MB',
-                uploadedAt: '2026-07-29',
-                author: 'Rian Hidayat, CISA (Cyber Lead)',
-                content: `LEMBAR VERIFIKASI & SIGN-OFF KEAMANAN SIBER (CYBERSECURITY SIGN-OFF)\nBANK NAGARI IT GOVERNANCE\n\nNomor Surat: CYBER-PASS/${activeProject.id}/2026\nNama Proyek: ${activeProject.name}\nStatus Audit: PENTEST CLEARED (BEBAS CELAH KEAMANAN KRITIS)\n\nDengan ini Lead Cyber Security menyatakan proyek tersebut telah Lulus Penetration Test dan diserahkan kembali ke Tim Pengembangan untuk proses pengajuan migrasi ke Grup INFRA.`
-            }
-        ];
+        return getProjectRealDocuments(activeProject);
     }, [activeProject]);
 
     const handleCopyStagingUrl = (url) => {
@@ -335,6 +326,32 @@ export default function WorkspaceCyber() {
                                 </div>
                             </div>
 
+                            {/* Catatan Teknis PM / Lead */}
+                            {(activeProject.cyberNotes || activeProject.cyber_notes || activeProject.notes) && (
+                                <div className="p-4 bg-orange-50/80 border border-orange-200 rounded-xl space-y-1">
+                                    <h4 className="text-xs font-extrabold text-orange-900 uppercase tracking-wider flex items-center gap-1.5">
+                                        <Info size={14} className="text-orange-600" />
+                                        Catatan Teknis Pengajuan (PM / Pengaju Proyek)
+                                    </h4>
+                                    <p className="text-xs text-orange-950 font-medium leading-relaxed whitespace-pre-wrap">
+                                        {activeProject.cyberNotes || activeProject.cyber_notes || activeProject.notes}
+                                    </p>
+                                </div>
+                            )}
+
+                            {(activeProject.cyberLeadNotes || activeProject.cyber_lead_notes) && (
+                                <div className="p-4 bg-purple-50/80 border border-purple-200 rounded-xl space-y-1">
+                                    <h4 className="text-xs font-extrabold text-purple-900 uppercase tracking-wider flex items-center gap-1.5">
+                                        <Info size={14} className="text-purple-600" />
+                                        Arahan &amp; Instruksi Disposisi Lead Siber
+                                    </h4>
+                                    <p className="text-xs text-purple-950 font-medium leading-relaxed whitespace-pre-wrap">
+                                        {activeProject.cyberLeadNotes || activeProject.cyber_lead_notes}
+                                    </p>
+                                </div>
+                            )}
+
+
                             {/* Dokumen SDLC & Sign-off */}
                             <div>
                                 <h4 className="text-xs font-extrabold text-gray-700 uppercase tracking-wider mb-2 flex items-center justify-between">
@@ -421,52 +438,100 @@ export default function WorkspaceCyber() {
                                     </div>
                                 </div>
                             ) : (
-                                /* TAB 2: REVIEW & APPROVAL LEAD CYBER */
+                                /* TAB 2: REVIEW & APPROVAL LEAD CYBER — Membaca Laporan Nyata dari Pentester */
                                 <div className="p-5 bg-emerald-50/60 rounded-2xl border border-emerald-200 space-y-4 shadow-xs">
                                     <div className="flex items-center justify-between border-b border-emerald-200/80 pb-3">
                                         <div className="flex items-center gap-2">
                                             <ShieldCheck size={18} className="text-emerald-700" />
-                                            <h4 className="font-extrabold text-sm text-emerald-900">Peninjauan Temuan Pentest &amp; Sign-Off Lead Cyber</h4>
+                                            <h4 className="font-extrabold text-sm text-emerald-900">Review Laporan Pentest &amp; Sign-Off Lead Cyber</h4>
                                         </div>
                                         <span className="bg-emerald-600 text-white text-[10px] font-bold px-2.5 py-0.5 rounded-full">
-                                            Pentest Completed
+                                            Menunggu Review Lead
                                         </span>
                                     </div>
 
-                                    {/* Hasil Penetration Test Auditor */}
-                                    <div className="bg-white p-4 rounded-xl border border-emerald-200 space-y-2">
-                                        <div className="flex items-center justify-between text-xs font-bold text-gray-800">
-                                            <span>Auditor: {activeProject.auditorResult?.auditorName || 'Bambang Supriyadi, CEH (Penetration Testing Specialist)'}</span>
-                                            <span className="px-2 py-0.5 bg-emerald-100 text-emerald-800 rounded font-extrabold">
-                                                {activeProject.auditorResult?.decision || 'PASS (PENTEST CLEARED)'}
-                                            </span>
+                                    {/* Laporan Nyata dari Pentester */}
+                                    {activeProject.auditorResult ? (
+                                        <div className="space-y-3">
+                                            <div className="bg-white p-4 rounded-xl border border-emerald-200 space-y-2.5">
+                                                <div className="flex items-center justify-between text-xs">
+                                                    <span className="font-bold text-gray-700 flex items-center gap-1.5"><User size={13} className="text-emerald-600" /> Auditor: <strong>{activeProject.auditorResult.auditorName}</strong></span>
+                                                    <span className={`px-2.5 py-0.5 rounded-full font-extrabold text-[11px] ${activeProject.auditorResult.isPass ? 'bg-emerald-100 text-emerald-800' : 'bg-red-100 text-red-800'}`}>
+                                                        {activeProject.auditorResult.decision}
+                                                    </span>
+                                                </div>
+                                                <div className="flex items-center gap-3 text-[10px] text-gray-500">
+                                                    <span>Risk: <strong className="text-gray-700">{activeProject.auditorResult.riskLevel}</strong></span>
+                                                    <span>•</span>
+                                                    <span>Checklist: <strong className="text-gray-700">{activeProject.auditorResult.checklistSummary}</strong></span>
+                                                    <span>•</span>
+                                                    <span>Dikirim: <strong className="text-gray-700">{activeProject.auditorResult.submittedAt ? new Date(activeProject.auditorResult.submittedAt).toLocaleString('id-ID') : '-'}</strong></span>
+                                                </div>
+                                                <div className="bg-gray-50 p-3 rounded-lg border border-gray-100">
+                                                    <p className="text-xs font-bold text-gray-600 mb-1">Catatan Temuan Kerentanan:</p>
+                                                    <p className="text-xs text-gray-700 leading-relaxed whitespace-pre-wrap">{activeProject.auditorResult.notes}</p>
+                                                </div>
+                                            </div>
+
+                                            {activeProject.auditorResult.evidence?.length > 0 && (
+                                                <div>
+                                                    <h5 className="text-xs font-extrabold text-gray-700 uppercase tracking-wider mb-2 flex items-center gap-1.5">
+                                                        <Paperclip size={13} className="text-emerald-600" /> Laporan &amp; Evidence Pentest ({activeProject.auditorResult.evidence.length})
+                                                    </h5>
+                                                    <div className="space-y-2">
+                                                        {activeProject.auditorResult.evidence.map(ev => (
+                                                            <div key={ev.id} className="flex items-center justify-between p-2.5 bg-white border border-gray-200 rounded-xl">
+                                                                <div className="flex items-center gap-2 overflow-hidden">
+                                                                    <Paperclip size={13} className="text-emerald-600 shrink-0" />
+                                                                    <div className="overflow-hidden">
+                                                                        <p className="text-xs font-bold text-gray-800 truncate">{ev.name}</p>
+                                                                        <p className="text-[10px] text-gray-400">{ev.size} • {ev.uploadedAt}</p>
+                                                                    </div>
+                                                                </div>
+                                                                <div className="flex items-center gap-1.5 shrink-0">
+                                                                    <button onClick={() => setSelectedDocPreview(ev)}
+                                                                        className="px-2 py-1 bg-[#1a365d] text-white rounded-lg text-xs font-bold hover:bg-[#0f2342] transition-all flex items-center gap-1 cursor-pointer">
+                                                                        <Eye size={11} /> Lihat
+                                                                    </button>
+                                                                    <button onClick={() => { if (ev.url) { const a = document.createElement('a'); a.href = ev.url; a.download = ev.name; a.click(); } else toast.error('File tidak tersedia untuk diunduh.'); }}
+                                                                        className="px-2 py-1 bg-emerald-600 text-white rounded-lg text-xs font-bold hover:bg-emerald-700 transition-all flex items-center gap-1 cursor-pointer">
+                                                                        <Download size={11} /> Unduh
+                                                                    </button>
+                                                                </div>
+                                                            </div>
+                                                        ))}
+                                                    </div>
+                                                </div>
+                                            )}
                                         </div>
-                                        <p className="text-xs text-gray-700 leading-relaxed font-medium bg-gray-50 p-3 rounded-lg border border-gray-100">
-                                            {activeProject.auditorResult?.notes || 'Seluruh celah OWASP Top 10 (SQLi, XSS, CSRF, JWT Validation) telah dites dan dinyatakan aman.'}
-                                        </p>
-                                    </div>
+                                    ) : (
+                                        <div className="p-4 bg-gray-50 border border-gray-200 rounded-xl text-center text-xs text-gray-400 italic">
+                                            Laporan dari Pentester belum masuk. Proyek ini belum selesai diaudit.
+                                        </div>
+                                    )}
 
                                     {/* Action Review Lead Cyber */}
-                                    <div className="space-y-3 pt-2">
+                                    <div className="space-y-3 pt-2 border-t border-emerald-200">
                                         <div>
                                             <label className="block text-xs font-bold text-gray-800 mb-1.5">Catatan Verifikasi &amp; Approval Lead Cyber Security</label>
                                             <textarea
                                                 rows={2}
                                                 value={leadApprovalNote}
                                                 onChange={(e) => setLeadApprovalNote(e.target.value)}
-                                                placeholder="Tuliskan catatan verifikasi Lead Cyber sebelum dikembalikan ke Tim Pengembangan..."
+                                                placeholder="Tuliskan catatan verifikasi & keputusan sign-off Lead Cyber sebelum dikembalikan ke PM..."
                                                 className="w-full px-3.5 py-2.5 bg-white border border-gray-200 rounded-xl text-xs md:text-sm focus:outline-none focus:ring-2 focus:ring-emerald-200"
                                             />
                                         </div>
 
                                         <button
                                             onClick={handleApproveCyberByLead}
-                                            disabled={isSubmitting}
+                                            disabled={isSubmitting || !activeProject.auditorResult}
                                             className="w-full py-3.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-extrabold text-xs md:text-sm shadow-md transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
                                         >
                                             <ShieldCheck size={18} />
-                                            <span>Setujui Sign-Off Lead Cyber &amp; Teruskan ke Tim Pengembangan (Dev/PM)</span>
+                                            <span>Sign-Off Lead Cyber &amp; Kembalikan Hasil ke PM</span>
                                         </button>
+                                        <p className="text-[10px] text-gray-400 text-center">Hasil akan diteruskan ke PM Proyek. Jika keduanya (QA &amp; Cyber) PASSED, PM bisa ajukan ke Infrastruktur.</p>
                                     </div>
                                 </div>
                             )}
@@ -475,53 +540,15 @@ export default function WorkspaceCyber() {
                 </div>
             </div>
 
-            {/* MODAL PRATINJAU DOKUMEN SDLC */}
+            {/* MODAL PRATINJAU DOKUMEN SDLC RESMI */}
             {selectedDocPreview && (
-                <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-50 animate-scale-up overflow-y-auto">
-                    <div className="bg-white rounded-2xl max-w-3xl w-full p-6 shadow-2xl space-y-4 border border-gray-100 my-8">
-                        <div className="flex items-center justify-between border-b border-gray-200 pb-3">
-                            <div className="flex items-center gap-3">
-                                <div className="w-10 h-10 rounded-xl bg-orange-600 text-white font-bold flex items-center justify-center text-sm shadow-sm">
-                                    BN
-                                </div>
-                                <div>
-                                    <span className="text-[10px] font-bold text-orange-600 uppercase tracking-widest bg-orange-50 px-2 py-0.5 rounded border border-orange-100">
-                                        Dokumen Resmi SDLC Bank Nagari
-                                    </span>
-                                    <h3 className="font-extrabold text-gray-800 text-base mt-0.5">
-                                        {selectedDocPreview.name}
-                                    </h3>
-                                </div>
-                            </div>
-                            <button onClick={() => setSelectedDocPreview(null)} className="text-gray-400 hover:text-gray-600 p-1.5 rounded-lg cursor-pointer">
-                                <X size={20} />
-                            </button>
-                        </div>
-
-                        <div className="bg-gray-50 border border-gray-200 p-6 rounded-xl space-y-4 max-h-[60vh] overflow-y-auto font-mono text-xs text-gray-800 whitespace-pre-wrap leading-relaxed">
-                            {selectedDocPreview.content}
-                        </div>
-
-                        <div className="flex items-center justify-end gap-3 pt-2 border-t border-gray-100">
-                            <button
-                                onClick={() => {
-                                    toast.success(`Dokumen ${selectedDocPreview.name} berhasil diunduh!`);
-                                }}
-                                className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 shadow-sm cursor-pointer"
-                            >
-                                <Download size={14} />
-                                Unduh Dokumen (PDF)
-                            </button>
-                            <button
-                                onClick={() => setSelectedDocPreview(null)}
-                                className="px-4 py-2 bg-gray-200 hover:bg-gray-300 text-gray-800 rounded-xl text-xs font-bold transition-all cursor-pointer"
-                            >
-                                Tutup
-                            </button>
-                        </div>
-                    </div>
-                </div>
+                <DocumentViewerModal
+                    doc={selectedDocPreview}
+                    project={activeProject}
+                    onClose={() => setSelectedDocPreview(null)}
+                />
             )}
+
         </div>
     );
 }
