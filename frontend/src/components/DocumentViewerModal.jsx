@@ -1,5 +1,6 @@
 // src/components/DocumentViewerModal.jsx
 import { useState, useMemo, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import {
     FileText,
     Download,
@@ -61,8 +62,8 @@ export default function DocumentViewerModal({ doc, project, onClose }) {
         return rawUrl.startsWith('data:') || rawUrl.startsWith('blob:');
     }, [rawUrl]);
 
-    // Viewer States
-    const [viewMode, setViewMode] = useState(isValidDirectStream ? 'direct' : 'paper'); // 'paper' or 'direct'
+    // Viewer States — Default to 'paper' for instant, beautiful, user-friendly official document reader!
+    const [viewMode, setViewMode] = useState('paper');
     const [zoomLevel, setZoomLevel] = useState(100);
     const [isFullscreen, setIsFullscreen] = useState(false);
     const [streamError, setStreamError] = useState(false);
@@ -74,13 +75,21 @@ export default function DocumentViewerModal({ doc, project, onClose }) {
         setViewMode('paper');
     };
 
-    // Keyboard ESC listener
+    // Keyboard ESC listener & body scroll lock for perfect screen centering
     useEffect(() => {
         const handleKeyDown = (e) => {
             if (e.key === 'Escape') onClose();
         };
         window.addEventListener('keydown', handleKeyDown);
-        return () => window.removeEventListener('keydown', handleKeyDown);
+        if (typeof document !== 'undefined') {
+            document.body.style.overflow = 'hidden';
+        }
+        return () => {
+            window.removeEventListener('keydown', handleKeyDown);
+            if (typeof document !== 'undefined') {
+                document.body.style.overflow = 'unset';
+            }
+        };
     }, [onClose]);
 
     // Handle Download File Action
@@ -107,9 +116,9 @@ export default function DocumentViewerModal({ doc, project, onClose }) {
         }
     };
 
-    return (
-        <div className="fixed inset-0 bg-slate-950/85 backdrop-blur-md z-50 flex items-center justify-center p-2 sm:p-4 md:p-6 animate-fade-in">
-            <div className={`bg-slate-900 text-white rounded-2xl md:rounded-3xl w-full flex flex-col shadow-2xl border border-slate-800 overflow-hidden transition-all duration-300 ${isFullscreen ? 'h-full max-w-none rounded-none' : 'max-w-6xl h-[92vh]'}`}>
+    const modalContent = (
+        <div className="fixed inset-0 top-0 left-0 w-screen h-screen bg-slate-950/85 backdrop-blur-md z-[99999] flex items-center justify-center p-3 sm:p-5 md:p-8 animate-fade-in overflow-hidden">
+            <div className={`bg-slate-900 text-white rounded-2xl md:rounded-3xl w-full flex flex-col shadow-2xl border border-slate-700/80 overflow-hidden transition-all duration-300 ${isFullscreen ? 'h-full max-w-none rounded-none' : 'max-w-5xl h-[90vh]'}`}>
                 
                 {/* ── HEADER TOOLBAR ── */}
                 <div className="bg-slate-900 border-b border-slate-800 px-4 sm:px-6 py-3 flex flex-wrap items-center justify-between shrink-0 gap-3">
@@ -437,4 +446,10 @@ export default function DocumentViewerModal({ doc, project, onClose }) {
             </div>
         </div>
     );
+
+    if (typeof document !== 'undefined' && document.body) {
+        return createPortal(modalContent, document.body);
+    }
+    return modalContent;
 }
+

@@ -69,10 +69,11 @@ export default function QARequest() {
   // 3. Cyber Dulu: PM ajukan ke QA setelah Cyber selesai (CYBER_PASSED)
   // + RETURN_TO_DEV: PM bisa resubmit ke QA setelah perbaikan defect
   const readyProjects = useMemo(() => {
-    let list = projects.filter(
-      p => ['IN_DEVELOPMENT', 'READY_FOR_QA', 'CYBER_IN_PROGRESS', 'CYBER_PASSED', 'RETURN_TO_DEV'].includes(p.status)
-    );
-
+    let list = projects.filter(p => {
+      const qaSt = String(p.qaStatus || p.qa_status || '').toUpperCase();
+      const isEligibleStage = ['DEV_COMPLETED', 'SIT_PASSED', 'UAT_PASSED', 'IN_DEVELOPMENT', 'READY_FOR_QA', 'CYBER_IN_PROGRESS', 'CYBER_PASSED', 'RETURN_TO_DEV', 'TESTING_IN_PROGRESS'].includes(p.status);
+      return isEligibleStage && qaSt !== 'PASSED';
+    });
 
     if (searchTerm.trim()) {
       const term = searchTerm.toLowerCase();
@@ -85,6 +86,7 @@ export default function QARequest() {
 
     return list;
   }, [projects, searchTerm]);
+
 
   // Auto Select Proyek Pertama jika belum ada yang terpilih
   useEffect(() => {
@@ -161,13 +163,16 @@ export default function QARequest() {
 
     setIsSubmitting(true);
     try {
+      const isCyberActive = ['SUBMITTED', 'IN_PROGRESS'].includes(String(selectedProject.cyberStatus || '').toUpperCase());
       await updateProject(selectedProject.id, {
-        status: 'READY_FOR_QA',
+        status: isCyberActive ? 'TESTING_IN_PROGRESS' : 'READY_FOR_QA',
+        qaStatus: 'SUBMITTED',
         qaSubmittedAt: new Date().toISOString(),
         qaTargetDate: formData.targetDate,
         qaStagingUrl: formData.stagingUrl,
         qaNotes: formData.technicalNotes
       });
+
 
       addNotification(
         'Pengajuan QA Berhasil',

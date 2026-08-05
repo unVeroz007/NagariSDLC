@@ -140,8 +140,11 @@ const normalizeProject = (p, storedDocs = []) => {
         isTeamAllocated: Boolean(p.isTeamAllocated || p.allocationStatus === 'COMPLETED' || (Array.isArray(p.team) && p.team.length > 0)),
         allocationStatus: p.allocationStatus || (Boolean(p.isTeamAllocated || (Array.isArray(p.team) && p.team.length > 0)) ? 'COMPLETED' : 'PENDING'),
         allocatedAt: p.allocatedAt || null,
+        qaStatus: p.qaStatus || p.qa_status || 'NOT_SUBMITTED',
+        cyberStatus: p.cyberStatus || p.cyber_status || 'NOT_SUBMITTED',
     };
 };
+
 
 const CLEAN_SLATE_VERSION = 'nagari_sdlc_reset_v4_empty_tasks';
 
@@ -217,9 +220,28 @@ export function ProjectProvider({ children }) {
                         const normalized = apiList.map(apiP => {
                             const localMatch = cachedProjects.find(lp => String(lp.id) === String(apiP.id) || lp.reqId === apiP.reqId);
                             const norm = normalizeProject(apiP, storedDocs);
+                            // Real DB status takes precedence, unless local has an advanced SIT/UAT status not yet in DB
+                            const isAdvancedLocalStatus = localMatch?.status && [
+                                'SIT_IN_PROGRESS', 'SIT_PASSED', 'SIT_REVISION',
+                                'UAT_IN_PROGRESS', 'UAT_PASSED', 'UAT_REVISION_SIT', 'UAT_REVISION_DEV',
+                                'DEV_COMPLETED', 'READY_FOR_QA', 'QA_IN_PROGRESS', 'QA_PASSED',
+                                'CYBER_IN_PROGRESS', 'CYBER_PASSED'
+                            ].includes(localMatch.status);
+
+                            const finalStatus = isAdvancedLocalStatus
+                                ? localMatch.status
+                                : ((norm.status && norm.status !== 'IN_SPRINT') ? norm.status : (localMatch?.status || 'PENDING'));
+
                             return {
                                 ...norm,
-                                status: localMatch?.status || norm.status,
+                                status: finalStatus,
+                                sitUatData: localMatch?.sitUatData || norm.sitUatData || {},
+                                qaStatus: apiP.qa_status || localMatch?.qaStatus || norm.qaStatus || 'NOT_SUBMITTED',
+                                cyberStatus: apiP.cyber_status || localMatch?.cyberStatus || norm.cyberStatus || 'NOT_SUBMITTED',
+                                sitPassedAt: localMatch?.sitPassedAt || norm.sitPassedAt || null,
+                                uatPassedAt: localMatch?.uatPassedAt || norm.uatPassedAt || null,
+                                stagingUrl: localMatch?.stagingUrl || norm.stagingUrl || null,
+
                                 statusColor: localMatch?.statusColor || norm.statusColor,
                                 pm: localMatch?.pm || norm.pm,
                                 pmName: localMatch?.pmName || localMatch?.assignedPM || norm.pmName,
@@ -229,8 +251,6 @@ export function ProjectProvider({ children }) {
                                 deadline: localMatch?.deadline || norm.deadline,
                                 targetDate: localMatch?.targetDate || norm.targetDate,
                                 rbbDeadline: localMatch?.rbbDeadline || norm.rbbDeadline,
-                                // Trust server team data from DB (from project_team_members table)
-                                // Only fall back to local if server returned empty (API down/not yet seeded)
                                 team: (norm.team && Array.isArray(norm.team) && norm.team.length > 0)
                                     ? norm.team
                                     : (localMatch?.team && Array.isArray(localMatch.team) && localMatch.team.length > 0)
@@ -257,6 +277,7 @@ export function ProjectProvider({ children }) {
                                 techStack: localMatch?.techStack || norm.techStack || null,
                                 fsdDevDocument: localMatch?.fsdDevDocument || norm.fsdDevDocument || null,
                             };
+
                         });
                         setProjects(normalized);
                         if (normalized.length === 0) {
@@ -293,12 +314,22 @@ export function ProjectProvider({ children }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 
-    // Initial load silently
+    // Initial load silently & realtime background polling (instant UI sync across windows/tabs)
     useEffect(() => {
         const session = localStorage.getItem('nagari_sdlc_session');
         if (session || isLoggedIn || MODE !== 'api') {
             loadProjects(false);
         }
+
+        // Silent realtime sync interval (every 10s)
+        const pollInterval = setInterval(() => {
+            const currentSession = localStorage.getItem('nagari_sdlc_session');
+            if (currentSession || MODE !== 'api') {
+                loadProjects(false);
+            }
+        }, 10000);
+
+        return () => clearInterval(pollInterval);
     }, [loadProjects, isLoggedIn]);
 
 
@@ -451,9 +482,27 @@ export function ProjectProvider({ children }) {
                     const merged = apiList.map(apiP => {
                         const localMatch = updatedList.find(lp => String(lp.id) === String(apiP.id) || lp.reqId === apiP.reqId);
                         const norm = normalizeProject(apiP, storedDocs);
+                        const isAdvancedLocalStatus = localMatch?.status && [
+                            'SIT_IN_PROGRESS', 'SIT_PASSED', 'SIT_REVISION',
+                            'UAT_IN_PROGRESS', 'UAT_PASSED', 'UAT_REVISION_SIT', 'UAT_REVISION_DEV',
+                            'DEV_COMPLETED', 'READY_FOR_QA', 'QA_IN_PROGRESS', 'QA_PASSED',
+                            'CYBER_IN_PROGRESS', 'CYBER_PASSED'
+                        ].includes(localMatch.status);
+
+                        const finalStatus = isAdvancedLocalStatus
+                            ? localMatch.status
+                            : ((norm.status && norm.status !== 'IN_SPRINT') ? norm.status : (localMatch?.status || 'PENDING'));
+
                         return {
                             ...norm,
-                            status: localMatch?.status || norm.status,
+                            status: finalStatus,
+                            sitUatData: localMatch?.sitUatData || norm.sitUatData || {},
+                            qaStatus: apiP.qa_status || localMatch?.qaStatus || norm.qaStatus || 'NOT_SUBMITTED',
+                            cyberStatus: apiP.cyber_status || localMatch?.cyberStatus || norm.cyberStatus || 'NOT_SUBMITTED',
+                            sitPassedAt: localMatch?.sitPassedAt || norm.sitPassedAt || null,
+                            uatPassedAt: localMatch?.uatPassedAt || norm.uatPassedAt || null,
+                            stagingUrl: localMatch?.stagingUrl || norm.stagingUrl || null,
+
                             statusColor: localMatch?.statusColor || norm.statusColor,
                             pm: localMatch?.pm || norm.pm,
                             pmName: localMatch?.pmName || localMatch?.assignedPM || norm.pmName,
@@ -463,7 +512,6 @@ export function ProjectProvider({ children }) {
                             deadline: localMatch?.deadline || norm.deadline,
                             targetDate: localMatch?.targetDate || norm.targetDate,
                             rbbDeadline: localMatch?.rbbDeadline || norm.rbbDeadline,
-                            // Trust server team data after DB write
                             team: (norm.team && Array.isArray(norm.team) && norm.team.length > 0)
                                 ? norm.team
                                 : (localMatch?.team && Array.isArray(localMatch.team) && localMatch.team.length > 0)
@@ -490,6 +538,7 @@ export function ProjectProvider({ children }) {
                             techStack: localMatch?.techStack || norm.techStack || null,
                             fsdDevDocument: localMatch?.fsdDevDocument || norm.fsdDevDocument || null,
                         };
+
                     });
                     setProjects(merged);
                     saveProjects(merged);

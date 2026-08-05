@@ -4,6 +4,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import { useProjects } from '../../contexts/ProjectContext';
 import { useNotifications } from '../../contexts/NotificationContext';
 import { projectService } from '../../services/api';
+import { PROJECT_STATUS } from '../../constants/projectStatus';
 import RBBBadge from '../../components/RBBBadge';
 import LoadingSpinner from '../../components/LoadingSpinner';
 import toast from 'react-hot-toast';
@@ -130,7 +131,7 @@ export default function Allocation() {
                 team: allocatedTeam,
                 isTeamAllocated: true,
                 allocationStatus: 'COMPLETED',
-                status: 'IN_SPRINT',
+                status: PROJECT_STATUS.IN_DEVELOPMENT,
                 allocatedAt: new Date().toISOString(),
             });
 
@@ -151,7 +152,7 @@ export default function Allocation() {
                 team: allocatedTeam,
                 isTeamAllocated: true,
                 allocationStatus: 'COMPLETED',
-                status: 'IN_SPRINT',
+                status: PROJECT_STATUS.IN_DEVELOPMENT,
                 allocatedAt: new Date().toISOString(),
             });
             toast.success(`Tim berhasil dialokasikan (mode offline)!`);

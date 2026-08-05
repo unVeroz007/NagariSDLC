@@ -131,7 +131,11 @@ const router = createBrowserRouter([
             // UTAMA
             {
                 path: '/dashboard',
-                element: <Dashboard />,
+                element: (
+                    <ProtectedRoute allowedRoles={['super_admin', 'head_of_it']}>
+                        <Dashboard />
+                    </ProtectedRoute>
+                ),
             },
             {
                 path: '/profile',

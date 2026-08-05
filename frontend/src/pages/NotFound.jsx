@@ -1,9 +1,12 @@
 // src/pages/NotFound.jsx
 import { useNavigate } from 'react-router-dom';
 import { FileSearch, Home, ArrowLeft } from 'lucide-react';
+import { useAuth } from '../contexts/AuthContext';
+import { getDefaultRouteForRole } from '../data/menuConfig';
 
 export default function NotFound() {
     const navigate = useNavigate();
+    const { user } = useAuth();
 
     return (
         <div className="min-h-screen bg-gradient-to-br from-[#001838] via-[#003a73] to-[#1A56DB] flex items-center justify-center p-6">
@@ -25,25 +28,24 @@ export default function NotFound() {
 
                     {/* Deskripsi */}
                     <p className="text-white/60 text-sm leading-relaxed mb-8">
-                        Halaman yang Anda cari mungkin sudah dipindahkan, dihapus, atau tidak pernah ada.
-                        Periksa kembali URL yang Anda masukkan.
+                        Maaf, halaman yang Anda cari tidak ada, telah dipindahkan, atau alamat URL yang Anda masukkan salah.
                     </p>
 
                     {/* Tombol aksi */}
                     <div className="flex flex-col sm:flex-row gap-3 justify-center">
                         <button
                             onClick={() => navigate(-1)}
-                            className="flex items-center justify-center gap-2 px-5 py-2.5 bg-white/10 hover:bg-white/20 text-white border border-white/20 rounded-xl text-sm font-medium transition-all"
+                            className="flex items-center justify-center gap-2 px-5 py-2.5 bg-white/10 hover:bg-white/20 text-white border border-white/20 rounded-xl text-sm font-medium transition-all cursor-pointer"
                         >
                             <ArrowLeft size={16} />
                             Kembali
                         </button>
                         <button
-                            onClick={() => navigate('/dashboard')}
-                            className="flex items-center justify-center gap-2 px-5 py-2.5 bg-white text-[#003a73] rounded-xl text-sm font-bold hover:bg-gray-100 transition-all shadow-lg"
+                            onClick={() => navigate(getDefaultRouteForRole(user?.role))}
+                            className="flex items-center justify-center gap-2 px-5 py-2.5 bg-white text-[#003a73] rounded-xl text-sm font-bold hover:bg-gray-100 transition-all shadow-lg cursor-pointer"
                         >
                             <Home size={16} />
-                            Ke Beranda
+                            Ke Workspace Utama
                         </button>
                     </div>
                 </div>

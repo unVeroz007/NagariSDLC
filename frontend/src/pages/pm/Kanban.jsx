@@ -97,9 +97,9 @@ export default function Kanban() {
         },
         {
             id: 'phase3',
-            title: 'Fase 3: Pengembangan IT',
+            title: 'Fase 3: Development & SIT/UAT Internal',
             color: 'border-amber-500 bg-amber-50/30',
-            statuses: ['IN_DEVELOPMENT', 'DEVELOPMENT', 'DEV_IN_PROGRESS', 'IN_SPRINT', 'RETURN_TO_DEV', 'SPRINT', 'CODING'],
+            statuses: ['IN_DEVELOPMENT', 'DEVELOPMENT', 'DEV_IN_PROGRESS', 'IN_SPRINT', 'RETURN_TO_DEV', 'SPRINT', 'CODING', 'SIT_IN_PROGRESS', 'SIT_PASSED', 'UAT_IN_PROGRESS', 'UAT_PASSED', 'DEV_COMPLETED'],
         },
         {
             id: 'phase4',
@@ -111,7 +111,7 @@ export default function Kanban() {
             id: 'phase5',
             title: 'Fase 5: Rilis & Quality Gate',
             color: 'border-emerald-500 bg-emerald-50/30',
-            statuses: ['READY_FOR_UAT', 'UAT_IN_PROGRESS', 'UAT_PASSED', 'PENDING_GOLIVE', 'GOLIVE', 'LIVE_PRODUCTION', 'COMPLETED', 'RELEASED'],
+            statuses: ['READY_FOR_UAT', 'UAT_PASSED', 'PENDING_GOLIVE', 'GOLIVE', 'LIVE_PRODUCTION', 'COMPLETED', 'RELEASED'],
         },
     ];
 

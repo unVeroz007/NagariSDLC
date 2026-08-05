@@ -6,6 +6,7 @@ import { useNavigate } from 'react-router-dom';
 import RBBBadge from '../../components/RBBBadge';
 import LoadingSpinner from '../../components/LoadingSpinner';
 import DocumentViewerModal from '../../components/DocumentViewerModal';
+import SITUATDocumentModal from '../../components/SITUATDocumentModal';
 import {
     Inbox,
     Search as SearchIcon,
@@ -112,6 +113,7 @@ export default function WorkspaceDevLead() {
     const [selectedAnalystId, setSelectedAnalystId] = useState('');
     const [leadNote, setLeadNote] = useState('');
     const [previewDoc, setPreviewDoc] = useState(null);
+    const [sitUatModalProject, setSitUatModalProject] = useState(null);
 
     const previewBlobUrl = useMemo(() => {
         if (!previewDoc) return null;
@@ -191,10 +193,19 @@ export default function WorkspaceDevLead() {
         p.status === 'DEV_ANALYSIS_DONE'
     ));
 
-    // 4. Proyek Sedang Dikembangkan (Hanya proyek yang sudah ditunjuk PM & sedang dalam koding/dev IT)
-    const inDevelopmentProjects = applySearch(projects.filter(p =>
-        p.status === 'IN_DEVELOPMENT'
-    ));
+    // 4. Proyek Sedang Dikembangkan & Pengujian (Meliputi Coding, SIT, UAT, QA, Pentest Siber)
+    const inDevelopmentProjects = applySearch(projects.filter(p => {
+        const st = String(p.status || '').toUpperCase();
+        return [
+            'IN_DEVELOPMENT', 'DEVELOPMENT', 'DEV_IN_PROGRESS', 'IN_SPRINT',
+            'SIT_IN_PROGRESS', 'SIT_PASSED', 'SIT_REVISION',
+            'UAT_IN_PROGRESS', 'UAT_REVISION_SIT', 'UAT_REVISION_DEV',
+            'DEV_COMPLETED', 'READY_FOR_QA', 'QA_IN_PROGRESS', 'QA_PASSED',
+            'CYBER_IN_PROGRESS', 'CYBER_PASSED', 'READY_FOR_UAT', 'UAT_PASSED',
+            'RETURN_TO_DEV', 'PENDING_GOLIVE'
+        ].includes(st);
+    }));
+
 
     // 5. Proyek Selesai & Go Live
     const completedProjects = applySearch(projects.filter(p =>
@@ -861,10 +872,24 @@ export default function WorkspaceDevLead() {
                                         <div>
                                             <div className="flex items-center justify-between mb-2">
                                                 <span className="text-xs font-mono font-bold text-blue-600 bg-blue-50 px-2.5 py-0.5 rounded border border-blue-100">{project.id}</span>
-                                                <span className="px-2.5 py-1 rounded-full text-xs font-bold bg-cyan-100 text-cyan-800 border border-cyan-200">
-                                                    Sedang Dikembangkan
-                                                </span>
+                                                {(() => {
+                                                    const s = String(project.status || '').toUpperCase();
+                                                    if (s === 'SIT_IN_PROGRESS') return <span className="px-2.5 py-1 rounded-full text-[11px] font-bold bg-sky-100 text-sky-800 border border-sky-200 animate-pulse">🔄 SIT Berlangsung</span>;
+                                                    if (s === 'SIT_PASSED') return <span className="px-2.5 py-1 rounded-full text-[11px] font-bold bg-blue-100 text-blue-800 border border-blue-200">🔵 SIT LULUS</span>;
+                                                    if (s === 'SIT_REVISION') return <span className="px-2.5 py-1 rounded-full text-[11px] font-bold bg-orange-100 text-orange-800 border border-orange-200">↩️ SIT Revisi</span>;
+                                                    if (s === 'UAT_IN_PROGRESS') return <span className="px-2.5 py-1 rounded-full text-[11px] font-bold bg-amber-100 text-amber-800 border border-amber-200 animate-pulse">🔄 UAT Internal</span>;
+                                                    if (s === 'UAT_REVISION_SIT' || s === 'UAT_REVISION_DEV') return <span className="px-2.5 py-1 rounded-full text-[11px] font-bold bg-red-100 text-red-800 border border-red-200">↩️ UAT Revisi</span>;
+                                                    if (s === 'DEV_COMPLETED') return <span className="px-2.5 py-1 rounded-full text-[11px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-200">✅ DEV COMPLETED</span>;
+                                                    if (s === 'READY_FOR_QA' || s === 'QA_IN_PROGRESS') return <span className="px-2.5 py-1 rounded-full text-[11px] font-bold bg-indigo-100 text-indigo-800 border border-indigo-200">🔍 QA Testing</span>;
+                                                    if (s === 'QA_PASSED') return <span className="px-2.5 py-1 rounded-full text-[11px] font-bold bg-teal-100 text-teal-800 border border-teal-200">✅ QA Lulus</span>;
+                                                    if (s === 'CYBER_IN_PROGRESS') return <span className="px-2.5 py-1 rounded-full text-[11px] font-bold bg-purple-100 text-purple-800 border border-purple-200">🛡️ Pentest Siber</span>;
+                                                    if (s === 'CYBER_PASSED') return <span className="px-2.5 py-1 rounded-full text-[11px] font-bold bg-purple-100 text-purple-900 border border-purple-300">✅ Siber Lulus</span>;
+                                                    if (s === 'RETURN_TO_DEV') return <span className="px-2.5 py-1 rounded-full text-[11px] font-bold bg-rose-100 text-rose-800 border border-rose-200">🚨 Perbaikan Dev</span>;
+                                                    if (s === 'PENDING_GOLIVE') return <span className="px-2.5 py-1 rounded-full text-[11px] font-bold bg-cyan-100 text-cyan-800 border border-cyan-200">🚀 Siap Go Live</span>;
+                                                    return <span className="px-2.5 py-1 rounded-full text-[11px] font-bold bg-cyan-100 text-cyan-800 border border-cyan-200">💻 Coding &amp; Dev</span>;
+                                                })()}
                                             </div>
+
                                             <h3 className="font-bold text-gray-800 text-base mb-2">{project.name}</h3>
 
                                             <div className="bg-gray-50 border border-gray-100 p-3 rounded-xl mb-3">
@@ -888,15 +913,18 @@ export default function WorkspaceDevLead() {
                                             </div>
                                         </div>
 
-                                        <button
-                                            onClick={() => navigate('/pm/tracker')}
-                                            className="w-full bg-[#1a365d] hover:bg-[#0f2342] text-white text-xs font-bold py-2.5 px-4 rounded-xl transition-all flex items-center justify-center gap-2 shadow-sm cursor-pointer"
-                                        >
-                                            <span>Lacak Status &amp; Progress Proyek</span>
-                                            <ChevronRight size={15} />
-                                        </button>
+                                        <div className="pt-2 border-t border-gray-100">
+                                            <button
+                                                onClick={() => navigate(`/pm/tasks/${project.id}`)}
+                                                className="w-full bg-[#003a73] hover:bg-[#002a5a] text-white text-xs font-bold py-2.5 px-4 rounded-xl transition-all flex items-center justify-center gap-2 shadow-xs cursor-pointer active:scale-98"
+                                            >
+                                                <Eye size={15} />
+                                                <span>Lihat Proyek &amp; Progress SDLC</span>
+                                            </button>
+                                        </div>
                                     </div>
                                 ))}
+
                             </div>
                         )}
                     </div>
@@ -1168,6 +1196,8 @@ export default function WorkspaceDevLead() {
                     onClose={() => setPreviewDoc(null)}
                 />
             )}
+
         </div>
     );
 }
+

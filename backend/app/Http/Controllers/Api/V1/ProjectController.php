@@ -108,6 +108,7 @@ class ProjectController extends Controller
         $request->validate([
             'title'                  => ['sometimes', 'string', 'max:255'],
             'description'            => ['sometimes', 'nullable', 'string'],
+            'status'                 => ['sometimes', 'nullable', 'string'],
             'pm_id'                  => ['sometimes', 'nullable', 'exists:users,id'],
             'analyst_id'             => ['sometimes', 'nullable', 'exists:users,id'],
             'division_id'            => ['sometimes', 'nullable', 'exists:divisions,id'],
@@ -115,13 +116,20 @@ class ProjectController extends Controller
             'current_stage_deadline' => ['sometimes', 'nullable', 'date'],
             'staging_url'            => ['sometimes', 'nullable', 'string'],
             'uat_notes'              => ['sometimes', 'nullable', 'string'],
+            'sit_uat_data'           => ['sometimes', 'nullable'],
+            'qa_status'              => ['sometimes', 'nullable', 'string'],
+            'cyber_status'           => ['sometimes', 'nullable', 'string'],
         ]);
 
-        $project->update($request->only([
-            'title', 'description', 'pm_id', 'analyst_id',
+        $updateData = $request->only([
+            'title', 'description', 'status', 'pm_id', 'analyst_id',
             'division_id', 'target_date', 'current_stage_deadline',
-            'staging_url', 'uat_notes',
-        ]));
+            'staging_url', 'uat_notes', 'sit_uat_data',
+            'qa_status', 'cyber_status',
+        ]);
+
+        $project->update(array_filter($updateData, fn($v) => !is_null($v)));
+
 
         if ($request->has('team') || $request->has('team_ids') || $request->has('developers')) {
             $teamData = $request->input('team') ?? $request->input('team_ids') ?? $request->input('developers');

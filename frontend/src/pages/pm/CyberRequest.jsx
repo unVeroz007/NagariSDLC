@@ -68,10 +68,11 @@ export default function CyberRequest() {
   // 3. QA Dulu: PM ajukan ke Cyber setelah QA selesai (QA_PASSED)
   // + RETURN_TO_DEV: PM bisa resubmit ke Cyber setelah perbaikan vulnerability
   const readyProjects = useMemo(() => {
-    let list = projects.filter(
-      p => ['IN_DEVELOPMENT', 'READY_FOR_QA', 'QA_IN_PROGRESS', 'QA_PASSED', 'RETURN_TO_DEV'].includes(p.status)
-    );
-
+    let list = projects.filter(p => {
+      const cyberSt = String(p.cyberStatus || p.cyber_status || '').toUpperCase();
+      const isEligibleStage = ['DEV_COMPLETED', 'SIT_PASSED', 'UAT_PASSED', 'IN_DEVELOPMENT', 'READY_FOR_QA', 'QA_IN_PROGRESS', 'QA_PASSED', 'RETURN_TO_DEV', 'TESTING_IN_PROGRESS'].includes(p.status);
+      return isEligibleStage && cyberSt !== 'PASSED';
+    });
 
     if (searchTerm.trim()) {
       const term = searchTerm.toLowerCase();
@@ -84,6 +85,7 @@ export default function CyberRequest() {
 
     return list;
   }, [projects, searchTerm]);
+
 
   // Auto Select Proyek Pertama
   useEffect(() => {
@@ -160,13 +162,16 @@ export default function CyberRequest() {
 
     setIsSubmitting(true);
     try {
+      const isQAActive = ['SUBMITTED', 'IN_PROGRESS'].includes(String(selectedProject.qaStatus || '').toUpperCase());
       await updateProject(selectedProject.id, {
-        status: 'CYBER_IN_PROGRESS',
+        status: isQAActive ? 'TESTING_IN_PROGRESS' : 'CYBER_IN_PROGRESS',
+        cyberStatus: 'SUBMITTED',
         cyberSubmittedAt: new Date().toISOString(),
         cyberTargetDate: formData.targetDate,
         cyberStagingUrl: formData.stagingUrl,
         cyberNotes: formData.technicalNotes
       });
+
 
       addNotification(
         'Pengajuan Cyber Security Berhasil',

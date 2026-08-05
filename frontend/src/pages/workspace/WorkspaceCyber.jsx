@@ -58,17 +58,22 @@ export default function WorkspaceCyber() {
 
     const [activeTab, setActiveTab] = useState('DISPOSITION'); // 'DISPOSITION' | 'REVIEW_LEAD'
 
-    // Tab 1 (Disposisi): proyek yang sudah diajukan PM ke Cyber Lead (status CYBER_IN_PROGRESS)
+    // Tab 1 (Disposisi): proyek yang sudah diajukan PM ke Cyber Lead
     const cyberProjects = useMemo(() => {
-        return (projects || []).filter(p => ['CYBER_IN_PROGRESS'].includes(p.status));
+        return (projects || []).filter(p => {
+            const cyberSt = String(p.cyberStatus || p.cyber_status || '').toUpperCase();
+            const st = String(p.status || '').toUpperCase();
+            return (cyberSt === 'SUBMITTED' || st === 'CYBER_IN_PROGRESS') && cyberSt !== 'IN_PROGRESS' && cyberSt !== 'PASSED';
+        });
     }, [projects]);
-
 
     // Tab 2 (Review Lead): laporan pentest masuk, Cyber Lead meninjau
     const reviewLeadProjects = useMemo(() => {
-        return (projects || []).filter(p => ['CYBER_IN_PROGRESS'].includes(p.status));
+        return (projects || []).filter(p => {
+            const cyberSt = String(p.cyberStatus || p.cyber_status || '').toUpperCase();
+            return cyberSt === 'IN_PROGRESS' || p.status === 'CYBER_IN_PROGRESS';
+        });
     }, [projects]);
-
 
     const activeList = activeTab === 'DISPOSITION' ? cyberProjects : reviewLeadProjects;
     const [selectedProject, setSelectedProject] = useState(null);
@@ -99,6 +104,8 @@ export default function WorkspaceCyber() {
         }
     }, [activeProject?.id, activeTab]);
 
+    const { updateProject } = useProjects();
+
     const handleAssign = async () => {
         if (!activeProject) return;
         if (!selectedPentester) {
@@ -107,7 +114,11 @@ export default function WorkspaceCyber() {
         }
         setIsSubmitting(true);
         try {
-            await updateProjectStatus(activeProject.id, 'CYBER_IN_PROGRESS', `Disposisi Pentester: ${selectedPentester}. ${instructions}`);
+            await updateProject(activeProject.id, {
+                cyberStatus: 'IN_PROGRESS',
+                cyberAssignee: selectedPentester,
+                status: activeProject.status === 'CYBER_IN_PROGRESS' ? 'CYBER_IN_PROGRESS' : activeProject.status
+            });
             toast.success(`Proyek ${activeProject.name} berhasil didisposisikan ke Security Auditor (${selectedPentester})!`);
             addNotification('Disposisi Pentest', `Proyek ${activeProject.name} telah didisposisikan ke ${selectedPentester}.`, 'info');
         } catch (err) {
@@ -122,7 +133,12 @@ export default function WorkspaceCyber() {
         if (!activeProject) return;
         setIsSubmitting(true);
         try {
-            await updateProjectStatus(activeProject.id, 'CYBER_PASSED', `Sign-off Lead Cyber Disetujui: ${leadApprovalNote || 'Hasil penetration test dinyatakan CLEARED tanpa celah keamanan kritis.'}`);
+            const isQAPassed = String(activeProject.qaStatus || '').toUpperCase() === 'PASSED';
+            await updateProject(activeProject.id, {
+                cyberStatus: 'PASSED',
+                cyberPassedAt: new Date().toISOString(),
+                status: isQAPassed ? 'TESTING_PASSED' : 'CYBER_PASSED'
+            });
             toast.success(`Laporan Pentest proyek ${activeProject.name} resmi disetujui Lead Cyber Security & dikembalikan ke Tim Pengembangan (Dev/PM)!`);
             addNotification('Sign-off Lead Cyber Disetujui', `Proyek ${activeProject.name} telah resmi mengantongi Sign-off Lead Cyber Security.`, 'success', '/pm/release-request');
             setLeadApprovalNote('');
@@ -132,6 +148,7 @@ export default function WorkspaceCyber() {
             setIsSubmitting(false);
         }
     };
+
 
     // Mock SDLC Documents List
     const projectDocuments = useMemo(() => {

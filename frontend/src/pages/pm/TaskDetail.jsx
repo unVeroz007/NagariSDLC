@@ -1,10 +1,16 @@
+import { getParallelTestingBadge } from '../../constants/projectStatus';
 import RBBBadge from '../../components/RBBBadge';
+
+
 import ChatBox from '../../components/ChatBox';
-import { useState, useMemo, useEffect } from 'react';
+import SITUATDocumentModal from '../../components/SITUATDocumentModal';
+import SITUATWizard from '../../components/SITUATWizard';
+import { useState, useMemo, useEffect, useRef } from 'react';
 import toast from 'react-hot-toast';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import { useProjects } from '../../contexts/ProjectContext';
+import { useNotifications } from '../../contexts/NotificationContext';
 import {
     ChevronLeft,
     ChevronRight,
@@ -16,6 +22,7 @@ import {
     Calendar,
     Clock,
     CheckCircle,
+    CheckCircle2,
     AlertCircle,
     Info,
     Edit,
@@ -34,8 +41,17 @@ import {
     Link,
     Trash2,
     X,
+    ShieldCheck,
+    Server,
+    CheckSquare,
+    Upload,
+    Lock,
+    Send,
+    FileCheck,
+    ArrowRight,
 } from 'lucide-react';
 import { taskProjects } from '../../data/mockData';
+
 
 export default function TaskDetail() {
     const { user } = useAuth();
@@ -49,13 +65,9 @@ export default function TaskDetail() {
     }, [projectId]);
 
     const project = useMemo(() => {
-        if (!projectId) return taskProjects[0];
+        if (!projectId) return null;
 
-        // 1. Cari di taskProjects mockData
-        let found = taskProjects.find((p) => String(p.id).toLowerCase() === String(projectId).toLowerCase());
-        if (found) return found;
-
-        // 2. Cari di ProjectContext
+        // 1. Cari di ProjectContext (data dinamis & ter-update)
         const ctxFound = (projects || []).find((p) =>
             String(p.id).toLowerCase() === String(projectId).toLowerCase() ||
             String(p.reqId || p.req_id || '').toLowerCase() === String(projectId).toLowerCase()
@@ -75,9 +87,14 @@ export default function TaskDetail() {
             };
         }
 
+        // 2. Fallback ke taskProjects mockData jika belum ada di context
+        let found = taskProjects.find((p) => String(p.id).toLowerCase() === String(projectId).toLowerCase());
+        if (found) return found;
+
         // 3. Fallback default project
-        return taskProjects[0] || null;
+        return (projects && projects[0]) || taskProjects[0] || null;
     }, [projectId, projects]);
+
 
     // Filter Assignee anggota tim proyek (HANYA Pekerja Teknis/Dev/Analyst, tanpa Management Roles)
     const validAssignees = useMemo(() => {
@@ -126,7 +143,61 @@ export default function TaskDetail() {
         );
     }
 
-    const [activeTab, setActiveTab] = useState('tasks'); // tasks, documents, activity
+    const [activeTab, setActiveTab] = useState('tasks'); // tasks, sit_uat, documents, activity
+    const { addNotification } = useNotifications();
+
+    // ─── SIT & UAT Internal State & Helpers ──────────────────────────────────
+    const fmtName = (val, fb = 'Tim TI') => {
+        if (!val) return fb;
+        if (typeof val === 'object') return val.name || val.label || fb;
+        return String(val);
+    };
+    const [sitUatState, setSitUatState] = useState({
+        stagingUrl: project?.stagingUrl || '',
+        sitCoverage: project?.sitCoverage || '',
+        sitNotes: project?.sitNotes || '',
+        uatScenarios: project?.uatScenarios || '',
+        uatNotes: project?.uatNotes || '',
+        sitUatFiles: project?.sitUatFiles || [],
+    });
+    const [sitUatSubmitting, setSitUatSubmitting] = useState(false);
+    const [sitUatDocOpen, setSitUatDocOpen] = useState(false);
+    const sitFileInputRef = useRef(null);
+
+    const handleSITUATFileUpload = (e) => {
+        const files = Array.from(e.target.files);
+        if (!files.length) return;
+        const newDocs = files.map(file => {
+            const url = URL.createObjectURL(file);
+            return {
+                id: `situatdoc_${Date.now()}_${Math.random().toString(36).slice(2)}`,
+                name: file.name,
+                size: `${(file.size / 1024 / 1024).toFixed(2)} MB`,
+                type: file.name.split('.').pop().toUpperCase(),
+                url,
+                uploadedAt: new Date().toISOString(),
+                category: 'BAST_SIT_UAT',
+            };
+        });
+        setSitUatState(prev => ({ ...prev, sitUatFiles: [...prev.sitUatFiles, ...newDocs] }));
+        toast.success(`${files.length} berkas bukti SIT & UAT berhasil dilampirkan.`);
+    };
+
+    const handleSaveSITUAT = (targetStatus) => {
+        setSitUatSubmitting(true);
+        updateProject(project.id, { status: targetStatus, sitPassedAt: new Date().toISOString(), sitPassedBy: fmtName(user?.name, 'Tim TI'), ...sitUatState });
+        if (addNotification) {
+            addNotification(
+                targetStatus === 'DEV_COMPLETED' ? 'BAST Dev Diterbitkan' : 'SIT Diverifikasi',
+                targetStatus === 'DEV_COMPLETED' ? `Proyek ${project.name} LULUS SIT & UAT. Siap QA & Siber.` : `Proyek ${project.name} Lulus SIT. Lanjut ke UAT Internal.`,
+                'success', '/pm/workspace'
+            );
+        }
+        toast.success(targetStatus === 'DEV_COMPLETED' ? `BAST Diterbitkan! Proyek "${project.name}" resmi DEV_COMPLETED.` : `SIT Lulus! Proyek "${project.name}" siap UAT Internal.`);
+        setSitUatSubmitting(false);
+    };
+    // ─────────────────────────────────────────────────────────────────────────
+
     const [searchTask, setSearchTask] = useState('');
     const [tasks, setTasks] = useState(project ? (project.tasks || []) : []);
     
@@ -342,11 +413,17 @@ export default function TaskDetail() {
                         </div>
                         <h1 className="text-3xl font-bold text-gray-800">{project.name}</h1>
                         <div className="flex flex-wrap items-center gap-3 mt-3">
-                            <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold border ${project.statusColor}`}>
-                                <span className="w-1.5 h-1.5 rounded-full bg-current"></span>
-                                {project.status}
-                            </span>
+                            {(() => {
+                                const badge = getParallelTestingBadge(project);
+                                return (
+                                    <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold border ${badge.colorClass}`}>
+                                        <span className="w-1.5 h-1.5 rounded-full bg-current"></span>
+                                        {badge.label}
+                                    </span>
+                                );
+                            })()}
                             <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold border ${project.priorityColor}`}>
+
                                 <AlertCircle size={14} />
                                 {project.priority}
                             </span>
@@ -478,6 +555,19 @@ export default function TaskDetail() {
                             Dokumen
                         </button>
                         <button
+                            onClick={() => setActiveTab('sit_uat')}
+                            className={`px-6 py-4 text-sm font-semibold border-b-2 transition-colors whitespace-nowrap flex items-center gap-2 ${activeTab === 'sit_uat'
+                                ? 'border-emerald-600 text-emerald-700 bg-white'
+                                : 'border-transparent text-gray-500 hover:text-gray-700'
+                                }`}
+                        >
+                            <ShieldCheck size={15} />
+                            SIT &amp; UAT Internal
+                            {(project?.status === 'IN_DEVELOPMENT' || project?.status === 'SIT_PASSED' || project?.status === 'UAT_IN_PROGRESS') && (
+                                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse ml-0.5" />
+                            )}
+                        </button>
+                        <button
                             onClick={() => setActiveTab('activity')}
                             className={`px-6 py-4 text-sm font-semibold border-b-2 transition-colors whitespace-nowrap ${activeTab === 'activity'
                                 ? 'border-[#1A56DB] text-[#1A56DB] bg-white'
@@ -601,6 +691,19 @@ export default function TaskDetail() {
                             </div>
                         </>
                     )}
+
+                    {/* ═══════════════════════════════════════════════════════════
+                         SIT & UAT INTERNAL TAB — Multi-Step Wizard Component
+                        ═══════════════════════════════════════════════════════════ */}
+                    {activeTab === 'sit_uat' && (
+                        <SITUATWizard
+                            project={project}
+                            updateProject={updateProject}
+                            addNotification={addNotification}
+                            navigate={navigate}
+                        />
+                    )}
+
 
                     {/* Dokumen Tab */}
                     {activeTab === 'documents' && (

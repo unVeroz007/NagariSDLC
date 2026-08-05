@@ -46,11 +46,48 @@ class ProjectWorkflowService
             ProjectStatus::DEV_ANALYSIS->value, // Mundur
         ],
         ProjectStatus::IN_DEVELOPMENT->value => [
+            ProjectStatus::SIT_IN_PROGRESS->value,
+            ProjectStatus::DEV_COMPLETED->value,
             ProjectStatus::READY_FOR_QA->value,
             ProjectStatus::CYBER_IN_PROGRESS->value,
             ProjectStatus::QA_IN_PROGRESS->value,
             ProjectStatus::DEV_ANALYSIS_DONE->value, // Mundur
             ProjectStatus::ON_HOLD->value,
+        ],
+        ProjectStatus::SIT_IN_PROGRESS->value => [
+            ProjectStatus::SIT_PASSED->value,
+            ProjectStatus::SIT_REVISION->value,
+            ProjectStatus::IN_DEVELOPMENT->value,
+        ],
+        ProjectStatus::SIT_PASSED->value => [
+            ProjectStatus::UAT_IN_PROGRESS->value,
+            ProjectStatus::DEV_COMPLETED->value,
+            ProjectStatus::SIT_REVISION->value,
+            ProjectStatus::IN_DEVELOPMENT->value,
+        ],
+        ProjectStatus::SIT_REVISION->value => [
+            ProjectStatus::SIT_IN_PROGRESS->value,
+            ProjectStatus::IN_DEVELOPMENT->value,
+        ],
+        ProjectStatus::UAT_IN_PROGRESS->value => [
+            ProjectStatus::UAT_PASSED->value,
+            ProjectStatus::DEV_COMPLETED->value,
+            ProjectStatus::UAT_REVISION_SIT->value,
+            ProjectStatus::UAT_REVISION_DEV->value,
+        ],
+        ProjectStatus::UAT_REVISION_SIT->value => [
+            ProjectStatus::SIT_IN_PROGRESS->value,
+            ProjectStatus::UAT_IN_PROGRESS->value,
+        ],
+        ProjectStatus::UAT_REVISION_DEV->value => [
+            ProjectStatus::IN_DEVELOPMENT->value,
+            ProjectStatus::SIT_IN_PROGRESS->value,
+        ],
+        ProjectStatus::DEV_COMPLETED->value => [
+            ProjectStatus::READY_FOR_QA->value,
+            ProjectStatus::QA_IN_PROGRESS->value,
+            ProjectStatus::CYBER_IN_PROGRESS->value,
+            ProjectStatus::IN_DEVELOPMENT->value,
         ],
         ProjectStatus::RETURN_TO_DEV->value => [
             ProjectStatus::IN_DEVELOPMENT->value,
@@ -61,6 +98,7 @@ class ProjectWorkflowService
         ProjectStatus::READY_FOR_QA->value => [
             ProjectStatus::QA_IN_PROGRESS->value,
             ProjectStatus::CYBER_IN_PROGRESS->value,
+            ProjectStatus::DEV_COMPLETED->value,
             ProjectStatus::IN_DEVELOPMENT->value, // Mundur
         ],
         ProjectStatus::QA_IN_PROGRESS->value => [
@@ -122,6 +160,13 @@ class ProjectWorkflowService
         ProjectStatus::DEV_ANALYSIS->value => [UserRole::DEVELOPMENT_LEAD->value, UserRole::ANALYST->value, UserRole::SUPER_ADMIN->value],
         ProjectStatus::DEV_ANALYSIS_DONE->value => [UserRole::ANALYST->value, UserRole::SUPER_ADMIN->value],
         ProjectStatus::IN_DEVELOPMENT->value => [UserRole::PROJECT_MANAGER->value, UserRole::DEVELOPER->value, UserRole::SUPER_ADMIN->value],
+        ProjectStatus::SIT_IN_PROGRESS->value => [UserRole::PROJECT_MANAGER->value, UserRole::DEVELOPMENT_LEAD->value, UserRole::DEVELOPER->value, UserRole::SUPER_ADMIN->value],
+        ProjectStatus::SIT_PASSED->value => [UserRole::PROJECT_MANAGER->value, UserRole::DEVELOPMENT_LEAD->value, UserRole::SUPER_ADMIN->value],
+        ProjectStatus::SIT_REVISION->value => [UserRole::PROJECT_MANAGER->value, UserRole::DEVELOPMENT_LEAD->value, UserRole::SUPER_ADMIN->value],
+        ProjectStatus::UAT_IN_PROGRESS->value => [UserRole::PROJECT_MANAGER->value, UserRole::BUSINESS_USER->value, UserRole::SUPER_ADMIN->value],
+        ProjectStatus::UAT_REVISION_SIT->value => [UserRole::PROJECT_MANAGER->value, UserRole::BUSINESS_USER->value, UserRole::SUPER_ADMIN->value],
+        ProjectStatus::UAT_REVISION_DEV->value => [UserRole::PROJECT_MANAGER->value, UserRole::BUSINESS_USER->value, UserRole::SUPER_ADMIN->value],
+        ProjectStatus::DEV_COMPLETED->value => [UserRole::PROJECT_MANAGER->value, UserRole::BUSINESS_USER->value, UserRole::SUPER_ADMIN->value],
         ProjectStatus::RETURN_TO_DEV->value => [UserRole::QA_LEAD->value, UserRole::QA_TESTER->value, UserRole::CYBER_LEAD->value, UserRole::PENTESTER->value, UserRole::SUPER_ADMIN->value],
         ProjectStatus::READY_FOR_QA->value => [UserRole::PROJECT_MANAGER->value, UserRole::SUPER_ADMIN->value],
         ProjectStatus::QA_IN_PROGRESS->value => [UserRole::QA_LEAD->value, UserRole::SUPER_ADMIN->value],
@@ -135,6 +180,7 @@ class ProjectWorkflowService
         ProjectStatus::ON_HOLD->value => [UserRole::PROJECT_MANAGER->value, UserRole::SUPER_ADMIN->value],
         ProjectStatus::CANCELLED->value => [UserRole::LEAD_GROUP->value, UserRole::HEAD_OF_IT->value, UserRole::SUPER_ADMIN->value],
     ];
+
 
     /**
      * Eksekusi transisi status secara aman.

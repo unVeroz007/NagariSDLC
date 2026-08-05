@@ -2,6 +2,7 @@
 import { useNavigate } from 'react-router-dom';
 import { ShieldX, Home, ArrowLeft, LogIn } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
+import { getDefaultRouteForRole } from '../data/menuConfig';
 
 export default function Unauthorized() {
     const navigate = useNavigate();
@@ -46,11 +47,11 @@ export default function Unauthorized() {
                             Kembali
                         </button>
                         <button
-                            onClick={() => navigate('/dashboard')}
-                            className="flex items-center justify-center gap-2 px-5 py-2.5 bg-white text-[#003a73] rounded-xl text-sm font-bold hover:bg-gray-100 transition-all shadow-lg"
+                            onClick={() => navigate(getDefaultRouteForRole(user?.role))}
+                            className="flex items-center justify-center gap-2 px-5 py-2.5 bg-white text-[#003a73] rounded-xl text-sm font-bold hover:bg-gray-100 transition-all shadow-lg cursor-pointer"
                         >
                             <Home size={16} />
-                            Ke Beranda
+                            Ke Workspace Utama
                         </button>
                     </div>
 

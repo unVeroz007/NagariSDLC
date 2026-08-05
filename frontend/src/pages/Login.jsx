@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
+import { getDefaultRouteForRole } from '../data/menuConfig';
 import {
     CheckCircle,
     User,
@@ -35,7 +36,9 @@ export default function Login() {
             const result = await login(username, password);
             setIsLoading(false);
             if (result.success) {
-                navigate('/dashboard');
+                const userRole = result.user?.role || result.data?.user?.role;
+                const targetRoute = getDefaultRouteForRole(userRole);
+                navigate(targetRoute);
             } else {
                 setError(result.message || 'Login gagal. Periksa kembali email dan password Anda.');
             }

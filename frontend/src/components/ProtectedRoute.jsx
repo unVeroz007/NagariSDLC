@@ -1,6 +1,7 @@
 // src/components/ProtectedRoute.jsx
 import { Navigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
+import { getDefaultRouteForRole } from '../data/menuConfig';
 import LoadingSpinner from './LoadingSpinner';
 
 /**
@@ -26,8 +27,13 @@ export default function ProtectedRoute({ children, allowedRoles }) {
         return <Navigate to="/login" state={{ from: location }} replace />;
     }
 
-    // Sudah login tapi role tidak diizinkan → redirect ke halaman unauthorized
+    // Sudah login tapi role tidak diizinkan → redirect secara ramah
     if (allowedRoles && !allowedRoles.includes(user.role)) {
+        // Jika mencoba membuka /dashboard tapi rolenya bukan admin, alihkan langsung ke workspacenya
+        if (location.pathname === '/dashboard') {
+            const targetRoute = getDefaultRouteForRole(user.role);
+            return <Navigate to={targetRoute} replace />;
+        }
         return <Navigate to="/unauthorized" state={{ from: location }} replace />;
     }
 

@@ -27,7 +27,11 @@ class Project extends Model
         'rejection_reason',
         'uat_notes',
         'staging_url',
+        'sit_uat_data',
+        'qa_status',
+        'cyber_status',
     ];
+
 
     protected function casts(): array
     {
@@ -35,8 +39,10 @@ class Project extends Model
             'status' => ProjectStatus::class,
             'target_date' => 'date',
             'current_stage_deadline' => 'date',
+            'sit_uat_data' => 'array',
         ];
     }
+
 
     /**
      * Auto-generate REQ ID dengan pencegahan race condition.

@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Outlet, NavLink, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { useProjects } from '../contexts/ProjectContext';
-import { menuSections } from '../data/menuConfig';
+import { menuSections, getDefaultRouteForRole } from '../data/menuConfig';
 import NotificationBell from '../components/NotificationBell';
 import {
     Search,
@@ -45,10 +45,11 @@ export default function MainLayout() {
     };
 
     const sections = user ? menuSections[user.role] || [] : [];
+    const homeRoute = getDefaultRouteForRole(user?.role);
 
     // Cari section dan item yang aktif berdasarkan URL saat ini
     let activeSectionLabel = 'Utama';
-    let activeItemLabel = 'Dashboard Utama';
+    let activeItemLabel = 'Workspace';
 
     for (const section of sections) {
         const found = section.items.find(item => location.pathname === item.path || location.pathname.startsWith(item.path + '/'));
@@ -75,9 +76,12 @@ export default function MainLayout() {
                     isMobileOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'
                 }`}
             >
-                {/* Branding */}
+                {/* Branding (Klik Mengarah ke Landing Page Role) */}
                 <div className="h-16 flex items-center justify-between px-6 border-b border-white/10 shrink-0">
-                    <div className="flex items-center gap-3">
+                    <div
+                        onClick={() => navigate(homeRoute)}
+                        className="flex items-center gap-3 cursor-pointer hover:opacity-90 transition-opacity"
+                    >
                         <div className="w-10 h-10 bg-white rounded p-1 flex items-center justify-center shadow-xs">
                             <span className="text-[#003a73] font-extrabold text-lg">BN</span>
                         </div>

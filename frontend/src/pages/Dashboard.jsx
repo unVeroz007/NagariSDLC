@@ -28,9 +28,10 @@ import {
     Send,
     Users,
     CalendarDays,
+    Code,
 } from 'lucide-react';
 import { useEffect, useMemo } from 'react';
-import { PROJECT_STATUS, PROJECT_STATUS_LABEL, PROJECT_STATUS_COLOR } from '../constants/projectStatus';
+import { PROJECT_STATUS, PROJECT_STATUS_LABEL, PROJECT_STATUS_COLOR, getProjectPhaseKey } from '../constants/projectStatus';
 
 export default function Dashboard() {
     const { user } = useAuth();
@@ -49,26 +50,20 @@ export default function Dashboard() {
         }
     };
 
-    // 📊 Hitung metrics dari data proyek pakai PROJECT_STATUS constants
+    // 📊 Hitung metrics dari data proyek pakai PROJECT_STATUS constants & getProjectPhaseKey
     const metrics = useMemo(() => {
         const total = projects.length;
-        const inisiasi = projects.filter(p =>
-            [PROJECT_STATUS.PENDING, PROJECT_STATUS.IN_REVIEW,
-             PROJECT_STATUS.ANALYSIS_APPROVED].includes(p.status)
-        ).length;
-        const pengujian = projects.filter(p =>
-            [PROJECT_STATUS.QA_IN_PROGRESS, PROJECT_STATUS.READY_FOR_QA,
-             PROJECT_STATUS.CYBER_IN_PROGRESS, PROJECT_STATUS.QA_PASSED].includes(p.status)
-        ).length;
-        const siapRilis = projects.filter(p =>
-            [PROJECT_STATUS.PENDING_GOLIVE, PROJECT_STATUS.READY_FOR_UAT,
-             PROJECT_STATUS.UAT_PASSED, PROJECT_STATUS.LIVE_PRODUCTION].includes(p.status)
-        ).length;
+        const inisiasi = projects.filter(p => getProjectPhaseKey(p.status) === 1).length;
+        const pengembangan = projects.filter(p => getProjectPhaseKey(p.status) === 2).length;
+        const inisiasiDanDev = inisiasi + pengembangan;
+        const pengujian = projects.filter(p => getProjectPhaseKey(p.status) === 3).length;
+        const siapRilis = projects.filter(p => getProjectPhaseKey(p.status) === 4).length;
 
         return [
             {
                 label: 'Total Proyek Aktif',
                 value: total,
+                subLabel: 'Total Keseluruhan Proyek SDLC',
                 trend: '+1',
                 trendUp: true,
                 icon: Briefcase,
@@ -79,21 +74,23 @@ export default function Dashboard() {
                 onClick: () => navigate('/projects'),
             },
             {
-                label: 'Tahap Inisiasi',
-                value: inisiasi,
-                trend: inisiasi > 5 ? '+2' : '0',
+                label: 'Inisiasi & Pengembangan IT',
+                value: inisiasiDanDev,
+                subLabel: `${inisiasi} Inisiasi · ${pengembangan} Dev`,
+                trend: `+${inisiasiDanDev}`,
                 trendUp: true,
-                icon: FileEdit,
-                iconBg: 'bg-amber-50',
-                iconColor: 'text-amber-600',
-                accentColor: 'from-amber-500/10 to-transparent',
-                borderColor: 'border-amber-100',
-                onClick: () => navigate('/projects'),
+                icon: Code,
+                iconBg: 'bg-indigo-50',
+                iconColor: 'text-indigo-600',
+                accentColor: 'from-indigo-500/10 to-transparent',
+                borderColor: 'border-indigo-100',
+                onClick: () => navigate('/pm/kanban'),
             },
             {
                 label: 'Pengujian QA & Siber',
                 value: pengujian,
-                trend: pengujian > 3 ? '+1' : '0',
+                subLabel: 'QA Testing & Pentest Siber',
+                trend: pengujian > 0 ? `+${pengujian}` : '0',
                 trendUp: pengujian > 0,
                 icon: Bug,
                 iconBg: 'bg-purple-50',
@@ -105,7 +102,8 @@ export default function Dashboard() {
             {
                 label: 'Siap Rilis / Quality Gate',
                 value: siapRilis,
-                trend: siapRilis > 1 ? '+2' : '0',
+                subLabel: 'UAT & Quality Gate Final',
+                trend: siapRilis > 0 ? `+${siapRilis}` : '0',
                 trendUp: true,
                 icon: Verified,
                 iconBg: 'bg-emerald-50',
@@ -117,39 +115,31 @@ export default function Dashboard() {
         ];
     }, [projects, navigate]);
 
-    // 📊 Distribusi fase — pakai PROJECT_STATUS constants (100% sinkron DB)
+    // 📊 Distribusi fase — pakai getProjectPhaseKey (100% sinkron DB & realtime)
     const phases = useMemo(() => {
-        const activeProjects = projects.filter(p => p.status !== PROJECT_STATUS.CANCELLED);
+        const activeProjects = projects.filter(p => {
+            const st = String(p?.status || '').toUpperCase();
+            return st !== PROJECT_STATUS.CANCELLED;
+        });
         const total = activeProjects.length || 1;
-        const phaseMap = {
-            'Fase 1: Inisiasi & Analisis': activeProjects.filter(p =>
-                [PROJECT_STATUS.PENDING, PROJECT_STATUS.IN_REVIEW,
-                 PROJECT_STATUS.ANALYSIS_APPROVED, PROJECT_STATUS.REJECTED].includes(p.status)
-            ).length,
-            'Fase 2: Pengembangan': activeProjects.filter(p =>
-                [PROJECT_STATUS.READY_FOR_DEVELOPMENT, PROJECT_STATUS.DEV_ANALYSIS,
-                 PROJECT_STATUS.DEV_ANALYSIS_DONE, PROJECT_STATUS.IN_DEVELOPMENT,
-                 PROJECT_STATUS.RETURN_TO_DEV].includes(p.status)
-            ).length,
-            'Fase 3: Pengujian QA & Cyber': activeProjects.filter(p =>
-                [PROJECT_STATUS.READY_FOR_QA, PROJECT_STATUS.QA_IN_PROGRESS, PROJECT_STATUS.QA_PASSED,
-                 PROJECT_STATUS.CYBER_IN_PROGRESS, PROJECT_STATUS.CYBER_PASSED].includes(p.status)
-            ).length,
-            'Fase 4: Rilis & Quality Gate': activeProjects.filter(p =>
-                [PROJECT_STATUS.READY_FOR_UAT, PROJECT_STATUS.UAT_PASSED,
-                 PROJECT_STATUS.PENDING_GOLIVE, PROJECT_STATUS.LIVE_PRODUCTION].includes(p.status)
-            ).length,
-        };
 
-        return Object.entries(phaseMap).map(([label, count]) => ({
-            label,
-            count,
+        const counts = { 1: 0, 2: 0, 3: 0, 4: 0 };
+        activeProjects.forEach(p => {
+            const pKey = getProjectPhaseKey(p.status);
+            counts[pKey] = (counts[pKey] || 0) + 1;
+        });
+
+        const phaseList = [
+            { label: 'Fase 1: Inisiasi & Analisis', count: counts[1], color: 'bg-[#1A56DB]' },
+            { label: 'Fase 2: Pengembangan', count: counts[2], color: 'bg-indigo-500' },
+            { label: 'Fase 3: Pengujian QA & Cyber', count: counts[3], color: 'bg-purple-500' },
+            { label: 'Fase 4: Rilis & Quality Gate', count: counts[4], color: 'bg-emerald-500' },
+        ];
+
+        return phaseList.map(item => ({
+            ...item,
             total,
-            pct: Math.round((count / total) * 100),
-            color: label.includes('Inisiasi') ? 'bg-[#1A56DB]' :
-                label.includes('Pengembangan') ? 'bg-indigo-500' :
-                    label.includes('Pengujian') ? 'bg-purple-500' :
-                        'bg-emerald-500',
+            pct: Math.round((item.count / total) * 100),
         }));
     }, [projects]);
 
@@ -231,6 +221,22 @@ export default function Dashboard() {
                 && p.status !== PROJECT_STATUS.LIVE_PRODUCTION)
             .sort((a, b) => new Date(a.rbbDeadline) - new Date(b.rbbDeadline))
             .slice(0, 3);
+    }, [projects]);
+
+    // 📅 Hitung real-time proyek dengan deadline minggu ini (7 hari ke depan)
+    const thisWeekDeadlineCount = useMemo(() => {
+        const now = Date.now();
+        const sevenDaysMs = 7 * 86400000;
+        return projects.filter(p => {
+            if (p.status === PROJECT_STATUS.LIVE_PRODUCTION || p.status === PROJECT_STATUS.CANCELLED) return false;
+            const rawDeadline = p.rbbDeadline || p.targetDate || p.deadline || p.target_date;
+            if (!rawDeadline || rawDeadline === 'TBD') return false;
+            const deadlineTime = new Date(rawDeadline).getTime();
+            if (isNaN(deadlineTime)) return false;
+
+            const diffMs = deadlineTime - now;
+            return diffMs <= sevenDaysMs;
+        }).length;
     }, [projects]);
 
     // 🎯 Quick actions berdasarkan role
@@ -362,15 +368,36 @@ export default function Dashboard() {
                         </div>
                     </div>
 
-                    {/* Quick stats row */}
-                    <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mt-8 pt-6 border-t border-white/10">
+                    {/* Quick stats row - 3 Metric Items (Inisiasi, Deadline Minggu Ini, Proyek RBB Aktif) */}
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-8 pt-6 border-t border-white/10">
                         {[
-                            { label: 'Proyek Selesai Bulan Ini', value: projects.filter(p => p.status === 'LIVE_PRODUCTION').length, icon: CheckCircle },
-                            { label: 'Deadline Minggu Ini', value: projects.filter(p => p.status === 'PENDING_GOLIVE').length, icon: Clock },
-                            { label: 'Butuh Perhatian', value: projects.filter(p => p.status === 'RETURN_TO_DEV' || p.status === 'REJECTED').length, icon: AlertTriangle },
-                            { label: 'Proyek RBB Aktif', value: projects.filter(p => p.type === 'RBB' && p.status !== 'LIVE_PRODUCTION').length, icon: AlertTriangle, color: 'text-red-400' },
+                            {
+                                label: 'Tahap Inisiasi & Review',
+                                value: projects.filter(p => getProjectPhaseKey(p.status) === 1).length,
+                                icon: FileEdit,
+                                color: 'text-amber-300',
+                                onClick: () => navigate('/queue')
+                            },
+                            {
+                                label: 'Deadline Minggu Ini',
+                                value: thisWeekDeadlineCount,
+                                icon: Clock,
+                                color: 'text-yellow-300',
+                                onClick: () => navigate('/projects')
+                            },
+                            {
+                                label: 'Proyek RBB Aktif',
+                                value: projects.filter(p => p.type === 'RBB' && p.status !== PROJECT_STATUS.LIVE_PRODUCTION && p.status !== PROJECT_STATUS.CANCELLED).length,
+                                icon: AlertTriangle,
+                                color: 'text-red-400',
+                                onClick: () => navigate('/projects')
+                            },
                         ].map((s, i) => (
-                            <div key={i} className="bg-white/8 rounded-xl px-4 py-3 border border-white/10 backdrop-blur-sm hover:bg-white/12 transition-colors cursor-default">
+                            <div
+                                key={i}
+                                onClick={s.onClick}
+                                className="bg-white/10 hover:bg-white/15 rounded-xl px-4 py-3 border border-white/10 backdrop-blur-sm transition-all cursor-pointer hover:-translate-y-0.5 active:scale-98"
+                            >
                                 <div className={`flex items-center gap-2 text-xs mb-1 ${s.color || 'text-blue-200/70'}`}>
                                     <s.icon size={13} />
                                     {s.label}
@@ -402,7 +429,8 @@ export default function Dashboard() {
                             </span>
                         </div>
                         <div className="text-3xl font-extrabold text-gray-800 mb-1">{m.value}</div>
-                        <div className="text-gray-500 text-sm font-medium">{m.label}</div>
+                        <div className="text-gray-700 text-sm font-bold">{m.label}</div>
+                        {m.subLabel && <div className="text-xs text-gray-400 font-medium mt-1">{m.subLabel}</div>}
                     </div>
                 ))}
             </section>
@@ -437,9 +465,12 @@ export default function Dashboard() {
                     {rbbUrgentProjects.length > 0 ? (
                         <div className="space-y-3">
                             {rbbUrgentProjects.map((p, i) => {
-                                const daysLeft = Math.ceil((new Date(p.rbbDeadline) - new Date()) / 86400000);
+                                const rawDeadline = p.rbbDeadline || p.targetDate || p.deadline;
+                                const daysLeft = Math.ceil((new Date(rawDeadline).getTime() - Date.now()) / 86400000);
+                                const displayDays = isNaN(daysLeft) ? 'TBD' : (daysLeft < 0 ? `Terlewat ${Math.abs(daysLeft)}h` : (daysLeft === 0 ? 'Hari ini' : `${daysLeft}h`));
+
                                 return (
-                                    <div key={i} className="flex items-center gap-3 p-3 bg-red-50 rounded-xl border border-red-100 hover:bg-red-100/50 transition-colors cursor-pointer" onClick={() => handleTrackProject(p.id)}>
+                                    <div key={i} className="flex items-center gap-3 p-3 bg-red-50/70 rounded-xl border border-red-100 hover:bg-red-100/60 transition-colors cursor-pointer" onClick={() => handleTrackProject(p.id)}>
                                         <div className="w-9 h-9 bg-red-100 rounded-xl flex items-center justify-center shrink-0">
                                             <Flag size={16} className="text-red-600" />
                                         </div>
@@ -448,7 +479,7 @@ export default function Dashboard() {
                                             <p className="text-xs text-gray-500">{p.id} · {p.division}</p>
                                         </div>
                                         <div className="text-right shrink-0">
-                                            <p className={`text-sm font-bold ${daysLeft <= 7 ? 'text-red-600' : 'text-amber-600'}`}>{daysLeft}h</p>
+                                            <p className={`text-sm font-bold ${daysLeft <= 7 ? 'text-red-600' : 'text-amber-600'}`}>{displayDays}</p>
                                             <p className="text-[10px] text-gray-400">tersisa</p>
                                         </div>
                                     </div>

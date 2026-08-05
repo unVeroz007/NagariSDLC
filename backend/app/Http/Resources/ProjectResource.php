@@ -30,6 +30,11 @@ class ProjectResource extends JsonResource
             'rejection_reason' => $this->rejection_reason,
             'uat_notes' => $this->uat_notes,
             'staging_url' => $this->staging_url,
+            'sit_uat_data' => $this->sit_uat_data,
+            'qa_status' => $this->qa_status ?? 'NOT_SUBMITTED',
+            'cyber_status' => $this->cyber_status ?? 'NOT_SUBMITTED',
+
+
             'team' => $this->relationLoaded('teamMembers') && $this->teamMembers ? $this->teamMembers->map(function($m) {
                 return [
                     'id' => $m->user_id,

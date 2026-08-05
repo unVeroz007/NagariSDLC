@@ -61,18 +61,23 @@ export default function WorkspaceQA() {
 
     // Tab 1 (Disposisi): proyek dari PM yang sudah diajukan ke QA Lead untuk ditunjuk testernya
     const qaProjects = useMemo(() => {
-        return (projects || []).filter(p => ['READY_FOR_QA'].includes(p.status));
+        return (projects || []).filter(p => {
+            const qaSt = String(p.qaStatus || p.qa_status || '').toUpperCase();
+            const st = String(p.status || '').toUpperCase();
+            return (qaSt === 'SUBMITTED' || st === 'READY_FOR_QA') && qaSt !== 'IN_PROGRESS' && qaSt !== 'PASSED';
+        });
     }, [projects]);
-
 
     // Tab 2 (Review Lead): proyek yang sedang diuji oleh QA Tester (QA_IN_PROGRESS)
     const reviewLeadProjects = useMemo(() => {
-        return (projects || []).filter(p => ['QA_IN_PROGRESS'].includes(p.status));
+        return (projects || []).filter(p => {
+            const qaSt = String(p.qaStatus || p.qa_status || '').toUpperCase();
+            const st = String(p.status || '').toUpperCase();
+            return qaSt === 'IN_PROGRESS' || st === 'QA_IN_PROGRESS';
+        });
     }, [projects]);
 
     const activeList = activeTab === 'DISPOSITION' ? qaProjects : reviewLeadProjects;
-
-
 
     const [selectedProject, setSelectedProject] = useState(null);
     const activeProject = selectedProject || activeList[0] || null;
@@ -102,6 +107,8 @@ export default function WorkspaceQA() {
         }
     }, [activeProject?.id, activeTab]);
 
+    const { updateProject } = useProjects();
+
     const handleAssign = async () => {
         if (!activeProject) return;
         if (!assignee) {
@@ -110,7 +117,11 @@ export default function WorkspaceQA() {
         }
         setIsSubmitting(true);
         try {
-            await updateProjectStatus(activeProject.id, 'QA_IN_PROGRESS', `Disposisi QA Tester: ${assignee}. ${notes}`);
+            await updateProject(activeProject.id, {
+                qaStatus: 'IN_PROGRESS',
+                qaAssignee: assignee,
+                status: activeProject.status === 'READY_FOR_QA' ? 'QA_IN_PROGRESS' : activeProject.status
+            });
             toast.success(`Proyek ${activeProject.name} berhasil didisposisikan ke QA Tester (${assignee})!`);
             addNotification('Disposisi QA', `Proyek ${activeProject.name} telah didisposisikan ke ${assignee}.`, 'info');
         } catch (err) {
@@ -125,7 +136,12 @@ export default function WorkspaceQA() {
         if (!activeProject) return;
         setIsSubmitting(true);
         try {
-            await updateProjectStatus(activeProject.id, 'QA_PASSED', `Sign-off Lead QA Disetujui: ${leadApprovalNote || 'Seluruh skenario pengujian QA dinyatakan Lulus 100%.'}`);
+            const isCyberPassed = String(activeProject.cyberStatus || '').toUpperCase() === 'PASSED';
+            await updateProject(activeProject.id, {
+                qaStatus: 'PASSED',
+                qaPassedAt: new Date().toISOString(),
+                status: isCyberPassed ? 'TESTING_PASSED' : 'QA_PASSED'
+            });
             toast.success(`Laporan QA proyek ${activeProject.name} resmi disetujui Lead QA & dikembalikan ke Tim Pengembangan (Dev/PM)!`);
             addNotification('Sign-off Lead QA Disetujui', `Proyek ${activeProject.name} telah resmi mengantongi Sign-off Lead QA.`, 'success', '/pm/release-request');
             setLeadApprovalNote('');
@@ -135,6 +151,7 @@ export default function WorkspaceQA() {
             setIsSubmitting(false);
         }
     };
+
 
     // Mock SDLC Documents List
     const projectDocuments = useMemo(() => {
