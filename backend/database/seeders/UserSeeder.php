@@ -104,12 +104,6 @@ class UserSeeder extends Seeder
                 'division_id' => $devDiv?->id,
             ],
             [
-                'email' => 'developer@nagari.co.id',
-                'name' => 'Dimas Anggara (Developer)',
-                'role' => UserRole::DEVELOPER->value,
-                'division_id' => $devDiv?->id,
-            ],
-            [
                 'email' => 'dev1@nagari.co.id',
                 'name' => 'Dimas Anggara (Backend Java)',
                 'role' => UserRole::DEVELOPER->value,

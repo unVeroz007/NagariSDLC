@@ -7,6 +7,8 @@ use App\Http\Controllers\Controller;
 use App\Models\Project;
 use App\Models\ProjectTask;
 use App\Models\User;
+use App\Models\ActivityLog;
+use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -35,6 +37,103 @@ class DashboardController extends Controller
                 'live_production' => $liveProduction,
                 'total_users' => $totalUsers,
                 'total_tasks' => $totalTasks,
+            ],
+        ]);
+    }
+
+    /**
+     * Analytics endpoint — statistik lanjutan untuk halaman Analitik SDLC.
+     */
+    public function analytics(): JsonResponse
+    {
+        // 1. Distribusi status proyek
+        $statusDistribution = Project::selectRaw('status, count(*) as count')
+            ->groupBy('status')
+            ->get()
+            ->pluck('count', 'status');
+
+        // 2. Rata-rata cycle time (created_at → updated_at untuk proyek LIVE_PRODUCTION) dalam hari
+        $liveProjects = Project::where('status', ProjectStatus::LIVE_PRODUCTION->value)->get();
+        $avgCycleTime = 0;
+        if ($liveProjects->count() > 0) {
+            $totalDays = $liveProjects->sum(function ($p) {
+                return $p->created_at->diffInDays($p->updated_at);
+            });
+            $avgCycleTime = round($totalDays / $liveProjects->count(), 1);
+        }
+
+        // 3. Success rate — proyek LIVE_PRODUCTION vs total selesai (termasuk CANCELLED/REJECTED)
+        $totalFinished = Project::whereIn('status', [
+            ProjectStatus::LIVE_PRODUCTION->value,
+            'CANCELLED',
+            'REJECTED',
+        ])->count();
+        $successRate = $totalFinished > 0
+            ? round(($liveProjects->count() / $totalFinished) * 100, 1)
+            : 0;
+
+        // 4. Project velocity — proyek selesai per bulan (6 bulan terakhir)
+        $releaseTrend = [];
+        for ($i = 5; $i >= 0; $i--) {
+            $month = Carbon::now()->subMonths($i);
+            $count = Project::where('status', ProjectStatus::LIVE_PRODUCTION->value)
+                ->whereYear('updated_at', $month->year)
+                ->whereMonth('updated_at', $month->month)
+                ->count();
+            $releaseTrend[] = [
+                'month' => $month->translatedFormat('M Y'),
+                'value' => $count,
+            ];
+        }
+
+        // 5. Workload per developer (jumlah proyek aktif yang ditugaskan)
+        $developers = User::whereHas('role', function ($q) {
+            $q->where('name', 'developer');
+        })->with('role:id,name,display_name')->get();
+
+        $workloads = $developers->map(function ($dev) {
+            $activeCount = Project::where('status', '!=', ProjectStatus::LIVE_PRODUCTION->value)
+                ->where('status', '!=', 'CANCELLED')
+                ->whereHas('teamMembers', function ($q) use ($dev) {
+                    $q->where('user_id', $dev->id);
+                })
+                ->count();
+            return [
+                'name'     => $dev->name,
+                'email'    => $dev->email,
+                'workload' => $activeCount,
+            ];
+        });
+
+        // 6. User role distribution
+        $roleDistribution = User::join('roles', 'users.role_id', '=', 'roles.id')
+            ->selectRaw('roles.display_name as role, count(users.id) as count')
+            ->groupBy('roles.display_name')
+            ->get();
+
+        // 7. Total metrics
+        $totalProjects = Project::count();
+        $totalUsers = User::count();
+        $totalTasks = ProjectTask::count();
+
+        // 8. Bug density placeholder (proyek yang pernah di-reject QA / total modul)
+        $qRejectedCount = Project::where('qa_status', 'REJECTED')->count();
+        $bugDensity = $totalProjects > 0 ? round($qRejectedCount / max($totalProjects, 1), 2) : 0;
+
+        return response()->json([
+            'status' => 'success',
+            'data'   => [
+                'status_distribution' => $statusDistribution,
+                'avg_cycle_time'      => ['value' => $avgCycleTime, 'change' => 0],
+                'success_rate'        => ['value' => $successRate, 'change' => 0],
+                'bug_density'         => ['value' => $bugDensity, 'change' => 0],
+                'velocity'            => ['value' => $liveProjects->count(), 'change' => 0],
+                'release_trend'       => $releaseTrend,
+                'developer_workloads' => $workloads,
+                'role_distribution'   => $roleDistribution,
+                'total_projects'      => $totalProjects,
+                'total_users'         => $totalUsers,
+                'total_tasks'         => $totalTasks,
             ],
         ]);
     }

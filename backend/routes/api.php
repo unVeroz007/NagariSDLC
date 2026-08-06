@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\Api\V1\ActivityLogController;
 use App\Http\Controllers\Api\V1\AuthController;
 use App\Http\Controllers\Api\V1\CyberRequestController;
 use App\Http\Controllers\Api\V1\DashboardController;
@@ -28,14 +29,24 @@ Route::prefix('v1')->group(function () {
     Route::middleware('auth:sanctum')->group(function () {
         // ----- AUTH -----
         Route::get('/auth/me', [AuthController::class, 'me']);
+        Route::patch('/auth/profile', [AuthController::class, 'updateProfile']);
+        Route::patch('/auth/password', [AuthController::class, 'updatePassword']);
         Route::post('/auth/logout', [AuthController::class, 'logout']);
 
         // ----- DASHBOARD -----
         Route::get('/dashboard/summary', [DashboardController::class, 'summary']);
+        Route::get('/dashboard/analytics', [DashboardController::class, 'analytics']);
 
-        // ----- REFERENCE DATA (Roles & Divisions) -----
+        // ----- REFERENCE DATA (Roles & Divisions) — Full CRUD -----
         Route::get('/roles', [RoleController::class, 'index']);
+        Route::post('/roles', [RoleController::class, 'store']);
+        Route::patch('/roles/{id}', [RoleController::class, 'update']);
+        Route::delete('/roles/{id}', [RoleController::class, 'destroy']);
+
         Route::get('/divisions', [DivisionController::class, 'index']);
+        Route::post('/divisions', [DivisionController::class, 'store']);
+        Route::patch('/divisions/{id}', [DivisionController::class, 'update']);
+        Route::delete('/divisions/{id}', [DivisionController::class, 'destroy']);
 
         // ----- USER MANAGEMENT (Admin CRUD) -----
         Route::get('/users', [UserController::class, 'index']);
@@ -90,9 +101,8 @@ Route::prefix('v1')->group(function () {
         Route::patch('/notifications/{id}/read', [NotificationController::class, 'markRead']);
         Route::patch('/notifications/read-all', [NotificationController::class, 'markAllRead']);
 
-        // ----- ACTIVITY LOG (placeholder) -----
-        Route::get('/activity-logs', function () {
-            return response()->json(['status' => 'success', 'data' => []]);
-        });
+        // ----- ACTIVITY LOG -----
+        Route::get('/activity-logs', [ActivityLogController::class, 'index']);
+        Route::get('/activity-logs/summary', [ActivityLogController::class, 'summary']);
     });
 });

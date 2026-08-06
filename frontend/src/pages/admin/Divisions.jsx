@@ -32,8 +32,8 @@ export default function DivisionsManagement() {
     // Filter Divisions
     const filteredDivisions = divisions.filter(d =>
         d.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        d.code.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        d.id.toLowerCase().includes(searchTerm.toLowerCase())
+        (d.code && d.code.toLowerCase().includes(searchTerm.toLowerCase())) ||
+        String(d.id).toLowerCase().includes(searchTerm.toLowerCase())
     );
 
     const handleOpenAdd = () => {

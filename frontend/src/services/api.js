@@ -115,6 +115,30 @@ export const authService = {
         const session = localStorage.getItem('nagari_sdlc_session');
         return session ? JSON.parse(session) : null;
     },
+
+    updateProfile: async (name, phoneNumber) => {
+        if (MODE === 'api') {
+            const res = await fetch(`${BASE_URL}/auth/profile`, {
+                method: 'PATCH',
+                headers: authHeaders(),
+                body: JSON.stringify({ name, phone_number: phoneNumber }),
+            });
+            return handleResponse(res);
+        }
+        return null;
+    },
+
+    updatePassword: async (currentPassword, newPassword) => {
+        if (MODE === 'api') {
+            const res = await fetch(`${BASE_URL}/auth/password`, {
+                method: 'PATCH',
+                headers: authHeaders(),
+                body: JSON.stringify({ current_password: currentPassword, new_password: newPassword }),
+            });
+            return handleResponse(res);
+        }
+        return null;
+    },
 };
 
 // ──────────────────────────────────────────────────────────
@@ -478,7 +502,15 @@ export const activityLogService = {
             const res = await fetch(`${BASE_URL}/activity-logs?${params}`, { headers: authHeaders() });
             return handleResponse(res);
         }
-        return [];
+        return { data: [], meta: { total: 0, current_page: 1, last_page: 1 } };
+    },
+
+    getSummary: async () => {
+        if (MODE === 'api') {
+            const res = await fetch(`${BASE_URL}/activity-logs/summary`, { headers: authHeaders() });
+            return handleResponse(res);
+        }
+        return { data: { total_today: 0, total_this_week: 0, total_all: 0, active_users_today: 0, top_actions_today: [] } };
     },
 };
 
@@ -505,24 +537,42 @@ export const roleService = {
             const res = await fetch(`${BASE_URL}/roles`, { headers: authHeaders() });
             return handleResponse(res);
         }
-        // Mock fallback
-        return {
-            status: 'success',
-            data: [
-                { id: 1, name: 'super_admin', display_name: 'Super Admin' },
-                { id: 2, name: 'head_of_it', display_name: 'Head of IT' },
-                { id: 3, name: 'lead_group', display_name: 'Lead Group / Kadiv' },
-                { id: 4, name: 'analyst', display_name: 'System Analyst' },
-                { id: 5, name: 'development_lead', display_name: 'Development Lead' },
-                { id: 6, name: 'project_manager', display_name: 'Project Manager' },
-                { id: 7, name: 'developer', display_name: 'Developer' },
-                { id: 8, name: 'qa_lead', display_name: 'QA Lead' },
-                { id: 9, name: 'qa_tester', display_name: 'QA Tester' },
-                { id: 10, name: 'cyber_lead', display_name: 'Cyber Security Lead' },
-                { id: 11, name: 'pentester', display_name: 'Pentester' },
-                { id: 12, name: 'business_user', display_name: 'Business User / Pemohon' },
-            ],
-        };
+        return { status: 'success', data: [] };
+    },
+
+    create: async (roleData) => {
+        if (MODE === 'api') {
+            const res = await fetch(`${BASE_URL}/roles`, {
+                method: 'POST',
+                headers: authHeaders(),
+                body: JSON.stringify(roleData),
+            });
+            return handleResponse(res);
+        }
+        return null;
+    },
+
+    update: async (id, updates) => {
+        if (MODE === 'api') {
+            const res = await fetch(`${BASE_URL}/roles/${id}`, {
+                method: 'PATCH',
+                headers: authHeaders(),
+                body: JSON.stringify(updates),
+            });
+            return handleResponse(res);
+        }
+        return null;
+    },
+
+    delete: async (id) => {
+        if (MODE === 'api') {
+            const res = await fetch(`${BASE_URL}/roles/${id}`, {
+                method: 'DELETE',
+                headers: authHeaders(),
+            });
+            return handleResponse(res);
+        }
+        return null;
     },
 };
 
@@ -535,17 +585,63 @@ export const divisionService = {
             const res = await fetch(`${BASE_URL}/divisions`, { headers: authHeaders() });
             return handleResponse(res);
         }
-        // Mock fallback
-        return {
-            status: 'success',
-            data: [
-                { id: 1, code: 'IT-DEV', name: 'IT Development' },
-                { id: 2, code: 'IT-OPS', name: 'IT Operations' },
-                { id: 3, code: 'IT-SEC', name: 'IT Security' },
-                { id: 4, code: 'IT-QA', name: 'IT Quality Assurance' },
-                { id: 5, code: 'DSI', name: 'Divisi Sistem Informasi' },
-            ],
-        };
+        return { status: 'success', data: [] };
+    },
+
+    create: async (divData) => {
+        if (MODE === 'api') {
+            const res = await fetch(`${BASE_URL}/divisions`, {
+                method: 'POST',
+                headers: authHeaders(),
+                body: JSON.stringify(divData),
+            });
+            return handleResponse(res);
+        }
+        return null;
+    },
+
+    update: async (id, updates) => {
+        if (MODE === 'api') {
+            const res = await fetch(`${BASE_URL}/divisions/${id}`, {
+                method: 'PATCH',
+                headers: authHeaders(),
+                body: JSON.stringify(updates),
+            });
+            return handleResponse(res);
+        }
+        return null;
+    },
+
+    delete: async (id) => {
+        if (MODE === 'api') {
+            const res = await fetch(`${BASE_URL}/divisions/${id}`, {
+                method: 'DELETE',
+                headers: authHeaders(),
+            });
+            return handleResponse(res);
+        }
+        return null;
+    },
+};
+
+// ──────────────────────────────────────────────────────────
+// DASHBOARD / ANALYTICS SERVICE
+// ──────────────────────────────────────────────────────────
+export const dashboardService = {
+    getSummary: async () => {
+        if (MODE === 'api') {
+            const res = await fetch(`${BASE_URL}/dashboard/summary`, { headers: authHeaders() });
+            return handleResponse(res);
+        }
+        return { data: {} };
+    },
+
+    getAnalytics: async () => {
+        if (MODE === 'api') {
+            const res = await fetch(`${BASE_URL}/dashboard/analytics`, { headers: authHeaders() });
+            return handleResponse(res);
+        }
+        return { data: {} };
     },
 };
 

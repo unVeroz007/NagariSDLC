@@ -1,6 +1,7 @@
-import { useState } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import { useMasterData } from '../../contexts/MasterDataContext';
+import { userService } from '../../services/api';
 import toast from 'react-hot-toast';
 import {
     Users,
@@ -22,111 +23,9 @@ import {
     Briefcase,
     AlertCircle,
     Check,
+    Loader2,
+    RefreshCw,
 } from 'lucide-react';
-
-// Mock Data Pengguna Awal
-const INITIAL_USERS = [
-    {
-        id: 'USR-001',
-        name: 'Budi Santoso',
-        email: 'budi.santoso@banknagari.co.id',
-        role: 'project_manager',
-        roleLabel: 'Project Manager',
-        department: 'Divisi Teknologi Informasi',
-        status: 'active',
-        initial: 'BS',
-    },
-    {
-        id: 'USR-002',
-        name: 'Citra Kirana',
-        email: 'citra.kirana@banknagari.co.id',
-        role: 'analyst',
-        roleLabel: 'System Analyst',
-        department: 'Divisi Teknologi Informasi',
-        status: 'active',
-        initial: 'CK',
-    },
-    {
-        id: 'USR-003',
-        name: 'Dimas Anggara',
-        email: 'dimas.anggara@banknagari.co.id',
-        role: 'developer',
-        roleLabel: 'Developer (Programmer)',
-        department: 'Divisi Teknologi Informasi',
-        status: 'active',
-        initial: 'DA',
-    },
-    {
-        id: 'USR-004',
-        name: 'Rizal Pratama',
-        email: 'rizal.pratama@banknagari.co.id',
-        role: 'cyber_team',
-        roleLabel: 'Cyber Team',
-        department: 'Divisi Kepatuhan',
-        status: 'active',
-        initial: 'RP',
-    },
-    {
-        id: 'USR-005',
-        name: 'Siti Rahmawati',
-        email: 'siti.rahmawati@banknagari.co.id',
-        role: 'qa_tester',
-        roleLabel: 'QA Tester',
-        department: 'Divisi Teknologi Informasi',
-        status: 'inactive',
-        initial: 'SR',
-    },
-    {
-        id: 'USR-006',
-        name: 'Ahmad Fauzi',
-        email: 'ahmad.fauzi@banknagari.co.id',
-        role: 'super_admin',
-        roleLabel: 'Super Admin',
-        department: 'Tata Kelola & Audit TI',
-        status: 'active',
-        initial: 'AF',
-    },
-    {
-        id: 'USR-007',
-        name: 'Dewi Lestari',
-        email: 'dewi.lestari@banknagari.co.id',
-        role: 'qa_lead',
-        roleLabel: 'QA Lead',
-        department: 'Divisi Teknologi Informasi',
-        status: 'active',
-        initial: 'DL',
-    },
-    {
-        id: 'USR-008',
-        name: 'Hendra Setiawan',
-        email: 'hendra.setiawan@banknagari.co.id',
-        role: 'head_of_it',
-        roleLabel: 'Head of IT',
-        department: 'Tata Kelola & Audit TI',
-        status: 'active',
-        initial: 'HS',
-    },
-    {
-        id: 'USR-009',
-        name: 'Eka Putri',
-        email: 'eka.putri@banknagari.co.id',
-        role: 'developer',
-        roleLabel: 'Developer (Programmer)',
-        department: 'Divisi Teknologi Informasi',
-        status: 'active',
-        initial: 'EP',
-    },
-    {
-        id: 'USR-010',
-        name: 'Fajar Hidayat',
-        email: 'fajar.hidayat@banknagari.co.id',
-        role: 'lead_group',
-        roleLabel: 'Lead Group',
-        department: 'Tata Kelola & Audit TI',
-        status: 'active',
-        initial: 'FH',
-    },
-];
 
 export default function UsersManagement() {
     const { user: currentUser } = useAuth();
@@ -137,19 +36,44 @@ export default function UsersManagement() {
     const [currentPage, setCurrentPage] = useState(1);
     const itemsPerPage = 5;
 
-    // Load users from localStorage or default
-    const [usersList, setUsersList] = useState(() => {
-        const saved = localStorage.getItem('nagari_sdlc_users_list');
-        if (saved) {
-            try { return JSON.parse(saved); } catch { }
-        }
-        return INITIAL_USERS;
-    });
+    // Data from API
+    const [usersList, setUsersList] = useState([]);
+    const [isLoading, setIsLoading] = useState(true);
+    const [isSaving, setIsSaving] = useState(false);
 
-    const saveUsersList = (updated) => {
-        setUsersList(updated);
-        localStorage.setItem('nagari_sdlc_users_list', JSON.stringify(updated));
-    };
+    // Fetch users from API
+    const fetchUsers = useCallback(async () => {
+        setIsLoading(true);
+        try {
+            const res = await userService.getAll();
+            if (res && res.data && Array.isArray(res.data)) {
+                const formatted = res.data.map(u => ({
+                    id: u.id,
+                    name: u.name,
+                    email: u.email,
+                    role: u.role?.name || 'developer',
+                    roleLabel: u.role?.display_name || u.role?.name || 'Developer',
+                    roleId: u.role?.id || null,
+                    department: u.division?.name || '-',
+                    divisionId: u.division?.id || null,
+                    status: u.is_active ? 'active' : 'inactive',
+                    initial: u.name?.split(' ').map(n => n.charAt(0)).join('').toUpperCase().slice(0, 2) || 'U',
+                    phoneNumber: u.phone_number || '',
+                    createdAt: u.created_at,
+                }));
+                setUsersList(formatted);
+            }
+        } catch (err) {
+            console.error('Failed to fetch users:', err);
+            toast.error('Gagal memuat data pengguna dari server.');
+        } finally {
+            setIsLoading(false);
+        }
+    }, []);
+
+    useEffect(() => {
+        fetchUsers();
+    }, [fetchUsers]);
 
     // Modal States
     const [isAddModalOpen, setIsAddModalOpen] = useState(false);
@@ -158,24 +82,25 @@ export default function UsersManagement() {
 
     // Form Data States
     const [formData, setFormData] = useState({
-        id: '',
         name: '',
         email: '',
-        role: masterRoles[0]?.code || 'developer',
-        department: masterDivisions[0]?.name || 'Divisi Teknologi Informasi',
-        status: 'active',
+        password: '',
+        role_id: '',
+        division_id: '',
+        phone_number: '',
+        is_active: true,
     });
 
     // Handle Open Add Modal
     const handleOpenAddModal = () => {
-        const newId = `USR-0${usersList.length + 1}`;
         setFormData({
-            id: newId,
             name: '',
             email: '',
-            role: masterRoles[0]?.code || 'developer',
-            department: masterDivisions[0]?.name || 'Divisi Teknologi Informasi',
-            status: 'active',
+            password: '',
+            role_id: masterRoles[0]?.id || '',
+            division_id: masterDivisions[0]?.id || '',
+            phone_number: '',
+            is_active: true,
         });
         setIsAddModalOpen(true);
     };
@@ -184,96 +109,105 @@ export default function UsersManagement() {
     const handleOpenEditModal = (u) => {
         setEditingUser(u);
         setFormData({
-            id: u.id,
             name: u.name,
             email: u.email,
-            role: u.role,
-            department: u.department,
-            status: u.status,
+            password: '',
+            role_id: u.roleId || '',
+            division_id: u.divisionId || '',
+            phone_number: u.phoneNumber || '',
+            is_active: u.status === 'active',
         });
         setIsEditModalOpen(true);
     };
 
-    // Handle Save New User
-    const handleAddUserSubmit = (e) => {
+    // Handle Save New User → API
+    const handleAddUserSubmit = async (e) => {
         e.preventDefault();
         if (!formData.name.trim() || !formData.email.trim()) {
             toast.error('Nama dan Email wajib diisi!');
             return;
         }
+        if (!formData.password || formData.password.length < 8) {
+            toast.error('Password minimal 8 karakter!');
+            return;
+        }
 
-        const roleObj = masterRoles.find(r => r.code === formData.role);
-        const initials = formData.name.split(' ').map(n => n.charAt(0)).join('').toUpperCase().slice(0, 2);
-
-        const newUserObj = {
-            id: formData.id || `USR-0${usersList.length + 1}`,
-            name: formData.name,
-            email: formData.email,
-            role: formData.role,
-            roleLabel: roleObj ? roleObj.name : formData.role,
-            department: formData.department,
-            status: formData.status,
-            initial: initials || 'U',
-        };
-
-        const updated = [newUserObj, ...usersList];
-        saveUsersList(updated);
-        toast.success(`Pengguna "${formData.name}" berhasil ditambahkan!`);
-        setIsAddModalOpen(false);
+        setIsSaving(true);
+        try {
+            const payload = {
+                name: formData.name,
+                email: formData.email,
+                password: formData.password,
+                role_id: parseInt(formData.role_id),
+                division_id: formData.division_id ? parseInt(formData.division_id) : null,
+                phone_number: formData.phone_number || null,
+            };
+            await userService.create(payload);
+            toast.success(`Pengguna "${formData.name}" berhasil ditambahkan & tersimpan ke database!`);
+            setIsAddModalOpen(false);
+            await fetchUsers(); // Refresh from DB
+        } catch (err) {
+            toast.error(`Gagal menambahkan pengguna: ${err.message}`);
+        } finally {
+            setIsSaving(false);
+        }
     };
 
-    // Handle Save Edited User
-    const handleEditUserSubmit = (e) => {
+    // Handle Save Edited User → API
+    const handleEditUserSubmit = async (e) => {
         e.preventDefault();
         if (!formData.name.trim()) {
             toast.error('Nama wajib diisi!');
             return;
         }
 
-        const roleObj = masterRoles.find(r => r.code === formData.role);
-        const initials = formData.name.split(' ').map(n => n.charAt(0)).join('').toUpperCase().slice(0, 2);
-
-        const updated = usersList.map(u => {
-            if (u.id === editingUser.id) {
-                return {
-                    ...u,
-                    name: formData.name,
-                    role: formData.role,
-                    roleLabel: roleObj ? roleObj.name : formData.role,
-                    department: formData.department,
-                    status: formData.status,
-                    initial: initials || u.initial,
-                };
+        setIsSaving(true);
+        try {
+            const payload = {
+                name: formData.name,
+                role_id: parseInt(formData.role_id),
+                division_id: formData.division_id ? parseInt(formData.division_id) : null,
+                phone_number: formData.phone_number || null,
+                is_active: formData.is_active,
+            };
+            if (formData.password && formData.password.length >= 8) {
+                payload.password = formData.password;
             }
-            return u;
-        });
-
-        saveUsersList(updated);
-        toast.success(`Data pengguna "${formData.name}" berhasil diperbarui!`);
-        setIsEditModalOpen(false);
-        setEditingUser(null);
+            await userService.update(editingUser.id, payload);
+            toast.success(`Data pengguna "${formData.name}" berhasil diperbarui di database!`);
+            setIsEditModalOpen(false);
+            setEditingUser(null);
+            await fetchUsers();
+        } catch (err) {
+            toast.error(`Gagal memperbarui pengguna: ${err.message}`);
+        } finally {
+            setIsSaving(false);
+        }
     };
 
-    // Handle Delete User
-    const handleDeleteUser = (u) => {
+    // Handle Delete User → API
+    const handleDeleteUser = async (u) => {
         if (window.confirm(`Apakah Anda yakin ingin menghapus pengguna "${u.name}" (${u.email})?`)) {
-            const updated = usersList.filter(item => item.id !== u.id);
-            saveUsersList(updated);
-            toast.success(`Pengguna "${u.name}" berhasil dihapus.`);
+            try {
+                await userService.delete(u.id);
+                toast.success(`Pengguna "${u.name}" berhasil dihapus dari database.`);
+                await fetchUsers();
+            } catch (err) {
+                toast.error(`Gagal menghapus pengguna: ${err.message}`);
+            }
         }
     };
 
     // Helper display role label
     const getDisplayRole = (u) => {
-        const found = masterRoles.find(r => r.code === u.role);
-        return found ? found.name : (u.roleLabel || u.role);
+        return u.roleLabel || u.role;
     };
 
     // Filter users
     const filteredUsers = usersList.filter(u => {
         const matchSearch = u.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
             u.email.toLowerCase().includes(searchTerm.toLowerCase()) ||
-            u.id.toLowerCase().includes(searchTerm.toLowerCase());
+            String(u.id).toLowerCase().includes(searchTerm.toLowerCase());
         const matchRole = roleFilter ? u.role === roleFilter : true;
         return matchSearch && matchRole;
     });
@@ -312,6 +246,7 @@ export default function UsersManagement() {
             qa_lead: 'bg-teal-100 text-teal-700 border-teal-200',
             qa_tester: 'bg-emerald-100 text-emerald-700 border-emerald-200',
             cyber_team: 'bg-rose-100 text-rose-700 border-rose-200',
+            cyber_lead: 'bg-rose-100 text-rose-700 border-rose-200',
             pentester: 'bg-red-100 text-red-700 border-red-200',
             head_of_it: 'bg-orange-100 text-orange-700 border-orange-200',
             business_user: 'bg-sky-100 text-sky-700 border-sky-200',
@@ -319,6 +254,17 @@ export default function UsersManagement() {
         };
         return colors[roleKey] || 'bg-gray-100 text-gray-700 border-gray-200';
     };
+
+    if (isLoading) {
+        return (
+            <div className="flex-1 flex items-center justify-center bg-[#f8f9fb]">
+                <div className="text-center">
+                    <Loader2 size={40} className="animate-spin text-[#003a73] mx-auto mb-3" />
+                    <p className="text-gray-500 font-medium">Memuat data pengguna...</p>
+                </div>
+            </div>
+        );
+    }
 
     return (
         <div className="flex-1 overflow-y-auto px-6 py-4 md:px-8 md:py-5 bg-[#f8f9fb]">
@@ -328,13 +274,22 @@ export default function UsersManagement() {
                     <h1 className="text-2xl font-bold text-gray-800">Manajemen Pengguna</h1>
                     <p className="text-sm text-gray-500 mt-1">Kelola akses, peran (role), dan status aktif pengguna sistem NagariSDLC.</p>
                 </div>
-                <button
-                    onClick={handleOpenAddModal}
-                    className="bg-[#003a73] text-white py-2.5 px-5 rounded-xl font-semibold flex items-center gap-2 hover:bg-[#002a5a] transition-all shadow-md shadow-[#003a73]/20 cursor-pointer"
-                >
-                    <UserPlus size={18} />
-                    Tambah Pengguna Baru
-                </button>
+                <div className="flex items-center gap-2">
+                    <button
+                        onClick={fetchUsers}
+                        className="p-2.5 rounded-xl border border-gray-200 bg-white text-gray-600 hover:bg-gray-50 transition-colors cursor-pointer"
+                        title="Refresh Data"
+                    >
+                        <RefreshCw size={18} />
+                    </button>
+                    <button
+                        onClick={handleOpenAddModal}
+                        className="bg-[#003a73] text-white py-2.5 px-5 rounded-xl font-semibold flex items-center gap-2 hover:bg-[#002a5a] transition-all shadow-md shadow-[#003a73]/20 cursor-pointer"
+                    >
+                        <UserPlus size={18} />
+                        Tambah Pengguna Baru
+                    </button>
+                </div>
             </div>
 
             {/* Stats Cards */}
@@ -413,7 +368,10 @@ export default function UsersManagement() {
                             {currentUsers.length === 0 ? (
                                 <tr>
                                     <td colSpan={6} className="p-8 text-center text-gray-400">
-                                        Tidak ada data pengguna yang sesuai dengan pencarian/filter.
+                                        {usersList.length === 0
+                                            ? 'Belum ada pengguna terdaftar di database.'
+                                            : 'Tidak ada data pengguna yang sesuai dengan pencarian/filter.'
+                                        }
                                     </td>
                                 </tr>
                             ) : (
@@ -428,7 +386,7 @@ export default function UsersManagement() {
                                                     <div className="font-semibold text-[#1a365d] group-hover:text-blue-600 transition-colors">
                                                         {u.name}
                                                     </div>
-                                                    <div className="text-xs text-gray-400 font-mono">{u.id}</div>
+                                                    <div className="text-xs text-gray-400 font-mono">ID: {u.id}</div>
                                                 </div>
                                             </div>
                                         </td>
@@ -541,36 +499,59 @@ export default function UsersManagement() {
                             </div>
 
                             <div>
-                                <label className="block text-xs font-bold text-gray-700 mb-1">Departemen / Divisi (Master Data)</label>
+                                <label className="block text-xs font-bold text-gray-700 mb-1">Password Baru (kosongkan jika tidak diubah)</label>
+                                <input
+                                    type="password"
+                                    value={formData.password}
+                                    onChange={(e) => setFormData({ ...formData, password: e.target.value })}
+                                    placeholder="Minimal 8 karakter..."
+                                    className="w-full px-3.5 py-2 rounded-xl border border-gray-200 text-xs font-medium focus:ring-2 focus:ring-blue-100 focus:border-[#003a73] outline-none"
+                                />
+                            </div>
+
+                            <div>
+                                <label className="block text-xs font-bold text-gray-700 mb-1">Departemen / Divisi</label>
                                 <select
-                                    value={formData.department}
-                                    onChange={(e) => setFormData({ ...formData, department: e.target.value })}
+                                    value={formData.division_id}
+                                    onChange={(e) => setFormData({ ...formData, division_id: e.target.value })}
                                     className="w-full px-3.5 py-2 rounded-xl border border-gray-200 text-xs font-medium focus:ring-2 focus:ring-blue-100 focus:border-[#003a73] outline-none bg-white cursor-pointer"
                                 >
+                                    <option value="">-- Tidak ada divisi --</option>
                                     {masterDivisions.map((dept) => (
-                                        <option key={dept.id} value={dept.name}>{dept.name}</option>
+                                        <option key={dept.id} value={dept.id}>{dept.name}</option>
                                     ))}
                                 </select>
                             </div>
 
                             <div>
-                                <label className="block text-xs font-bold text-gray-700 mb-1">Role / Peran Pengguna (Master Data)</label>
+                                <label className="block text-xs font-bold text-gray-700 mb-1">Role / Peran Pengguna</label>
                                 <select
-                                    value={formData.role}
-                                    onChange={(e) => setFormData({ ...formData, role: e.target.value })}
+                                    value={formData.role_id}
+                                    onChange={(e) => setFormData({ ...formData, role_id: e.target.value })}
                                     className="w-full px-3.5 py-2 rounded-xl border border-gray-200 text-xs font-semibold focus:ring-2 focus:ring-blue-100 focus:border-[#003a73] outline-none bg-white cursor-pointer text-[#003a73]"
                                 >
                                     {masterRoles.map((r) => (
-                                        <option key={r.id} value={r.code}>{r.name}</option>
+                                        <option key={r.id} value={r.id}>{r.name}</option>
                                     ))}
                                 </select>
+                            </div>
+
+                            <div>
+                                <label className="block text-xs font-bold text-gray-700 mb-1">No. Handphone</label>
+                                <input
+                                    type="tel"
+                                    value={formData.phone_number}
+                                    onChange={(e) => setFormData({ ...formData, phone_number: e.target.value })}
+                                    placeholder="08xxxxxxxxxx"
+                                    className="w-full px-3.5 py-2 rounded-xl border border-gray-200 text-xs font-medium focus:ring-2 focus:ring-blue-100 focus:border-[#003a73] outline-none"
+                                />
                             </div>
 
                             <div>
                                 <label className="block text-xs font-bold text-gray-700 mb-1">Status Pengguna</label>
                                 <select
-                                    value={formData.status}
-                                    onChange={(e) => setFormData({ ...formData, status: e.target.value })}
+                                    value={formData.is_active ? 'active' : 'inactive'}
+                                    onChange={(e) => setFormData({ ...formData, is_active: e.target.value === 'active' })}
                                     className="w-full px-3.5 py-2 rounded-xl border border-gray-200 text-xs font-medium focus:ring-2 focus:ring-blue-100 focus:border-[#003a73] outline-none bg-white cursor-pointer"
                                 >
                                     <option value="active">Aktif</option>
@@ -588,8 +569,10 @@ export default function UsersManagement() {
                                 </button>
                                 <button
                                     type="submit"
-                                    className="flex-1 py-2.5 rounded-xl bg-[#003a73] text-white text-xs font-bold hover:bg-[#002a5a] transition-all shadow-md shadow-[#003a73]/20 cursor-pointer"
+                                    disabled={isSaving}
+                                    className="flex-1 py-2.5 rounded-xl bg-[#003a73] text-white text-xs font-bold hover:bg-[#002a5a] transition-all shadow-md shadow-[#003a73]/20 cursor-pointer disabled:opacity-60 flex items-center justify-center gap-2"
                                 >
+                                    {isSaving && <Loader2 size={14} className="animate-spin" />}
                                     Simpan Perubahan
                                 </button>
                             </div>
@@ -639,41 +622,53 @@ export default function UsersManagement() {
                             </div>
 
                             <div>
-                                <label className="block text-xs font-bold text-gray-700 mb-1">Departemen / Divisi (Master Data)</label>
+                                <label className="block text-xs font-bold text-gray-700 mb-1">Password</label>
+                                <input
+                                    type="password"
+                                    value={formData.password}
+                                    onChange={(e) => setFormData({ ...formData, password: e.target.value })}
+                                    placeholder="Minimal 8 karakter"
+                                    className="w-full px-3.5 py-2 rounded-xl border border-gray-200 text-xs font-medium focus:ring-2 focus:ring-blue-100 focus:border-[#003a73] outline-none"
+                                    required
+                                />
+                            </div>
+
+                            <div>
+                                <label className="block text-xs font-bold text-gray-700 mb-1">Departemen / Divisi</label>
                                 <select
-                                    value={formData.department}
-                                    onChange={(e) => setFormData({ ...formData, department: e.target.value })}
+                                    value={formData.division_id}
+                                    onChange={(e) => setFormData({ ...formData, division_id: e.target.value })}
                                     className="w-full px-3.5 py-2 rounded-xl border border-gray-200 text-xs font-medium focus:ring-2 focus:ring-blue-100 focus:border-[#003a73] outline-none bg-white cursor-pointer"
                                 >
+                                    <option value="">-- Tidak ada divisi --</option>
                                     {masterDivisions.map((dept) => (
-                                        <option key={dept.id} value={dept.name}>{dept.name}</option>
+                                        <option key={dept.id} value={dept.id}>{dept.name}</option>
                                     ))}
                                 </select>
                             </div>
 
                             <div>
-                                <label className="block text-xs font-bold text-gray-700 mb-1">Role / Peran Pengguna (Master Data)</label>
+                                <label className="block text-xs font-bold text-gray-700 mb-1">Role / Peran Pengguna</label>
                                 <select
-                                    value={formData.role}
-                                    onChange={(e) => setFormData({ ...formData, role: e.target.value })}
+                                    value={formData.role_id}
+                                    onChange={(e) => setFormData({ ...formData, role_id: e.target.value })}
                                     className="w-full px-3.5 py-2 rounded-xl border border-gray-200 text-xs font-semibold focus:ring-2 focus:ring-blue-100 focus:border-[#003a73] outline-none bg-white cursor-pointer text-[#003a73]"
                                 >
                                     {masterRoles.map((r) => (
-                                        <option key={r.id} value={r.code}>{r.name}</option>
+                                        <option key={r.id} value={r.id}>{r.name}</option>
                                     ))}
                                 </select>
                             </div>
 
                             <div>
-                                <label className="block text-xs font-bold text-gray-700 mb-1">Status Pengguna</label>
-                                <select
-                                    value={formData.status}
-                                    onChange={(e) => setFormData({ ...formData, status: e.target.value })}
-                                    className="w-full px-3.5 py-2 rounded-xl border border-gray-200 text-xs font-medium focus:ring-2 focus:ring-blue-100 focus:border-[#003a73] outline-none bg-white cursor-pointer"
-                                >
-                                    <option value="active">Aktif</option>
-                                    <option value="inactive">Non-Aktif</option>
-                                </select>
+                                <label className="block text-xs font-bold text-gray-700 mb-1">No. Handphone (opsional)</label>
+                                <input
+                                    type="tel"
+                                    value={formData.phone_number}
+                                    onChange={(e) => setFormData({ ...formData, phone_number: e.target.value })}
+                                    placeholder="08xxxxxxxxxx"
+                                    className="w-full px-3.5 py-2 rounded-xl border border-gray-200 text-xs font-medium focus:ring-2 focus:ring-blue-100 focus:border-[#003a73] outline-none"
+                                />
                             </div>
 
                             <div className="flex gap-3 pt-4 border-t border-gray-100">
@@ -686,8 +681,10 @@ export default function UsersManagement() {
                                 </button>
                                 <button
                                     type="submit"
-                                    className="flex-1 py-2.5 rounded-xl bg-[#003a73] text-white text-xs font-bold hover:bg-[#002a5a] transition-all shadow-md shadow-[#003a73]/20 cursor-pointer"
+                                    disabled={isSaving}
+                                    className="flex-1 py-2.5 rounded-xl bg-[#003a73] text-white text-xs font-bold hover:bg-[#002a5a] transition-all shadow-md shadow-[#003a73]/20 cursor-pointer disabled:opacity-60 flex items-center justify-center gap-2"
                                 >
+                                    {isSaving && <Loader2 size={14} className="animate-spin" />}
                                     Tambah Pengguna
                                 </button>
                             </div>

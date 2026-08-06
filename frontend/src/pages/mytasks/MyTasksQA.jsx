@@ -181,10 +181,10 @@ export default function MyTasksQA() {
                                 <p className="text-xs text-gray-500 mt-1 flex items-center gap-2 flex-wrap">
                                     <Building size={14} className="text-gray-400" />
                                     <span>Divisi: <strong className="text-gray-700">{activeTask.division}</strong></span>
-                                    <span>•</span>
+                                    <span>ï¿½</span>
                                     <Calendar size={14} className="text-gray-400" />
                                     <span>Target: <strong className="text-gray-700">{activeTask.targetDate || "2026-09-30"}</strong></span>
-                                    {activeTask.qaAssignee && (<><span>•</span><User size={14} className="text-gray-400" /><span>Ditugaskan: <strong className="text-purple-700">{activeTask.qaAssignee}</strong></span></>)}
+                                    {activeTask.qaAssignee && (<><span>ï¿½</span><User size={14} className="text-gray-400" /><span>Ditugaskan: <strong className="text-purple-700">{activeTask.qaAssignee}</strong></span></>)}
                                 </p>
                             </div>
 
@@ -242,7 +242,7 @@ export default function MyTasksQA() {
                                                 <FileText size={16} className="text-purple-600 shrink-0" />
                                                 <div className="truncate">
                                                     <span className="font-bold text-gray-800 text-xs truncate block">{doc.name}</span>
-                                                    <span className="text-[10px] text-gray-500">{doc.type} • {doc.size}</span>
+                                                    <span className="text-[10px] text-gray-500">{doc.type} ï¿½ {doc.size}</span>
                                                 </div>
                                             </div>
                                             <div className="flex items-center gap-1.5 shrink-0">
@@ -337,7 +337,7 @@ export default function MyTasksQA() {
                                                             <div className="w-7 h-7 rounded-lg bg-purple-50 text-purple-600 flex items-center justify-center shrink-0"><Paperclip size={13} /></div>
                                                             <div className="overflow-hidden">
                                                                 <p className="text-xs font-bold text-gray-800 truncate">{ef.name}</p>
-                                                                <p className="text-[10px] text-gray-400">{ef.size} • {ef.uploadedAt}</p>
+                                                                <p className="text-[10px] text-gray-400">{ef.size} ï¿½ {ef.uploadedAt}</p>
                                                             </div>
                                                         </div>
                                                         <button type="button" onClick={() => setEvidenceFiles(prev => prev.filter(f => f.id !== ef.id))}

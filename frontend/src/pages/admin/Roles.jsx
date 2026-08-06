@@ -35,9 +35,9 @@ export default function RolesManagement() {
     // Filter Roles
     const filteredRoles = roles.filter(r =>
         r.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        r.code.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        r.id.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        r.menuAccess.toLowerCase().includes(searchTerm.toLowerCase())
+        (r.code && r.code.toLowerCase().includes(searchTerm.toLowerCase())) ||
+        String(r.id).toLowerCase().includes(searchTerm.toLowerCase()) ||
+        (r.menuAccess && r.menuAccess.toLowerCase().includes(searchTerm.toLowerCase()))
     );
 
     const handleOpenAdd = () => {

@@ -5,12 +5,15 @@ namespace App\Http\Controllers\Api\V1;
 use App\Http\Controllers\Controller;
 use App\Http\Resources\UserResource;
 use App\Models\User;
+use App\Traits\LogsActivity;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
 
 class UserController extends Controller
 {
+    use LogsActivity;
+
     public function index(): JsonResponse
     {
         $users = User::with(['role', 'division'])->orderBy('created_at', 'desc')->get();
@@ -42,10 +45,19 @@ class UserController extends Controller
             'is_active' => true,
         ]);
 
+        $user->load(['role', 'division']);
+
+        $this->logActivity(
+            'create_user',
+            'Membuat Pengguna Baru',
+            "Pengguna \"{$user->name}\" ({$user->email}) berhasil dibuat dengan role {$user->role?->display_name}.",
+            $user
+        );
+
         return response()->json([
             'status' => 'success',
             'message' => 'Pengguna berhasil dibuat.',
-            'data' => new UserResource($user->load(['role', 'division'])),
+            'data' => new UserResource($user),
         ], 201);
     }
 
@@ -63,23 +75,51 @@ class UserController extends Controller
             'is_active' => ['sometimes', 'boolean'],
         ]);
 
+        $oldRole = $user->role?->display_name;
         $data = $request->except('password');
         if ($request->filled('password')) {
             $data['password'] = Hash::make($request->password);
         }
 
         $user->update($data);
+        $user->load(['role', 'division']);
+
+        $this->logActivity(
+            'update_user',
+            'Memperbarui Pengguna',
+            "Data pengguna \"{$user->name}\" berhasil diperbarui.",
+            $user,
+            ['old_role' => $oldRole, 'new_role' => $user->role?->display_name]
+        );
 
         return response()->json([
             'status' => 'success',
             'message' => 'Data pengguna berhasil diperbarui.',
-            'data' => new UserResource($user->fresh(['role', 'division'])),
+            'data' => new UserResource($user),
         ]);
     }
 
     public function destroy(int $id): JsonResponse
     {
         $user = User::findOrFail($id);
+
+        // Proteksi: tidak bisa hapus diri sendiri
+        if (auth()->id() === $user->id) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Anda tidak dapat menghapus akun Anda sendiri.',
+            ], 403);
+        }
+
+        $name = $user->name;
+        $email = $user->email;
+
+        $this->logActivity(
+            'delete_user',
+            'Menghapus Pengguna',
+            "Pengguna \"{$name}\" ({$email}) berhasil dihapus dari sistem."
+        );
+
         $user->delete();
 
         return response()->json([

@@ -36,22 +36,32 @@ import {
     Smartphone,
     Monitor,
 } from 'lucide-react';
+import { authService } from '../../services/api';
 import toast from 'react-hot-toast';
 
 // Sub-komponen untuk setiap tab
 const ProfileSettings = ({ user, profile, setProfile, handleSave }) => {
     const [isEditing, setIsEditing] = useState(false);
     const [formData, setFormData] = useState(profile);
+    const [isSubmitting, setIsSubmitting] = useState(false);
 
     const handleChange = (e) => {
         const { name, value } = e.target;
         setFormData(prev => ({ ...prev, [name]: value }));
     };
 
-    const handleSubmit = () => {
-        setProfile(formData);
-        setIsEditing(false);
-        handleSave('Profil berhasil diperbarui!');
+    const handleSubmit = async () => {
+        setIsSubmitting(true);
+        try {
+            await authService.updateProfile(formData.name, formData.phone);
+            setProfile(formData);
+            setIsEditing(false);
+            handleSave('Profil berhasil diperbarui & tersimpan ke database!');
+        } catch (err) {
+            toast.error(`Gagal memperbarui profil: ${err.message}`);
+        } finally {
+            setIsSubmitting(false);
+        }
     };
 
     return (
@@ -160,7 +170,7 @@ const SecuritySettings = () => {
         setPassword(prev => ({ ...prev, [name]: value }));
     };
 
-    const handlePasswordSubmit = (e) => {
+    const handlePasswordSubmit = async (e) => {
         e.preventDefault();
         if (password.new !== password.confirm) {
             toast.error('Konfirmasi password tidak cocok!');
@@ -170,8 +180,13 @@ const SecuritySettings = () => {
             toast.error('Password minimal 8 karakter!');
             return;
         }
-        toast.success('Password berhasil diperbarui!');
-        setPassword({ current: '', new: '', confirm: '' });
+        try {
+            await authService.updatePassword(password.current, password.new);
+            toast.success('Password berhasil diperbarui & tersimpan di database!');
+            setPassword({ current: '', new: '', confirm: '' });
+        } catch (err) {
+            toast.error(`Gagal mengubah password: ${err.message}`);
+        }
     };
 
     const togglePassword = (field) => {
