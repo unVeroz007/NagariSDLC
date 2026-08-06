@@ -13,10 +13,14 @@ class UserSeeder extends Seeder
 {
     public function run(): void
     {
-        $devDiv = Division::where('code', 'IT-DEV')->first();
-        $secDiv = Division::where('code', 'IT-SEC')->first();
-        $qaDiv  = Division::where('code', 'IT-QA')->first();
-        $dsiDiv = Division::where('code', 'DSI')->first();
+        $devDiv     = Division::where('code', 'IT-DEV')->first();
+        $opsDiv     = Division::where('code', 'IT-OPS')->first();
+        $secDiv     = Division::where('code', 'IT-SEC')->first();
+        $qaDiv      = Division::where('code', 'IT-QA')->first();
+        $dsiDiv     = Division::where('code', 'DSI')->first();
+        $kreditDiv  = Division::where('code', 'KREDIT')->first();
+        $danaDiv    = Division::where('code', 'DANA')->first();
+        $kepatuhanDiv = Division::where('code', 'KEPATUHAN')->first();
 
         $users = [
             [
@@ -35,37 +39,37 @@ class UserSeeder extends Seeder
                 'email' => 'lead@nagari.co.id',
                 'name' => 'Dewi Lestari (Lead Group)',
                 'role' => UserRole::LEAD_GROUP->value,
-                'division_id' => $devDiv?->id,
+                'division_id' => $dsiDiv?->id,
             ],
             [
                 'email' => 'analyst@nagari.co.id',
                 'name' => 'Citra Kirana (System Analyst)',
                 'role' => UserRole::ANALYST->value,
-                'division_id' => $devDiv?->id,
+                'division_id' => $dsiDiv?->id,
             ],
             [
                 'email' => 'analyst1@nagari.co.id',
                 'name' => 'Citra Kirana (Plan Analyst)',
                 'role' => UserRole::ANALYST->value,
-                'division_id' => $devDiv?->id,
+                'division_id' => $danaDiv?->id,
             ],
             [
                 'email' => 'analyst2@nagari.co.id',
                 'name' => 'Mustafa Fathur Rahman (Solution Architect)',
                 'role' => UserRole::ANALYST->value,
-                'division_id' => $devDiv?->id,
+                'division_id' => $kreditDiv?->id,
             ],
             [
                 'email' => 'analyst3@nagari.co.id',
                 'name' => 'Fajar Ramadhan (Core Banking Analyst)',
                 'role' => UserRole::ANALYST->value,
-                'division_id' => $devDiv?->id,
+                'division_id' => $kepatuhanDiv?->id,
             ],
             [
                 'email' => 'analyst4@nagari.co.id',
                 'name' => 'Ahmad Fauzi (Digital Payment Analyst)',
                 'role' => UserRole::ANALYST->value,
-                'division_id' => $devDiv?->id,
+                'division_id' => $dsiDiv?->id,
             ],
             [
                 'email' => 'devlead@nagari.co.id',
@@ -83,25 +87,25 @@ class UserSeeder extends Seeder
                 'email' => 'pm1@nagari.co.id',
                 'name' => 'Budi Santoso (PM Core & Retail)',
                 'role' => UserRole::PROJECT_MANAGER->value,
-                'division_id' => $devDiv?->id,
+                'division_id' => $danaDiv?->id,
             ],
             [
                 'email' => 'pm2@nagari.co.id',
                 'name' => 'Dewi Lestari (PM Digital Banking)',
                 'role' => UserRole::PROJECT_MANAGER->value,
-                'division_id' => $devDiv?->id,
+                'division_id' => $dsiDiv?->id,
             ],
             [
                 'email' => 'pm3@nagari.co.id',
                 'name' => 'Andi Wijaya (PM Infrastructure)',
                 'role' => UserRole::PROJECT_MANAGER->value,
-                'division_id' => $devDiv?->id,
+                'division_id' => $opsDiv?->id,
             ],
             [
                 'email' => 'pm4@nagari.co.id',
                 'name' => 'Citra Kirana (PM Enterprise Systems)',
                 'role' => UserRole::PROJECT_MANAGER->value,
-                'division_id' => $devDiv?->id,
+                'division_id' => $kreditDiv?->id,
             ],
             [
                 'email' => 'dev1@nagari.co.id',
@@ -125,7 +129,7 @@ class UserSeeder extends Seeder
                 'email' => 'dev4@nagari.co.id',
                 'name' => 'Gilang Pratama (DevOps & Cloud)',
                 'role' => UserRole::DEVELOPER->value,
-                'division_id' => $devDiv?->id,
+                'division_id' => $opsDiv?->id,
             ],
             [
                 'email' => 'dev5@nagari.co.id',
@@ -161,7 +165,7 @@ class UserSeeder extends Seeder
                 'email' => 'user@nagari.co.id',
                 'name' => 'Rina Amalia (Business User)',
                 'role' => UserRole::BUSINESS_USER->value,
-                'division_id' => $dsiDiv?->id,
+                'division_id' => $kreditDiv?->id,
             ],
         ];
 

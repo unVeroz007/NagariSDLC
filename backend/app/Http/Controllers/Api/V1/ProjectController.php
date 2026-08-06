@@ -66,9 +66,11 @@ class ProjectController extends Controller
             $division = Division::where('name', $request->division)
                 ->orWhere('code', $request->division)
                 ->first();
-            $divisionId = $division?->id ?? 1; // fallback ke id 1 jika tidak ditemukan
+            $divisionId = $division?->id;
         }
-        $divisionId = $divisionId ?? 1;
+        if (! $divisionId) {
+            $divisionId = $request->user()->division_id ?? 1;
+        }
 
         $project = Project::create([
             'req_id'      => Project::generateReqId(),

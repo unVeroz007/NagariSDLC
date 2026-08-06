@@ -64,15 +64,33 @@ export default function ProjectNew() {
         fetchDivisions();
     }, []);
 
+    const getUserDivision = (u) => {
+        if (!u) return 'Divisi Pemohon';
+        if (typeof u.division === 'object' && u.division?.name) return u.division.name;
+        if (typeof u.division === 'string' && u.division) return u.division;
+        if (u.department) return u.department;
+        return 'Divisi Pemohon';
+    };
+
+    const currentUserDivision = getUserDivision(user);
+
     // Form state & modal states
     const [formData, setFormData] = useState({
         projectName: '',
-        division: user?.department || 'Divisi Pengembangan TI',
+        division: currentUserDivision,
         priority: 'Medium',
         type: 'RBB', // Klasifikasi RBB / Non-RBB ditentukan sejak awal inisiasi divisi
         targetDate: '',
         description: '',
     });
+
+    useEffect(() => {
+        const divName = getUserDivision(user);
+        setFormData((prev) => ({
+            ...prev,
+            division: divName,
+        }));
+    }, [user]);
 
     const [uploadedFiles, setUploadedFiles] = useState([]);
     const [isSubmitting, setIsSubmitting] = useState(false);
@@ -92,7 +110,7 @@ export default function ProjectNew() {
         setSubmittedProject(null);
         setFormData({
             projectName: '',
-            division: user?.department || 'Divisi Pengembangan TI',
+            division: getUserDivision(user),
             priority: 'Medium',
             type: 'RBB',
             targetDate: '',
@@ -215,10 +233,11 @@ export default function ProjectNew() {
 
         try {
             const submittedName = formData.projectName;
+            const userDivision = getUserDivision(user);
             const newProject = {
                 name: formData.projectName,
                 description: formData.description || 'Pengajuan proyek baru oleh ' + (user?.name || 'PIC'),
-                division: formData.division || 'Divisi TI',
+                division: userDivision,
                 priority: formData.priority,
                 targetDate: formData.targetDate || 'TBD',
                 status: 'PENDING',
@@ -249,7 +268,7 @@ export default function ProjectNew() {
             // 🔄 RESET FORM & UNGGAHAN AGAR LAMAN KOSONG DAN SIAP UNTUK PENGAJUAN PROYEK BARU
             setFormData({
                 projectName: '',
-                division: user?.department || 'Divisi Pengembangan TI',
+                division: userDivision,
                 priority: 'Medium',
                 type: 'RBB',
                 targetDate: '',
@@ -361,12 +380,13 @@ export default function ProjectNew() {
                                 />
                             </div>
                             <div className="space-y-2">
-                                <label className="text-sm font-semibold text-gray-600">Unit Kerja PIC</label>
+                                <label className="text-sm font-semibold text-gray-600">Unit Kerja PIC (Divisi Pemohon)</label>
                                 <input
-                                    className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-lg text-sm text-gray-700 cursor-not-allowed font-semibold transition-all"
+                                    className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-lg text-sm text-gray-800 font-semibold cursor-not-allowed transition-all"
                                     disabled
+                                    readOnly
                                     type="text"
-                                    value={formData.division || user?.department || 'Divisi Pengembangan TI'}
+                                    value={getUserDivision(user)}
                                 />
                             </div>
                             <div className="space-y-2 md:col-span-2">
@@ -456,20 +476,7 @@ export default function ProjectNew() {
                                     </label>
                                 </div>
                             </div>
-                            <div className="space-y-2">
-                                <label className="text-sm font-semibold text-gray-600">Unit Kerja / Divisi Inisiator</label>
-                                <select
-                                    name="division"
-                                    value={formData.division}
-                                    onChange={handleChange}
-                                    className="w-full px-4 py-3 bg-white border border-gray-200 rounded-lg focus:ring-2 focus:ring-[#1A56DB] focus:border-[#1A56DB] transition-all text-sm appearance-none"
-                                >
-                                    <option value="">Pilih Divisi</option>
-                                    {divisionList.map((div) => (
-                                        <option key={div} value={div}>{div}</option>
-                                    ))}
-                                </select>
-                            </div>
+
                             <div className="space-y-2">
                                 <label className="text-sm font-semibold text-gray-600">Prioritas Proyek</label>
                                 <div className="flex gap-2">
