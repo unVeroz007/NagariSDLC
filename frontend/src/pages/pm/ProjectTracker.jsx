@@ -312,13 +312,13 @@ function ProjectCard({ project, isSelected, onClick }) {
             onClick={onClick}
             className={`p-4 rounded-xl border cursor-pointer transition-all hover:shadow-md group ${
                 isSelected
-                    ? 'border-[#1A56DB] bg-blue-50/70 shadow-sm'
-                    : 'border-gray-200 bg-white hover:border-[#1A56DB]/40'
+                    ? 'border-[#00529C] bg-blue-50/70 shadow-sm'
+                    : 'border-gray-200 bg-white hover:border-[#00529C]/40'
             }`}
         >
             <div className="flex items-start justify-between gap-2 mb-2">
                 <div className="flex-1 min-w-0">
-                    <p className="text-xs font-bold text-[#1A56DB] mb-0.5">{project.id}</p>
+                    <p className="text-xs font-bold text-[#00529C] mb-0.5">{project.id}</p>
                     <p className="text-sm font-semibold text-gray-800 leading-tight line-clamp-2">{project.name}</p>
                 </div>
                 <RBBBadge type={project.type} />
@@ -339,7 +339,7 @@ function ProjectCard({ project, isSelected, onClick }) {
                                 ? 'bg-emerald-500'
                                 : project.status === PROJECT_STATUS.REJECTED
                                 ? 'bg-red-400'
-                                : 'bg-[#1A56DB]'
+                                : 'bg-[#00529C]'
                         }`}
                         style={{ width: `${progress}%` }}
                     />
@@ -379,7 +379,7 @@ function PhaseItem({ phase, currentStatus, isLast }) {
             bg: phase.activeBg,
             label: 'Sedang Berjalan',
             labelColor: 'text-blue-600 bg-blue-100',
-            lineBg: 'bg-[#1A56DB]',
+            lineBg: 'bg-[#00529C]',
         },
         pending: {
             iconBg: 'bg-gray-100',
@@ -459,14 +459,14 @@ function PhaseItem({ phase, currentStatus, isLast }) {
                                         {state === 'completed' ? (
                                             <CheckCircle2 size={16} className="text-emerald-500 shrink-0" />
                                         ) : state === 'active' ? (
-                                            <div className="w-4 h-4 rounded-full border-2 border-[#1A56DB] bg-white flex items-center justify-center shrink-0">
-                                                <div className="w-2 h-2 rounded-full bg-[#1A56DB] animate-pulse" />
+                                            <div className="w-4 h-4 rounded-full border-2 border-[#00529C] bg-white flex items-center justify-center shrink-0">
+                                                <div className="w-2 h-2 rounded-full bg-[#00529C] animate-pulse" />
                                             </div>
                                         ) : (
                                             <Circle size={16} className="text-gray-300 shrink-0" />
                                         )}
                                         <span className={`text-sm font-medium ${
-                                            state === 'active' ? 'text-[#1A56DB]' :
+                                            state === 'active' ? 'text-[#00529C]' :
                                             state === 'completed' ? 'text-gray-600' : 'text-gray-400'
                                         }`}>
                                             {label}
@@ -648,7 +648,7 @@ export default function ProjectTracker() {
                 {/* Header panel kiri */}
                 <div className="p-4 border-b border-gray-200 bg-gray-50/50 shrink-0">
                     <div className="flex items-center gap-2 mb-3">
-                        <MapPin size={18} className="text-[#1A56DB]" />
+                        <MapPin size={18} className="text-[#00529C]" />
                         <h3 className="font-bold text-gray-800">Lacak Status Proyek</h3>
                         <span className="ml-auto text-xs bg-gray-200 text-gray-600 px-2 py-0.5 rounded-full font-medium">
                             {filteredProjects.length} proyek
@@ -663,7 +663,7 @@ export default function ProjectTracker() {
                             value={searchTerm}
                             onChange={e => setSearchTerm(e.target.value)}
                             placeholder="Cari nama atau ID proyek..."
-                            className="w-full pl-9 pr-3 py-2 text-sm border border-gray-200 rounded-lg focus:ring-2 focus:ring-[#1A56DB]/20 focus:border-[#1A56DB] outline-none bg-white"
+                            className="w-full pl-9 pr-3 py-2 text-sm border border-gray-200 rounded-lg focus:ring-2 focus:ring-[#00529C]/20 focus:border-[#00529C] outline-none bg-white"
                         />
                     </div>
 
@@ -671,7 +671,7 @@ export default function ProjectTracker() {
                     <select
                         value={filterPhase}
                         onChange={e => setFilterPhase(e.target.value)}
-                        className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:ring-2 focus:ring-[#1A56DB]/20 outline-none bg-white text-gray-600"
+                        className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:ring-2 focus:ring-[#00529C]/20 outline-none bg-white text-gray-600"
                     >
                         <option value="">Semua Fase</option>
                         {PHASES.map(ph => (
@@ -780,7 +780,7 @@ export default function ProjectTracker() {
                         <div className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden mb-6">
                             <div className="p-4 border-b border-gray-100 bg-gray-50/50">
                                 <h2 className="font-bold text-gray-800 flex items-center gap-2">
-                                    <Clock size={18} className="text-[#1A56DB]" />
+                                    <Clock size={18} className="text-[#00529C]" />
                                     Timeline Fase SDLC
                                     <span className="ml-auto text-xs text-gray-500 font-normal">
                                         Klik fase untuk melihat detail langkah
@@ -845,7 +845,7 @@ export default function ProjectTracker() {
                                 <div className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden mb-6">
                                     <div className="p-4 border-b border-gray-100 bg-gray-50/50 flex items-center justify-between">
                                         <div className="flex items-center gap-2">
-                                            <FolderOpen size={18} className="text-[#1A56DB]" />
+                                            <FolderOpen size={18} className="text-[#00529C]" />
                                             <h2 className="font-bold text-gray-800">Dokumen Terkait ({allDocs.length})</h2>
                                         </div>
                                         <span className="text-[10px] font-bold text-blue-600 bg-blue-50 px-2.5 py-0.5 rounded-full border border-blue-100">
@@ -860,10 +860,10 @@ export default function ProjectTracker() {
                                                 className="flex items-center gap-3 p-3 bg-gray-50/80 rounded-xl border border-gray-200/80 hover:bg-blue-50/70 hover:border-blue-200 transition-all cursor-pointer group shadow-2xs"
                                             >
                                                 <div className="w-9 h-9 bg-white rounded-lg shadow-sm flex items-center justify-center shrink-0 border border-gray-100">
-                                                    <FileText size={16} className="text-[#1A56DB]" />
+                                                    <FileText size={16} className="text-[#00529C]" />
                                                 </div>
                                                 <div className="flex-1 min-w-0">
-                                                    <p className="text-xs font-bold text-gray-800 truncate group-hover:text-[#1A56DB] transition-colors">
+                                                    <p className="text-xs font-bold text-gray-800 truncate group-hover:text-[#00529C] transition-colors">
                                                         {doc.name}
                                                     </p>
                                                     <div className="flex items-center gap-1.5 mt-0.5">
@@ -880,7 +880,7 @@ export default function ProjectTracker() {
                                                         handleDownloadFile(doc);
                                                     }}
                                                     title="Unduh Berkas"
-                                                    className="p-2 text-gray-400 hover:text-[#1A56DB] hover:bg-white rounded-lg transition-colors shrink-0 border border-transparent hover:border-blue-200 shadow-2xs cursor-pointer"
+                                                    className="p-2 text-gray-400 hover:text-[#00529C] hover:bg-white rounded-lg transition-colors shrink-0 border border-transparent hover:border-blue-200 shadow-2xs cursor-pointer"
                                                 >
                                                     <Download size={15} />
                                                 </button>

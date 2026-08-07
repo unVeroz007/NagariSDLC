@@ -60,7 +60,12 @@ class QARequestController extends Controller
                 "QA Test Result: {$result->value}. " . ($request->notes ?? '')
             );
         } catch (Throwable $e) {
-            // Log transition exception
+            // Report saved but transition failed — return warning
+            return response()->json([
+                'status'  => 'success',
+                'message' => 'Laporan QA tersimpan, namun transisi status gagal: ' . $e->getMessage(),
+                'data'    => new TestReportResource($report->load(['tester', 'project'])),
+            ], 201);
         }
 
         return response()->json([
@@ -69,6 +74,7 @@ class QARequestController extends Controller
             'data' => new TestReportResource($report->load(['tester', 'project'])),
         ], 201);
     }
+
     public function updateStatus(Request $request, int $id): JsonResponse
     {
         $request->validate([
@@ -77,7 +83,32 @@ class QARequestController extends Controller
         ]);
 
         $report = TestReport::where('test_type', 'qa')->findOrFail($id);
-        $report->update(['notes' => $request->notes ?? $report->notes]);
+
+        // Update review fields
+        $report->update([
+            'notes'       => $request->notes ?? $report->notes,
+            'reviewed_by' => $request->user()->id,
+            'reviewed_at' => now(),
+        ]);
+
+        // If status provided, attempt workflow transition
+        if ($request->status && $request->status !== $report->result->value) {
+            try {
+                $project = $report->project;
+                $targetStatus = ProjectStatus::from($request->status);
+                $this->workflowService->transition(
+                    $project,
+                    $targetStatus,
+                    $request->user(),
+                    $request->notes ?? ''
+                );
+            } catch (Throwable $e) {
+                return response()->json([
+                    'status'  => 'error',
+                    'message' => 'Update catatan berhasil, namun transisi status gagal: ' . $e->getMessage(),
+                ], 422);
+            }
+        }
 
         return response()->json([
             'status'  => 'success',

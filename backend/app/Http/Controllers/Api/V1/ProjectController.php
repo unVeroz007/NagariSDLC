@@ -13,6 +13,7 @@ use App\Models\Project;
 use App\Services\ProjectWorkflowService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Throwable;
 
 class ProjectController extends Controller
@@ -23,8 +24,71 @@ class ProjectController extends Controller
 
     public function index(Request $request): JsonResponse
     {
+        $user = $request->user();
+        $roleName = $user->role?->name;
+
         $query = Project::with(['creator', 'pm', 'analyst', 'division', 'documents', 'teamMembers.user']);
 
+        // ─── ROLE-BASED DATA ISOLATION ───
+        // Super Admin, Head of IT, Lead Group: bisa lihat SEMUA proyek
+        // Role lain: hanya lihat proyek yang menjadi tanggung jawab mereka
+        if (! in_array($roleName, ['super_admin', 'head_of_it', 'lead_group'])) {
+
+            if ($roleName === 'business_user') {
+                // Business User hanya lihat proyek yang diajukan sendiri
+                $query->where('created_by', $user->id);
+
+            } elseif ($roleName === 'analyst') {
+                // Analyst hanya lihat proyek yang ditugaskan ke dia
+                $query->where('analyst_id', $user->id);
+
+            } elseif ($roleName === 'development_lead') {
+                // Development Lead: semua proyek di fase pengembangan (bukan cuma punya dia)
+                // Karena Lead Dev mengelola alokasi semua proyek, biarkan semua proyek terlihat
+                // (opsional: bisa ditambah filter jika dibutuhkan)
+
+            } elseif ($roleName === 'project_manager') {
+                // PM hanya lihat proyek yang dikelola dia
+                $query->where('pm_id', $user->id);
+
+            } elseif ($roleName === 'developer') {
+                // Developer hanya lihat proyek di mana dia anggota tim
+                $query->whereHas('teamMembers', fn($q) => $q->where('user_id', $user->id));
+
+            } elseif (in_array($roleName, ['qa_lead', 'qa_tester'])) {
+                // QA: proyek di fase QA atau sudah pernah masuk QA
+                $query->whereIn('status', [
+                    ProjectStatus::READY_FOR_QA->value,
+                    ProjectStatus::QA_IN_PROGRESS->value,
+                    ProjectStatus::QA_PASSED->value,
+                    ProjectStatus::RETURN_TO_DEV->value,
+                    ProjectStatus::CYBER_IN_PROGRESS->value,
+                    ProjectStatus::CYBER_PASSED->value,
+                    ProjectStatus::READY_FOR_UAT->value,
+                    ProjectStatus::UAT_PASSED->value,
+                    ProjectStatus::PENDING_GOLIVE->value,
+                    ProjectStatus::LIVE_PRODUCTION->value,
+                ]);
+
+            } elseif (in_array($roleName, ['cyber_lead', 'pentester'])) {
+                // Cyber: proyek di fase Cyber atau sudah pernah masuk Cyber
+                $query->whereIn('status', [
+                    ProjectStatus::DEV_COMPLETED->value,
+                    ProjectStatus::READY_FOR_QA->value,
+                    ProjectStatus::QA_IN_PROGRESS->value,
+                    ProjectStatus::QA_PASSED->value,
+                    ProjectStatus::RETURN_TO_DEV->value,
+                    ProjectStatus::CYBER_IN_PROGRESS->value,
+                    ProjectStatus::CYBER_PASSED->value,
+                    ProjectStatus::READY_FOR_UAT->value,
+                    ProjectStatus::UAT_PASSED->value,
+                    ProjectStatus::PENDING_GOLIVE->value,
+                    ProjectStatus::LIVE_PRODUCTION->value,
+                ]);
+            }
+        }
+
+        // ─── EXISTING FILTERS ───
         if ($request->filled('status')) {
             $query->where('status', $request->status);
         }
@@ -102,6 +166,7 @@ class ProjectController extends Controller
 
     /**
      * General project update (non-status fields: pm_id, analyst_id, staging_url, uat_notes, etc.)
+     * Status changes MUST go through updateStatus() endpoint via ProjectWorkflowService.
      */
     public function update(Request $request, int $id): JsonResponse
     {
@@ -110,7 +175,6 @@ class ProjectController extends Controller
         $request->validate([
             'title'                  => ['sometimes', 'string', 'max:255'],
             'description'            => ['sometimes', 'nullable', 'string'],
-            'status'                 => ['sometimes', 'nullable', 'string'],
             'pm_id'                  => ['sometimes', 'nullable', 'exists:users,id'],
             'analyst_id'             => ['sometimes', 'nullable', 'exists:users,id'],
             'division_id'            => ['sometimes', 'nullable', 'exists:divisions,id'],
@@ -124,7 +188,7 @@ class ProjectController extends Controller
         ]);
 
         $updateData = $request->only([
-            'title', 'description', 'status', 'pm_id', 'analyst_id',
+            'title', 'description', 'pm_id', 'analyst_id',
             'division_id', 'target_date', 'current_stage_deadline',
             'staging_url', 'uat_notes', 'sit_uat_data',
             'qa_status', 'cyber_status',
@@ -185,49 +249,40 @@ class ProjectController extends Controller
 
         $request->validate([
             'team'   => ['required', 'array', 'min:1'],
-            'team.*' => ['array'],
+            'team.*' => ['required', 'array'],
         ]);
 
         $teamData = $request->input('team', []);
 
-        // Clear all existing team members for this project
-        \App\Models\ProjectTeamMember::where('project_id', $project->id)->delete();
+        // Use DB transaction to prevent race conditions
+        DB::transaction(function () use ($project, $teamData) {
+            \App\Models\ProjectTeamMember::where('project_id', $project->id)->delete();
 
-        $saved = 0;
-        foreach ($teamData as $member) {
-            $userId = null;
-            $roleInProject = 'Developer';
-
-            if (is_array($member)) {
+            foreach ($teamData as $member) {
+                $userId = null;
                 $roleInProject = $member['skill'] ?? $member['role'] ?? 'Developer';
 
-                // 1. Resolve by email FIRST to guarantee exact DB user match
-                if (!empty($member['email'])) {
+                // Resolve by ID first (most reliable)
+                if (!empty($member['id']) && is_numeric($member['id'])) {
+                    $userId = (int) $member['id'];
+                }
+                // Resolve by email as fallback
+                if (!$userId && !empty($member['email'])) {
                     $u = \App\Models\User::where('email', $member['email'])->first();
                     if ($u) $userId = $u->id;
                 }
-                // 2. Resolve by name if email didn't match
-                if (!$userId && !empty($member['name'])) {
-                    $u = \App\Models\User::where('name', 'like', "%{$member['name']}%")->first();
-                    if ($u) $userId = $u->id;
-                }
-                // 3. Fallback to id if valid numeric ID
-                if (!$userId && !empty($member['id']) && is_numeric($member['id'])) {
-                    $userId = (int) $member['id'];
-                }
-            } elseif (is_numeric($member)) {
-                $userId = (int) $member;
-            }
 
-            if ($userId) {
-                // Skip duplicate (project_id + user_id combo)
-                \App\Models\ProjectTeamMember::firstOrCreate(
-                    ['project_id' => $project->id, 'user_id' => $userId],
-                    ['role_in_project' => $roleInProject]
-                );
-                $saved++;
+                if ($userId) {
+                    \App\Models\ProjectTeamMember::create([
+                        'project_id'      => $project->id,
+                        'user_id'         => $userId,
+                        'role_in_project' => $roleInProject,
+                    ]);
+                }
             }
-        }
+        });
+
+        $saved = count($teamData);
 
         return response()->json([
             'status'  => 'success',

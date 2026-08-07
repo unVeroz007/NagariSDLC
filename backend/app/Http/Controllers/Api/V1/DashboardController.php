@@ -17,12 +17,52 @@ class DashboardController extends Controller
     public function summary(Request $request): JsonResponse
     {
         $user = $request->user();
+        $roleName = $user->role?->name;
 
-        $totalProjects = Project::count();
-        $pendingProjects = Project::where('status', ProjectStatus::PENDING->value)->count();
-        $inDevelopment = Project::where('status', ProjectStatus::IN_DEVELOPMENT->value)->count();
-        $inQa = Project::where('status', ProjectStatus::QA_IN_PROGRESS->value)->count();
-        $liveProduction = Project::where('status', ProjectStatus::LIVE_PRODUCTION->value)->count();
+        // Base query — filter by role
+        $baseQuery = Project::query();
+
+        if (!in_array($roleName, ['super_admin', 'head_of_it'])) {
+            if ($roleName === 'business_user') {
+                // Business user only sees their own projects
+                $baseQuery->where('created_by', $user->id);
+            } elseif ($roleName === 'project_manager') {
+                // PM sees projects they manage
+                $baseQuery->where('pm_id', $user->id);
+            } elseif ($roleName === 'developer') {
+                // Developer sees projects they're assigned to
+                $baseQuery->whereHas('teamMembers', fn($q) => $q->where('user_id', $user->id));
+            } elseif (in_array($roleName, ['qa_lead', 'qa_tester'])) {
+                // QA sees projects in QA phase or assigned to them
+                $baseQuery->whereIn('status', [
+                    ProjectStatus::READY_FOR_QA->value,
+                    ProjectStatus::QA_IN_PROGRESS->value,
+                    ProjectStatus::QA_PASSED->value,
+                    ProjectStatus::RETURN_TO_DEV->value,
+                ]);
+            } elseif (in_array($roleName, ['cyber_lead', 'pentester'])) {
+                // Cyber sees projects in Cyber phase
+                $baseQuery->whereIn('status', [
+                    ProjectStatus::CYBER_IN_PROGRESS->value,
+                    ProjectStatus::CYBER_PASSED->value,
+                    ProjectStatus::RETURN_TO_DEV->value,
+                ]);
+            } elseif ($roleName === 'analyst') {
+                // Analyst sees projects they're analyzing
+                $baseQuery->where('analyst_id', $user->id)
+                    ->orWhereIn('status', [
+                        ProjectStatus::PENDING->value,
+                        ProjectStatus::IN_REVIEW->value,
+                        ProjectStatus::ANALYSIS_APPROVED->value,
+                    ]);
+            }
+        }
+
+        $totalProjects = (clone $baseQuery)->count();
+        $pendingProjects = (clone $baseQuery)->where('status', ProjectStatus::PENDING->value)->count();
+        $inDevelopment = (clone $baseQuery)->where('status', ProjectStatus::IN_DEVELOPMENT->value)->count();
+        $inQa = (clone $baseQuery)->where('status', ProjectStatus::QA_IN_PROGRESS->value)->count();
+        $liveProduction = (clone $baseQuery)->where('status', ProjectStatus::LIVE_PRODUCTION->value)->count();
 
         $totalUsers = User::count();
         $totalTasks = ProjectTask::count();

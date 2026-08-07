@@ -60,7 +60,11 @@ class CyberRequestController extends Controller
                 "Cyber Security Test Result: {$result->value}. " . ($request->notes ?? '')
             );
         } catch (Throwable $e) {
-            // Log transition exception
+            return response()->json([
+                'status'  => 'success',
+                'message' => 'Laporan Cyber tersimpan, namun transisi status gagal: ' . $e->getMessage(),
+                'data'    => new TestReportResource($report->load(['tester', 'project'])),
+            ], 201);
         }
 
         return response()->json([
@@ -69,6 +73,7 @@ class CyberRequestController extends Controller
             'data' => new TestReportResource($report->load(['tester', 'project'])),
         ], 201);
     }
+
     public function updateStatus(Request $request, int $id): JsonResponse
     {
         $request->validate([
@@ -77,7 +82,30 @@ class CyberRequestController extends Controller
         ]);
 
         $report = TestReport::where('test_type', 'cyber')->findOrFail($id);
-        $report->update(['notes' => $request->notes ?? $report->notes]);
+
+        $report->update([
+            'notes'       => $request->notes ?? $report->notes,
+            'reviewed_by' => $request->user()->id,
+            'reviewed_at' => now(),
+        ]);
+
+        if ($request->status && $request->status !== $report->result->value) {
+            try {
+                $project = $report->project;
+                $targetStatus = ProjectStatus::from($request->status);
+                $this->workflowService->transition(
+                    $project,
+                    $targetStatus,
+                    $request->user(),
+                    $request->notes ?? ''
+                );
+            } catch (Throwable $e) {
+                return response()->json([
+                    'status'  => 'error',
+                    'message' => 'Update catatan berhasil, namun transisi status gagal: ' . $e->getMessage(),
+                ], 422);
+            }
+        }
 
         return response()->json([
             'status'  => 'success',

@@ -156,7 +156,7 @@ export default function Track() {
             return <CheckCircle size={18} className="text-emerald-500" />;
         }
         if (phase.isActive) {
-            return <Code size={18} className="text-[#1A56DB]" />;
+            return <Code size={18} className="text-[#00529C]" />;
         }
         return <Rocket size={18} className="text-gray-400" />;
     };
@@ -171,8 +171,8 @@ export default function Track() {
         }
         if (phase.isActive) {
             return (
-                <div className="w-10 h-10 rounded-full bg-[#1A56DB] border-4 border-blue-200 flex items-center justify-center shadow-md relative">
-                    <div className="absolute inset-0 rounded-full border-2 border-[#1A56DB] animate-ping opacity-50"></div>
+                <div className="w-10 h-10 rounded-full bg-[#00529C] border-4 border-blue-200 flex items-center justify-center shadow-md relative">
+                    <div className="absolute inset-0 rounded-full border-2 border-[#00529C] animate-ping opacity-50"></div>
                     <Code size={20} className="text-white" />
                 </div>
             );
@@ -200,7 +200,7 @@ export default function Track() {
                                 value={searchTerm}
                                 onChange={(e) => setSearchTerm(e.target.value)}
                                 placeholder="Cari ID atau Nama Proyek..."
-                                className="w-full pl-10 pr-4 py-2.5 bg-gray-50 rounded-lg border border-gray-200 focus:ring-2 focus:ring-[#1A56DB] focus:border-[#1A56DB] outline-none transition-all text-sm"
+                                className="w-full pl-10 pr-4 py-2.5 bg-gray-50 rounded-lg border border-gray-200 focus:ring-2 focus:ring-[#00529C] focus:border-[#00529C] outline-none transition-all text-sm"
                             />
                         </div>
                         <div className="flex gap-2 overflow-x-auto pb-1">
@@ -209,7 +209,7 @@ export default function Track() {
                                     key={opt}
                                     onClick={() => setFilterStatus(opt)}
                                     className={`px-3 py-1.5 rounded-full text-xs font-semibold whitespace-nowrap transition-colors ${filterStatus === opt
-                                            ? 'bg-blue-100 text-[#1A56DB]'
+                                            ? 'bg-blue-100 text-[#00529C]'
                                             : 'bg-gray-100 text-gray-600 hover:bg-gray-200 border border-gray-200'
                                         }`}
                                 >
@@ -227,7 +227,7 @@ export default function Track() {
                                     key={project.id}
                                     onClick={() => setSelectedProject(project)}
                                     className={`bg-white rounded-xl shadow-sm border relative overflow-hidden cursor-pointer hover:shadow-md transition-shadow group ${activeSelected?.id === project.id
-                                            ? 'border-[#1A56DB] ring-1 ring-[#1A56DB]'
+                                            ? 'border-[#00529C] ring-1 ring-[#00529C]'
                                             : 'border-gray-200'
                                         }`}
                                 >
@@ -243,7 +243,7 @@ export default function Track() {
                                                 {project.status}
                                             </span>
                                         </div>
-                                        <h3 className="font-semibold text-gray-800 text-sm mb-1 group-hover:text-[#1A56DB] transition-colors line-clamp-1">
+                                        <h3 className="font-semibold text-gray-800 text-sm mb-1 group-hover:text-[#00529C] transition-colors line-clamp-1">
                                             {project.name}
                                         </h3>
                                         <p className="text-xs text-gray-500 line-clamp-2 mb-3">
@@ -251,7 +251,7 @@ export default function Track() {
                                         </p>
                                         <div className="flex items-center justify-between text-[11px] text-gray-500 border-t border-gray-100 pt-2">
                                             <div className="flex items-center gap-1.5">
-                                                <div className="w-5 h-5 rounded-full bg-blue-100 text-[#1A56DB] flex items-center justify-center font-bold text-[10px]">
+                                                <div className="w-5 h-5 rounded-full bg-blue-100 text-[#00529C] flex items-center justify-center font-bold text-[10px]">
                                                     {project.pmAvatar}
                                                 </div>
                                                 <span className="truncate max-w-[100px]">{project.pm}</span>
@@ -311,7 +311,7 @@ export default function Track() {
                                 <div>
                                     <p className="text-xs text-gray-500 mb-1">Project Manager</p>
                                     <div className="flex items-center">
-                                        <div className="w-6 h-6 rounded-full bg-[#1A56DB] text-white flex items-center justify-center text-[10px] font-bold mr-2">
+                                        <div className="w-6 h-6 rounded-full bg-[#00529C] text-white flex items-center justify-center text-[10px] font-bold mr-2">
                                             {activeSelected?.pmAvatar}
                                         </div>
                                         <p className="font-semibold text-gray-800">{activeSelected?.pm}</p>
@@ -333,7 +333,7 @@ export default function Track() {
                             {/* Timeline Section */}
                             <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-200">
                                 <h2 className="text-lg font-semibold text-gray-800 mb-8 flex items-center">
-                                    <Route size={20} className="mr-2 text-[#1A56DB]" />
+                                    <Route size={20} className="mr-2 text-[#00529C]" />
                                     Perjalanan Pengajuan
                                 </h2>
 
@@ -355,7 +355,7 @@ export default function Track() {
 
                                             {/* Content */}
                                             <div className="flex-1 pt-1">
-                                                <h3 className={`font-semibold text-gray-800 mb-1 ${phase.isActive ? 'text-[#1A56DB]' : ''}`}>
+                                                <h3 className={`font-semibold text-gray-800 mb-1 ${phase.isActive ? 'text-[#00529C]' : ''}`}>
                                                     {phase.name}
                                                 </h3>
                                                 <p className="text-sm text-gray-500 mb-4">{phase.description}</p>
@@ -375,7 +375,7 @@ export default function Track() {
                                                         {/* Active note */}
                                                         {phase.isActive && phase.activeNote && (
                                                             <div className="flex items-start gap-3 p-3 bg-white rounded border border-blue-200 shadow-sm mt-2">
-                                                                <Shield size={18} className="text-[#1A56DB] animate-pulse mt-0.5" />
+                                                                <Shield size={18} className="text-[#00529C] animate-pulse mt-0.5" />
                                                                 <div>
                                                                     <span className="font-semibold text-sm text-gray-800 block mb-1">
                                                                         {phase.activeNote}

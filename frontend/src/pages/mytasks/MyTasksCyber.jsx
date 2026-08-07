@@ -5,6 +5,7 @@ import { useNotifications } from "../../contexts/NotificationContext";
 import RBBBadge from "../../components/RBBBadge";
 import DocumentViewerModal from "../../components/DocumentViewerModal";
 import toast from "react-hot-toast";
+import { generateDocumentName, DOCUMENT_TYPES, formatFileSize } from '../../utils/documentNaming';
 import {
     Shield, CheckCircle, FileText, FileCheck, Eye, Lock, AlertTriangle, Clock,
     User, AlertCircle, FolderOpen, Copy, ShieldAlert, Check, Building, ExternalLink,
@@ -18,11 +19,16 @@ export default function MyTasksCyber() {
     const { addNotification } = useNotifications();
 
     const cyberTasks = useMemo(() => {
-        return (projects || []).filter(p => {
+        let list = (projects || []).filter(p => {
             const cyberSt = String(p.cyberStatus || p.cyber_status || "").toUpperCase();
             return (cyberSt === "IN_PROGRESS" || p.status === "CYBER_IN_PROGRESS") && cyberSt !== "PASSED" && cyberSt !== "REVIEW";
         });
-    }, [projects]);
+        const isPrivileged = user?.role && ['super_admin', 'lead_group', 'head_of_it', 'development_lead'].includes(user.role);
+        if (!isPrivileged && user?.name) {
+            list = list.filter(p => String(p.cyberAssignee || "").toLowerCase().includes(user.name.toLowerCase()));
+        }
+        return list;
+    }, [projects, user]);
 
     const [selectedTask, setSelectedTask] = useState(null);
     const activeTask = selectedTask || cyberTasks[0] || null;
@@ -66,15 +72,24 @@ export default function MyTasksCyber() {
     const checkedCount = Object.values(checklist).filter(Boolean).length;
 
     const handleEvidenceFiles = (files) => {
-        const newFiles = Array.from(files).map(file => ({
-            id: `ev-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`,
-            name: file.name,
-            size: file.size > 1048576 ? `${(file.size / 1048576).toFixed(1)} MB` : `${Math.round(file.size / 1024)} KB`,
-            type: file.type || "application/octet-stream",
-            uploadedAt: new Date().toLocaleString("id-ID"),
-            author: user?.name || "Pentester",
-            fileObj: file, dataUrl: null,
-        }));
+        const newFiles = Array.from(files).map(file => {
+            const ext = file.name.split('.').pop() || '';
+            const autoName = generateDocumentName(
+                activeTask?.req_id || activeTask?.id,
+                DOCUMENT_TYPES.CYBER_REPORT.code,
+                activeTask?.title || activeTask?.name
+            ) + '.' + ext;
+            return {
+                id: `ev-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`,
+                name: autoName,
+                originalName: file.name,
+                size: formatFileSize(file.size),
+                type: file.type || "application/octet-stream",
+                uploadedAt: new Date().toLocaleString("id-ID"),
+                author: user?.name || "Pentester",
+                fileObj: file, dataUrl: null,
+            };
+        });
         newFiles.forEach(ef => {
             const reader = new FileReader();
             reader.onload = (e) => {
@@ -329,7 +344,7 @@ export default function MyTasksCyber() {
                                             <Upload size={20} className="mx-auto mb-1.5 text-gray-400" />
                                             <p className="text-xs font-semibold text-gray-600">Seret file ke sini atau <span className="text-orange-600 underline">klik untuk pilih file</span></p>
                                             <p className="text-[10px] text-gray-400 mt-0.5">PDF, PNG, JPG, Excel, ZIP (maks. 20 MB per file)</p>
-                                            <input ref={evidenceInputRef} type="file" multiple className="hidden" onChange={(e) => e.target.files && handleEvidenceFiles(e.target.files)} accept=".pdf,.png,.jpg,.jpeg,.xlsx,.xls,.zip,.docx,.doc,.csv,.txt" />
+                                            <input ref={evidenceInputRef} type="file" multiple className="hidden" onChange={(e) => e.target.files && handleEvidenceFiles(e.target.files)} accept=".pdf,.xls,.xlsx,.jpg,.jpeg,.png,.zip" />
                                         </div>
                                         {evidenceFiles.length > 0 && (
                                             <div className="mt-3 space-y-2">

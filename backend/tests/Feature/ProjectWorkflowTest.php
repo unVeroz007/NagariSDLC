@@ -48,6 +48,7 @@ class ProjectWorkflowTest extends TestCase
             'title' => 'Sistem QRIS Bank Nagari',
             'description' => 'Pengembangan fitur QRIS.',
             'division_id' => $this->division->id,
+            'target_date' => now()->addDays(30)->format('Y-m-d'),
         ]);
 
         $response->assertStatus(201)

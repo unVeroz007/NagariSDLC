@@ -322,7 +322,7 @@ const router = createBrowserRouter([
                 ),
             },
             {
-                path: 'pm/release-request', // backward compat (tanpa slash awal)
+                path: '/pm/release-request', // backward compat (tanpa slash awal)
                 element: <Navigate to="/pm/release-request" replace />,
             },
             {

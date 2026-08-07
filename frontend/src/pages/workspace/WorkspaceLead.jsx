@@ -1,5 +1,5 @@
 import RBBBadge from '../../components/RBBBadge';
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useRef, useEffect, useCallback } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import {
     User,
@@ -151,12 +151,54 @@ export default function WorkspaceLead() {
     const [notes, setNotes] = useState('');
     const [isSubmitting, setIsSubmitting] = useState(false);
 
+    // Searchable analyst dropdown state
+    const [analystSearch, setAnalystSearch] = useState('');
+    const [isAnalystDropdownOpen, setIsAnalystDropdownOpen] = useState(false);
+    const analystDropdownRef = useRef(null);
+    const analystSearchRef = useRef(null);
+
+    // Close analyst dropdown on outside click
+    useEffect(() => {
+        const handleClickOutside = (e) => {
+            if (analystDropdownRef.current && !analystDropdownRef.current.contains(e.target)) {
+                setIsAnalystDropdownOpen(false);
+            }
+        };
+        document.addEventListener('mousedown', handleClickOutside);
+        return () => document.removeEventListener('mousedown', handleClickOutside);
+    }, []);
+
+    // Calculate active workload per analyst
+    const analystWorkloads = useMemo(() => {
+        const counts = {};
+        (analysts || []).forEach(a => { counts[a.name] = 0; });
+        (projects || []).forEach(p => {
+            const analystName = typeof p.assignedAnalyst === 'object' ? (p.assignedAnalyst?.name || '') : String(p.assignedAnalyst || p.analyst || '');
+            if (analystName && counts[analystName] !== undefined) {
+                const isFinished = p.status === 'LIVE_PRODUCTION' || p.status === 'CANCELLED' || p.status === 'REJECTED';
+                if (!isFinished) counts[analystName]++;
+            }
+        });
+        return counts;
+    }, [projects, analysts]);
+
+    // Filtered analysts based on search
+    const filteredAnalysts = useMemo(() => {
+        if (!analystSearch.trim()) return analysts || [];
+        const q = analystSearch.toLowerCase();
+        return (analysts || []).filter(a =>
+            a.name.toLowerCase().includes(q) ||
+            a.email.toLowerCase().includes(q) ||
+            a.department.toLowerCase().includes(q)
+        );
+    }, [analystSearch]);
+
     const handleVerify = () => {
         if (!currentSelected) return;
         setIsSubmitting(true);
         updateProject(currentSelected.id, {
             status: 'READY_FOR_DEVELOPMENT',
-            statusColor: 'bg-[#1A56DB]/10 text-[#1A56DB] border-blue-200',
+            statusColor: 'bg-[#00529C]/10 text-[#00529C] border-blue-200',
         });
 
         addNotification(
@@ -264,13 +306,13 @@ export default function WorkspaceLead() {
                     <div className="flex bg-white p-1 rounded-xl border border-gray-200 shadow-sm flex-wrap gap-1">
                         <button
                             onClick={() => { setActiveTab('disposition'); setSelectedProject(null); }}
-                            className={`px-3.5 py-2 rounded-lg text-xs md:text-sm font-semibold transition-all cursor-pointer ${activeTab === 'disposition' ? 'bg-[#1A56DB] text-white shadow-md' : 'text-gray-600 hover:text-gray-800 hover:bg-gray-50'}`}
+                            className={`px-3.5 py-2 rounded-lg text-xs md:text-sm font-semibold transition-all cursor-pointer ${activeTab === 'disposition' ? 'bg-[#00529C] text-white shadow-md' : 'text-gray-600 hover:text-gray-800 hover:bg-gray-50'}`}
                         >
                             Disposisi Proyek Baru
                         </button>
                         <button
                             onClick={() => { setActiveTab('analyzing'); setSelectedProject(null); }}
-                            className={`px-3.5 py-2 rounded-lg text-xs md:text-sm font-semibold transition-all cursor-pointer flex items-center gap-1.5 ${activeTab === 'analyzing' ? 'bg-[#1A56DB] text-white shadow-md' : 'text-gray-600 hover:text-gray-800 hover:bg-gray-50'}`}
+                            className={`px-3.5 py-2 rounded-lg text-xs md:text-sm font-semibold transition-all cursor-pointer flex items-center gap-1.5 ${activeTab === 'analyzing' ? 'bg-[#00529C] text-white shadow-md' : 'text-gray-600 hover:text-gray-800 hover:bg-gray-50'}`}
                         >
                             <span>Sedang Dikaji Analyst</span>
                             {analyzingQueue.length > 0 && (
@@ -281,7 +323,7 @@ export default function WorkspaceLead() {
                         </button>
                         <button
                             onClick={() => { setActiveTab('verification'); setSelectedProject(null); }}
-                            className={`px-3.5 py-2 rounded-lg text-xs md:text-sm font-semibold transition-all cursor-pointer flex items-center gap-1.5 ${activeTab === 'verification' ? 'bg-[#1A56DB] text-white shadow-md' : 'text-gray-600 hover:text-gray-800 hover:bg-gray-50'}`}
+                            className={`px-3.5 py-2 rounded-lg text-xs md:text-sm font-semibold transition-all cursor-pointer flex items-center gap-1.5 ${activeTab === 'verification' ? 'bg-[#00529C] text-white shadow-md' : 'text-gray-600 hover:text-gray-800 hover:bg-gray-50'}`}
                         >
                             <span>Verifikasi Hasil Analisis</span>
                             {verificationQueue.length > 0 && (
@@ -305,7 +347,7 @@ export default function WorkspaceLead() {
                             </h2>
                             <p className="text-xs text-gray-400 mt-0.5">{activeQueue.length} proyek</p>
                         </div>
-                        <button className="p-2 text-gray-400 hover:text-[#1A56DB] hover:bg-blue-50 rounded-lg transition-colors">
+                        <button className="p-2 text-gray-400 hover:text-[#00529C] hover:bg-blue-50 rounded-lg transition-colors">
                             <Filter size={16} />
                         </button>
                     </div>
@@ -316,12 +358,12 @@ export default function WorkspaceLead() {
                                 onClick={() => setSelectedProject(project)}
                                 className={`p-4 rounded-xl cursor-pointer transition-all relative overflow-hidden group ${
                                     selectedProject?.id === project.id
-                                        ? 'bg-white border-2 border-[#1A56DB] shadow-md'
-                                        : 'bg-white border border-gray-200 hover:border-[#1A56DB]/40 hover:shadow-md'
+                                        ? 'bg-white border-2 border-[#00529C] shadow-md'
+                                        : 'bg-white border border-gray-200 hover:border-[#00529C]/40 hover:shadow-md'
                                 }`}
                             >
                                 {selectedProject?.id === project.id && (
-                                    <div className="absolute left-0 top-0 w-1 h-full bg-[#1A56DB] rounded-l-xl" />
+                                    <div className="absolute left-0 top-0 w-1 h-full bg-[#00529C] rounded-l-xl" />
                                 )}
                                 <div className="flex justify-between items-start mb-2">
                                     <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold border ${getPriorityColor(project.priority)}`}>
@@ -332,13 +374,13 @@ export default function WorkspaceLead() {
                                     </span>
                                 </div>
                                 <div className="mb-2"><RBBBadge type={project.type} deadline={project.rbbDeadline} status={project.status} /></div>
-                                <h3 className="font-semibold text-gray-800 text-sm mb-1 group-hover:text-[#1A56DB] transition-colors">{project.name}</h3>
+                                <h3 className="font-semibold text-gray-800 text-sm mb-1 group-hover:text-[#00529C] transition-colors">{project.name}</h3>
                                 <div className="flex items-center gap-1 text-xs text-gray-500">
                                     <Users size={13} />
                                     <span>{project.division}</span>
                                 </div>
                                 <div className="flex justify-between items-center pt-2.5 mt-2.5 border-t border-gray-100">
-                                    <span className="text-[10px] font-bold text-[#1A56DB] bg-blue-50 px-2 py-0.5 rounded">{project.id}</span>
+                                    <span className="text-[10px] font-bold text-[#00529C] bg-blue-50 px-2 py-0.5 rounded">{project.id}</span>
                                     <span className="text-[10px] text-gray-400">{project.status}</span>
                                 </div>
                             </div>
@@ -382,7 +424,7 @@ export default function WorkspaceLead() {
                             </div>
                             <button
                                 onClick={() => setIsPreviewModalOpen(true)}
-                                className="p-2.5 text-gray-400 hover:text-[#1A56DB] hover:bg-blue-50 rounded-xl transition-colors border border-gray-200 cursor-pointer"
+                                className="p-2.5 text-gray-400 hover:text-[#00529C] hover:bg-blue-50 rounded-xl transition-colors border border-gray-200 cursor-pointer"
                                 title="Lihat Detail Proyek"
                             >
                                 <Eye size={18} />
@@ -408,7 +450,7 @@ export default function WorkspaceLead() {
                         {/* Documents */}
                         <div className="mb-6">
                             <h3 className="text-lg font-semibold text-gray-800 mb-3 flex items-center gap-2">
-                                <FolderOpen size={20} className="text-[#1A56DB]" />
+                                <FolderOpen size={20} className="text-[#00529C]" />
                                 Dokumen Inisiasi
                             </h3>
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
@@ -430,7 +472,7 @@ export default function WorkspaceLead() {
                                             <button
                                                 type="button"
                                                 onClick={() => setPreviewFsdDoc(doc)}
-                                                className="px-3 py-1.5 border border-[#1A56DB] text-[#1A56DB] hover:bg-blue-50 rounded-lg text-xs font-bold transition-all flex items-center gap-1 cursor-pointer active:scale-95"
+                                                className="px-3 py-1.5 border border-[#00529C] text-[#00529C] hover:bg-blue-50 rounded-lg text-xs font-bold transition-all flex items-center gap-1 cursor-pointer active:scale-95"
                                                 title="View & Baca Dokumen"
                                             >
                                                 <Eye size={14} />
@@ -463,7 +505,7 @@ export default function WorkspaceLead() {
                                                         toast.success(`Mengunduh salinan berkas "${fileName}"...`);
                                                     }
                                                 }}
-                                                className="p-2 text-gray-500 hover:text-[#1A56DB] hover:bg-blue-50 rounded-lg transition-colors cursor-pointer"
+                                                className="p-2 text-gray-500 hover:text-[#00529C] hover:bg-blue-50 rounded-lg transition-colors cursor-pointer"
                                                 title="Unduh Dokumen"
                                             >
                                                 <Download size={16} />
@@ -480,32 +522,122 @@ export default function WorkspaceLead() {
                         {activeTab === 'disposition' ? (
                             <div className="bg-gray-50 rounded-xl p-6 border border-gray-200">
                                 <h3 className="text-lg font-semibold text-gray-800 mb-4 flex items-center gap-2">
-                                    <User size={20} className="text-[#1A56DB]" />
+                                    <User size={20} className="text-[#00529C]" />
                                     Form Penugasan Analis
                                 </h3>
                                 <div className="space-y-4">
                                     <div>
                                         <label className="block text-sm font-semibold text-gray-700 mb-1.5">Pilih System Analyst <span className="text-red-500">*</span></label>
-                                        <select
-                                            value={selectedAnalyst}
-                                            onChange={(e) => setSelectedAnalyst(e.target.value)}
-                                            className="w-full px-4 py-2.5 rounded-xl border border-gray-200 focus:border-[#1A56DB] focus:ring-2 focus:ring-blue-50 outline-none transition-all bg-white font-medium text-sm"
-                                        >
-                                            <option value="">-- Pilih System Analyst --</option>
-                                            {analysts.map((a, i) => {
-                                                const activeCount = (projects || []).filter(p => {
-                                                    const analystName = typeof p.assignedAnalyst === 'object' ? (p.assignedAnalyst?.name || '') : String(p.assignedAnalyst || p.analyst || '');
-                                                    const matches = analystName.toLowerCase().includes(a.name.toLowerCase());
-                                                    const isFinished = p.status === 'LIVE_PRODUCTION' || p.status === 'CANCELLED' || p.status === 'REJECTED';
-                                                    return matches && !isFinished;
-                                                }).length;
-                                                return (
-                                                    <option key={i} value={a.name}>
-                                                        {a.name} (Beban: {activeCount} Proyek Aktif)
-                                                    </option>
-                                                );
-                                            })}
-                                        </select>
+                                        <div className="relative" ref={analystDropdownRef}>
+                                            {/* Trigger Input */}
+                                            <div
+                                                onClick={() => {
+                                                    setIsAnalystDropdownOpen(!isAnalystDropdownOpen);
+                                                    setTimeout(() => analystSearchRef.current?.focus(), 50);
+                                                }}
+                                                className="w-full px-4 py-2.5 rounded-xl border border-gray-200 focus-within:border-[#00529C] focus-within:ring-2 focus-within:ring-blue-50 transition-all bg-white cursor-pointer flex items-center justify-between"
+                                            >
+                                                {selectedAnalyst ? (
+                                                    <span className="text-sm font-medium text-gray-800 flex items-center gap-2">
+                                                        <span className="w-7 h-7 rounded-full bg-[#00529C] text-white text-xs font-bold flex items-center justify-center shrink-0">
+                                                            {selectedAnalyst.split(' ').map(n => n[0]).join('').slice(0, 2)}
+                                                        </span>
+                                                        <div>
+                                                            <span className="block leading-tight">{selectedAnalyst}</span>
+                                                            <span className="text-[10px] text-gray-400 font-normal">{analystWorkloads[selectedAnalyst] || 0} proyek aktif</span>
+                                                        </div>
+                                                    </span>
+                                                ) : (
+                                                    <span className="text-sm text-gray-400">Ketik nama atau email untuk mencari...</span>
+                                                )}
+                                                <svg className={`w-4 h-4 text-gray-400 shrink-0 transition-transform ${isAnalystDropdownOpen ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
+                                            </div>
+
+                                            {/* Dropdown Panel */}
+                                            {isAnalystDropdownOpen && (
+                                                <div className="absolute z-50 mt-2 w-full bg-white border border-gray-200 rounded-xl shadow-xl overflow-hidden animate-scale-up">
+                                                    {/* Search Input */}
+                                                    <div className="p-3 border-b border-gray-100 bg-gray-50/50">
+                                                        <div className="relative">
+                                                            <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                                                            <input
+                                                                ref={analystSearchRef}
+                                                                type="text"
+                                                                value={analystSearch}
+                                                                onChange={(e) => setAnalystSearch(e.target.value)}
+                                                                onFocus={() => setIsAnalystDropdownOpen(true)}
+                                                                placeholder="Cari berdasarkan nama, email, atau departemen..."
+                                                                className="w-full pl-9 pr-4 py-2 rounded-lg border border-gray-200 bg-white text-sm focus:ring-2 focus:ring-[#00529C]/20 focus:border-[#00529C] outline-none transition-all"
+                                                            />
+                                                        </div>
+                                                    </div>
+
+                                                    {/* Analyst List */}
+                                                    <div className="max-h-[260px] overflow-y-auto">
+                                                        {filteredAnalysts.length === 0 ? (
+                                                            <div className="p-6 text-center">
+                                                                <Search size={24} className="mx-auto text-gray-300 mb-2" />
+                                                                <p className="text-sm text-gray-500 font-medium">Tidak ditemukan analis</p>
+                                                                <p className="text-xs text-gray-400">Coba kata kunci lain</p>
+                                                            </div>
+                                                        ) : (
+                                                            filteredAnalysts.map((a, i) => {
+                                                                const workload = analystWorkloads[a.name] || 0;
+                                                                const isSelected = selectedAnalyst === a.name;
+                                                                return (
+                                                                    <div
+                                                                        key={i}
+                                                                        onClick={() => {
+                                                                            setSelectedAnalyst(a.name);
+                                                                            setIsAnalystDropdownOpen(false);
+                                                                            setAnalystSearch('');
+                                                                        }}
+                                                                        className={`px-4 py-3 cursor-pointer transition-all flex items-center gap-3 ${
+                                                                            isSelected
+                                                                                ? 'bg-[#00529C]/5 border-l-3 border-[#00529C]'
+                                                                                : 'hover:bg-blue-50/50 border-l-3 border-transparent'
+                                                                        }`}
+                                                                    >
+                                                                        <span className="w-9 h-9 rounded-full bg-gradient-to-br from-[#00529C] to-[#004080] text-white text-xs font-bold flex items-center justify-center shrink-0">
+                                                                            {a.name.split(' ').map(n => n[0]).join('').slice(0, 2)}
+                                                                        </span>
+                                                                        <div className="flex-1 min-w-0">
+                                                                            <div className="flex items-center gap-2">
+                                                                                <span className="text-sm font-semibold text-gray-800 truncate">{a.name}</span>
+                                                                                {isSelected && <Check size={14} className="text-[#00529C] shrink-0" />}
+                                                                            </div>
+                                                                            <p className="text-[11px] text-gray-500 truncate">{a.department}</p>
+                                                                            <p className="text-[10px] text-gray-400 mt-0.5 truncate">{a.email}</p>
+                                                                        </div>
+                                                                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full shrink-0 ${
+                                                                            workload >= 3 ? 'bg-red-100 text-red-600' : workload >= 1 ? 'bg-amber-100 text-amber-700' : 'bg-emerald-100 text-emerald-700'
+                                                                        }`}>
+                                                                            {workload} aktif
+                                                                        </span>
+                                                                    </div>
+                                                                );
+                                                            })
+                                                        )}
+                                                    </div>
+
+                                                    {/* Quick Clear */}
+                                                    {selectedAnalyst && (
+                                                        <div className="p-2 border-t border-gray-100 bg-gray-50/30">
+                                                            <button
+                                                                onClick={(e) => {
+                                                                    e.stopPropagation();
+                                                                    setSelectedAnalyst('');
+                                                                    setAnalystSearch('');
+                                                                }}
+                                                                className="w-full text-center py-1.5 text-xs font-semibold text-red-500 hover:text-red-700 hover:bg-red-50 rounded-lg transition-colors cursor-pointer"
+                                                            >
+                                                                Hapus Pilihan
+                                                            </button>
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            )}
+                                        </div>
                                     </div>
                                     <div>
                                         <label className="block text-sm font-semibold text-gray-700 mb-1.5">Target Selesai Analisis (Opsional)</label>
@@ -513,7 +645,7 @@ export default function WorkspaceLead() {
                                             type="date"
                                             value={deadline}
                                             onChange={(e) => setDeadline(e.target.value)}
-                                            className="w-full px-4 py-2.5 rounded-xl border border-gray-200 focus:border-[#1A56DB] focus:ring-2 focus:ring-blue-50 outline-none transition-all bg-white"
+                                            className="w-full px-4 py-2.5 rounded-xl border border-gray-200 focus:border-[#00529C] focus:ring-2 focus:ring-blue-50 outline-none transition-all bg-white"
                                         />
                                     </div>
                                     <div>
@@ -522,7 +654,7 @@ export default function WorkspaceLead() {
                                             value={notes}
                                             onChange={(e) => setNotes(e.target.value)}
                                             placeholder="Berikan instruksi khusus atau fokus analisis..."
-                                            className="w-full px-4 py-2.5 rounded-xl border border-gray-200 focus:border-[#1A56DB] focus:ring-2 focus:ring-blue-50 outline-none transition-all min-h-[80px] resize-y bg-white text-sm"
+                                            className="w-full px-4 py-2.5 rounded-xl border border-gray-200 focus:border-[#00529C] focus:ring-2 focus:ring-blue-50 outline-none transition-all min-h-[80px] resize-y bg-white text-sm"
                                         ></textarea>
                                     </div>
 
@@ -530,7 +662,7 @@ export default function WorkspaceLead() {
                                         <div className="p-3.5 bg-blue-50/80 border border-blue-200 rounded-xl text-xs space-y-1.5 animate-fade-in">
                                             <span className="font-bold text-blue-900 block text-[11px] uppercase tracking-wider">Ringkasan Penunjukan Analyst Plan:</span>
                                             <div className="flex flex-wrap items-center justify-between text-blue-950 font-semibold gap-2">
-                                                <span>Analyst Terpilih: <strong className="text-[#1A56DB] font-bold">{selectedAnalyst}</strong></span>
+                                                <span>Analyst Terpilih: <strong className="text-[#00529C] font-bold">{selectedAnalyst}</strong></span>
                                                 <span>Beban Kerja Saat Ini: <strong className="text-gray-800 font-bold">{
                                                     (projects || []).filter(p => {
                                                         const analystName = typeof p.assignedAnalyst === 'object' ? (p.assignedAnalyst?.name || '') : String(p.assignedAnalyst || p.analyst || '');
@@ -551,7 +683,7 @@ export default function WorkspaceLead() {
                                         <button
                                             onClick={handleAssign}
                                             disabled={isSubmitting || !selectedAnalyst}
-                                            className="w-full bg-[#1A56DB] hover:bg-blue-700 text-white font-bold py-3 px-4 rounded-xl transition-all shadow-md hover:shadow-lg flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+                                            className="w-full bg-[#00529C] hover:bg-blue-700 text-white font-bold py-3 px-4 rounded-xl transition-all shadow-md hover:shadow-lg flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
                                         >
                                             {isSubmitting ? <LoadingSpinner size="sm" color="white" /> : <Send size={18} />}
                                             Kirim Tugasan Analisis
@@ -620,7 +752,7 @@ export default function WorkspaceLead() {
                                             <button
                                                 type="button"
                                                 onClick={() => setPreviewFsdDoc(currentFsdDoc)}
-                                                className="px-3 py-1.5 border border-[#1A56DB] text-[#1A56DB] rounded-lg font-bold hover:bg-blue-50 transition-colors flex items-center gap-1.5 text-xs cursor-pointer"
+                                                className="px-3 py-1.5 border border-[#00529C] text-[#00529C] rounded-lg font-bold hover:bg-blue-50 transition-colors flex items-center gap-1.5 text-xs cursor-pointer"
                                             >
                                                 <Eye size={14} />
                                                 View &amp; Baca FSD
@@ -701,7 +833,7 @@ export default function WorkspaceLead() {
                         <div className="flex justify-between items-start mb-4 border-b border-gray-100 pb-3">
                             <div>
                                 <div className="flex items-center gap-2 mb-1">
-                                    <span className="text-xs font-bold text-[#1A56DB] bg-blue-50 px-2 py-0.5 rounded border border-blue-100">
+                                    <span className="text-xs font-bold text-[#00529C] bg-blue-50 px-2 py-0.5 rounded border border-blue-100">
                                         {currentSelected.id}
                                     </span>
                                     <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold border ${getPriorityColor(currentSelected.priority)}`}>

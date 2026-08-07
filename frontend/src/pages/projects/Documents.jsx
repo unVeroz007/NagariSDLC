@@ -32,6 +32,7 @@ import { useProjects } from '../../contexts/ProjectContext';
 import LoadingSpinner from '../../components/LoadingSpinner';
 import EmptyState from '../../components/EmptyState';
 import DocumentViewerModal from '../../components/DocumentViewerModal';
+import { generateDocumentName, DOCUMENT_TYPES, formatFileSize } from '../../utils/documentNaming';
 
 const mapDocTypeToCategory = (type, fileName = '') => {
     const t = (type || '').toLowerCase();
@@ -77,7 +78,7 @@ export default function Documents() {
     // Form states
     const [folderName, setFolderName] = useState('');
     const [customFolders, setCustomFolders] = useState([
-        { id: 'f1', name: 'BRD & FSD Kebutuhan', color: 'bg-blue-50 border-blue-200 text-[#1A56DB]' },
+        { id: 'f1', name: 'BRD & FSD Kebutuhan', color: 'bg-blue-50 border-blue-200 text-[#00529C]' },
         { id: 'f2', name: 'Laporan Test QA & Siber', color: 'bg-purple-50 border-purple-200 text-purple-700' },
         { id: 'f3', name: 'Berita Acara UAT & Legal', color: 'bg-emerald-50 border-emerald-200 text-emerald-700' },
     ]);
@@ -313,10 +314,10 @@ export default function Documents() {
                 subtitle: 'Seluruh berkas SDLC',
                 count: total,
                 icon: FolderOpen,
-                activeClass: 'bg-gradient-to-r from-[#003a73] to-[#1A56DB] text-white border-[#003a73] shadow-md',
+                activeClass: 'bg-gradient-to-r from-[#003a73] to-[#00529C] text-white border-[#003a73] shadow-md',
                 defaultClass: 'bg-white border-gray-200 text-gray-800 hover:border-blue-300 hover:bg-blue-50/40',
                 badgeClass: 'bg-white/20 text-white',
-                badgeDefaultClass: 'bg-blue-50 text-[#1A56DB]',
+                badgeDefaultClass: 'bg-blue-50 text-[#00529C]',
             },
             {
                 id: 'cat_brd',
@@ -328,7 +329,7 @@ export default function Documents() {
                 activeClass: 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white border-blue-600 shadow-md',
                 defaultClass: 'bg-white border-gray-200 text-gray-800 hover:border-blue-300 hover:bg-blue-50/40',
                 badgeClass: 'bg-white/20 text-white',
-                badgeDefaultClass: 'bg-blue-50 text-[#1A56DB]',
+                badgeDefaultClass: 'bg-blue-50 text-[#00529C]',
             },
             {
                 id: 'cat_qa',
@@ -392,8 +393,10 @@ export default function Documents() {
                 e.target.value = '';
                 return;
             }
-            if (!file.name.toLowerCase().endsWith('.pdf')) {
-                showToast('Mohon unggah berkas PDF (.pdf) untuk pratinjau langsung di browser!', 'error');
+            const ext = '.' + (file.name.split('.').pop() || '').toLowerCase();
+            const ALLOWED = ['.pdf', '.xls', '.xlsx', '.jpg', '.jpeg', '.png', '.zip'];
+            if (!ALLOWED.includes(ext)) {
+                showToast('Format yang diizinkan: PDF, Excel (.xls/.xlsx), Gambar (.jpg/.jpeg/.png), ZIP!', 'error');
                 e.target.value = '';
                 return;
             }
@@ -412,7 +415,7 @@ export default function Documents() {
         const newFolder = {
             id: `f_${Date.now()}`,
             name: folderName,
-            color: 'bg-blue-50 border-blue-200 text-[#1A56DB]',
+            color: 'bg-blue-50 border-blue-200 text-[#00529C]',
         };
         setCustomFolders(prev => [...prev, newFolder]);
         showToast(`Folder "${folderName}" berhasil dibuat!`);
@@ -425,12 +428,22 @@ export default function Documents() {
         e.preventDefault();
         const docName = uploadFileName || selectedFile?.name || 'Dokumen_Baru.pdf';
         const projName = uploadProject || (projects[0]?.name || 'Modul Pelaporan OJK Terpusat');
-        const calcSize = selectedFile ? `${(selectedFile.size / (1024 * 1024)).toFixed(1)} MB` : '1.8 MB';
+        const selectedProjectForNaming = projects.find(p => p.name === uploadProject) || projects[0];
+        const calcSize = selectedFile ? formatFileSize(selectedFile.size) : '1.8 MB';
+        const docTypeCode = (DOCUMENT_TYPES[uploadDocType.toUpperCase()] || DOCUMENT_TYPES.LAINNYA).code;
+        const ext = selectedFile ? '.' + (selectedFile.name.split('.').pop() || '').toLowerCase() : '.pdf';
+        const autoName = selectedFile
+            ? generateDocumentName(
+                selectedProjectForNaming?.req_id || selectedProjectForNaming?.id,
+                docTypeCode,
+                selectedProjectForNaming?.title || selectedProjectForNaming?.name
+            ) + ext
+            : docName;
 
         const dataUrl = selectedFile ? URL.createObjectURL(selectedFile) : null;
         addDocument({
             id: Date.now(),
-            file_name: docName,
+            file_name: autoName,
             file_size: calcSize,
             project_name: projName,
             doc_type: uploadDocType,
@@ -439,7 +452,7 @@ export default function Documents() {
             created_at: new Date().toISOString(),
         });
 
-        showToast(`Dokumen "${docName}" berhasil diunggah!`);
+        showToast(`Dokumen "${autoName}" berhasil diunggah!`);
         setIsUploadModalOpen(false);
         setUploadFileName('');
         setSelectedFile(null);
@@ -517,7 +530,7 @@ export default function Documents() {
                             onClick={() => setIsFolderModalOpen(true)}
                             className="px-4 py-2.5 bg-white border border-gray-300 text-gray-700 rounded-xl text-sm font-semibold hover:bg-gray-50 transition-colors flex items-center gap-2 shadow-xs cursor-pointer active:scale-95"
                         >
-                            <FolderOpen size={18} className="text-[#1A56DB]" />
+                            <FolderOpen size={18} className="text-[#00529C]" />
                             Buat Folder
                         </button>
                         <button
@@ -539,7 +552,7 @@ export default function Documents() {
                                 key={item.label}
                                 className="bg-white p-5 rounded-xl shadow-sm border border-gray-100 flex items-start gap-4"
                             >
-                                <div className="w-12 h-12 rounded-xl bg-blue-50 text-[#1A56DB] flex items-center justify-center shrink-0">
+                                <div className="w-12 h-12 rounded-xl bg-blue-50 text-[#00529C] flex items-center justify-center shrink-0">
                                     <Icon size={24} />
                                 </div>
                                 <div>
@@ -561,11 +574,11 @@ export default function Documents() {
                     <div className="flex items-center justify-between mb-4">
                         <div>
                             <h3 className="text-sm font-bold text-gray-800 flex items-center gap-2">
-                                <Folder size={18} className="text-[#1A56DB]" /> Folder &amp; Kategori Dokumen
+                                <Folder size={18} className="text-[#00529C]" /> Folder &amp; Kategori Dokumen
                             </h3>
                             <p className="text-xs text-gray-400 mt-0.5">Pilih folder kategori di bawah untuk memfilter berkas dokumen SDLC</p>
                         </div>
-                        <button onClick={() => setIsFolderModalOpen(true)} className="text-xs font-bold text-[#1A56DB] hover:underline flex items-center gap-1 cursor-pointer">
+                        <button onClick={() => setIsFolderModalOpen(true)} className="text-xs font-bold text-[#00529C] hover:underline flex items-center gap-1 cursor-pointer">
                             <Plus size={14} /> Tambah Folder
                         </button>
                     </div>
@@ -584,7 +597,7 @@ export default function Documents() {
                                 >
                                     <div className="flex items-start justify-between gap-2 mb-3">
                                         <div className={`w-10 h-10 rounded-lg flex items-center justify-center shrink-0 ${
-                                            isActive ? 'bg-white/20 text-white' : 'bg-blue-50 text-[#1A56DB]'
+                                            isActive ? 'bg-white/20 text-white' : 'bg-blue-50 text-[#00529C]'
                                         }`}>
                                             <Icon size={22} />
                                         </div>
@@ -627,20 +640,20 @@ export default function Documents() {
                                     value={searchTerm}
                                     onChange={(e) => setSearchTerm(e.target.value)}
                                     placeholder="Cari file dokumen..."
-                                    className="w-full pl-9 pr-4 py-2 bg-white border border-gray-200 rounded-xl text-sm focus:outline-none focus:border-[#1A56DB] focus:ring-1 focus:ring-[#1A56DB] transition-all"
+                                    className="w-full pl-9 pr-4 py-2 bg-white border border-gray-200 rounded-xl text-sm focus:outline-none focus:border-[#00529C] focus:ring-1 focus:ring-[#00529C] transition-all"
                                 />
                             </div>
                             <div className="flex items-center gap-1 border-l border-gray-200 pl-2">
                                 <button
                                     onClick={() => setViewMode('grid')}
-                                    className={`p-1.5 rounded-md transition-colors ${viewMode === 'grid' ? 'text-[#1A56DB] bg-blue-50' : 'text-gray-400 hover:bg-gray-100'
+                                    className={`p-1.5 rounded-md transition-colors ${viewMode === 'grid' ? 'text-[#00529C] bg-blue-50' : 'text-gray-400 hover:bg-gray-100'
                                         }`}
                                 >
                                     <Grid3X3 size={18} />
                                 </button>
                                 <button
                                     onClick={() => setViewMode('list')}
-                                    className={`p-1.5 rounded-md transition-colors ${viewMode === 'list' ? 'text-[#1A56DB] bg-blue-50' : 'text-gray-400 hover:bg-gray-100'
+                                    className={`p-1.5 rounded-md transition-colors ${viewMode === 'list' ? 'text-[#00529C] bg-blue-50' : 'text-gray-400 hover:bg-gray-100'
                                         }`}
                                 >
                                     <List size={18} />
@@ -670,7 +683,7 @@ export default function Documents() {
                                                 type="checkbox"
                                                 checked={selectedDocs.length === filteredDocs.length && filteredDocs.length > 0}
                                                 onChange={toggleSelectAll}
-                                                className="rounded border-gray-300 text-[#1A56DB] focus:ring-[#1A56DB]"
+                                                className="rounded border-gray-300 text-[#00529C] focus:ring-[#00529C]"
                                             />
                                         </th>
                                         <th className="py-3.5 px-5">NAMA DOKUMEN</th>
@@ -692,14 +705,14 @@ export default function Documents() {
                                                     type="checkbox"
                                                     checked={selectedDocs.includes(doc.id)}
                                                     onChange={() => toggleSelectDoc(doc.id)}
-                                                    className="rounded border-gray-300 text-[#1A56DB] focus:ring-[#1A56DB]"
+                                                    className="rounded border-gray-300 text-[#00529C] focus:ring-[#00529C]"
                                                 />
                                             </td>
                                             <td className="py-4 px-5">
                                                 <div className="flex items-center gap-3">
                                                     {getDocIcon(doc.icon)}
                                                     <div>
-                                                        <p className="font-semibold text-gray-800 group-hover:text-[#1A56DB] transition-colors">
+                                                        <p className="font-semibold text-gray-800 group-hover:text-[#00529C] transition-colors">
                                                             {doc.name}
                                                         </p>
                                                         <p className="text-xs text-gray-400">{doc.size}</p>
@@ -718,7 +731,7 @@ export default function Documents() {
                                                 <div className="flex items-center justify-center gap-1">
                                                     <button
                                                         onClick={() => setPreviewDoc(doc)}
-                                                        className="p-1.5 text-gray-400 hover:text-[#1A56DB] hover:bg-blue-50 rounded-lg transition-colors"
+                                                        className="p-1.5 text-gray-400 hover:text-[#00529C] hover:bg-blue-50 rounded-lg transition-colors"
                                                         title="Lihat Detail"
                                                     >
                                                         <Eye size={18} />
@@ -767,7 +780,7 @@ export default function Documents() {
                                             <p className="text-xs text-gray-400 mt-1">Oleh: {doc.uploadedBy}</p>
                                         </div>
                                         <div className="flex items-center justify-end gap-1 mt-4 pt-3 border-t border-gray-100">
-                                            <button onClick={() => setPreviewDoc(doc)} className="p-1.5 text-gray-400 hover:text-[#1A56DB] hover:bg-blue-50 rounded-lg transition-colors">
+                                            <button onClick={() => setPreviewDoc(doc)} className="p-1.5 text-gray-400 hover:text-[#00529C] hover:bg-blue-50 rounded-lg transition-colors">
                                                 <Eye size={16} />
                                             </button>
                                             <button onClick={() => handleDownload(doc)} className="p-1.5 text-gray-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg transition-colors">
@@ -791,7 +804,7 @@ export default function Documents() {
                     <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-xl animate-scale-up">
                         <div className="flex justify-between items-center mb-4">
                             <h3 className="text-lg font-bold text-gray-800 flex items-center gap-2">
-                                <FolderOpen size={20} className="text-[#1A56DB]" />
+                                <FolderOpen size={20} className="text-[#00529C]" />
                                 Buat Folder Baru
                             </h3>
                             <button onClick={() => setIsFolderModalOpen(false)} className="text-gray-400 hover:text-gray-600 p-1 rounded-lg">
@@ -807,7 +820,7 @@ export default function Documents() {
                                     value={folderName}
                                     onChange={e => setFolderName(e.target.value)}
                                     placeholder="Contoh: Dokumen Spesifikasi Kebutuhan"
-                                    className="w-full px-3.5 py-2.5 border border-gray-200 rounded-xl text-sm outline-none focus:border-[#1A56DB] focus:ring-2 focus:ring-[#1A56DB]/20"
+                                    className="w-full px-3.5 py-2.5 border border-gray-200 rounded-xl text-sm outline-none focus:border-[#00529C] focus:ring-2 focus:ring-[#00529C]/20"
                                 />
                             </div>
                             <div className="flex justify-end gap-3 pt-2">
@@ -836,7 +849,7 @@ export default function Documents() {
                     <div className="bg-white rounded-2xl max-w-lg w-full p-6 shadow-xl animate-scale-up">
                         <div className="flex justify-between items-center mb-4">
                             <h3 className="text-lg font-bold text-gray-800 flex items-center gap-2">
-                                <Upload size={20} className="text-[#1A56DB]" />
+                                <Upload size={20} className="text-[#00529C]" />
                                 Unggah Dokumen SDLC
                             </h3>
                             <button onClick={() => setIsUploadModalOpen(false)} className="text-gray-400 hover:text-gray-600 p-1 rounded-lg">
@@ -849,7 +862,7 @@ export default function Documents() {
                                 <select
                                     value={uploadProject}
                                     onChange={e => setUploadProject(e.target.value)}
-                                    className="w-full px-3.5 py-2.5 border border-gray-200 rounded-xl text-sm outline-none focus:border-[#1A56DB] bg-white"
+                                    className="w-full px-3.5 py-2.5 border border-gray-200 rounded-xl text-sm outline-none focus:border-[#00529C] bg-white"
                                 >
                                     <option value="">Pilih Proyek Terkait...</option>
                                     {projects.map(p => (
@@ -863,7 +876,7 @@ export default function Documents() {
                                 <select
                                     value={uploadDocType}
                                     onChange={e => setUploadDocType(e.target.value)}
-                                    className="w-full px-3.5 py-2.5 border border-gray-200 rounded-xl text-sm outline-none focus:border-[#1A56DB] bg-white"
+                                    className="w-full px-3.5 py-2.5 border border-gray-200 rounded-xl text-sm outline-none focus:border-[#00529C] bg-white"
                                 >
                                     <option value="brd">BRD (Business Requirement Document)</option>
                                     <option value="fsd">FSD (Functional Specification Document)</option>
@@ -880,24 +893,24 @@ export default function Documents() {
                                     type="file"
                                     ref={fileInputRef}
                                     onChange={handleFileChange}
-                                    accept=".pdf,application/pdf"
+                                    accept=".pdf,.xls,.xlsx,.jpg,.jpeg,.png,.zip"
                                     className="hidden"
                                 />
                                 <div
                                     onClick={() => fileInputRef.current?.click()}
-                                    className="border-2 border-dashed border-blue-200 hover:border-[#1A56DB] rounded-xl p-6 text-center cursor-pointer bg-blue-50/30 hover:bg-blue-50/60 transition-colors"
+                                    className="border-2 border-dashed border-blue-200 hover:border-[#00529C] rounded-xl p-6 text-center cursor-pointer bg-blue-50/30 hover:bg-blue-50/60 transition-colors"
                                 >
-                                    <Upload size={32} className="mx-auto text-[#1A56DB] mb-2" />
+                                    <Upload size={32} className="mx-auto text-[#00529C] mb-2" />
                                     {selectedFile ? (
                                         <div>
-                                            <p className="text-sm font-bold text-[#1A56DB]">{selectedFile.name}</p>
-                                            <p className="text-xs text-gray-500">{(selectedFile.size / (1024 * 1024)).toFixed(2)} MB • PDF Terverifikasi</p>
+                                            <p className="text-sm font-bold text-[#00529C]">{selectedFile.name}</p>
+                                            <p className="text-xs text-gray-500">{(selectedFile.size / (1024 * 1024)).toFixed(2)} MB • Dokumen Terverifikasi</p>
                                         </div>
                                     ) : (
                                         <div>
-                                            <p className="text-sm font-semibold text-gray-800">Klik untuk memilih berkas dokumen PDF</p>
+                                            <p className="text-sm font-semibold text-gray-800">Klik untuk memilih berkas dokumen</p>
                                             <p className="text-xs text-blue-600 font-semibold mt-1 bg-white py-1 px-2.5 rounded-lg border border-blue-200 inline-block shadow-2xs">
-                                                Format Resmi SDLC: Berkas PDF (.pdf) untuk Pratinjau Langsung (maks 25 MB)
+                                                PDF, Excel, Gambar, ZIP (Maks 5MB)
                                             </p>
                                         </div>
                                     )}
@@ -911,7 +924,7 @@ export default function Documents() {
                                     value={uploadFileName}
                                     onChange={e => setUploadFileName(e.target.value)}
                                     placeholder="Contoh: BRD_SistemPelaporan_v1.0.pdf"
-                                    className="w-full px-3.5 py-2.5 border border-gray-200 rounded-xl text-sm outline-none focus:border-[#1A56DB]"
+                                    className="w-full px-3.5 py-2.5 border border-gray-200 rounded-xl text-sm outline-none focus:border-[#00529C]"
                                 />
                             </div>
 

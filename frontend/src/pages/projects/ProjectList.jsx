@@ -82,7 +82,7 @@ export default function ProjectList() {
     const uniqueStatuses = [...new Set(projects.map(p => p.status))];
 
     const statCards = [
-        { label: 'Total Proyek', value: stats.total, icon: Folder, iconBg: 'bg-blue-50', iconColor: 'text-[#1A56DB]', border: 'border-blue-100' },
+        { label: 'Total Proyek', value: stats.total, icon: Folder, iconBg: 'bg-blue-50', iconColor: 'text-[#00529C]', border: 'border-blue-100' },
         { label: 'Dalam Pengerjaan', value: stats.inProgress, icon: Bolt, iconBg: 'bg-amber-50', iconColor: 'text-amber-600', border: 'border-amber-100' },
         { label: 'Menunggu Review', value: stats.pendingReview, icon: ClipboardCheck, iconBg: 'bg-purple-50', iconColor: 'text-purple-600', border: 'border-purple-100' },
         { label: 'Selesai', value: stats.completed, icon: CheckCircle, iconBg: 'bg-emerald-50', iconColor: 'text-emerald-600', border: 'border-emerald-100' },
@@ -147,14 +147,14 @@ export default function ProjectList() {
                                 value={searchTerm}
                                 onChange={(e) => { setSearchTerm(e.target.value); setCurrentPage(1); }}
                                 placeholder="Cari ID atau nama proyek..."
-                                className="w-full pl-9 pr-4 py-2.5 bg-white border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-[#1A56DB]/20 focus:border-[#1A56DB] transition-all shadow-sm"
+                                className="w-full pl-9 pr-4 py-2.5 bg-white border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-[#00529C]/20 focus:border-[#00529C] transition-all shadow-sm"
                             />
                         </div>
                         <div className="flex gap-2.5 flex-wrap">
                             <select
                                 value={divisionFilter}
                                 onChange={(e) => { setDivisionFilter(e.target.value); setCurrentPage(1); }}
-                                className="px-3 py-2.5 bg-white border border-gray-200 rounded-xl text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-[#1A56DB]/20 focus:border-[#1A56DB] shadow-sm"
+                                className="px-3 py-2.5 bg-white border border-gray-200 rounded-xl text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-[#00529C]/20 focus:border-[#00529C] shadow-sm"
                             >
                                 <option value="">Semua Divisi</option>
                                 {uniqueDivisions.map(div => <option key={div} value={div}>{div}</option>)}
@@ -162,7 +162,7 @@ export default function ProjectList() {
                             <select
                                 value={typeFilter}
                                 onChange={(e) => { setTypeFilter(e.target.value); setCurrentPage(1); }}
-                                className="px-3 py-2.5 bg-white border border-gray-200 rounded-xl text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-[#1A56DB]/20 focus:border-[#1A56DB] shadow-sm"
+                                className="px-3 py-2.5 bg-white border border-gray-200 rounded-xl text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-[#00529C]/20 focus:border-[#00529C] shadow-sm"
                             >
                                 <option value="">Semua Tipe</option>
                                 <option value="RBB">RBB (Wajib Selesai)</option>
@@ -171,7 +171,7 @@ export default function ProjectList() {
                             <select
                                 value={statusFilter}
                                 onChange={(e) => { setStatusFilter(e.target.value); setCurrentPage(1); }}
-                                className="px-3 py-2.5 bg-white border border-gray-200 rounded-xl text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-[#1A56DB]/20 focus:border-[#1A56DB] shadow-sm"
+                                className="px-3 py-2.5 bg-white border border-gray-200 rounded-xl text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-[#00529C]/20 focus:border-[#00529C] shadow-sm"
                             >
                                 <option value="">Semua Status</option>
                                 {uniqueStatuses.map(s => <option key={s} value={s}>{s}</option>)}
@@ -179,13 +179,13 @@ export default function ProjectList() {
                             <select
                                 value={sortBy}
                                 onChange={(e) => setSortBy(e.target.value)}
-                                className="px-3 py-2.5 bg-white border border-gray-200 rounded-xl text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-[#1A56DB]/20 focus:border-[#1A56DB] shadow-sm"
+                                className="px-3 py-2.5 bg-white border border-gray-200 rounded-xl text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-[#00529C]/20 focus:border-[#00529C] shadow-sm"
                             >
                                 <option value="newest">Terbaru</option>
                                 <option value="oldest">Terlama</option>
                                 <option value="id_asc">ID (A-Z)</option>
                             </select>
-                            <button className="p-2.5 bg-white border border-gray-200 rounded-xl text-gray-500 hover:text-[#1A56DB] hover:border-[#1A56DB]/30 transition-colors shadow-sm">
+                            <button className="p-2.5 bg-white border border-gray-200 rounded-xl text-gray-500 hover:text-[#00529C] hover:border-[#00529C]/30 transition-colors shadow-sm">
                                 <Filter size={16} />
                             </button>
                         </div>
@@ -230,11 +230,11 @@ export default function ProjectList() {
                                                 className="group hover:bg-blue-50/40 transition-colors cursor-pointer"
                                             >
                                                 <td className="pl-5 pr-4 py-4">
-                                                    <span className="font-bold text-[#1A56DB] bg-blue-50 px-2.5 py-1 rounded-lg text-xs border border-blue-100/80">{project.reqId || project.id}</span>
+                                                    <span className="font-bold text-[#00529C] bg-blue-50 px-2.5 py-1 rounded-lg text-xs border border-blue-100/80">{project.reqId || project.id}</span>
                                                 </td>
                                                 <td className="px-4 py-4">
                                                     <div>
-                                                        <div className="font-semibold text-gray-800 group-hover:text-[#1A56DB] transition-colors truncate">{project.name}</div>
+                                                        <div className="font-semibold text-gray-800 group-hover:text-[#00529C] transition-colors truncate">{project.name}</div>
                                                         <div className="text-xs text-gray-400 truncate mt-0.5 font-normal">{project.description}</div>
                                                     </div>
                                                 </td>
@@ -247,7 +247,7 @@ export default function ProjectList() {
                                                 <td className="px-3 py-4">
                                                     {project.pm ? (
                                                         <div className="flex items-center gap-2">
-                                                            <div className="w-7 h-7 rounded-full bg-gradient-to-br from-[#1A56DB] to-indigo-600 text-white flex items-center justify-center text-[10px] font-bold shadow-sm shrink-0">
+                                                            <div className="w-7 h-7 rounded-full bg-gradient-to-br from-[#00529C] to-indigo-600 text-white flex items-center justify-center text-[10px] font-bold shadow-sm shrink-0">
                                                                 {project.pm.initial || (project.pm.name || 'PM').substring(0, 2).toUpperCase()}
                                                             </div>
                                                             <span className="text-gray-700 font-medium truncate">{project.pm.name}</span>
@@ -279,7 +279,7 @@ export default function ProjectList() {
                                                             e.stopPropagation();
                                                             handleNavigate();
                                                         }}
-                                                        className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-50 hover:bg-blue-100 text-[#1A56DB] text-xs font-bold rounded-lg border border-[#1A56DB]/30 transition-all shadow-sm active:scale-95"
+                                                        className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-50 hover:bg-blue-100 text-[#00529C] text-xs font-bold rounded-lg border border-[#00529C]/30 transition-all shadow-sm active:scale-95"
                                                     >
                                                         <span>Detail</span>
                                                         <ArrowUpRight size={14} />
@@ -292,7 +292,7 @@ export default function ProjectList() {
                                     <tr>
                                         <td colSpan="7" className="px-6 py-14 text-center">
                                             <div className="flex flex-col items-center gap-2">
-                                                <div className="w-14 h-14 bg-blue-50 text-[#1A56DB] rounded-2xl flex items-center justify-center mb-1">
+                                                <div className="w-14 h-14 bg-blue-50 text-[#00529C] rounded-2xl flex items-center justify-center mb-1">
                                                     <Folder size={28} />
                                                 </div>
                                                 <p className="text-gray-800 font-bold text-base">Belum Ada Proyek</p>
@@ -334,7 +334,7 @@ export default function ProjectList() {
                                     if (pageNum > 0 && pageNum <= totalPages) {
                                         return (
                                             <button key={pageNum} onClick={() => goToPage(pageNum)}
-                                                className={`w-8 h-8 rounded-lg text-sm font-semibold flex items-center justify-center transition-colors ${pageNum === currentPage ? 'bg-[#1A56DB] text-white shadow-sm' : 'border border-gray-200 text-gray-600 hover:bg-gray-100'}`}>
+                                                className={`w-8 h-8 rounded-lg text-sm font-semibold flex items-center justify-center transition-colors ${pageNum === currentPage ? 'bg-[#00529C] text-white shadow-sm' : 'border border-gray-200 text-gray-600 hover:bg-gray-100'}`}>
                                                 {pageNum}
                                             </button>
                                         );

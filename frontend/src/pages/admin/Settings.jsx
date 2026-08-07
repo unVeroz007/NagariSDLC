@@ -74,7 +74,7 @@ const ProfileSettings = ({ user, profile, setProfile, handleSave }) => {
                 {!isEditing ? (
                     <button
                         onClick={() => setIsEditing(true)}
-                        className="px-4 py-2 bg-[#1A56DB] text-white rounded-lg text-sm font-medium hover:bg-[#1349c2] transition-colors"
+                        className="px-4 py-2 bg-[#00529C] text-white rounded-lg text-sm font-medium hover:bg-[#004080] transition-colors"
                     >
                         Edit Profil
                     </button>
@@ -116,7 +116,7 @@ const ProfileSettings = ({ user, profile, setProfile, handleSave }) => {
                             name="name"
                             value={formData.name}
                             onChange={handleChange}
-                            className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#1A56DB] focus:border-transparent"
+                            className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#00529C] focus:border-transparent"
                         />
                     ) : (
                         <p className="px-4 py-2 bg-gray-50 rounded-lg border border-gray-200 text-gray-700">{formData.name}</p>
@@ -134,7 +134,7 @@ const ProfileSettings = ({ user, profile, setProfile, handleSave }) => {
                             name="phone"
                             value={formData.phone}
                             onChange={handleChange}
-                            className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#1A56DB] focus:border-transparent"
+                            className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#00529C] focus:border-transparent"
                         />
                     ) : (
                         <p className="px-4 py-2 bg-gray-50 rounded-lg border border-gray-200 text-gray-700">{formData.phone}</p>
@@ -211,7 +211,7 @@ const SecuritySettings = () => {
                             name="current"
                             value={password.current}
                             onChange={handlePasswordChange}
-                            className="w-full px-4 py-2 pr-10 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#1A56DB] focus:border-transparent"
+                            className="w-full px-4 py-2 pr-10 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#00529C] focus:border-transparent"
                             required
                         />
                         <button
@@ -231,7 +231,7 @@ const SecuritySettings = () => {
                             name="new"
                             value={password.new}
                             onChange={handlePasswordChange}
-                            className="w-full px-4 py-2 pr-10 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#1A56DB] focus:border-transparent"
+                            className="w-full px-4 py-2 pr-10 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#00529C] focus:border-transparent"
                             required
                             minLength="8"
                         />
@@ -253,7 +253,7 @@ const SecuritySettings = () => {
                             name="confirm"
                             value={password.confirm}
                             onChange={handlePasswordChange}
-                            className="w-full px-4 py-2 pr-10 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#1A56DB] focus:border-transparent"
+                            className="w-full px-4 py-2 pr-10 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#00529C] focus:border-transparent"
                             required
                         />
                         <button
@@ -389,12 +389,12 @@ const AppearanceSettings = () => {
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4 max-w-2xl">
                 {/* Light Theme */}
                 <div
-                    className={`border-2 rounded-xl p-4 cursor-pointer transition-all ${theme === 'light' ? 'border-[#1A56DB] shadow-md' : 'border-gray-200 hover:border-gray-300'
+                    className={`border-2 rounded-xl p-4 cursor-pointer transition-all ${theme === 'light' ? 'border-[#00529C] shadow-md' : 'border-gray-200 hover:border-gray-300'
                         }`}
                     onClick={() => setTheme('light')}
                 >
                     {theme === 'light' && (
-                        <div className="text-[#1A56DB] float-right">
+                        <div className="text-[#00529C] float-right">
                             <CheckCircle size={20} />
                         </div>
                     )}
@@ -410,7 +410,7 @@ const AppearanceSettings = () => {
 
                 {/* Dark Theme */}
                 <div
-                    className={`border-2 rounded-xl p-4 cursor-pointer transition-all ${theme === 'dark' ? 'border-[#1A56DB] shadow-md' : 'border-gray-200 hover:border-gray-300'
+                    className={`border-2 rounded-xl p-4 cursor-pointer transition-all ${theme === 'dark' ? 'border-[#00529C] shadow-md' : 'border-gray-200 hover:border-gray-300'
                         }`}
                     onClick={() => setTheme('dark')}
                 >
@@ -426,7 +426,7 @@ const AppearanceSettings = () => {
 
                 {/* System Theme */}
                 <div
-                    className={`border-2 rounded-xl p-4 cursor-pointer transition-all ${theme === 'system' ? 'border-[#1A56DB] shadow-md' : 'border-gray-200 hover:border-gray-300'
+                    className={`border-2 rounded-xl p-4 cursor-pointer transition-all ${theme === 'system' ? 'border-[#00529C] shadow-md' : 'border-gray-200 hover:border-gray-300'
                         }`}
                     onClick={() => setTheme('system')}
                 >
@@ -484,7 +484,7 @@ const SystemSettings = () => {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6 max-w-3xl">
                 <div className="p-4 bg-gray-50 rounded-lg border border-gray-200">
                     <div className="flex items-center gap-3">
-                        <Database size={20} className="text-[#1A56DB]" />
+                        <Database size={20} className="text-[#00529C]" />
                         <div>
                             <p className="font-semibold text-gray-800">Total Proyek</p>
                             <p className="text-2xl font-bold text-gray-800">{projects.length}</p>
@@ -493,7 +493,7 @@ const SystemSettings = () => {
                 </div>
                 <div className="p-4 bg-gray-50 rounded-lg border border-gray-200">
                     <div className="flex items-center gap-3">
-                        <Users size={20} className="text-[#1A56DB]" />
+                        <Users size={20} className="text-[#00529C]" />
                         <div>
                             <p className="font-semibold text-gray-800">Total Pengguna</p>
                             <p className="text-2xl font-bold text-gray-800">47</p>
@@ -502,7 +502,7 @@ const SystemSettings = () => {
                 </div>
                 <div className="p-4 bg-gray-50 rounded-lg border border-gray-200">
                     <div className="flex items-center gap-3">
-                        <Clock size={20} className="text-[#1A56DB]" />
+                        <Clock size={20} className="text-[#00529C]" />
                         <div>
                             <p className="font-semibold text-gray-800">Uptime Sistem</p>
                             <p className="text-2xl font-bold text-gray-800">99.8%</p>
@@ -511,7 +511,7 @@ const SystemSettings = () => {
                 </div>
                 <div className="p-4 bg-gray-50 rounded-lg border border-gray-200">
                     <div className="flex items-center gap-3">
-                        <Calendar size={20} className="text-[#1A56DB]" />
+                        <Calendar size={20} className="text-[#00529C]" />
                         <div>
                             <p className="font-semibold text-gray-800">Versi Aplikasi</p>
                             <p className="text-2xl font-bold text-gray-800">v2.4.0</p>
@@ -589,7 +589,7 @@ export default function Settings() {
                 <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
                     <div>
                         <h1 className="text-2xl font-bold text-gray-800 flex items-center gap-2">
-                            <SettingsIcon size={24} className="text-[#1A56DB]" />
+                            <SettingsIcon size={24} className="text-[#00529C]" />
                             Pengaturan Sistem
                         </h1>
                         <p className="text-sm text-gray-500 mt-1">
@@ -613,7 +613,7 @@ export default function Settings() {
                                 key={tab.id}
                                 onClick={() => setActiveTab(tab.id)}
                                 className={`px-6 py-3 text-sm font-medium border-b-2 transition-colors whitespace-nowrap flex items-center gap-2 ${isActive
-                                    ? 'border-[#1A56DB] text-[#1A56DB]'
+                                    ? 'border-[#00529C] text-[#00529C]'
                                     : 'border-transparent text-gray-500 hover:text-gray-700'
                                     }`}
                             >

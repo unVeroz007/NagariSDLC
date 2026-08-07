@@ -66,20 +66,30 @@ export default function WorkspaceQA() {
 
     // Tab 1 (Disposisi): proyek dari PM yang sudah diajukan ke QA Lead untuk ditunjuk testernya
     const qaProjects = useMemo(() => {
-        return (projects || []).filter(p => {
+        let list = (projects || []).filter(p => {
             const qaSt = String(p.qaStatus || p.qa_status || '').toUpperCase();
             const st = String(p.status || '').toUpperCase();
             return (qaSt === 'SUBMITTED' || st === 'READY_FOR_QA') && qaSt !== 'IN_PROGRESS' && qaSt !== 'PASSED';
         });
-    }, [projects]);
+        const isPrivileged = user?.role && ['super_admin', 'lead_group', 'head_of_it', 'development_lead'].includes(user.role);
+        if (!isPrivileged && user?.name) {
+            list = list.filter(p => String(p.qaAssignee || '').toLowerCase().includes(user.name.toLowerCase()));
+        }
+        return list;
+    }, [projects, user]);
 
     // Tab 2 (Review Lead): proyek yang laporan Analis-nya sudah masuk (qaStatus === 'REVIEW')
     const reviewLeadProjects = useMemo(() => {
-        return (projects || []).filter(p => {
+        let list = (projects || []).filter(p => {
             const qaSt = String(p.qaStatus || p.qa_status || '').toUpperCase();
             return qaSt === 'REVIEW';
         });
-    }, [projects]);
+        const isPrivileged = user?.role && ['super_admin', 'lead_group', 'head_of_it', 'development_lead'].includes(user.role);
+        if (!isPrivileged && user?.name) {
+            list = list.filter(p => String(p.qaAssignee || '').toLowerCase().includes(user.name.toLowerCase()));
+        }
+        return list;
+    }, [projects, user]);
 
     const activeList = activeTab === 'DISPOSITION' ? qaProjects : reviewLeadProjects;
 

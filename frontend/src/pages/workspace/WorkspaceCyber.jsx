@@ -64,20 +64,30 @@ export default function WorkspaceCyber() {
 
     // Tab 1 (Disposisi): proyek yang sudah diajukan PM ke Cyber Lead
     const cyberProjects = useMemo(() => {
-        return (projects || []).filter(p => {
+        let list = (projects || []).filter(p => {
             const cyberSt = String(p.cyberStatus || p.cyber_status || '').toUpperCase();
             const st = String(p.status || '').toUpperCase();
             return (cyberSt === 'SUBMITTED' || st === 'CYBER_IN_PROGRESS') && cyberSt !== 'IN_PROGRESS' && cyberSt !== 'PASSED';
         });
-    }, [projects]);
+        const isPrivileged = user?.role && ['super_admin', 'lead_group', 'head_of_it', 'development_lead'].includes(user.role);
+        if (!isPrivileged && user?.name) {
+            list = list.filter(p => String(p.cyberAssignee || '').toLowerCase().includes(user.name.toLowerCase()));
+        }
+        return list;
+    }, [projects, user]);
 
     // Tab 2 (Review Lead): laporan pentest dari Pentester sudah masuk (cyberStatus === 'REVIEW')
     const reviewLeadProjects = useMemo(() => {
-        return (projects || []).filter(p => {
+        let list = (projects || []).filter(p => {
             const cyberSt = String(p.cyberStatus || p.cyber_status || '').toUpperCase();
             return cyberSt === 'REVIEW';
         });
-    }, [projects]);
+        const isPrivileged = user?.role && ['super_admin', 'lead_group', 'head_of_it', 'development_lead'].includes(user.role);
+        if (!isPrivileged && user?.name) {
+            list = list.filter(p => String(p.cyberAssignee || '').toLowerCase().includes(user.name.toLowerCase()));
+        }
+        return list;
+    }, [projects, user]);
 
     const activeList = activeTab === 'DISPOSITION' ? cyberProjects : reviewLeadProjects;
     const [selectedProject, setSelectedProject] = useState(null);

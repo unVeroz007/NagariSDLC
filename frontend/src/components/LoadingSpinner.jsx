@@ -17,7 +17,7 @@ export default function LoadingSpinner({ size = 'md', text = 'Memuat data...', i
     return (
         <div className="flex flex-col items-center justify-center py-12">
             <div
-                className={`${sizes[size]} border-gray-200 border-t-[#1A56DB] rounded-full animate-spin`}
+                className={`${sizes[size]} border-gray-200 border-t-[#00529C] rounded-full animate-spin`}
             ></div>
             {text && <p className="mt-4 text-gray-500 text-sm">{text}</p>}
         </div>

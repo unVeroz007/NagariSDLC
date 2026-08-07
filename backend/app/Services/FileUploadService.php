@@ -25,6 +25,7 @@ class FileUploadService
             'file_name' => $originalName,
             'file_path' => $path,
             'file_size' => $size,
+            'mime_type' => $file->getMimeType(),
         ];
     }
 }

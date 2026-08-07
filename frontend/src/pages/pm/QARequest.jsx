@@ -5,6 +5,7 @@ import { useNotifications } from '../../contexts/NotificationContext';
 import LoadingSpinner from '../../components/LoadingSpinner';
 import DocumentViewerModal from '../../components/DocumentViewerModal';
 import toast from 'react-hot-toast';
+import { generateDocumentName, DOCUMENT_TYPES, formatFileSize } from '../../utils/documentNaming';
 
 import { useNavigate } from 'react-router-dom';
 import RBBBadge from '../../components/RBBBadge';
@@ -79,6 +80,15 @@ export default function QARequest() {
       return isEligibleStage && !isAlreadySubmittedQA;
     });
 
+    const isPrivileged = user?.role && ['super_admin', 'lead_group', 'head_of_it', 'development_lead'].includes(user.role);
+    if (!isPrivileged && user?.id) {
+      const pmId = user.id;
+      list = list.filter(p => {
+        const pmObjId = typeof p.pm === 'object' ? p.pm?.id : null;
+        return pmObjId && pmObjId === pmId;
+      });
+    }
+
     if (searchTerm.trim()) {
       const term = searchTerm.toLowerCase();
       return list.filter(p =>
@@ -89,7 +99,7 @@ export default function QARequest() {
     }
 
     return list;
-  }, [projects, searchTerm]);
+  }, [projects, user, searchTerm]);
 
 
 
@@ -141,10 +151,17 @@ export default function QARequest() {
     const newFiles = validFiles.map((file) => {
       const url = URL.createObjectURL(file);
       saveFileToStore(file.name, url);
+      const ext = file.name.split('.').pop() || '';
+      const autoName = generateDocumentName(
+        selectedProject?.req_id || selectedProject?.id,
+        DOCUMENT_TYPES.QA_REPORT.code,
+        selectedProject?.title || selectedProject?.name
+      ) + '.' + ext;
       return {
-        name: file.name,
-        size: (file.size / 1024 / 1024).toFixed(1) + ' MB',
-        type: file.type || 'Dokumen Tambahan Pengajuan QA',
+        name: autoName,
+        originalName: file.name,
+        size: formatFileSize(file.size),
+        type: 'QA_REPORT',
         rawFile: file,
         url: url,
       };
@@ -457,13 +474,14 @@ export default function QARequest() {
                   <CloudUpload size={32} className="text-blue-600 mx-auto mb-2" />
                   <p className="text-xs font-bold text-gray-700">Tarik &amp; lepas file di sini, atau klik untuk memilih file</p>
                   <p className="text-[10px] text-gray-400 mt-1">Format dukungan: PDF, DOCX, XLSX, JSON (Maksimal 5 MB)</p>
-                  <input
+<input
                     type="file"
                     multiple
+                    accept=".pdf,.xls,.xlsx,.jpg,.jpeg,.png,.zip"
                     onChange={handleFileUpload}
                     className="hidden"
                     id="qa-file-input"
-                  />
+                />
                   <label
                     htmlFor="qa-file-input"
                     className="mt-3 inline-block px-4 py-2 bg-white border border-gray-300 hover:border-blue-600 text-gray-700 font-bold rounded-xl text-xs cursor-pointer shadow-xs transition-all"

@@ -68,8 +68,8 @@ export default function Dashboard() {
                 trendUp: true,
                 icon: Briefcase,
                 iconBg: 'bg-blue-50',
-                iconColor: 'text-[#1A56DB]',
-                accentColor: 'from-[#1A56DB]/10 to-transparent',
+                iconColor: 'text-[#00529C]',
+                accentColor: 'from-[#00529C]/10 to-transparent',
                 borderColor: 'border-blue-100',
                 onClick: () => navigate('/projects'),
             },
@@ -130,7 +130,7 @@ export default function Dashboard() {
         });
 
         const phaseList = [
-            { label: 'Fase 1: Inisiasi & Analisis', count: counts[1], color: 'bg-[#1A56DB]' },
+            { label: 'Fase 1: Inisiasi & Analisis', count: counts[1], color: 'bg-[#00529C]' },
             { label: 'Fase 2: Pengembangan', count: counts[2], color: 'bg-indigo-500' },
             { label: 'Fase 3: Pengujian QA & Cyber', count: counts[3], color: 'bg-purple-500' },
             { label: 'Fase 4: Rilis & Quality Gate', count: counts[4], color: 'bg-emerald-500' },
@@ -256,7 +256,7 @@ export default function Dashboard() {
             { label: 'Workspace Analyst', icon: FileEdit, action: () => navigate('/workspace/analyst'), color: 'bg-blue-600' },
         ];
         if (role === 'qa_lead') return [
-            { label: 'Workspace QA', icon: Bug, action: () => navigate('/workspace/qa'), color: 'bg-[#1A56DB]' },
+            { label: 'Workspace QA', icon: Bug, action: () => navigate('/workspace/qa'), color: 'bg-[#00529C]' },
             { label: 'Tugas QA Saya', icon: CheckCircle, action: () => navigate('/my-tasks/qa'), color: 'bg-indigo-600' },
         ];
         if (role === 'cyber_team') return [
@@ -295,13 +295,13 @@ export default function Dashboard() {
             iconBg: n.type === 'success' ? 'bg-emerald-50 text-emerald-600' :
                 n.type === 'warning' ? 'bg-amber-50 text-amber-600' :
                     n.type === 'danger' ? 'bg-red-50 text-red-500' :
-                        'bg-blue-50 text-[#1A56DB]',
+                        'bg-blue-50 text-[#00529C]',
             text: <><span className="font-semibold">{n.title}</span> {n.message}</>,
             time: formatTimeAgo(n.createdAt),
             dot: n.type === 'success' ? 'bg-emerald-500' :
                 n.type === 'warning' ? 'bg-amber-500' :
                     n.type === 'danger' ? 'bg-red-500' :
-                        'bg-[#1A56DB]',
+                        'bg-[#00529C]',
         }));
     }, [notifications]);
 
@@ -554,7 +554,7 @@ export default function Dashboard() {
                         <h3 className="text-base font-bold text-gray-800">Daftar Proyek Prioritas</h3>
                         <p className="text-xs text-gray-400 mt-0.5">Proyek yang memerlukan perhatian segera</p>
                     </div>
-                    <button onClick={() => navigate('/projects')} className="flex items-center gap-1.5 text-sm font-semibold text-[#1A56DB] hover:text-[#1A56DB]/80 hover:bg-blue-50 px-3 py-1.5 rounded-lg transition-all">
+                    <button onClick={() => navigate('/projects')} className="flex items-center gap-1.5 text-sm font-semibold text-[#00529C] hover:text-[#00529C]/80 hover:bg-blue-50 px-3 py-1.5 rounded-lg transition-all">
                         Lihat Semua <ArrowRight size={15} />
                     </button>
                 </div>
@@ -580,7 +580,7 @@ export default function Dashboard() {
                             {priorityProjects.map((proj, idx) => (
                                 <tr key={idx} className="table-row-hover group">
                                     <td className="py-4 px-5">
-                                        <p className="font-semibold text-gray-800 group-hover:text-[#1A56DB] transition-colors truncate">{proj.name}</p>
+                                        <p className="font-semibold text-gray-800 group-hover:text-[#00529C] transition-colors truncate">{proj.name}</p>
                                         <p className="text-xs text-gray-400 mt-0.5">{proj.id}</p>
                                     </td>
                                     <td className="py-4 px-4">
@@ -601,7 +601,7 @@ export default function Dashboard() {
                                     <td className="py-4 px-5 text-center">
                                         <button
                                             onClick={() => handleTrackProject(proj.id)}
-                                            className="text-xs font-semibold text-[#1A56DB] bg-blue-50 hover:bg-blue-100 px-3.5 py-1.5 rounded-lg border border-[#1A56DB]/30 transition-all shadow-sm"
+                                            className="text-xs font-semibold text-[#00529C] bg-blue-50 hover:bg-blue-100 px-3.5 py-1.5 rounded-lg border border-[#00529C]/30 transition-all shadow-sm"
                                         >
                                             Lacak
                                         </button>

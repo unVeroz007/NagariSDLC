@@ -31,6 +31,7 @@ import LoadingSpinner from '../../components/LoadingSpinner';
 import EmptyState from '../../components/EmptyState';
 import DocumentViewerModal from '../../components/DocumentViewerModal';
 import toast from 'react-hot-toast';
+import { generateDocumentName, DOCUMENT_TYPES, formatFileSize } from '../../utils/documentNaming';
 
 export default function WorkspaceAnalyst() {
     const { user } = useAuth();
@@ -56,6 +57,8 @@ export default function WorkspaceAnalyst() {
         if (selectedAnalystFilter === 'MY_PROJECTS') {
             const myName = user?.name || '';
             list = list.filter(p => {
+                const analystId = p.analyst?.id || (typeof p.assignedAnalyst === 'object' ? p.assignedAnalyst?.id : null);
+                if (analystId && user?.id) return analystId === user.id;
                 const analystName = typeof p.assignedAnalyst === 'object'
                     ? (p.assignedAnalyst?.name || '')
                     : String(p.assignedAnalyst || p.analyst || '');
@@ -96,21 +99,27 @@ export default function WorkspaceAnalyst() {
                 return;
             }
             const objectUrl = URL.createObjectURL(file);
+            const autoDocName = generateDocumentName(
+                selectedProject?.req_id || selectedProject?.id,
+                DOCUMENT_TYPES.FSD.code,
+                selectedProject?.title || selectedProject?.name
+            );
             const fileObj = {
-                name: file.name,
-                size: (file.size / 1024 / 1024).toFixed(1) + ' MB',
+                name: autoDocName,
+                originalName: file.name,
+                size: formatFileSize(file.size),
                 type: 'fsd',
                 doc_type: 'fsd',
                 url: objectUrl,
                 rawFile: file,
                 uploadedAt: new Date().toISOString()
             };
-            saveFileToStore(file.name, objectUrl);
+            saveFileToStore(autoDocName, objectUrl);
             if (selectedProject?.id) {
                 saveFileToStore(`fsd_${selectedProject.id}`, objectUrl);
             }
             setUploadedFile(fileObj);
-            toast.success(`Dokumen FSD "${file.name}" berhasil diunggah.`);
+            toast.success(`Dokumen FSD "${autoDocName}" berhasil diunggah.`);
         }
     };
 
@@ -312,7 +321,7 @@ export default function WorkspaceAnalyst() {
             {/* Top Filter Control Bar */}
             <div className="bg-white border border-gray-200 rounded-2xl p-4 mb-6 shadow-2xs flex flex-col sm:flex-row items-center justify-between gap-4">
                 <div className="flex items-center gap-2">
-                    <Filter size={18} className="text-[#1A56DB]" />
+                    <Filter size={18} className="text-[#00529C]" />
                     <span className="text-sm font-bold text-gray-800">Filter Antrean Proyek:</span>
                 </div>
 
@@ -333,7 +342,7 @@ export default function WorkspaceAnalyst() {
                             onClick={() => setSelectedAnalystFilter('MY_PROJECTS')}
                             className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
                                 selectedAnalystFilter === 'MY_PROJECTS'
-                                    ? 'bg-[#1A56DB] text-white shadow-xs'
+                                    ? 'bg-[#00529C] text-white shadow-xs'
                                     : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
                             }`}
                         >
@@ -344,7 +353,7 @@ export default function WorkspaceAnalyst() {
                     <select
                         value={['ALL', 'MY_PROJECTS'].includes(selectedAnalystFilter) ? '' : selectedAnalystFilter}
                         onChange={(e) => setSelectedAnalystFilter(e.target.value || 'ALL')}
-                        className="px-3 py-1.5 rounded-xl text-xs font-semibold border border-gray-200 bg-white text-gray-700 outline-none focus:border-[#1A56DB]"
+                        className="px-3 py-1.5 rounded-xl text-xs font-semibold border border-gray-200 bg-white text-gray-700 outline-none focus:border-[#00529C]"
                     >
                         <option value="">-- Filter Per System Analyst --</option>
                         <option value="Citra Kirana">Citra Kirana</option>
@@ -364,7 +373,7 @@ export default function WorkspaceAnalyst() {
                             <h2 className="text-base font-bold text-gray-800">Tugas Review</h2>
                             <p className="text-xs text-gray-500 mt-0.5">{reviewQueue.length} proyek dalam antrean</p>
                         </div>
-                        <button className="p-2 text-gray-400 hover:text-[#1A56DB] hover:bg-blue-50 rounded-lg transition-colors">
+                        <button className="p-2 text-gray-400 hover:text-[#00529C] hover:bg-blue-50 rounded-lg transition-colors">
                             <Filter size={16} />
                         </button>
                     </div>
@@ -375,12 +384,12 @@ export default function WorkspaceAnalyst() {
                                 onClick={() => setSelectedProject(project)}
                                 className={`p-4 rounded-xl cursor-pointer transition-all relative overflow-hidden group ${
                                     selectedProject?.id === project.id
-                                        ? 'bg-white border-2 border-[#1A56DB] shadow-md'
-                                        : 'bg-white border border-gray-200 hover:border-[#1A56DB]/40 hover:shadow-md'
+                                        ? 'bg-white border-2 border-[#00529C] shadow-md'
+                                        : 'bg-white border border-gray-200 hover:border-[#00529C]/40 hover:shadow-md'
                                 }`}
                             >
                                 {selectedProject?.id === project.id && (
-                                    <div className="absolute left-0 top-0 w-1 h-full bg-[#1A56DB] rounded-l-xl" />
+                                    <div className="absolute left-0 top-0 w-1 h-full bg-[#00529C] rounded-l-xl" />
                                 )}
                                 <div className="flex justify-between items-start mb-2.5">
                                     <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold border ${getStatusBadge(project.status)}`}>
@@ -392,7 +401,7 @@ export default function WorkspaceAnalyst() {
                                     </span>
                                 </div>
                                 <div className="mb-2"><RBBBadge type={project.type} deadline={project.rbbDeadline} /></div>
-                                <h4 className="font-semibold text-gray-800 text-sm mb-1 group-hover:text-[#1A56DB] transition-colors">{project.name}</h4>
+                                <h4 className="font-semibold text-gray-800 text-sm mb-1 group-hover:text-[#00529C] transition-colors">{project.name}</h4>
                                 <p className="text-xs text-gray-500 mb-2.5">Peminta: {project.division}</p>
                                 {(project.leadNote || project.leadNotes || project.notes || project.dispositionNotes || project.assignmentNote) && (
                                     <div className="bg-amber-50/90 p-2.5 rounded-lg border border-amber-200 text-xs">
@@ -432,7 +441,7 @@ export default function WorkspaceAnalyst() {
                                 <h2 className="text-2xl font-bold text-gray-800">{selectedProject.name}</h2>
                             </div>
                             <div className="flex items-center gap-2">
-                                <span className="text-xs bg-blue-50 text-[#1A56DB] font-bold px-3 py-1 rounded-lg border border-blue-100">
+                                <span className="text-xs bg-blue-50 text-[#00529C] font-bold px-3 py-1 rounded-lg border border-blue-100">
                                     {selectedProject.id}
                                 </span>
                             </div>
@@ -468,7 +477,7 @@ export default function WorkspaceAnalyst() {
                         {/* Documents Inisiasi Peminta (Dynamic & Interactive) */}
                         <div className="mb-6 border-b border-gray-200 pb-6">
                             <h3 className="text-lg font-semibold text-gray-800 mb-3 flex items-center gap-2">
-                                <FileText size={20} className="text-[#1A56DB]" />
+                                <FileText size={20} className="text-[#00529C]" />
                                 Dokumen Inisiasi Peminta
                             </h3>
                             <div className="space-y-3">
@@ -492,7 +501,7 @@ export default function WorkspaceAnalyst() {
                                             <button
                                                 type="button"
                                                 onClick={() => setPreviewDoc(doc)}
-                                                className="px-3.5 py-2 border border-[#1A56DB] text-[#1A56DB] rounded-xl font-semibold hover:bg-blue-50 transition-colors flex items-center gap-1.5 text-xs cursor-pointer active:scale-95"
+                                                className="px-3.5 py-2 border border-[#00529C] text-[#00529C] rounded-xl font-semibold hover:bg-blue-50 transition-colors flex items-center gap-1.5 text-xs cursor-pointer active:scale-95"
                                             >
                                                 <Eye size={15} />
                                                 View &amp; Baca
@@ -523,7 +532,7 @@ export default function WorkspaceAnalyst() {
                                     <select
                                         value={decision}
                                         onChange={(e) => setDecision(e.target.value)}
-                                        className="w-full px-4 py-2.5 bg-white border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#1A56DB] focus:border-[#1A56DB] appearance-none transition-all"
+                                        className="w-full px-4 py-2.5 bg-white border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#00529C] focus:border-[#00529C] appearance-none transition-all"
                                     >
                                         <option value="">Pilih Keputusan...</option>
                                         <option value="Disetujui (Layak Develop)">Disetujui (Layak Develop)</option>
@@ -551,7 +560,7 @@ export default function WorkspaceAnalyst() {
                                         onChange={(e) => setNotes(e.target.value)}
                                         placeholder="Masukkan ringkasan analisis teknis, temuan, atau instruksi penyesuaian..."
                                         rows={4}
-                                        className="w-full px-4 py-2.5 bg-white border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#1A56DB] focus:border-[#1A56DB] transition-all resize-none"
+                                        className="w-full px-4 py-2.5 bg-white border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#00529C] focus:border-[#00529C] transition-all resize-none"
                                     />
                                 </div>
                             </div>
@@ -560,21 +569,21 @@ export default function WorkspaceAnalyst() {
                         {/* Upload FSD */}
                         <div className="bg-gray-50 rounded-xl p-6 border border-gray-200">
                             <h3 className="text-lg font-semibold text-gray-800 mb-4 flex items-center gap-2">
-                                <Upload size={20} className="text-[#1A56DB]" />
+                                <Upload size={20} className="text-[#00529C]" />
                                 Unggah Dokumen Analisis Teknis (FSD)
                             </h3>
 
                             <div
                                 onClick={() => fileInputRef.current?.click()}
-                                className="border-2 border-dashed border-gray-300 hover:border-[#1A56DB] rounded-xl p-8 flex flex-col items-center justify-center bg-white hover:bg-blue-50/40 transition-all cursor-pointer mb-4 group"
+                                className="border-2 border-dashed border-gray-300 hover:border-[#00529C] rounded-xl p-8 flex flex-col items-center justify-center bg-white hover:bg-blue-50/40 transition-all cursor-pointer mb-4 group"
                             >
-                                <CloudUpload size={40} className="text-gray-400 group-hover:text-[#1A56DB] group-hover:scale-110 transition-all mb-2" />
-                                <p className="font-semibold text-gray-700 group-hover:text-[#1A56DB] transition-colors">Tarik &amp; Lepas file di sini, atau klik untuk unggah</p>
+                                <CloudUpload size={40} className="text-gray-400 group-hover:text-[#00529C] group-hover:scale-110 transition-all mb-2" />
+                                <p className="font-semibold text-gray-700 group-hover:text-[#00529C] transition-colors">Tarik &amp; Lepas file di sini, atau klik untuk unggah</p>
                                 <p className="text-xs text-gray-500 mt-1">Format Berkas PDF Resmi SDLC Bank Nagari (Maksimal 5MB)</p>
                                 <input
                                     ref={fileInputRef}
                                     type="file"
-                                    accept=".pdf,application/pdf"
+                                    accept=".pdf,.xls,.xlsx,.jpg,.jpeg,.png,.zip"
                                     className="hidden"
                                     onChange={handleFileUpload}
                                 />

@@ -59,7 +59,7 @@ export default function NotificationBell() {
             {/* Bell Button */}
             <button
                 onClick={() => setIsOpen(!isOpen)}
-                className="relative p-2 text-gray-500 hover:text-[#1A56DB] hover:bg-blue-50 rounded-full transition-colors"
+                className="relative p-2 text-gray-500 hover:text-[#00529C] hover:bg-blue-50 rounded-full transition-colors"
             >
                 <Bell size={22} />
                 {unreadCount > 0 && (
@@ -79,7 +79,7 @@ export default function NotificationBell() {
                             {unreadCount > 0 && (
                                 <button
                                     onClick={markAllAsRead}
-                                    className="text-xs text-[#1A56DB] hover:text-[#1349c2] font-medium transition-colors"
+                                    className="text-xs text-[#00529C] hover:text-[#004080] font-medium transition-colors"
                                 >
                                     Tandai Semua
                                 </button>
@@ -134,7 +134,7 @@ export default function NotificationBell() {
                                                 {notif.relatedUrl && (
                                                     <>
                                                         <span className="text-gray-300">•</span>
-                                                        <span className="text-xs text-[#1A56DB] hover:underline flex items-center gap-0.5">
+                                                        <span className="text-xs text-[#00529C] hover:underline flex items-center gap-0.5">
                                                             Lihat <ChevronRight size={12} />
                                                         </span>
                                                     </>
@@ -155,7 +155,7 @@ export default function NotificationBell() {
                                     setIsOpen(false);
                                     navigate('/admin/audit');
                                 }}
-                                className="text-xs text-gray-500 hover:text-[#1A56DB] transition-colors"
+                                className="text-xs text-gray-500 hover:text-[#00529C] transition-colors"
                             >
                                 Lihat semua notifikasi di Audit Trail
                             </button>

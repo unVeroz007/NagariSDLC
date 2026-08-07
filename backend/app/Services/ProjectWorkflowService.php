@@ -237,7 +237,67 @@ class ProjectWorkflowService
                 'notes' => $notes,
             ]);
 
+            // Create notification for relevant roles
+            $this->notifyRelevantRoles($project, $currentStatus, $targetStatus->value, $user);
+
+            // Todo: Broadcast event ProjectUpdated when Reverb is installed
+            // event(new \App\Events\ProjectUpdated($project));
+
             return $project->fresh(['creator', 'pm', 'analyst', 'division', 'statusHistories']);
         });
+    }
+
+    /**
+     * Kirim notifikasi ke role terkait berdasarkan transisi status baru.
+     */
+    protected function notifyRelevantRoles(Project $project, ?string $oldStatus, string $newStatus, User $actor): void
+    {
+        $message = "Proyek '{$project->title}' telah mengubah status dari " . ($oldStatus ?? 'Baru') . " menjadi {$newStatus} oleh {$actor->name}.";
+        
+        $rolesToNotify = [];
+        
+        // Define target audience based on state machine
+        if (in_array($newStatus, [ProjectStatus::IN_REVIEW->value, ProjectStatus::REJECTED->value, ProjectStatus::CANCELLED->value])) {
+            $rolesToNotify = ['lead_group', 'super_admin'];
+            if ($project->created_by) \App\Models\Notification::create(['user_id' => $project->created_by, 'title' => 'Update Status Proyek', 'message' => $message]);
+        } elseif ($newStatus === ProjectStatus::ANALYSIS_APPROVED->value) {
+            $rolesToNotify = ['development_lead', 'super_admin'];
+        } elseif (in_array($newStatus, [ProjectStatus::READY_FOR_DEVELOPMENT->value, ProjectStatus::DEV_ANALYSIS->value])) {
+            $rolesToNotify = ['analyst', 'super_admin'];
+        } elseif ($newStatus === ProjectStatus::IN_DEVELOPMENT->value) {
+            $rolesToNotify = ['developer', 'super_admin'];
+        } elseif ($newStatus === ProjectStatus::READY_FOR_QA->value) {
+            $rolesToNotify = ['qa_lead', 'super_admin'];
+        } elseif ($newStatus === ProjectStatus::CYBER_IN_PROGRESS->value) {
+            $rolesToNotify = ['cyber_lead', 'super_admin'];
+        } elseif ($newStatus === ProjectStatus::PENDING_GOLIVE->value) {
+            $rolesToNotify = ['head_of_it', 'super_admin'];
+        } elseif ($newStatus === ProjectStatus::LIVE_PRODUCTION->value) {
+            // Notify everyone involved
+            if ($project->created_by) \App\Models\Notification::create(['user_id' => $project->created_by, 'title' => 'Proyek Rilis ke Produksi', 'message' => "Selamat! Proyek '{$project->title}' telah berhasil rilis ke production."]);
+            if ($project->pm_id) \App\Models\Notification::create(['user_id' => $project->pm_id, 'title' => 'Proyek Rilis ke Produksi', 'message' => "Proyek '{$project->title}' yang Anda pimpin telah LIVE."]);
+        }
+
+        if (!empty($rolesToNotify)) {
+            $users = User::whereHas('role', function ($q) use ($rolesToNotify) {
+                $q->whereIn('name', $rolesToNotify);
+            })->get();
+
+            $notifications = [];
+            $now = now();
+            foreach ($users as $u) {
+                $notifications[] = [
+                    'user_id' => $u->id,
+                    'title' => 'Pembaruan Alur Kerja Proyek',
+                    'message' => $message,
+                    'type' => 'info',
+                    'created_at' => $now,
+                    'updated_at' => $now,
+                ];
+            }
+            if (!empty($notifications)) {
+                \App\Models\Notification::insert($notifications);
+            }
+        }
     }
 }

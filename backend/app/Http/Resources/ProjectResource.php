@@ -20,8 +20,9 @@ class ProjectResource extends JsonResource
             'creator' => new UserResource($this->whenLoaded('creator')),
             'pm' => new UserResource($this->whenLoaded('pm')),
             'analyst' => new UserResource($this->whenLoaded('analyst')),
-            'division' => $this->division ? [
-                'id' => $this->division->id,
+            'division' => $this->division?->name ?? 'Divisi TI',
+            'division_detail' => $this->division ? [
+                'id'   => $this->division->id,
                 'code' => $this->division->code,
                 'name' => $this->division->name,
             ] : null,

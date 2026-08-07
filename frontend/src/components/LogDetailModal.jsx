@@ -137,7 +137,7 @@ export default function LogDetailModal({ activity, isOpen, onClose }) {
                 <div className="px-6 py-4 border-t border-gray-200 bg-gray-50/50 flex justify-end">
                     <button
                         onClick={onClose}
-                        className="px-4 py-2 bg-[#1A56DB] text-white rounded-lg font-medium hover:bg-[#1349c2] transition-colors text-sm"
+                        className="px-4 py-2 bg-[#00529C] text-white rounded-lg font-medium hover:bg-[#004080] transition-colors text-sm"
                     >
                         Tutup
                     </button>

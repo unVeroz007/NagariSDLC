@@ -157,18 +157,18 @@ export default function MainLayout() {
                         {/* Hamburger Button for Mobile */}
                         <button
                             onClick={() => setIsMobileOpen(true)}
-                            className="lg:hidden p-2 text-gray-600 hover:text-[#1A56DB] hover:bg-gray-100 rounded-xl transition-colors"
+                            className="lg:hidden p-2 text-gray-600 hover:text-[#00529C] hover:bg-gray-100 rounded-xl transition-colors"
                         >
                             <Menu size={22} />
                         </button>
 
                         {/* Breadcrumbs */}
                         <div className="hidden sm:flex items-center gap-2 text-gray-500 text-xs md:text-sm">
-                            <span className="hover:text-[#1A56DB] cursor-pointer font-medium">Beranda</span>
+                            <span className="hover:text-[#00529C] cursor-pointer font-medium">Beranda</span>
                             <ChevronRight size={14} />
-                            <span className="hover:text-[#1A56DB] cursor-pointer capitalize font-medium">{activeSectionLabel.split('(')[0].trim().toLowerCase()}</span>
+                            <span className="hover:text-[#00529C] cursor-pointer capitalize font-medium">{activeSectionLabel.split('(')[0].trim().toLowerCase()}</span>
                             <ChevronRight size={14} />
-                            <span className="text-[#1A56DB] font-bold">{activeItemLabel}</span>
+                            <span className="text-[#00529C] font-bold">{activeItemLabel}</span>
                         </div>
                     </div>
 
@@ -182,7 +182,7 @@ export default function MainLayout() {
                                     setIsSearchOpen(true);
                                 }}
                                 onFocus={() => setIsSearchOpen(true)}
-                                className="pl-9 pr-4 py-1.5 rounded-xl border border-gray-200 bg-[#f8f9fb] text-xs md:text-sm focus:ring-2 focus:ring-[#1A56DB]/20 focus:border-[#1A56DB] w-[200px] lg:w-[260px] outline-none transition-all"
+                                className="pl-9 pr-4 py-1.5 rounded-xl border border-gray-200 bg-[#f8f9fb] text-xs md:text-sm focus:ring-2 focus:ring-[#00529C]/20 focus:border-[#00529C] w-[200px] lg:w-[260px] outline-none transition-all"
                                 placeholder="Cari nama atau ID proyek..."
                                 type="text"
                             />
@@ -213,11 +213,11 @@ export default function MainLayout() {
                                                     className="p-2.5 rounded-xl hover:bg-blue-50/60 cursor-pointer transition-colors flex items-center justify-between group"
                                                 >
                                                     <div>
-                                                        <span className="text-[10px] font-bold text-[#1A56DB] bg-blue-50 px-1.5 py-0.5 rounded border border-blue-100">{p.id}</span>
-                                                        <p className="text-xs font-bold text-gray-800 line-clamp-1 mt-0.5 group-hover:text-[#1A56DB]">{p.name}</p>
+                                                        <span className="text-[10px] font-bold text-[#00529C] bg-blue-50 px-1.5 py-0.5 rounded border border-blue-100">{p.id}</span>
+                                                        <p className="text-xs font-bold text-gray-800 line-clamp-1 mt-0.5 group-hover:text-[#00529C]">{p.name}</p>
                                                         <p className="text-[10px] text-gray-500">{p.division}</p>
                                                     </div>
-                                                    <ChevronRight size={14} className="text-gray-400 shrink-0 group-hover:text-[#1A56DB]" />
+                                                    <ChevronRight size={14} className="text-gray-400 shrink-0 group-hover:text-[#00529C]" />
                                                 </div>
                                             ))
                                         )}

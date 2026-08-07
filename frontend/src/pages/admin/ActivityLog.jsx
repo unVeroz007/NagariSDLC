@@ -130,7 +130,7 @@ export default function ActivityLog() {
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                     <div>
                         <div className="flex items-center gap-2">
-                            <Activity size={24} className="text-[#1A56DB]" />
+                            <Activity size={24} className="text-[#00529C]" />
                             <h1 className="text-2xl font-bold text-gray-800">Activity Log</h1>
                             <span className="bg-gray-100 text-gray-500 text-xs font-bold px-2 py-1 rounded-full">
                                 {filteredActivities.length}
@@ -166,7 +166,7 @@ export default function ActivityLog() {
                 {/* Quick Stats */}
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                     <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm flex items-center gap-3">
-                        <div className="w-10 h-10 rounded-lg bg-blue-50 text-[#1A56DB] flex items-center justify-center">
+                        <div className="w-10 h-10 rounded-lg bg-blue-50 text-[#00529C] flex items-center justify-center">
                             <Activity size={20} />
                         </div>
                         <div>
@@ -235,7 +235,7 @@ export default function ActivityLog() {
                         <button
                             onClick={() => setViewMode('timeline')}
                             className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${viewMode === 'timeline'
-                                ? 'bg-[#1A56DB] text-white'
+                                ? 'bg-[#00529C] text-white'
                                 : 'text-gray-500 hover:bg-gray-100'
                                 }`}
                         >
@@ -245,7 +245,7 @@ export default function ActivityLog() {
                         <button
                             onClick={() => setViewMode('table')}
                             className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${viewMode === 'table'
-                                ? 'bg-[#1A56DB] text-white'
+                                ? 'bg-[#00529C] text-white'
                                 : 'text-gray-500 hover:bg-gray-100'
                                 }`}
                         >
@@ -329,7 +329,7 @@ export default function ActivityLog() {
                                             <td className="px-4 py-3 text-center">
                                                 <button
                                                     onClick={() => handleViewDetail(activity)}
-                                                    className="text-gray-400 hover:text-[#1A56DB] hover:bg-blue-50 p-1.5 rounded-lg transition-colors"
+                                                    className="text-gray-400 hover:text-[#00529C] hover:bg-blue-50 p-1.5 rounded-lg transition-colors"
                                                 >
                                                     <Eye size={16} />
                                                 </button>
@@ -366,7 +366,7 @@ export default function ActivityLog() {
                                                     key={pageNum}
                                                     onClick={() => setCurrentPage(pageNum)}
                                                     className={`px-3 py-1 rounded text-sm font-medium ${pageNum === currentPage
-                                                        ? 'bg-[#1A56DB] text-white'
+                                                        ? 'bg-[#00529C] text-white'
                                                         : 'border border-gray-200 bg-white hover:bg-gray-50'
                                                         }`}
                                                 >

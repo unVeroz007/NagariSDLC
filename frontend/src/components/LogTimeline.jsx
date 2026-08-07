@@ -92,7 +92,7 @@ export default function LogTimeline({ activities, onViewDetail }) {
                                                     {activity.project && (
                                                         <>
                                                             <span className="text-gray-400 text-sm">·</span>
-                                                            <span className="text-sm text-[#1A56DB] font-medium hover:underline cursor-pointer">
+                                                            <span className="text-sm text-[#00529C] font-medium hover:underline cursor-pointer">
                                                                 {activity.project}
                                                             </span>
                                                         </>
@@ -134,7 +134,7 @@ export default function LogTimeline({ activities, onViewDetail }) {
                                         <div className="flex items-center gap-2 shrink-0">
                                             <button
                                                 onClick={() => onViewDetail(activity)}
-                                                className="p-1.5 text-gray-400 hover:text-[#1A56DB] hover:bg-blue-50 rounded-lg transition-colors"
+                                                className="p-1.5 text-gray-400 hover:text-[#00529C] hover:bg-blue-50 rounded-lg transition-colors"
                                                 title="Lihat Detail"
                                             >
                                                 <Eye size={16} />

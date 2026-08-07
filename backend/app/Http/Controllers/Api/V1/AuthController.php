@@ -93,7 +93,17 @@ class AuthController extends Controller
 
         $request->validate([
             'current_password' => ['required', 'string'],
-            'new_password' => ['required', 'string', 'min:8'],
+            'new_password' => [
+                'required',
+                'string',
+                'min:8',
+                'regex:/[a-z]/',
+                'regex:/[A-Z]/',
+                'regex:/[0-9]/',
+                'regex:/[@$!%*#?&._-]/',
+            ],
+        ], [
+            'new_password.regex' => 'Password baru harus mengandung huruf kecil, huruf besar, angka, dan karakter spesial (@$!%*#?&._-).',
         ]);
 
         if (! Hash::check($request->current_password, $user->password)) {

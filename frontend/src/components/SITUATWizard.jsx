@@ -9,6 +9,7 @@ import {
     Eye, Download, Printer, Building2, ClipboardList, Bug,
     UserCheck, FileCheck, BookOpen
 } from 'lucide-react';
+import { generateDocumentName, DOCUMENT_TYPES, formatFileSize } from '../utils/documentNaming';
 
 
 // ─── Helper: safely render object or string field ────────────────────────────
@@ -195,15 +196,34 @@ export default function SITUATWizard({ project, updateProject, addNotification, 
     const uat2FileRef = useRef(null);
     const uat3FileRef = useRef(null);
 
-    const mkDocs = (files, cat) => Array.from(files).map(f => ({
-        id: `${cat}_${Date.now()}_${Math.random().toString(36).slice(2)}`,
-        name: f.name,
-        size: `${(f.size / 1024 / 1024).toFixed(2)} MB`,
-        type: f.name.split('.').pop().toUpperCase(),
-        url: URL.createObjectURL(f),
-        uploadedAt: new Date().toISOString(),
-        category: cat,
-    }));
+    const mkDocs = (files, cat) => Array.from(files).map(f => {
+        // Map category codes to DOCUMENT_TYPES for auto-naming
+        const catToDocType = {
+            'SIT_PREP': DOCUMENT_TYPES.SIT_PLAN.code,
+            'SIT_EXEC': DOCUMENT_TYPES.SIT_RESULT.code,
+            'SIT_SIGNOFF': DOCUMENT_TYPES.SIT_SIGNOFF.code,
+            'UAT_PREP': DOCUMENT_TYPES.UAT_PLAN.code,
+            'UAT_EXEC': DOCUMENT_TYPES.UAT_RESULT.code,
+            'UAT_APPROVAL': DOCUMENT_TYPES.UAT_SIGNOFF.code,
+        };
+        const docTypeCode = catToDocType[cat] || cat;
+        const ext = f.name.split('.').pop() || '';
+        const autoName = generateDocumentName(
+            project?.req_id || project?.id,
+            docTypeCode,
+            project?.title || project?.name
+        ) + '.' + ext;
+        return {
+            id: `${cat}_${Date.now()}_${Math.random().toString(36).slice(2)}`,
+            name: autoName,
+            originalName: f.name,
+            size: formatFileSize(f.size),
+            type: f.name.split('.').pop().toUpperCase(),
+            url: URL.createObjectURL(f),
+            uploadedAt: new Date().toISOString(),
+            category: cat,
+        };
+    });
 
     const onUpload = (e, setter, key, cat) => {
         const docs = mkDocs(e.target.files, cat);
@@ -344,7 +364,7 @@ export default function SITUATWizard({ project, updateProject, addNotification, 
         <div className="p-5 space-y-5">
 
             {/* ─── Master Phase Stepper ─────────────────────────────────── */}
-            <div className="bg-gradient-to-r from-[#003a73] to-[#1a56db] rounded-2xl p-5 text-white">
+            <div className="bg-gradient-to-r from-[#003a73] to-[#00529C] rounded-2xl p-5 text-white">
                 <div className="flex items-center justify-between mb-4">
                     <div className="flex items-center gap-3">
                         <div className="w-10 h-10 bg-white/15 rounded-xl flex items-center justify-center border border-white/20">
@@ -512,7 +532,7 @@ export default function SITUATWizard({ project, updateProject, addNotification, 
                                         {!sitDone && (
                                             <label className="px-3 py-1.5 bg-sky-600 hover:bg-sky-700 text-white rounded-xl text-xs font-bold cursor-pointer flex items-center gap-1.5 transition-colors">
                                                 <Upload size={12} /> Upload
-                                                <input type="file" ref={sit1FileRef} multiple accept=".pdf,.docx,.xlsx" onChange={e => onUpload(e, setSit1, 'docs', 'SIT_PREP')} className="hidden" />
+                                                <input type="file" ref={sit1FileRef} multiple accept=".pdf,.xls,.xlsx,.jpg,.jpeg,.png,.zip" onChange={e => onUpload(e, setSit1, 'docs', 'SIT_PREP')} className="hidden" />
                                             </label>
                                         )}
                                     </div>
@@ -579,7 +599,7 @@ export default function SITUATWizard({ project, updateProject, addNotification, 
                                         {!sitDone && (
                                             <label className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold cursor-pointer flex items-center gap-1.5 transition-colors">
                                                 <Upload size={12} /> Upload
-                                                <input type="file" ref={sit2FileRef} multiple onChange={e => onUpload(e, setSit2, 'docs', 'SIT_EXEC')} className="hidden" />
+                                                <input type="file" ref={sit2FileRef} multiple accept=".pdf,.xls,.xlsx,.jpg,.jpeg,.png,.zip" onChange={e => onUpload(e, setSit2, 'docs', 'SIT_EXEC')} className="hidden" />
                                             </label>
                                         )}
                                     </div>
@@ -633,7 +653,7 @@ export default function SITUATWizard({ project, updateProject, addNotification, 
                                         {!sitDone && (
                                             <label className="px-3 py-1.5 bg-teal-600 hover:bg-teal-700 text-white rounded-xl text-xs font-bold cursor-pointer flex items-center gap-1.5 transition-colors">
                                                 <Upload size={12} /> Upload
-                                                <input type="file" ref={sit3FileRef} multiple accept=".pdf,.docx" onChange={e => onUpload(e, setSit3, 'docs', 'SIT_SIGNOFF')} className="hidden" />
+                                                <input type="file" ref={sit3FileRef} multiple accept=".pdf,.xls,.xlsx,.jpg,.jpeg,.png,.zip" onChange={e => onUpload(e, setSit3, 'docs', 'SIT_SIGNOFF')} className="hidden" />
                                             </label>
                                         )}
                                     </div>
@@ -779,7 +799,7 @@ export default function SITUATWizard({ project, updateProject, addNotification, 
                                         {!uatDone && (
                                             <label className="px-3 py-1.5 bg-amber-500 hover:bg-amber-600 text-white rounded-xl text-xs font-bold cursor-pointer flex items-center gap-1.5 transition-colors">
                                                 <Upload size={12} /> Upload
-                                                <input type="file" ref={uat1FileRef} multiple onChange={e => onUpload(e, setUat1, 'docs', 'UAT_PREP')} className="hidden" />
+                                                <input type="file" ref={uat1FileRef} multiple accept=".pdf,.xls,.xlsx,.jpg,.jpeg,.png,.zip" onChange={e => onUpload(e, setUat1, 'docs', 'UAT_PREP')} className="hidden" />
                                             </label>
                                         )}
                                     </div>
@@ -836,7 +856,7 @@ export default function SITUATWizard({ project, updateProject, addNotification, 
                                         {!uatDone && (
                                             <label className="px-3 py-1.5 bg-orange-500 hover:bg-orange-600 text-white rounded-xl text-xs font-bold cursor-pointer flex items-center gap-1.5 transition-colors">
                                                 <Upload size={12} /> Upload
-                                                <input type="file" ref={uat2FileRef} multiple onChange={e => onUpload(e, setUat2, 'docs', 'UAT_EXEC')} className="hidden" />
+                                                <input type="file" ref={uat2FileRef} multiple accept=".pdf,.xls,.xlsx,.jpg,.jpeg,.png,.zip" onChange={e => onUpload(e, setUat2, 'docs', 'UAT_EXEC')} className="hidden" />
                                             </label>
                                         )}
                                     </div>
@@ -898,7 +918,7 @@ export default function SITUATWizard({ project, updateProject, addNotification, 
                                         {!uatDone && (
                                             <label className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold cursor-pointer flex items-center gap-1.5 transition-colors">
                                                 <Upload size={12} /> Upload
-                                                <input type="file" ref={uat3FileRef} multiple accept=".pdf,.docx" onChange={e => onUpload(e, setUat3, 'docs', 'UAT_APPROVAL')} className="hidden" />
+                                                <input type="file" ref={uat3FileRef} multiple accept=".pdf,.xls,.xlsx,.jpg,.jpeg,.png,.zip" onChange={e => onUpload(e, setUat3, 'docs', 'UAT_APPROVAL')} className="hidden" />
                                             </label>
                                         )}
                                     </div>

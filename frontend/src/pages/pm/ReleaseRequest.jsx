@@ -6,6 +6,7 @@ import { useProjects } from '../../contexts/ProjectContext';
 import LoadingSpinner from '../../components/LoadingSpinner';
 import RBBBadge from '../../components/RBBBadge';
 import toast from 'react-hot-toast';
+import { generateDocumentName, DOCUMENT_TYPES, formatFileSize } from '../../utils/documentNaming';
 import {
     Rocket,
     ChevronRight,
@@ -50,15 +51,25 @@ export default function ReleaseRequest() {
     // - CYBER_PASSED: Cyber lulus, QA lulus (dicek secara manual pada qaStatus)
     // - PENDING_GOLIVE: sudah diajukan ke INFRA, menunggu proses quality gate
     const readyProjects = useMemo(() => {
-        return projects.filter(p => {
+        let list = projects.filter(p => {
             const st = String(p.status || '').toUpperCase();
             const qaSt = String(p.qaStatus || p.qa_status || '').toUpperCase();
             const cyberSt = String(p.cyberStatus || p.cyber_status || '').toUpperCase();
-            // Keduanya PASSED, atau status sudah TESTING_PASSED, atau sudah PENDING_GOLIVE
             const bothPassed = qaSt === 'PASSED' && cyberSt === 'PASSED';
             return bothPassed || st === 'TESTING_PASSED' || st === 'PENDING_GOLIVE';
         });
-    }, [projects]);
+
+        const isPrivileged = user?.role && ['super_admin', 'lead_group', 'head_of_it', 'development_lead'].includes(user.role);
+        if (!isPrivileged && user?.id) {
+            const pmId = user.id;
+            list = list.filter(p => {
+                const pmObjId = typeof p.pm === 'object' ? p.pm?.id : null;
+                return pmObjId && pmObjId === pmId;
+            });
+        }
+
+        return list;
+    }, [projects, user]);
 
 
     const [selectedProject, setSelectedProject] = useState(null);
@@ -114,13 +125,20 @@ export default function ReleaseRequest() {
                 e.target.value = '';
                 return;
             }
+            const ext = file.name.split('.').pop() || '';
+            const autoName = generateDocumentName(
+                selectedProject?.req_id || selectedProject?.id,
+                DOCUMENT_TYPES.RELEASE_PLAN.code,
+                selectedProject?.title || selectedProject?.name
+            ) + '.' + ext;
             setUploadedFile({
-                name: file.name,
-                size: (file.size / 1024 / 1024).toFixed(1) + ' MB',
+                name: autoName,
+                originalName: file.name,
+                size: formatFileSize(file.size),
                 rawFile: file,
                 url: URL.createObjectURL(file),
             });
-            toast.success(`File paket migrasi ${file.name} berhasil diunggah!`);
+            toast.success(`File paket migrasi ${autoName} berhasil diunggah!`);
         }
     };
 
@@ -407,6 +425,7 @@ export default function ReleaseRequest() {
                                     <p className="text-[10px] text-gray-400 mt-1">Format dukungan: ZIP, TAR.GZ, SQL, DDL (Maksimal 5 MB)</p>
                                     <input
                                         type="file"
+                                        accept=".pdf,.xls,.xlsx,.jpg,.jpeg,.png,.zip"
                                         onChange={handleFileUpload}
                                         className="hidden"
                                         id="release-file-input"

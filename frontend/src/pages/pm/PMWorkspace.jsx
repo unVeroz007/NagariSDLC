@@ -81,28 +81,11 @@ export default function PMWorkspace() {
 
         // Jika akun yang login adalah PM (Project Manager), tampilkan HANYA proyek milik PM tersebut!
         if (user?.role === 'project_manager' || user?.role === 'pm') {
-            const userName = (user?.name || '').toLowerCase();
-            const userEmail = (user?.email || '').toLowerCase();
-
+            const pmId = user?.id;
             return projects.filter(p => {
-                const pmName = typeof p.pm === 'object' ? (p.pm?.name || '') : String(p.pm || '');
-                const assignedPM = String(p.assignedPM || p.pmName || '');
-
-                const matchesBudi = (userEmail.includes('pm1') || userName.includes('budi')) && (pmName.toLowerCase().includes('budi') || assignedPM.toLowerCase().includes('budi'));
-                const matchesDewi = (userEmail.includes('pm2') || userName.includes('dewi')) && (pmName.toLowerCase().includes('dewi') || assignedPM.toLowerCase().includes('dewi'));
-                const matchesAndi = (userEmail.includes('pm3') || userEmail === 'pm@nagari.co.id' || userName.includes('andi')) && (pmName.toLowerCase().includes('andi') || assignedPM.toLowerCase().includes('andi'));
-                const matchesCitra = (userEmail.includes('pm4') || userName.includes('citra')) && (pmName.toLowerCase().includes('citra') || assignedPM.toLowerCase().includes('citra'));
-
-                if (userEmail.includes('pm1') || userName.includes('budi')) return matchesBudi;
-                if (userEmail.includes('pm2') || userName.includes('dewi')) return matchesDewi;
-                if (userEmail.includes('pm3') || userEmail === 'pm@nagari.co.id' || userName.includes('andi')) return matchesAndi;
-                if (userEmail.includes('pm4') || userName.includes('citra')) return matchesCitra;
-
-                return (
-                    (pmName && pmName.toLowerCase().includes(userName)) ||
-                    (assignedPM && assignedPM.toLowerCase().includes(userName)) ||
-                    p.pmId === user?.id
-                );
+                const pmObjId = typeof p.pm === 'object' ? p.pm?.id : null;
+                if (pmObjId && pmId) return pmObjId === pmId;
+                return false;
             });
         }
 
@@ -302,7 +285,7 @@ export default function PMWorkspace() {
                 <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
                     <div>
                         <h1 className="text-2xl font-bold text-gray-800 flex items-center gap-2">
-                            <Briefcase size={24} className="text-[#1A56DB]" />
+                            <Briefcase size={24} className="text-[#00529C]" />
                             PM Workspace
                         </h1>
                         <p className="text-sm text-gray-500 mt-1">
@@ -312,7 +295,7 @@ export default function PMWorkspace() {
                     <div className="flex flex-wrap items-center gap-3">
                         {(user?.role === 'super_admin' || user?.role === 'head_of_it' || user?.role === 'development_lead') && pmList.length > 0 && (
                             <div className="flex items-center gap-2 bg-white border border-gray-300 px-3 py-2 rounded-xl shadow-2xs">
-                                <Users size={16} className="text-[#1A56DB]" />
+                                <Users size={16} className="text-[#00529C]" />
                                 <span className="text-xs font-bold text-gray-600">Filter Akun PM:</span>
                                 <select
                                     value={selectedPMFilter}
@@ -340,7 +323,7 @@ export default function PMWorkspace() {
                 </div>
 
                 {/* Quick SDLC Action Bar */}
-                <div className="bg-gradient-to-r from-[#003a73] to-[#1A56DB] p-4 rounded-2xl text-white shadow-md space-y-3">
+                <div className="bg-gradient-to-r from-[#003a73] to-[#00529C] p-4 rounded-2xl text-white shadow-md space-y-3">
                     <div className="flex items-center justify-between">
                         <h3 className="text-xs font-bold uppercase tracking-wider text-blue-100 flex items-center gap-1.5">
                             <Zap size={15} className="text-amber-400" />
@@ -450,7 +433,7 @@ export default function PMWorkspace() {
                     <button
                         onClick={() => setActiveTab('overview')}
                         className={`px-6 py-3 text-sm font-medium border-b-2 transition-colors whitespace-nowrap flex items-center gap-2 ${activeTab === 'overview'
-                            ? 'border-[#1A56DB] text-[#1A56DB]'
+                            ? 'border-[#00529C] text-[#00529C]'
                             : 'border-transparent text-gray-500 hover:text-gray-700'
                             }`}
                     >
@@ -460,7 +443,7 @@ export default function PMWorkspace() {
                     <button
                         onClick={() => setActiveTab('projects')}
                         className={`px-6 py-3 text-sm font-medium border-b-2 transition-colors whitespace-nowrap flex items-center gap-2 ${activeTab === 'projects'
-                            ? 'border-[#1A56DB] text-[#1A56DB]'
+                            ? 'border-[#00529C] text-[#00529C]'
                             : 'border-transparent text-gray-500 hover:text-gray-700'
                             }`}
                     >
@@ -473,7 +456,7 @@ export default function PMWorkspace() {
                     <button
                         onClick={() => setActiveTab('tasks')}
                         className={`px-6 py-3 text-sm font-medium border-b-2 transition-colors whitespace-nowrap flex items-center gap-2 ${activeTab === 'tasks'
-                            ? 'border-[#1A56DB] text-[#1A56DB]'
+                            ? 'border-[#00529C] text-[#00529C]'
                             : 'border-transparent text-gray-500 hover:text-gray-700'
                             }`}
                     >
@@ -491,7 +474,7 @@ export default function PMWorkspace() {
                         {/* Task Progress Ring */}
                         <div className="bg-white rounded-xl border border-gray-200 p-6 shadow-sm">
                             <h3 className="font-semibold text-gray-800 mb-4 flex items-center gap-2">
-                                <Target size={18} className="text-[#1A56DB]" />
+                                <Target size={18} className="text-[#00529C]" />
                                 Task Progress Overview
                             </h3>
                             <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
@@ -517,7 +500,7 @@ export default function PMWorkspace() {
                         {/* Recent Activities */}
                         <div className="bg-white rounded-xl border border-gray-200 p-6 shadow-sm">
                             <h3 className="font-semibold text-gray-800 mb-4 flex items-center gap-2">
-                                <Activity size={18} className="text-[#1A56DB]" />
+                                <Activity size={18} className="text-[#00529C]" />
                                 Aktivitas Terkini
                             </h3>
                             {recentActivities.length > 0 ? (
@@ -559,7 +542,7 @@ export default function PMWorkspace() {
                                     value={searchTerm}
                                     onChange={(e) => setSearchTerm(e.target.value)}
                                     placeholder="Cari nama, ID, atau status..."
-                                    className="pl-9 pr-4 py-1.5 text-xs border border-gray-200 rounded-xl focus:ring-2 focus:ring-[#1A56DB] outline-none bg-white w-full shadow-xs"
+                                    className="pl-9 pr-4 py-1.5 text-xs border border-gray-200 rounded-xl focus:ring-2 focus:ring-[#00529C] outline-none bg-white w-full shadow-xs"
                                 />
                             </div>
                         </div>
@@ -582,7 +565,7 @@ export default function PMWorkspace() {
                                             <tr key={project.id} className="hover:bg-gray-50 transition-colors group">
                                                 <td className="px-6 py-4 cursor-pointer group-hover:bg-blue-50/40" onClick={() => navigate(`/pm/tasks/${project.id}`)}>
                                                     <div>
-                                                        <span className="font-semibold text-gray-800 group-hover:text-[#1A56DB] transition-colors">{project.name}</span>
+                                                        <span className="font-semibold text-gray-800 group-hover:text-[#00529C] transition-colors">{project.name}</span>
                                                         <p className="text-xs text-gray-400">{project.id}</p>
                                                     </div>
                                                 </td>
@@ -600,7 +583,7 @@ export default function PMWorkspace() {
                                                 <td className="px-6 py-4">
                                                     <div className="flex items-center gap-2">
                                                         <div className="w-24 h-1.5 bg-gray-200 rounded-full overflow-hidden">
-                                                            <div className="bg-[#1A56DB] h-full rounded-full" style={{ width: `${progress}%` }} />
+                                                            <div className="bg-[#00529C] h-full rounded-full" style={{ width: `${progress}%` }} />
                                                         </div>
                                                         <span className="text-xs font-medium text-gray-600">{progress}%</span>
                                                     </div>
@@ -615,7 +598,7 @@ export default function PMWorkspace() {
                                                     <div className="flex items-center justify-center gap-1.5">
                                                         <button
                                                             onClick={() => navigate(`/pm/tasks/${project.id}`)}
-                                                            className="text-gray-400 hover:text-[#1A56DB] hover:bg-blue-50 p-1.5 rounded-lg transition-colors cursor-pointer"
+                                                            className="text-gray-400 hover:text-[#00529C] hover:bg-blue-50 p-1.5 rounded-lg transition-colors cursor-pointer"
                                                             title="Lihat Detail Proyek & Manajemen Task"
                                                         >
                                                             <Eye size={18} />
@@ -652,9 +635,9 @@ export default function PMWorkspace() {
                                     {allTasks.map((task, idx) => (
                                         <tr key={idx} className="hover:bg-gray-50 transition-colors group">
                                             <td className="px-6 py-4 cursor-pointer group-hover:bg-blue-50/40" onClick={() => navigate(`/pm/tasks/${task.projectId}`)}>
-                                                <span className="font-semibold text-gray-800 group-hover:text-[#1A56DB] transition-colors">{task.name || task.title || 'Task'}</span>
+                                                <span className="font-semibold text-gray-800 group-hover:text-[#00529C] transition-colors">{task.name || task.title || 'Task'}</span>
                                             </td>
-                                            <td className="px-6 py-4 text-gray-600 font-medium cursor-pointer hover:text-[#1A56DB]" onClick={() => navigate(`/pm/tasks/${task.projectId}`)}>
+                                            <td className="px-6 py-4 text-gray-600 font-medium cursor-pointer hover:text-[#00529C]" onClick={() => navigate(`/pm/tasks/${task.projectId}`)}>
                                                 {task.projectName || '-'}
                                             </td>
                                             <td className="px-6 py-4">
@@ -679,7 +662,7 @@ export default function PMWorkspace() {
                                             <td className="px-6 py-4 text-center">
                                                 <button
                                                     onClick={() => navigate(`/pm/tasks/${task.projectId}`)}
-                                                    className="text-gray-400 hover:text-[#1A56DB] hover:bg-blue-50 p-1.5 rounded-lg transition-colors cursor-pointer"
+                                                    className="text-gray-400 hover:text-[#00529C] hover:bg-blue-50 p-1.5 rounded-lg transition-colors cursor-pointer"
                                                     title="Lihat Detail Proyek & Progress SDLC"
                                                 >
                                                     <Eye size={18} />

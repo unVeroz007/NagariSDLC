@@ -228,7 +228,7 @@ export default function Register() {
                     <div className="mb-6">
                         <Link 
                             to="/login"
-                            className="inline-flex items-center gap-2 text-sm font-semibold text-gray-500 hover:text-[#1A56DB] transition-colors"
+                            className="inline-flex items-center gap-2 text-sm font-semibold text-gray-500 hover:text-[#00529C] transition-colors"
                         >
                             <ArrowLeft size={16} />
                             Kembali ke Login
@@ -238,7 +238,7 @@ export default function Register() {
                     {/* Header */}
                     <div className="mb-8 text-center lg:text-left">
                         <h2 className="text-2xl lg:text-3xl font-bold text-gray-800 mb-2 flex items-center gap-2 justify-center lg:justify-start">
-                            <UserPlus size={28} className="text-[#1A56DB]" />
+                            <UserPlus size={28} className="text-[#00529C]" />
                             Daftar Akun
                         </h2>
                         <p className="text-sm text-gray-500">
@@ -260,7 +260,7 @@ export default function Register() {
                                     value={formData.name}
                                     onChange={handleChange}
                                     placeholder="Masukkan nama lengkap Anda"
-                                    className={`w-full pl-10 pr-4 py-3 border rounded-lg bg-gray-50 text-sm focus:ring-2 focus:ring-[#1A56DB] focus:border-[#1A56DB] outline-none transition-all ${errors.name ? 'border-red-400' : 'border-gray-200'
+                                    className={`w-full pl-10 pr-4 py-3 border rounded-lg bg-gray-50 text-sm focus:ring-2 focus:ring-[#00529C] focus:border-[#00529C] outline-none transition-all ${errors.name ? 'border-red-400' : 'border-gray-200'
                                         }`}
                                 />
                             </div>
@@ -285,7 +285,7 @@ export default function Register() {
                                     value={formData.email}
                                     onChange={handleChange}
                                     placeholder="Masukkan email korporat Anda"
-                                    className={`w-full pl-10 pr-4 py-3 border rounded-lg bg-gray-50 text-sm focus:ring-2 focus:ring-[#1A56DB] focus:border-[#1A56DB] outline-none transition-all ${errors.email ? 'border-red-400' : 'border-gray-200'
+                                    className={`w-full pl-10 pr-4 py-3 border rounded-lg bg-gray-50 text-sm focus:ring-2 focus:ring-[#00529C] focus:border-[#00529C] outline-none transition-all ${errors.email ? 'border-red-400' : 'border-gray-200'
                                         }`}
                                 />
                             </div>
@@ -310,7 +310,7 @@ export default function Register() {
                                     value={formData.password}
                                     onChange={handleChange}
                                     placeholder="Minimal 8 karakter"
-                                    className={`w-full pl-10 pr-10 py-3 border rounded-lg bg-gray-50 text-sm focus:ring-2 focus:ring-[#1A56DB] focus:border-[#1A56DB] outline-none transition-all ${errors.password ? 'border-red-400' : 'border-gray-200'
+                                    className={`w-full pl-10 pr-10 py-3 border rounded-lg bg-gray-50 text-sm focus:ring-2 focus:ring-[#00529C] focus:border-[#00529C] outline-none transition-all ${errors.password ? 'border-red-400' : 'border-gray-200'
                                         }`}
                                 />
                                 <button
@@ -342,7 +342,7 @@ export default function Register() {
                                     value={formData.password_confirmation}
                                     onChange={handleChange}
                                     placeholder="Ketik ulang password"
-                                    className={`w-full pl-10 pr-10 py-3 border rounded-lg bg-gray-50 text-sm focus:ring-2 focus:ring-[#1A56DB] focus:border-[#1A56DB] outline-none transition-all ${errors.password_confirmation ? 'border-red-400' : 'border-gray-200'
+                                    className={`w-full pl-10 pr-10 py-3 border rounded-lg bg-gray-50 text-sm focus:ring-2 focus:ring-[#00529C] focus:border-[#00529C] outline-none transition-all ${errors.password_confirmation ? 'border-red-400' : 'border-gray-200'
                                         }`}
                                 />
                                 <button
@@ -372,7 +372,7 @@ export default function Register() {
                                     name="department"
                                     value={formData.department}
                                     onChange={handleChange}
-                                    className={`w-full pl-10 pr-4 py-3 border rounded-lg bg-gray-50 text-sm focus:ring-2 focus:ring-[#1A56DB] focus:border-[#1A56DB] outline-none appearance-none transition-all ${errors.department ? 'border-red-400' : 'border-gray-200'
+                                    className={`w-full pl-10 pr-4 py-3 border rounded-lg bg-gray-50 text-sm focus:ring-2 focus:ring-[#00529C] focus:border-[#00529C] outline-none appearance-none transition-all ${errors.department ? 'border-red-400' : 'border-gray-200'
                                         }`}
                                 >
                                     <option value="">Pilih Departemen</option>
@@ -415,14 +415,14 @@ export default function Register() {
                                 name="terms"
                                 checked={formData.terms}
                                 onChange={handleChange}
-                                className={`mt-1 w-4 h-4 rounded border-gray-300 text-[#1A56DB] focus:ring-[#1A56DB] ${errors.terms ? 'border-red-400' : ''
+                                className={`mt-1 w-4 h-4 rounded border-gray-300 text-[#00529C] focus:ring-[#00529C] ${errors.terms ? 'border-red-400' : ''
                                     }`}
                             />
                             <label className="text-sm text-gray-600">
                                 Saya menyetujui{' '}
-                                <a href="#" className="text-[#1A56DB] hover:underline">Syarat dan Ketentuan</a>
+                                <a href="#" className="text-[#00529C] hover:underline">Syarat dan Ketentuan</a>
                                 {' '}serta{' '}
-                                <a href="#" className="text-[#1A56DB] hover:underline">Kebijakan Privasi</a>
+                                <a href="#" className="text-[#00529C] hover:underline">Kebijakan Privasi</a>
                                 {' '}Bank Nagari.
                                 {errors.terms && (
                                     <span className="text-red-500 text-xs block mt-1">{errors.terms}</span>

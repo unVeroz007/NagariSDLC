@@ -110,25 +110,27 @@ export default function MyTasksDev() {
 
     // Filter tasks untuk developer yang sedang login
     const filteredTasks = useMemo(() => {
-        return allCombinedTasks.filter(task => {
-            const matchesUser =
-                !user?.name ||
-                task.assignee.toLowerCase().includes(user.name.toLowerCase()) ||
-                (user.email && task.assigneeEmail === user.email) ||
-                user.role === 'super_admin' ||
-                user.role === 'developer' ||
-                user.role === 'project_manager' ||
-                user.role === 'development_lead';
+        let list = allCombinedTasks;
+        const isPrivileged = user?.role && ['super_admin', 'lead_group', 'head_of_it', 'development_lead'].includes(user.role);
+        
+        if (!isPrivileged && user?.id) {
+            list = list.filter(task => {
+                const project = projects?.find(p => String(p.id) === String(task.projectId));
+                if (!project || !project.team) return false;
+                return project.team.some(t => (typeof t === 'object' ? t.id : t) === user.id);
+            });
+        }
 
+        return list.filter(task => {
             const matchesStatus = statusFilter === 'ALL' || task.status === statusFilter;
             const matchesSearch =
                 task.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
                 task.projectName.toLowerCase().includes(searchTerm.toLowerCase()) ||
                 task.id.toLowerCase().includes(searchTerm.toLowerCase());
 
-            return matchesUser && matchesStatus && matchesSearch;
+            return matchesStatus && matchesSearch;
         });
-    }, [allCombinedTasks, user, statusFilter, searchTerm]);
+    }, [allCombinedTasks, user, projects, statusFilter, searchTerm]);
 
     const handleUpdateStatus = (taskId, newStatus) => {
         const updated = devTasks.map(t =>

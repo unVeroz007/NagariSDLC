@@ -817,7 +817,7 @@ export default function WorkspaceDevLead() {
                                             <div className="p-3.5 bg-blue-50/80 border border-blue-200 rounded-xl text-xs space-y-1.5 animate-fade-in">
                                                 <span className="font-bold text-blue-900 block text-[11px] uppercase tracking-wider">Ringkasan Penunjukan Dev Lead:</span>
                                                 <div className="flex flex-wrap items-center justify-between text-blue-950 font-semibold gap-2">
-                                                    <span>PM Terpilih: <strong className="text-[#1A56DB] font-bold">{pmWorkloadStats.find(p => String(p.id) === String(selectedPM))?.name}</strong></span>
+                                                    <span>PM Terpilih: <strong className="text-[#00529C] font-bold">{pmWorkloadStats.find(p => String(p.id) === String(selectedPM))?.name}</strong></span>
                                                     <span>Proyek Aktif: <strong className="text-gray-800 font-bold">{pmWorkloadStats.find(p => String(p.id) === String(selectedPM))?.activeCount} Proyek</strong></span>
                                                     <span>Perkiraan Tenggat: <strong className="text-emerald-700 font-bold">{(() => {
                                                         const days = parseInt(estimationDays || '30', 10) || 30;
@@ -1005,7 +1005,7 @@ export default function WorkspaceDevLead() {
                         <div className="flex items-start justify-between border-b border-gray-100 pb-4">
                             <div>
                                 <div className="flex items-center gap-2 mb-1.5 flex-wrap">
-                                    <span className="text-[10px] font-extrabold text-[#1A56DB] uppercase tracking-widest bg-blue-50 px-2.5 py-0.5 rounded border border-blue-100">
+                                    <span className="text-[10px] font-extrabold text-[#00529C] uppercase tracking-widest bg-blue-50 px-2.5 py-0.5 rounded border border-blue-100">
                                         {targetProjectForAnalyst.id}
                                     </span>
                                     <RBBBadge type={targetProjectForAnalyst.type} deadline={targetProjectForAnalyst.rbbDeadline} />
@@ -1024,7 +1024,7 @@ export default function WorkspaceDevLead() {
                             {/* 1. Detail & Deskripsi Proyek */}
                             <div className="bg-slate-50 p-4 rounded-xl border border-slate-200/80 space-y-3 text-xs">
                                 <p className="font-bold text-[#1a365d] uppercase tracking-wider flex items-center gap-1.5 text-[11px]">
-                                    <Briefcase size={14} className="text-[#1A56DB]" />
+                                    <Briefcase size={14} className="text-[#00529C]" />
                                     1. Deskripsi &amp; Lingkup Bisnis Proyek
                                 </p>
                                 <p className="text-gray-800 leading-relaxed text-xs sm:text-sm bg-white p-3.5 rounded-xl border border-slate-200 shadow-2xs">
@@ -1060,7 +1060,7 @@ export default function WorkspaceDevLead() {
                             {/* 2. Dokumen Kelengkapan Proyek (View & Download Interactive) */}
                             <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-2xs space-y-3">
                                 <p className="font-bold text-[#1a365d] uppercase tracking-wider flex items-center gap-1.5 text-[11px]">
-                                    <FolderOpen size={14} className="text-[#1A56DB]" />
+                                    <FolderOpen size={14} className="text-[#00529C]" />
                                     2. Daftar Berkas &amp; Dokumen SDLC Proyek (Semua Tahap)
                                 </p>
                                 <div className="space-y-2">
@@ -1079,7 +1079,7 @@ export default function WorkspaceDevLead() {
                                                 <button
                                                     type="button"
                                                     onClick={() => setPreviewDoc(doc)}
-                                                    className="px-3 py-1.5 border border-[#1A56DB] text-[#1A56DB] hover:bg-blue-50 rounded-lg text-xs font-bold transition-all flex items-center gap-1 cursor-pointer active:scale-95"
+                                                    className="px-3 py-1.5 border border-[#00529C] text-[#00529C] hover:bg-blue-50 rounded-lg text-xs font-bold transition-all flex items-center gap-1 cursor-pointer active:scale-95"
                                                     title="View & Baca Dokumen"
                                                 >
                                                     <Eye size={13} />
@@ -1112,7 +1112,7 @@ export default function WorkspaceDevLead() {
                                                             toast.success(`Mengunduh salinan berkas "${fileName}"...`);
                                                         }
                                                     }}
-                                                    className="p-1.5 text-gray-500 hover:text-[#1A56DB] hover:bg-blue-50 rounded-lg transition-colors cursor-pointer"
+                                                    className="p-1.5 text-gray-500 hover:text-[#00529C] hover:bg-blue-50 rounded-lg transition-colors cursor-pointer"
                                                     title="Unduh Dokumen"
                                                 >
                                                     <Download size={15} />
@@ -1126,7 +1126,7 @@ export default function WorkspaceDevLead() {
                             {/* 3. Form Penugasan Analyst */}
                             <div className="bg-blue-50/50 p-4 rounded-xl border border-blue-100 space-y-3">
                                 <p className="font-bold text-[#1a365d] uppercase tracking-wider flex items-center gap-1.5 text-[11px]">
-                                    <UserCheck size={14} className="text-[#1A56DB]" />
+                                    <UserCheck size={14} className="text-[#00529C]" />
                                     3. Penunjukan System Analyst
                                 </p>
                                 <div>

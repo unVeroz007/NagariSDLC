@@ -22,8 +22,9 @@ Route::prefix('v1')->group(function () {
     // Public Health Check Route
     Route::get('/health', [HealthCheckController::class, 'check']);
 
-    // Guest Auth Routes (public, tidak butuh token)
-    Route::post('/auth/login', [AuthController::class, 'login']);
+    // Guest Auth Routes (public, rate-limited)
+    Route::post('/auth/login', [AuthController::class, 'login'])
+        ->middleware('throttle:5,1'); // 5 login attempts per minute
 
     // Authenticated Routes
     Route::middleware('auth:sanctum')->group(function () {
@@ -37,32 +38,44 @@ Route::prefix('v1')->group(function () {
         Route::get('/dashboard/summary', [DashboardController::class, 'summary']);
         Route::get('/dashboard/analytics', [DashboardController::class, 'analytics']);
 
-        // ----- REFERENCE DATA (Roles & Divisions) — Full CRUD -----
+        // ----- REFERENCE DATA (Roles & Divisions) — Admin Only -----
+        Route::middleware('role:super_admin')->group(function () {
+            Route::get('/roles', [RoleController::class, 'index']);
+            Route::post('/roles', [RoleController::class, 'store']);
+            Route::patch('/roles/{id}', [RoleController::class, 'update']);
+            Route::delete('/roles/{id}', [RoleController::class, 'destroy']);
+
+            Route::get('/divisions', [DivisionController::class, 'index']);
+            Route::post('/divisions', [DivisionController::class, 'store']);
+            Route::patch('/divisions/{id}', [DivisionController::class, 'update']);
+            Route::delete('/divisions/{id}', [DivisionController::class, 'destroy']);
+
+            // ----- USER MANAGEMENT (Admin CRUD) -----
+            Route::get('/users', [UserController::class, 'index']);
+            Route::post('/users', [UserController::class, 'store']);
+            Route::patch('/users/{id}', [UserController::class, 'update']);
+            Route::delete('/users/{id}', [UserController::class, 'destroy']);
+
+            // ----- ACTIVITY LOG (Admin Only) -----
+            Route::get('/activity-logs', [ActivityLogController::class, 'index']);
+            Route::get('/activity-logs/summary', [ActivityLogController::class, 'summary']);
+        });
+
+        // Master data — read access available to all authenticated users
         Route::get('/roles', [RoleController::class, 'index']);
-        Route::post('/roles', [RoleController::class, 'store']);
-        Route::patch('/roles/{id}', [RoleController::class, 'update']);
-        Route::delete('/roles/{id}', [RoleController::class, 'destroy']);
-
         Route::get('/divisions', [DivisionController::class, 'index']);
-        Route::post('/divisions', [DivisionController::class, 'store']);
-        Route::patch('/divisions/{id}', [DivisionController::class, 'update']);
-        Route::delete('/divisions/{id}', [DivisionController::class, 'destroy']);
-
-        // ----- USER MANAGEMENT (Admin CRUD) -----
         Route::get('/users', [UserController::class, 'index']);
-        Route::post('/users', [UserController::class, 'store']);
-        Route::patch('/users/{id}', [UserController::class, 'update']);
-        Route::delete('/users/{id}', [UserController::class, 'destroy']);
 
         // ----- PROJECT ROUTES -----
         Route::get('/projects', [ProjectController::class, 'index']);
         Route::post('/projects', [ProjectController::class, 'store']);
         Route::get('/projects/{id}', [ProjectController::class, 'show']);
-        Route::patch('/projects/{id}', [ProjectController::class, 'update']);           // general fields update
-        Route::delete('/projects/{id}', [ProjectController::class, 'destroy']);         // hapus proyek
-        Route::patch('/projects/{id}/status', [ProjectController::class, 'updateStatus']); // transisi status
-        Route::get('/projects/{id}/timeline', [ProjectController::class, 'timeline']);  // audit trail
-        Route::post('/projects/{id}/team', [ProjectController::class, 'allocateTeam']); // alokasi tim developer
+        Route::patch('/projects/{id}', [ProjectController::class, 'update']);
+        Route::delete('/projects/{id}', [ProjectController::class, 'destroy'])
+            ->middleware('role:super_admin,head_of_it,project_manager');
+        Route::patch('/projects/{id}/status', [ProjectController::class, 'updateStatus']);
+        Route::get('/projects/{id}/timeline', [ProjectController::class, 'timeline']);
+        Route::post('/projects/{id}/team', [ProjectController::class, 'allocateTeam']);
 
         // ----- TASK ROUTES -----
         Route::get('/projects/{projectId}/tasks', [TaskController::class, 'getByProject']);
@@ -86,9 +99,11 @@ Route::prefix('v1')->group(function () {
         Route::get('/release-requests', [ReleaseRequestController::class, 'index']);
         Route::post('/release-requests', [ReleaseRequestController::class, 'store']);
 
-        // Quality Gate — PENTING: route 'queue' harus di-register SEBELUM '{id}' agar tidak bentrok
-        Route::get('/quality-gate/queue', [QualityGateController::class, 'queue']);
-        Route::post('/quality-gate/approve', [QualityGateController::class, 'approve']);
+        // Quality Gate — Head of IT only
+        Route::middleware('role:super_admin,head_of_it')->group(function () {
+            Route::get('/quality-gate/queue', [QualityGateController::class, 'queue']);
+            Route::post('/quality-gate/approve', [QualityGateController::class, 'approve']);
+        });
 
         // ----- DOCUMENT VAULT -----
         Route::get('/documents', [DocumentController::class, 'index']);
@@ -100,9 +115,5 @@ Route::prefix('v1')->group(function () {
         Route::get('/notifications', [NotificationController::class, 'index']);
         Route::patch('/notifications/{id}/read', [NotificationController::class, 'markRead']);
         Route::patch('/notifications/read-all', [NotificationController::class, 'markAllRead']);
-
-        // ----- ACTIVITY LOG -----
-        Route::get('/activity-logs', [ActivityLogController::class, 'index']);
-        Route::get('/activity-logs/summary', [ActivityLogController::class, 'summary']);
     });
 });

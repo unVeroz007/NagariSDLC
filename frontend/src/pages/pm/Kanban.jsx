@@ -210,7 +210,7 @@ export default function Kanban() {
                             value={searchTerm}
                             onChange={(e) => setSearchTerm(e.target.value)}
                             placeholder="Cari ID / Nama Proyek..."
-                            className="pl-9 pr-4 py-2 bg-white border border-gray-200 rounded-xl text-xs md:text-sm focus:outline-none focus:ring-2 focus:ring-[#1A56DB]/20 focus:border-[#1A56DB] shadow-xs w-64"
+                            className="pl-9 pr-4 py-2 bg-white border border-gray-200 rounded-xl text-xs md:text-sm focus:outline-none focus:ring-2 focus:ring-[#00529C]/20 focus:border-[#00529C] shadow-xs w-64"
                         />
                     </div>
                 </div>
@@ -219,7 +219,7 @@ export default function Kanban() {
             {/* Top Filter Bar (PM Scope Selection) */}
             <div className="bg-white border border-gray-200 rounded-2xl p-4 mb-6 shadow-2xs flex flex-col sm:flex-row items-center justify-between gap-4">
                 <div className="flex items-center gap-2">
-                    <Filter size={18} className="text-[#1A56DB]" />
+                    <Filter size={18} className="text-[#00529C]" />
                     <span className="text-sm font-bold text-gray-800">Filter Tampilan Kanban Proyek:</span>
                 </div>
 
@@ -240,7 +240,7 @@ export default function Kanban() {
                             onClick={() => setSelectedPmFilter('MY_PROJECTS')}
                             className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
                                 selectedPmFilter === 'MY_PROJECTS'
-                                    ? 'bg-[#1A56DB] text-white shadow-xs'
+                                    ? 'bg-[#00529C] text-white shadow-xs'
                                     : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
                             }`}
                         >
@@ -251,7 +251,7 @@ export default function Kanban() {
                     <select
                         value={['ALL', 'MY_PROJECTS'].includes(selectedPmFilter) ? '' : selectedPmFilter}
                         onChange={(e) => setSelectedPmFilter(e.target.value || 'ALL')}
-                        className="px-3 py-1.5 rounded-xl text-xs font-semibold border border-gray-200 bg-white text-gray-700 outline-none focus:border-[#1A56DB]"
+                        className="px-3 py-1.5 rounded-xl text-xs font-semibold border border-gray-200 bg-white text-gray-700 outline-none focus:border-[#00529C]"
                     >
                         <option value="">-- Filter Per Project Manager --</option>
                         <option value="Budi Santoso">Budi Santoso</option>
@@ -293,7 +293,7 @@ export default function Kanban() {
                                             className="p-3.5 bg-white hover:bg-blue-50/40 rounded-xl border border-gray-200 shadow-xs hover:shadow-md transition-all group"
                                         >
                                             <div className="flex items-center justify-between mb-1.5">
-                                                <span className="text-[11px] font-mono font-bold text-[#1A56DB]">
+                                                <span className="text-[11px] font-mono font-bold text-[#00529C]">
                                                     {p.reqId || p.req_id || `REQ-${p.id}`}
                                                 </span>
                                                 <span className={`text-[10px] px-2 py-0.5 font-bold rounded-md border ${getStatusBadgeStyle(p.status)}`}>
@@ -301,7 +301,7 @@ export default function Kanban() {
                                                 </span>
                                             </div>
 
-                                            <h4 className="font-bold text-gray-800 text-xs mb-2 line-clamp-2 group-hover:text-[#1A56DB] transition-colors">
+                                            <h4 className="font-bold text-gray-800 text-xs mb-2 line-clamp-2 group-hover:text-[#00529C] transition-colors">
                                                 {p.name || p.title}
                                             </h4>
 
@@ -320,7 +320,7 @@ export default function Kanban() {
 
                                             <button
                                                 onClick={() => navigate(`/pm/tasks/${p.id}`)}
-                                                className="w-full py-2 bg-[#1A56DB] text-white hover:bg-blue-700 rounded-xl text-xs font-bold transition-all shadow-xs flex items-center justify-center gap-1.5 cursor-pointer active:scale-95"
+                                                className="w-full py-2 bg-[#00529C] text-white hover:bg-blue-700 rounded-xl text-xs font-bold transition-all shadow-xs flex items-center justify-center gap-1.5 cursor-pointer active:scale-95"
                                             >
                                                 <List size={13} />
                                                 <span>Detail Task &amp; Pekerjaan Dev</span>

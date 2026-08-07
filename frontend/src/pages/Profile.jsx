@@ -218,7 +218,7 @@ export default function Profile() {
                                         name="name"
                                         value={profile.name}
                                         onChange={handleChange}
-                                        className="w-full px-4 py-2.5 rounded-lg border border-gray-300 focus:ring-2 focus:ring-[#1A56DB] focus:border-transparent text-sm"
+                                        className="w-full px-4 py-2.5 rounded-lg border border-gray-300 focus:ring-2 focus:ring-[#00529C] focus:border-transparent text-sm"
                                     />
                                 ) : (
                                     <div className="px-4 py-2.5 bg-gray-50 rounded-lg border border-gray-200 text-gray-700 text-sm">
@@ -272,7 +272,7 @@ export default function Profile() {
                                         name="phone"
                                         value={profile.phone}
                                         onChange={handleChange}
-                                        className="w-full px-4 py-2.5 rounded-lg border border-gray-300 focus:ring-2 focus:ring-[#1A56DB] focus:border-transparent text-sm"
+                                        className="w-full px-4 py-2.5 rounded-lg border border-gray-300 focus:ring-2 focus:ring-[#00529C] focus:border-transparent text-sm"
                                     />
                                 ) : (
                                     <div className="px-4 py-2.5 bg-gray-50 rounded-lg border border-gray-200 text-gray-700 text-sm">
@@ -298,10 +298,10 @@ export default function Profile() {
 
                 {/* Security Note */}
                 <div className="mt-6 p-4 bg-blue-50 border border-blue-200 rounded-xl flex items-start gap-3">
-                    <Shield size={18} className="text-[#1A56DB] shrink-0 mt-0.5" />
+                    <Shield size={18} className="text-[#00529C] shrink-0 mt-0.5" />
                     <div>
                         <p className="text-sm font-semibold text-gray-800">Keamanan Akun</p>
-                        <p className="text-xs text-gray-600">Untuk mengubah kata sandi, silakan kunjungi halaman <a href="/admin/settings" className="text-[#1A56DB] hover:underline">Pengaturan Sistem</a> &gt; Keamanan &amp; Sandi.</p>
+                        <p className="text-xs text-gray-600">Untuk mengubah kata sandi, silakan kunjungi halaman <a href="/admin/settings" className="text-[#00529C] hover:underline">Pengaturan Sistem</a> &gt; Keamanan &amp; Sandi.</p>
                     </div>
                 </div>
             </div>

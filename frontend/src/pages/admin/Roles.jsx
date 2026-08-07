@@ -131,7 +131,7 @@ export default function RolesManagement() {
                             value={searchTerm}
                             onChange={(e) => setSearchTerm(e.target.value)}
                             placeholder="Cari nama, kode, atau menu akses role..."
-                            className="w-full pl-10 pr-4 py-2 rounded-xl border border-gray-200 bg-white text-sm focus:border-[#1A56DB] focus:ring-2 focus:ring-blue-100 outline-none transition-all shadow-sm"
+                            className="w-full pl-10 pr-4 py-2 rounded-xl border border-gray-200 bg-white text-sm focus:border-[#00529C] focus:ring-2 focus:ring-blue-100 outline-none transition-all shadow-sm"
                         />
                     </div>
                     <div className="text-xs font-semibold text-gray-500 bg-purple-50 px-3 py-1.5 rounded-lg border border-purple-100">

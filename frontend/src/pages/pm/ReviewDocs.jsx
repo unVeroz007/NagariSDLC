@@ -50,10 +50,21 @@ export default function ReviewDocs() {
 
     // Proyek yang dikembalikan dari QA Lead atau Cyber Lead ke Tim Dev/PM.
     const receivedProjects = useMemo(() => {
-        return (projects || []).filter(p =>
+        let list = (projects || []).filter(p =>
             ['QA_PASSED', 'CYBER_PASSED'].includes(p.status)
         );
-    }, [projects]);
+
+        const isPrivileged = user?.role && ['super_admin', 'lead_group', 'head_of_it', 'development_lead'].includes(user.role);
+        if (!isPrivileged && user?.id) {
+            const pmId = user.id;
+            list = list.filter(p => {
+                const pmObjId = typeof p.pm === 'object' ? p.pm?.id : null;
+                return pmObjId && pmObjId === pmId;
+            });
+        }
+
+        return list;
+    }, [projects, user]);
 
 
     const activeProject = selectedProject || receivedProjects[0] || null;

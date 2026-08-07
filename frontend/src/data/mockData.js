@@ -87,7 +87,7 @@ export const teamMembers = [
 export const kanbanStages = [
     { id: 'inisiasi', type: 'RBB', rbbDeadline: '2026-08-02', label: 'Inisiasi', color: 'bg-slate-400' },
     { id: 'analisis', type: 'NON_RBB', rbbDeadline: null, label: 'Analisis', color: 'bg-blue-400' },
-    { id: 'desain', type: 'RBB', rbbDeadline: '2026-08-02', label: 'Desain', color: 'bg-[#1A56DB]' },
+    { id: 'desain', type: 'RBB', rbbDeadline: '2026-08-02', label: 'Desain', color: 'bg-[#00529C]' },
     { id: 'pembangunan', type: 'NON_RBB', rbbDeadline: null, label: 'Pembangunan', color: 'bg-purple-400' },
     { id: 'pengujian', type: 'RBB', rbbDeadline: '2026-08-02', label: 'Pengujian', color: 'bg-orange-400' },
     { id: 'deployment', type: 'NON_RBB', rbbDeadline: null, label: 'Deployment', color: 'bg-green-400' },

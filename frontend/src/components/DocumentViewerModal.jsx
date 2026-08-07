@@ -114,7 +114,7 @@ export default function DocumentViewerModal({ doc, project, onClose }) {
                         {/* Download Button */}
                         <button
                             onClick={handleDownload}
-                            className="flex items-center gap-1.5 px-3.5 py-1.5 bg-[#1A56DB] hover:bg-blue-600 text-white rounded-xl text-xs font-bold transition-all shadow-md cursor-pointer active:scale-95"
+                            className="flex items-center gap-1.5 px-3.5 py-1.5 bg-[#00529C] hover:bg-blue-600 text-white rounded-xl text-xs font-bold transition-all shadow-md cursor-pointer active:scale-95"
                         >
                             <Download size={14} />
                             <span className="hidden sm:inline">Unduh File</span>

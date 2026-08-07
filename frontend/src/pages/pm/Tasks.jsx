@@ -79,14 +79,14 @@ export default function Tasks() {
                         value={searchTerm}
                         onChange={(e) => setSearchTerm(e.target.value)}
                         placeholder="Cari ID atau Nama Proyek..."
-                        className="w-full pl-9 pr-4 py-2.5 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#1A56DB]/20 focus:border-[#1A56DB] text-sm shadow-sm transition-all"
+                        className="w-full pl-9 pr-4 py-2.5 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#00529C]/20 focus:border-[#00529C] text-sm shadow-sm transition-all"
                     />
                 </div>
                 <div className="flex gap-2.5 w-full md:w-auto">
                     <select
                         value={statusFilter}
                         onChange={(e) => setStatusFilter(e.target.value)}
-                        className="border border-gray-200 rounded-xl px-4 py-2.5 bg-white text-sm focus:outline-none focus:ring-2 focus:ring-[#1A56DB]/20 focus:border-[#1A56DB] shadow-sm"
+                        className="border border-gray-200 rounded-xl px-4 py-2.5 bg-white text-sm focus:outline-none focus:ring-2 focus:ring-[#00529C]/20 focus:border-[#00529C] shadow-sm"
                     >
                         <option value="">Semua Status</option>
                         <option value="PENDING">Menunggu Review</option>
@@ -134,7 +134,7 @@ export default function Tasks() {
 
                                 <button
                                     onClick={() => handleSelectProject(project.realId)}
-                                    className="w-full py-2.5 px-4 bg-[#1A56DB] hover:bg-[#1546b8] text-white rounded-xl text-xs font-bold transition-all shadow-xs flex items-center justify-center gap-2 group cursor-pointer active:scale-95"
+                                    className="w-full py-2.5 px-4 bg-[#00529C] hover:bg-[#004080] text-white rounded-xl text-xs font-bold transition-all shadow-xs flex items-center justify-center gap-2 group cursor-pointer active:scale-95"
                                 >
                                     <span>Kelola Task &amp; Pekerjaan Dev</span>
                                     <ArrowUpRight size={14} className="group-hover:translate-x-0.5 group-hover:-translate-y-0.5 transition-transform" />

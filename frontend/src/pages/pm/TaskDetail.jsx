@@ -1,7 +1,13 @@
 import { getParallelTestingBadge } from '../../constants/projectStatus';
 import RBBBadge from '../../components/RBBBadge';
-
-
+import DocumentViewerModal from '../../components/DocumentViewerModal';
+import {
+    generateDocumentName,
+    DOCUMENT_TYPES,
+    getDocumentTypeInfo,
+    formatFileSize,
+} from '../../utils/documentNaming';
+import { documentService } from '../../services/api';
 import ChatBox from '../../components/ChatBox';
 import SITUATDocumentModal from '../../components/SITUATDocumentModal';
 import SITUATWizard from '../../components/SITUATWizard';
@@ -9,7 +15,7 @@ import { useState, useMemo, useEffect, useRef } from 'react';
 import toast from 'react-hot-toast';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
-import { useProjects } from '../../contexts/ProjectContext';
+import { useProjects, getFileFromStore } from '../../contexts/ProjectContext';
 import { useNotifications } from '../../contexts/NotificationContext';
 import {
     ChevronLeft,
@@ -44,6 +50,7 @@ import {
     ShieldCheck,
     Server,
     CheckSquare,
+    Download,
     Upload,
     Lock,
     Send,
@@ -134,7 +141,7 @@ export default function TaskDetail() {
                     <p className="text-gray-500 mb-6">Proyek yang Anda cari tidak ada atau sudah dihapus.</p>
                     <button
                         onClick={() => navigate('/pm/workspace')}
-                        className="px-6 py-3 bg-[#1A56DB] text-white rounded-xl font-bold hover:bg-[#1346b3] transition-all shadow-md shadow-[#1A56DB]/20"
+                        className="px-6 py-3 bg-[#00529C] text-white rounded-xl font-bold hover:bg-[#004080] transition-all shadow-md shadow-[#00529C]/20"
                     >
                         Kembali ke PM Workspace
                     </button>
@@ -397,7 +404,7 @@ export default function TaskDetail() {
                 {/* Back Button */}
                 <button
                     onClick={() => navigate('/pm/tasks')}
-                    className="flex items-center gap-2 text-gray-500 hover:text-[#1A56DB] transition-colors text-sm mb-2"
+                    className="flex items-center gap-2 text-gray-500 hover:text-[#00529C] transition-colors text-sm mb-2"
                 >
                     <ChevronLeft size={18} />
                     Kembali ke Daftar Proyek
@@ -437,7 +444,7 @@ export default function TaskDetail() {
                         {(user?.role === 'super_admin' || user?.role === 'head_of_it' || user?.role === 'development_lead') && (
                             <button 
                                 onClick={handleOpenEditProjectModal}
-                                className="px-4 py-2 rounded-lg bg-[#1A56DB] text-white hover:bg-[#1346b3] transition-colors text-sm font-semibold flex items-center gap-2 shadow-sm cursor-pointer"
+                                className="px-4 py-2 rounded-lg bg-[#00529C] text-white hover:bg-[#004080] transition-colors text-sm font-semibold flex items-center gap-2 shadow-sm cursor-pointer"
                                 title="Khusus Super Admin & Ketua Grup untuk penyesuaian alokasi PM"
                             >
                                 <Edit size={16} />
@@ -457,13 +464,13 @@ export default function TaskDetail() {
                                 <p className="text-sm text-gray-500">Status penyelesaian task utama dalam milestone ini.</p>
                             </div>
                             <div className="text-right">
-                                <span className="text-2xl font-bold text-[#1A56DB] block">{progress}%</span>
+                                <span className="text-2xl font-bold text-[#00529C] block">{progress}%</span>
                                 <span className="text-xs text-gray-500">{completedTasks} dari {tasks.length} Task Selesai</span>
                             </div>
                         </div>
                         <div className="w-full h-4 bg-gray-100 rounded-full overflow-hidden">
                             <div
-                                className="h-full bg-[#1A56DB] rounded-full transition-all duration-1000 ease-in-out"
+                                className="h-full bg-[#00529C] rounded-full transition-all duration-1000 ease-in-out"
                                 style={{ width: `${progress}%` }}
                             />
                         </div>
@@ -475,7 +482,7 @@ export default function TaskDetail() {
                             <div className="flex items-center justify-between mb-3">
                                 <h3 className="text-lg font-bold text-gray-800">Informasi Utama</h3>
                                 {project.estimation && (
-                                    <span className="text-xs px-2.5 py-1 bg-blue-50 text-[#1A56DB] border border-blue-200 rounded-full font-extrabold shadow-2xs">
+                                    <span className="text-xs px-2.5 py-1 bg-blue-50 text-[#00529C] border border-blue-200 rounded-full font-extrabold shadow-2xs">
                                         {String(project.estimation).includes('Hari') ? project.estimation : `${project.estimation} Hari Kerja`}
                                     </span>
                                 )}
@@ -495,7 +502,7 @@ export default function TaskDetail() {
 
                         <div className="flex flex-col gap-3.5 pt-3 border-t border-gray-100">
                             <div className="flex items-center gap-3">
-                                <div className="p-2 rounded-xl bg-blue-50 text-[#1A56DB] shrink-0">
+                                <div className="p-2 rounded-xl bg-blue-50 text-[#00529C] shrink-0">
                                     <Calendar size={18} />
                                 </div>
                                 <div>
@@ -518,7 +525,7 @@ export default function TaskDetail() {
                                 </div>
                             </div>
                             <div className="flex items-center gap-3">
-                                <div className="p-2 rounded-xl bg-blue-50 text-[#1A56DB] shrink-0">
+                                <div className="p-2 rounded-xl bg-blue-50 text-[#00529C] shrink-0">
                                     <User size={18} />
                                 </div>
                                 <div>
@@ -539,7 +546,7 @@ export default function TaskDetail() {
                         <button
                             onClick={() => setActiveTab('tasks')}
                             className={`px-6 py-4 text-sm font-semibold border-b-2 transition-colors whitespace-nowrap ${activeTab === 'tasks'
-                                ? 'border-[#1A56DB] text-[#1A56DB] bg-white'
+                                ? 'border-[#00529C] text-[#00529C] bg-white'
                                 : 'border-transparent text-gray-500 hover:text-gray-700'
                                 }`}
                         >
@@ -548,7 +555,7 @@ export default function TaskDetail() {
                         <button
                             onClick={() => setActiveTab('documents')}
                             className={`px-6 py-4 text-sm font-semibold border-b-2 transition-colors whitespace-nowrap ${activeTab === 'documents'
-                                ? 'border-[#1A56DB] text-[#1A56DB] bg-white'
+                                ? 'border-[#00529C] text-[#00529C] bg-white'
                                 : 'border-transparent text-gray-500 hover:text-gray-700'
                                 }`}
                         >
@@ -570,7 +577,7 @@ export default function TaskDetail() {
                         <button
                             onClick={() => setActiveTab('activity')}
                             className={`px-6 py-4 text-sm font-semibold border-b-2 transition-colors whitespace-nowrap ${activeTab === 'activity'
-                                ? 'border-[#1A56DB] text-[#1A56DB] bg-white'
+                                ? 'border-[#00529C] text-[#00529C] bg-white'
                                 : 'border-transparent text-gray-500 hover:text-gray-700'
                                 }`}
                         >
@@ -591,7 +598,7 @@ export default function TaskDetail() {
                                             value={searchTask}
                                             onChange={(e) => setSearchTask(e.target.value)}
                                             placeholder="Cari task..."
-                                            className="w-full pl-9 pr-4 py-2 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-[#1A56DB] focus:border-[#1A56DB] outline-none transition-all"
+                                            className="w-full pl-9 pr-4 py-2 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-[#00529C] focus:border-[#00529C] outline-none transition-all"
                                         />
                                     </div>
                                     <button className="px-3 py-2 border border-gray-200 rounded-lg text-gray-600 text-sm hover:bg-gray-50 transition-colors flex items-center gap-2">
@@ -599,7 +606,7 @@ export default function TaskDetail() {
                                         <span className="hidden sm:inline">Filter</span>
                                     </button>
                                 </div>
-                                <button onClick={() => setIsAddTaskModalOpen(true)} className="px-4 py-2 rounded-lg bg-[#1A56DB] text-white hover:bg-[#1346b3] transition-colors text-sm font-semibold flex items-center gap-2 shadow-sm whitespace-nowrap">
+                                <button onClick={() => setIsAddTaskModalOpen(true)} className="px-4 py-2 rounded-lg bg-[#00529C] text-white hover:bg-[#004080] transition-colors text-sm font-semibold flex items-center gap-2 shadow-sm whitespace-nowrap">
                                     <Plus size={16} />
                                     Tambah Task
                                 </button>
@@ -707,53 +714,7 @@ export default function TaskDetail() {
 
                     {/* Dokumen Tab */}
                     {activeTab === 'documents' && (
-                        <div className="p-6">
-                            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6 border-b border-gray-100 pb-4">
-                                <div>
-                                    <h3 className="text-lg font-semibold text-gray-800">Dokumen Proyek</h3>
-                                    <p className="text-sm text-gray-500">Kelola dan lihat dokumen terkait proyek ini.</p>
-                                </div>
-                                <button className="px-4 py-2 bg-[#1A56DB] text-white rounded-lg text-sm font-semibold flex items-center gap-2 shadow-sm hover:bg-[#1346b3] transition-colors">
-                                    <Plus size={16} />
-                                    Unggah Dokumen
-                                </button>
-                            </div>
-                            
-                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                                {[
-                                    { name: 'BRD_Final_v2.pdf', type: 'PDF', date: '10 Ags 2026', size: '2.4 MB', uploader: 'Budi Santoso' },
-                                    { name: 'FSD_Draft_Rev.docx', type: 'DOCX', date: '12 Ags 2026', size: '1.1 MB', uploader: 'Citra Kirana' },
-                                    { name: 'API_Documentation.pdf', type: 'PDF', date: '15 Ags 2026', size: '3.5 MB', uploader: 'Dimas Anggara' },
-                                    { name: 'UI_Mockups.fig', type: 'FIG', date: '16 Ags 2026', size: '12.8 MB', uploader: 'Fani Wijaya' },
-                                    { name: 'Security_Audit.pdf', type: 'PDF', date: '18 Ags 2026', size: '1.9 MB', uploader: 'Eka Putri' },
-                                ].map((doc, i) => (
-                                    <div key={i} className="flex items-start gap-4 p-4 border border-gray-200 rounded-xl hover:border-[#1A56DB] hover:shadow-md transition-all cursor-pointer group bg-white">
-                                        <div className={`w-12 h-12 rounded-lg flex items-center justify-center shrink-0 ${
-                                            doc.type === 'PDF' ? 'bg-red-50 text-red-500' :
-                                            doc.type === 'DOCX' ? 'bg-blue-50 text-blue-500' :
-                                            doc.type === 'FIG' ? 'bg-purple-50 text-purple-500' :
-                                            'bg-gray-50 text-gray-500'
-                                        }`}>
-                                            <FileText size={24} />
-                                        </div>
-                                        <div className="flex-1 min-w-0">
-                                            <p className="text-sm font-semibold text-gray-800 truncate group-hover:text-[#1A56DB] transition-colors">{doc.name}</p>
-                                            <div className="flex items-center gap-2 mt-1 text-xs text-gray-500">
-                                                <span>{doc.size}</span>
-                                                <span>•</span>
-                                                <span>{doc.date}</span>
-                                            </div>
-                                            <p className="text-[10px] text-gray-400 mt-1 flex items-center gap-1">
-                                                <User size={10} /> {doc.uploader}
-                                            </p>
-                                        </div>
-                                        <button className="text-gray-400 hover:text-[#1A56DB] p-1.5 rounded hover:bg-blue-50 opacity-0 group-hover:opacity-100 transition-all">
-                                            <MoreVertical size={16} />
-                                        </button>
-                                    </div>
-                                ))}
-                            </div>
-                        </div>
+                        <DocumentSection project={project} user={user} />
                     )}
 
                     {/* Activity Tab (placeholder) */}
@@ -803,7 +764,7 @@ export default function TaskDetail() {
                                         value={newTask.title}
                                         onChange={(e) => setNewTask({...newTask, title: e.target.value})}
                                         placeholder="Masukkan nama task..."
-                                        className="w-full px-4 py-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-[#1A56DB] focus:border-[#1A56DB] outline-none"
+                                        className="w-full px-4 py-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-[#00529C] focus:border-[#00529C] outline-none"
                                         required
                                     />
                                 </div>
@@ -818,7 +779,7 @@ export default function TaskDetail() {
                                         onChange={(e) => setNewTask({...newTask, description: e.target.value})}
                                         placeholder="Masukkan deskripsi task..."
                                         rows={3}
-                                        className="w-full px-4 py-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-[#1A56DB] focus:border-[#1A56DB] outline-none resize-none"
+                                        className="w-full px-4 py-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-[#00529C] focus:border-[#00529C] outline-none resize-none"
                                     />
                                 </div>
 
@@ -831,7 +792,7 @@ export default function TaskDetail() {
                                         <select
                                             value={newTask.assignee}
                                             onChange={(e) => setNewTask({...newTask, assignee: e.target.value})}
-                                            className="w-full px-4 py-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-[#1A56DB] focus:border-[#1A56DB] outline-none bg-white"
+                                            className="w-full px-4 py-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-[#00529C] focus:border-[#00529C] outline-none bg-white"
                                         >
                                             <option value="">Pilih Anggota Tim...</option>
                                             {validAssignees.map((memName, idx) => {
@@ -852,7 +813,7 @@ export default function TaskDetail() {
                                             type="date"
                                             value={newTask.deadline}
                                             onChange={(e) => setNewTask({...newTask, deadline: e.target.value})}
-                                            className="w-full px-4 py-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-[#1A56DB] focus:border-[#1A56DB] outline-none"
+                                            className="w-full px-4 py-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-[#00529C] focus:border-[#00529C] outline-none"
                                         />
                                     </div>
                                 </div>
@@ -871,7 +832,7 @@ export default function TaskDetail() {
                                                     value={p}
                                                     checked={newTask.priority === p}
                                                     onChange={(e) => setNewTask({...newTask, priority: e.target.value})}
-                                                    className="w-4 h-4 text-[#1A56DB]"
+                                                    className="w-4 h-4 text-[#00529C]"
                                                 />
                                                 <span className={`text-sm font-medium ${
                                                     p === 'High' ? 'text-red-600' : p === 'Medium' ? 'text-amber-600' : 'text-blue-600'
@@ -930,7 +891,7 @@ export default function TaskDetail() {
                                         type="text"
                                         value={editingTask.name}
                                         onChange={(e) => setEditingTask({...editingTask, name: e.target.value})}
-                                        className="w-full px-4 py-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-[#1A56DB] focus:border-[#1A56DB] outline-none"
+                                        className="w-full px-4 py-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-[#00529C] focus:border-[#00529C] outline-none"
                                         required
                                     />
                                 </div>
@@ -943,7 +904,7 @@ export default function TaskDetail() {
                                         <select
                                             value={editingTask.assignee || ''}
                                             onChange={(e) => setEditingTask({...editingTask, assignee: e.target.value})}
-                                            className="w-full px-4 py-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-[#1A56DB] focus:border-[#1A56DB] outline-none bg-white"
+                                            className="w-full px-4 py-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-[#00529C] focus:border-[#00529C] outline-none bg-white"
                                         >
                                             <option value="">Pilih Anggota Tim...</option>
                                             {validAssignees.map((memName, idx) => {
@@ -963,7 +924,7 @@ export default function TaskDetail() {
                                         <select
                                             value={editingTask.status}
                                             onChange={(e) => setEditingTask({...editingTask, status: e.target.value})}
-                                            className="w-full px-4 py-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-[#1A56DB] focus:border-[#1A56DB] outline-none"
+                                            className="w-full px-4 py-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-[#00529C] focus:border-[#00529C] outline-none"
                                         >
                                             <option value="Belum Mulai">Belum Mulai</option>
                                             <option value="Sedang Dikerjakan">Sedang Dikerjakan</option>
@@ -982,7 +943,7 @@ export default function TaskDetail() {
                                     </button>
                                     <button
                                         type="submit"
-                                        className="px-4 py-2 bg-[#1A56DB] text-white rounded-lg font-medium hover:bg-[#1346b3] transition-colors flex items-center gap-2"
+                                        className="px-4 py-2 bg-[#00529C] text-white rounded-lg font-medium hover:bg-[#004080] transition-colors flex items-center gap-2"
                                     >
                                         Simpan
                                     </button>
@@ -999,7 +960,7 @@ export default function TaskDetail() {
                     <div className="bg-white rounded-2xl max-w-lg w-full p-6 shadow-2xl border border-gray-100">
                         <div className="flex justify-between items-center pb-4 border-b border-gray-100 mb-4">
                             <div className="flex items-center gap-2">
-                                <User className="text-[#1A56DB]" size={20} />
+                                <User className="text-[#00529C]" size={20} />
                                 <h3 className="text-lg font-bold text-gray-800">Edit Proyek & Alokasi PM</h3>
                             </div>
                             <button
@@ -1017,7 +978,7 @@ export default function TaskDetail() {
                                 <select
                                     value={editProjectForm.pmName}
                                     onChange={(e) => setEditProjectForm({...editProjectForm, pmName: e.target.value})}
-                                    className="w-full px-3.5 py-2.5 border border-gray-300 rounded-xl text-sm font-semibold focus:ring-2 focus:ring-[#1A56DB] outline-none bg-white"
+                                    className="w-full px-3.5 py-2.5 border border-gray-300 rounded-xl text-sm font-semibold focus:ring-2 focus:ring-[#00529C] outline-none bg-white"
                                 >
                                     <option value="">-- Pilih Project Manager --</option>
                                     {[
@@ -1049,7 +1010,7 @@ export default function TaskDetail() {
                                         min="1"
                                         value={editProjectForm.estimation}
                                         onChange={(e) => setEditProjectForm({...editProjectForm, estimation: e.target.value})}
-                                        className="w-full px-3.5 py-2.5 border border-gray-300 rounded-xl text-sm font-semibold focus:ring-2 focus:ring-[#1A56DB] outline-none"
+                                        className="w-full px-3.5 py-2.5 border border-gray-300 rounded-xl text-sm font-semibold focus:ring-2 focus:ring-[#00529C] outline-none"
                                     />
                                     <span className="absolute right-3.5 top-2.5 text-xs text-gray-400 font-bold">Hari</span>
                                 </div>
@@ -1063,7 +1024,7 @@ export default function TaskDetail() {
                                     rows={3}
                                     value={editProjectForm.description}
                                     onChange={(e) => setEditProjectForm({...editProjectForm, description: e.target.value})}
-                                    className="w-full px-3.5 py-2.5 border border-gray-300 rounded-xl text-sm focus:ring-2 focus:ring-[#1A56DB] outline-none"
+                                    className="w-full px-3.5 py-2.5 border border-gray-300 rounded-xl text-sm focus:ring-2 focus:ring-[#00529C] outline-none"
                                     placeholder="Masukkan deskripsi ringkas proyek..."
                                 />
                             </div>
@@ -1078,7 +1039,7 @@ export default function TaskDetail() {
                                 </button>
                                 <button
                                     type="submit"
-                                    className="px-5 py-2 bg-[#1A56DB] text-white rounded-xl font-bold text-xs hover:bg-[#1346b3] transition-colors shadow-md shadow-[#1A56DB]/20 cursor-pointer"
+                                    className="px-5 py-2 bg-[#00529C] text-white rounded-xl font-bold text-xs hover:bg-[#004080] transition-colors shadow-md shadow-[#00529C]/20 cursor-pointer"
                                 >
                                     Simpan Perubahan
                                 </button>
@@ -1086,6 +1047,279 @@ export default function TaskDetail() {
                         </form>
                     </div>
                 </div>
+            )}
+        </div>
+    );
+}
+
+/**
+ * Komponen Dokumen Tab — fetch dari API, upload, lihat, hapus, download
+ */
+function DocumentSection({ project, user }) {
+    const [docs, setDocs] = useState([]);
+    const [loading, setLoading] = useState(true);
+    const [uploading, setUploading] = useState(false);
+    const [selectedDocType, setSelectedDocType] = useState('BRD');
+    const [searchQuery, setSearchQuery] = useState('');
+    const [previewDoc, setPreviewDoc] = useState(null);
+    const fileInputRef = useRef(null);
+
+    const ALLOWED_EXTS = ['.pdf', '.xls', '.xlsx', '.jpg', '.jpeg', '.png', '.zip'];
+    const MAX_SIZE_MB = 5;
+
+    // Fetch documents from API
+    const fetchDocs = async () => {
+        if (!project?.id) return;
+        setLoading(true);
+        try {
+            const res = await documentService.getAll(project.id);
+            if (res && res.data) {
+                setDocs(res.data);
+            }
+        } catch (err) {
+            console.warn('[DocumentSection] Failed to load docs:', err.message);
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    useEffect(() => {
+        fetchDocs();
+    }, [project?.id]);
+
+    // Handle file upload
+    const handleUpload = async (e) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+
+        const ext = '.' + (file.name.split('.').pop() || '').toLowerCase();
+        if (!ALLOWED_EXTS.includes(ext)) {
+            toast.error('Format yang diizinkan: PDF, Excel (.xls/.xlsx), Gambar (.jpg/.jpeg/.png), ZIP!');
+            return;
+        }
+        if (file.size > MAX_SIZE_MB * 1024 * 1024) {
+            toast.error(`Ukuran file melebihi batas ${MAX_SIZE_MB}MB!`);
+            return;
+        }
+
+        setUploading(true);
+        try {
+            const finalName = generateDocumentName(project.req_id || project.reqId || `REQ-${project.id}`, selectedDocType, project.title || project.name || 'Proyek');
+            const ext = file.name.split('.').pop();
+            const renamedFile = new File([file], `${finalName}.${ext}`, { type: file.type });
+
+            await documentService.upload(renamedFile, {
+                project_id: project.id,
+                document_type: selectedDocType,
+                original_filename: file.name,
+            });
+
+            toast.success('Dokumen berhasil diunggah!');
+            await fetchDocs(); // Refresh list
+        } catch (err) {
+            toast.error(`Gagal upload: ${err.message}`);
+        } finally {
+            setUploading(false);
+            if (fileInputRef.current) fileInputRef.current.value = '';
+        }
+    };
+
+    // Handle delete
+    const handleDelete = async (docId, docName) => {
+        if (!confirm(`Hapus dokumen "${docName}"?`)) return;
+        try {
+            await documentService.delete(docId);
+            toast.success('Dokumen berhasil dihapus.');
+            setDocs(prev => prev.filter(d => d.id !== docId));
+        } catch (err) {
+            toast.error(`Gagal hapus: ${err.message}`);
+        }
+    };
+
+    // Handle View / Preview
+    const handleView = async (doc) => {
+        try {
+            toast.loading('Memuat pratinjau...', { id: 'preview-load' });
+            const blob = await documentService.download(doc.id);
+            const url = URL.createObjectURL(blob);
+            setPreviewDoc({
+                ...doc,
+                previewBlobUrl: url,
+            });
+            toast.dismiss('preview-load');
+        } catch {
+            toast.error('Gagal memuat pratinjau dokumen.', { id: 'preview-load' });
+        }
+    };
+
+    // Handle download
+    const handleDownload = async (doc) => {
+        try {
+            const blob = await documentService.download(doc.id);
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = doc.original_filename || doc.file_name || 'Dokumen';
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+            toast.success('Mengunduh dokumen...');
+        } catch {
+            toast.error('Gagal mengunduh dokumen.');
+        }
+    };
+
+    // File extension icon helper
+    const getExtColor = (filename) => {
+        const fn = (filename || '').toLowerCase();
+        if (fn.endsWith('.pdf')) return 'bg-red-50 text-red-500 border-red-200';
+        if (fn.endsWith('.xlsx') || fn.endsWith('.xls')) return 'bg-green-50 text-green-600 border-green-200';
+        if (fn.endsWith('.jpg') || fn.endsWith('.jpeg') || fn.endsWith('.png')) return 'bg-yellow-50 text-yellow-600 border-yellow-200';
+        if (fn.endsWith('.zip')) return 'bg-purple-50 text-purple-600 border-purple-200';
+        return 'bg-gray-50 text-gray-500 border-gray-200';
+    };
+
+    const getExtLabel = (filename) => {
+        const ext = (filename || '').split('.').pop()?.toUpperCase() || 'FILE';
+        return ext.substring(0, 4);
+    };
+
+    const isPrivileged = ['super_admin', 'head_of_it', 'lead_group', 'project_manager', 'development_lead'].includes(user?.role);
+
+    // Filter docs by search
+    const filteredDocs = useMemo(() => {
+        if (!searchQuery.trim()) return docs;
+        const q = searchQuery.toLowerCase();
+        return docs.filter(d =>
+            (d.original_filename || d.file_name || d.name || '').toLowerCase().includes(q) ||
+            (d.document_type || '').toLowerCase().replace(/_/g, ' ').includes(q) ||
+            (d.uploader?.name || '').toLowerCase().includes(q)
+        );
+    }, [docs, searchQuery]);
+
+    return (
+        <div className="p-6">
+            {/* Header + Search + Upload */}
+            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6 border-b border-gray-100 pb-4">
+                <div className="flex-1 min-w-0">
+                    <h3 className="text-lg font-semibold text-gray-800">Dokumen Proyek</h3>
+                    <div className="relative mt-2 max-w-sm">
+                        <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                        <input
+                            type="text"
+                            value={searchQuery}
+                            onChange={(e) => setSearchQuery(e.target.value)}
+                            placeholder="Cari nama, tipe, atau uploader..."
+                            className="w-full pl-9 pr-4 py-2 rounded-lg border border-gray-200 bg-white text-sm focus:ring-2 focus:ring-[#00529C]/20 focus:border-[#00529C] outline-none transition-all"
+                        />
+                    </div>
+                </div>
+                {isPrivileged && (
+                    <div className="flex items-center gap-2 shrink-0">
+                        <input
+                            ref={fileInputRef}
+                            type="file"
+                            accept=".pdf,.xls,.xlsx,.jpg,.jpeg,.png,.zip"
+                            onChange={handleUpload}
+                            className="hidden"
+                        />
+                        <button
+                            onClick={() => fileInputRef.current?.click()}
+                            disabled={uploading}
+                            className="px-4 py-2 bg-[#00529C] text-white rounded-lg text-sm font-semibold flex items-center gap-2 shadow-sm hover:bg-[#004080] transition-colors disabled:opacity-50 cursor-pointer"
+                        >
+                            {uploading ? (
+                                <><Clock size={16} className="animate-spin" /> Mengunggah...</>
+                            ) : (
+                                <><Upload size={16} /> Unggah Dokumen</>
+                            )}
+                        </button>
+                    </div>
+                )}
+            </div>
+
+            {/* Document List */}
+            {loading ? (
+                <div className="py-12 text-center text-gray-400">
+                    <Clock size={32} className="mx-auto animate-spin mb-3" />
+                    <p className="text-sm">Memuat dokumen...</p>
+                </div>
+            ) : filteredDocs.length === 0 ? (
+                <div className="py-12 text-center text-gray-400">
+                    <FolderOpen size={48} className="mx-auto text-gray-300 mb-3" />
+                    <p className="text-sm font-medium">{searchQuery ? 'Tidak ada dokumen yang cocok' : 'Belum ada dokumen'}</p>
+                    <p className="text-xs mt-1">{searchQuery ? 'Coba kata kunci lain' : 'Unggah dokumen pertama untuk proyek ini.'}</p>
+                </div>
+            ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                    {filteredDocs.map((doc) => (
+                        <div key={doc.id} className="flex items-start gap-4 p-4 border border-gray-200 rounded-xl hover:border-[#00529C] hover:shadow-md transition-all cursor-pointer group bg-white">
+                            <div className={`w-12 h-12 rounded-lg flex items-center justify-center shrink-0 font-bold text-[10px] border ${getExtColor(doc.file_name || doc.name)}`}>
+                                {getExtLabel(doc.file_name || doc.name)}
+                            </div>
+                            <div className="flex-1 min-w-0">
+                                <p className="text-sm font-semibold text-gray-800 truncate group-hover:text-[#00529C] transition-colors" title={doc.original_filename || doc.file_name}>
+                                    {doc.original_filename || doc.file_name || doc.name || 'Dokumen'}
+                                </p>
+                                <div className="flex items-center gap-2 mt-1 text-xs text-gray-500">
+                                    <span>{formatFileSize(doc.file_size)}</span>
+                                    <span>•</span>
+                                    <span>{doc.document_type?.replace(/_/g, ' ')}</span>
+                                </div>
+                                <p className="text-[10px] text-gray-400 mt-1 flex items-center gap-1">
+                                    <User size={10} /> {doc.uploader?.name || 'Unknown'}
+                                    <span className="mx-1">•</span>
+                                    {doc.created_at ? new Date(doc.created_at).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' }) : ''}
+                                </p>
+                            </div>
+                            <div className="flex flex-col gap-1 opacity-0 group-hover:opacity-100 transition-all shrink-0">
+                                <button
+                                    onClick={(e) => { e.stopPropagation(); handleView(doc); }}
+                                    className="text-gray-400 hover:text-[#00529C] p-1.5 rounded hover:bg-blue-50 cursor-pointer"
+                                    title="Lihat Dokumen"
+                                >
+                                    <Eye size={14} />
+                                </button>
+                                <button
+                                    onClick={(e) => { e.stopPropagation(); handleDownload(doc); }}
+                                    className="text-gray-400 hover:text-[#00529C] p-1.5 rounded hover:bg-blue-50 cursor-pointer"
+                                    title="Unduh"
+                                >
+                                    <Download size={14} />
+                                </button>
+                                {isPrivileged && (
+                                    <button
+                                        onClick={(e) => { e.stopPropagation(); handleDelete(doc.id, doc.original_filename || doc.file_name); }}
+                                        className="text-gray-400 hover:text-red-500 p-1.5 rounded hover:bg-red-50 cursor-pointer"
+                                        title="Hapus"
+                                    >
+                                        <Trash2 size={14} />
+                                    </button>
+                                )}
+                            </div>
+                        </div>
+                    ))}
+                </div>
+            )}
+
+            {/* Modal Pratinjau Dokumen */}
+            {previewDoc && (
+                <DocumentViewerModal
+                    doc={{
+                        name: previewDoc.original_filename || previewDoc.file_name || 'Dokumen',
+                        url: previewDoc.previewBlobUrl || `/api/v1/documents/${previewDoc.id}/download`,
+                        type: previewDoc.document_type || 'Dokumen',
+                        size: formatFileSize(previewDoc.file_size),
+                        author: previewDoc.uploader?.name || 'Unknown',
+                        created_at: previewDoc.created_at,
+                    }}
+                    project={project}
+                    onClose={() => {
+                        if (previewDoc.previewBlobUrl) URL.revokeObjectURL(previewDoc.previewBlobUrl);
+                        setPreviewDoc(null);
+                    }}
+                />
             )}
         </div>
     );

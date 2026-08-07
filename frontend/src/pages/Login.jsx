@@ -179,7 +179,7 @@ export default function Login() {
                                     value={username}
                                     onChange={(e) => setUsername(e.target.value)}
                                     placeholder="Masukkan NIP atau Email"
-                                    className="block w-full pl-11 pr-4 py-3 border border-gray-200 rounded-xl bg-white focus:ring-2 focus:ring-[#1A56DB]/20 focus:border-[#1A56DB] text-sm text-gray-800 transition-all outline-none shadow-sm hover:border-gray-300"
+                                    className="block w-full pl-11 pr-4 py-3 border border-gray-200 rounded-xl bg-white focus:ring-2 focus:ring-[#00529C]/20 focus:border-[#00529C] text-sm text-gray-800 transition-all outline-none shadow-sm hover:border-gray-300"
                                     required
                                 />
                             </div>
@@ -190,7 +190,7 @@ export default function Login() {
                             <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2" htmlFor="password">
                                 <div className="flex justify-between items-center">
                                     <span>Kata Sandi</span>
-                                    <a href="#" className="text-[#1A56DB] hover:underline text-xs font-semibold normal-case tracking-normal">Lupa sandi?</a>
+                                    <a href="#" className="text-[#00529C] hover:underline text-xs font-semibold normal-case tracking-normal">Lupa sandi?</a>
                                 </div>
                             </label>
                             <div className="relative">
@@ -203,7 +203,7 @@ export default function Login() {
                                     value={password}
                                     onChange={(e) => setPassword(e.target.value)}
                                     placeholder="••••••••"
-                                    className="block w-full pl-11 pr-12 py-3 border border-gray-200 rounded-xl bg-white focus:ring-2 focus:ring-[#1A56DB]/20 focus:border-[#1A56DB] text-sm text-gray-800 transition-all outline-none shadow-sm hover:border-gray-300"
+                                    className="block w-full pl-11 pr-12 py-3 border border-gray-200 rounded-xl bg-white focus:ring-2 focus:ring-[#00529C]/20 focus:border-[#00529C] text-sm text-gray-800 transition-all outline-none shadow-sm hover:border-gray-300"
                                     required
                                 />
                                 <button
@@ -223,7 +223,7 @@ export default function Login() {
                                 type="checkbox"
                                 checked={rememberMe}
                                 onChange={(e) => setRememberMe(e.target.checked)}
-                                className="w-4 h-4 text-[#1A56DB] focus:ring-[#1A56DB] border-gray-300 rounded"
+                                className="w-4 h-4 text-[#00529C] focus:ring-[#00529C] border-gray-300 rounded"
                             />
                             <label htmlFor="remember-me" className="text-sm text-gray-600">
                                 Ingat saya di perangkat ini
@@ -231,11 +231,11 @@ export default function Login() {
                         </div>
 
                         <div className="flex items-center justify-between text-sm">
-                            <Link to="/register" className="text-[#1A56DB] hover:underline">
+                            <Link to="/register" className="text-[#00529C] hover:underline">
                                 <UserPlus size={14} className="inline mr-1" />
                                 Daftar Akun Baru
                             </Link>
-                            <Link to="/forgot-password" className="text-[#1A56DB] hover:underline">
+                            <Link to="/forgot-password" className="text-[#00529C] hover:underline">
                                 Lupa password?
                             </Link>
                         </div>

@@ -59,7 +59,7 @@ export default function Analytics() {
             change: analyticsData.avg_cycle_time?.change ?? 0,
             icon: Timer,
             iconBg: 'bg-blue-100',
-            iconColor: 'text-[#1A56DB]',
+            iconColor: 'text-[#00529C]',
             trend: 'down',
         },
         {
@@ -209,7 +209,7 @@ export default function Analytics() {
                                         </div>
                                         <div className="w-full bg-gray-100 h-2 rounded-full overflow-hidden">
                                             <div
-                                                className="bg-[#1A56DB] h-full rounded-full transition-all duration-500"
+                                                className="bg-[#00529C] h-full rounded-full transition-all duration-500"
                                                 style={{ width: `${pct}%` }}
                                             />
                                         </div>
@@ -250,7 +250,7 @@ export default function Analytics() {
                                             <polyline
                                                 points={points}
                                                 fill="none"
-                                                stroke="#1a56db"
+                                                stroke="#00529C"
                                                 strokeLinecap="round"
                                                 strokeLinejoin="round"
                                                 strokeWidth="4"
@@ -273,7 +273,7 @@ export default function Analytics() {
                             return (
                                 <div key={idx} className="flex flex-col items-center justify-end h-full z-10 relative">
                                     <div
-                                        className={`w-3 h-3 rounded-full border-2 border-white shadow-sm ${isLast ? 'bg-[#D4A017]' : 'bg-[#1A56DB]'
+                                        className={`w-3 h-3 rounded-full border-2 border-white shadow-sm ${isLast ? 'bg-[#D4A017]' : 'bg-[#00529C]'
                                             }`}
                                         style={{ marginBottom: `${height}%` }}
                                     />
@@ -283,7 +283,7 @@ export default function Analytics() {
                                     {isLast && d.value > 0 && (
                                         <div className="absolute bottom-[calc(35px+2%)] bg-white border border-gray-200 shadow-lg rounded-lg p-2 mb-2 w-max text-center">
                                             <p className="text-xs text-gray-500">{d.month}</p>
-                                            <p className="text-sm font-bold text-[#1A56DB]">{d.value} Rilis</p>
+                                            <p className="text-sm font-bold text-[#00529C]">{d.value} Rilis</p>
                                         </div>
                                     )}
                                 </div>

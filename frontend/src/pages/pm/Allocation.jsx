@@ -71,11 +71,22 @@ export default function Allocation() {
     }, []);
 
     // Filter proyek yang sudah memiliki PM tetapi BELUM dialokasikan tim (Antrean Alokasi Tim PM)
-    const activeProjectsWithPM = projects.filter(p =>
-        (p.status === 'IN_DEVELOPMENT' || (p.pm && p.pm.name)) &&
-        !p.isTeamAllocated &&
-        p.allocationStatus !== 'COMPLETED'
-    );
+    const activeProjectsWithPM = useMemo(() => {
+        let list = projects.filter(p =>
+            (p.status === 'IN_DEVELOPMENT' || (p.pm && p.pm.name)) &&
+            !p.isTeamAllocated &&
+            p.allocationStatus !== 'COMPLETED'
+        );
+        const isPrivileged = user?.role && ['super_admin', 'lead_group', 'head_of_it', 'development_lead'].includes(user.role);
+        if (!isPrivileged && user?.id) {
+            const pmId = user.id;
+            list = list.filter(p => {
+                const pmObjId = typeof p.pm === 'object' ? p.pm?.id : null;
+                return pmObjId && pmObjId === pmId;
+            });
+        }
+        return list;
+    }, [projects, user]);
 
     const [selectedProject, setSelectedProject] = useState(null);
     const [selectedTeamIds, setSelectedTeamIds] = useState([]);

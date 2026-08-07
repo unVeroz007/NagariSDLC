@@ -299,7 +299,7 @@ export default function UsersManagement() {
                         <p className="text-gray-500 text-xs font-semibold uppercase tracking-wider">Total Pengguna Aktif</p>
                         <h3 className="text-3xl font-bold text-gray-800 mt-1">{usersList.filter(u => u.status === 'active').length}</h3>
                     </div>
-                    <div className="w-12 h-12 rounded-2xl bg-blue-50 flex items-center justify-center text-[#1A56DB]">
+                    <div className="w-12 h-12 rounded-2xl bg-blue-50 flex items-center justify-center text-[#00529C]">
                         <Users size={26} />
                     </div>
                 </div>
@@ -334,14 +334,14 @@ export default function UsersManagement() {
                             value={searchTerm}
                             onChange={(e) => setSearchTerm(e.target.value)}
                             placeholder="Cari pengguna berdasarkan nama, email, ID..."
-                            className="w-full pl-10 pr-4 py-2 rounded-xl border border-gray-200 bg-white text-sm focus:border-[#1A56DB] focus:ring-2 focus:ring-blue-100 outline-none transition-all shadow-sm"
+                            className="w-full pl-10 pr-4 py-2 rounded-xl border border-gray-200 bg-white text-sm focus:border-[#00529C] focus:ring-2 focus:ring-blue-100 outline-none transition-all shadow-sm"
                         />
                     </div>
                     <div className="flex items-center gap-3 w-full sm:w-auto">
                         <select
                             value={roleFilter}
                             onChange={(e) => setRoleFilter(e.target.value)}
-                            className="w-full sm:w-56 py-2 px-3 rounded-xl border border-gray-200 bg-white text-sm focus:border-[#1A56DB] outline-none shadow-sm cursor-pointer font-medium text-gray-700"
+                            className="w-full sm:w-56 py-2 px-3 rounded-xl border border-gray-200 bg-white text-sm focus:border-[#00529C] outline-none shadow-sm cursor-pointer font-medium text-gray-700"
                         >
                             <option value="">Semua Peran (Master Roles)</option>
                             {masterRoles.map((r) => (

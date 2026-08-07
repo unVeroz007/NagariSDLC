@@ -117,7 +117,7 @@ export default function ForgotPassword() {
                     {/* Header */}
                     <div className="mb-8 text-center lg:text-left">
                         <div className="flex items-center gap-3 mb-2 justify-center lg:justify-start">
-                            <div className="w-12 h-12 rounded-full bg-blue-50 text-[#1A56DB] flex items-center justify-center">
+                            <div className="w-12 h-12 rounded-full bg-blue-50 text-[#00529C] flex items-center justify-center">
                                 <KeyRound size={24} />
                             </div>
                             <h2 className="text-2xl lg:text-3xl font-bold text-gray-800">Lupa Password</h2>
@@ -143,14 +143,14 @@ export default function ForgotPassword() {
                             </p>
                             <button
                                 onClick={handleResend}
-                                className="text-[#1A56DB] hover:underline text-sm font-medium"
+                                className="text-[#00529C] hover:underline text-sm font-medium"
                             >
                                 Kirim ulang link
                             </button>
                             <div className="mt-4 pt-4 border-t border-emerald-200">
                                 <Link
                                     to="/login"
-                                    className="text-[#1A56DB] hover:underline text-sm font-medium flex items-center justify-center gap-2"
+                                    className="text-[#00529C] hover:underline text-sm font-medium flex items-center justify-center gap-2"
                                 >
                                     <ArrowLeft size={16} />
                                     Kembali ke Login
@@ -175,7 +175,7 @@ export default function ForgotPassword() {
                                         }}
                                         onBlur={validateEmail}
                                         placeholder="Masukkan email korporat Anda"
-                                        className={`w-full pl-10 pr-4 py-3 border rounded-lg bg-gray-50 text-sm focus:ring-2 focus:ring-[#1A56DB] focus:border-[#1A56DB] outline-none transition-all ${error ? 'border-red-400' : 'border-gray-200'
+                                        className={`w-full pl-10 pr-4 py-3 border rounded-lg bg-gray-50 text-sm focus:ring-2 focus:ring-[#00529C] focus:border-[#00529C] outline-none transition-all ${error ? 'border-red-400' : 'border-gray-200'
                                             }`}
                                     />
                                 </div>
@@ -213,7 +213,7 @@ export default function ForgotPassword() {
                             <div className="text-center">
                                 <Link
                                     to="/login"
-                                    className="text-sm text-gray-500 hover:text-[#1A56DB] transition-colors flex items-center justify-center gap-1"
+                                    className="text-sm text-gray-500 hover:text-[#00529C] transition-colors flex items-center justify-center gap-1"
                                 >
                                     <ArrowLeft size={16} />
                                     Kembali ke Login

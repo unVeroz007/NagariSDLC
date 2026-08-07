@@ -113,7 +113,7 @@ export default function Queue() {
       return (
         <button
           onClick={() => navigate('/workspace/lead')}
-          className="px-3 py-1.5 bg-[#1A56DB] text-white rounded-lg text-xs font-medium hover:bg-[#1349c2] transition-colors flex items-center gap-1"
+          className="px-3 py-1.5 bg-[#00529C] text-white rounded-lg text-xs font-medium hover:bg-[#004080] transition-colors flex items-center gap-1"
         >
           <UserCheck size={14} />
           Disposisi
@@ -166,13 +166,13 @@ export default function Queue() {
               <select
                 value={typeFilter}
                 onChange={(e) => { setTypeFilter(e.target.value); setCurrentPage(1); }}
-                className="w-full pl-9 pr-10 py-2.5 bg-white border border-gray-200 rounded-xl text-sm font-semibold text-gray-700 shadow-xs focus:ring-2 focus:ring-[#1A56DB]/20 focus:border-[#1A56DB] outline-none cursor-pointer appearance-none transition-all hover:border-gray-300"
+                className="w-full pl-9 pr-10 py-2.5 bg-white border border-gray-200 rounded-xl text-sm font-semibold text-gray-700 shadow-xs focus:ring-2 focus:ring-[#00529C]/20 focus:border-[#00529C] outline-none cursor-pointer appearance-none transition-all hover:border-gray-300"
               >
                 <option value="All">Semua Tipe Proyek</option>
                 <option value="RBB">Tipe: RBB (Wajib Selesai)</option>
                 <option value="NON_RBB">Tipe: Non-RBB (Fleksibel)</option>
               </select>
-              <Filter size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#1A56DB] pointer-events-none" />
+              <Filter size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#00529C] pointer-events-none" />
               <ChevronDown size={16} className="absolute right-3.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
             </div>
           </div>
@@ -183,7 +183,7 @@ export default function Queue() {
               onClick={() => { setActiveTab('pending'); setCurrentPage(1); }}
               className={`px-6 py-3 text-sm font-medium border-b-2 transition-colors flex items-center gap-2 ${
                 activeTab === 'pending'
-                  ? 'border-[#1A56DB] text-[#1A56DB]'
+                  ? 'border-[#00529C] text-[#00529C]'
                   : 'border-transparent text-gray-500 hover:text-gray-700'
               }`}
             >
@@ -199,7 +199,7 @@ export default function Queue() {
               onClick={() => { setActiveTab('in_review'); setCurrentPage(1); }}
               className={`px-6 py-3 text-sm font-medium border-b-2 transition-colors flex items-center gap-2 ${
                 activeTab === 'in_review'
-                  ? 'border-[#1A56DB] text-[#1A56DB]'
+                  ? 'border-[#00529C] text-[#00529C]'
                   : 'border-transparent text-gray-500 hover:text-gray-700'
               }`}
             >
@@ -215,7 +215,7 @@ export default function Queue() {
               onClick={() => { setActiveTab('completed'); setCurrentPage(1); }}
               className={`px-6 py-3 text-sm font-medium border-b-2 transition-colors flex items-center gap-2 ${
                 activeTab === 'completed'
-                  ? 'border-[#1A56DB] text-[#1A56DB]'
+                  ? 'border-[#00529C] text-[#00529C]'
                   : 'border-transparent text-gray-500 hover:text-gray-700'
               }`}
             >
@@ -255,7 +255,7 @@ export default function Queue() {
                       const statusConfig = getStatusBadge(project.status);
                       return (
                         <tr key={project.id} className="hover:bg-gray-50 transition-colors group">
-                          <td className="px-6 py-4 font-semibold text-[#1A56DB]">{project.id}</td>
+                          <td className="px-6 py-4 font-semibold text-[#00529C]">{project.id}</td>
                           <td className="px-6 py-4 font-medium text-gray-800">{project.name}</td>
                           <td className="px-6 py-4 text-gray-500">{project.division || '-'}</td>
                           <td className="px-6 py-4">
@@ -314,7 +314,7 @@ export default function Queue() {
                           onClick={() => setCurrentPage(pageNum)}
                           className={`px-3 py-1 rounded text-sm font-medium ${
                             pageNum === currentPage
-                              ? 'bg-[#1A56DB] text-white'
+                              ? 'bg-[#00529C] text-white'
                               : 'border border-gray-200 bg-white hover:bg-gray-50'
                           }`}
                         >

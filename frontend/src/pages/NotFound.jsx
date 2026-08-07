@@ -9,7 +9,7 @@ export default function NotFound() {
     const { user } = useAuth();
 
     return (
-        <div className="min-h-screen bg-gradient-to-br from-[#001838] via-[#003a73] to-[#1A56DB] flex items-center justify-center p-6">
+        <div className="min-h-screen bg-gradient-to-br from-[#001838] via-[#003a73] to-[#00529C] flex items-center justify-center p-6">
             <div className="w-full max-w-lg">
                 {/* Card */}
                 <div className="bg-white/10 backdrop-blur-md rounded-3xl border border-white/20 p-10 text-center shadow-2xl">

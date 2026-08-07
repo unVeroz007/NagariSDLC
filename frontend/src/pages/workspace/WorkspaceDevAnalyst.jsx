@@ -31,6 +31,7 @@ import LoadingSpinner from '../../components/LoadingSpinner';
 import EmptyState from '../../components/EmptyState';
 import DocumentViewerModal from '../../components/DocumentViewerModal';
 import toast from 'react-hot-toast';
+import { generateDocumentName, DOCUMENT_TYPES, formatFileSize } from '../../utils/documentNaming';
 
 const resolveAllProjectDocs = (project) => {
     if (!project) return [];
@@ -118,6 +119,8 @@ export default function WorkspaceDevAnalyst() {
         if (selectedAnalystFilter === 'MY_PROJECTS') {
             const myName = user?.name || '';
             list = list.filter(p => {
+                const analystId = p.analyst?.id || (typeof p.assignedAnalyst === 'object' ? p.assignedAnalyst?.id : null);
+                if (analystId && user?.id) return analystId === user.id;
                 const analystName = typeof p.assignedAnalyst === 'object'
                     ? (p.assignedAnalyst?.name || '')
                     : String(p.assignedAnalyst || p.devAnalyst || p.devAnalystName || p.analyst || '');
@@ -156,21 +159,27 @@ export default function WorkspaceDevAnalyst() {
                 return;
             }
             const objectUrl = URL.createObjectURL(file);
+            const autoDocName = generateDocumentName(
+                selectedProject?.req_id || selectedProject?.id,
+                DOCUMENT_TYPES.ARSITEKTUR.code,
+                selectedProject?.title || selectedProject?.name
+            );
             const fileObj = {
-                name: file.name,
-                size: (file.size / 1024 / 1024).toFixed(1) + ' MB',
+                name: autoDocName,
+                originalName: file.name,
+                size: formatFileSize(file.size),
                 type: 'fsd_dev',
                 doc_type: 'fsd_dev',
                 url: objectUrl,
                 rawFile: file,
                 uploadedAt: new Date().toISOString()
             };
-            saveFileToStore(file.name, objectUrl);
+            saveFileToStore(autoDocName, objectUrl);
             if (selectedProject?.id) {
                 saveFileToStore(`fsd_dev_${selectedProject.id}`, objectUrl);
             }
             setUploadedFile(fileObj);
-            toast.success(`Dokumen Arsitektur Teknis "${file.name}" berhasil diunggah.`);
+            toast.success(`Dokumen Arsitektur Teknis "${autoDocName}" berhasil diunggah.`);
         }
     };
 
@@ -313,7 +322,7 @@ export default function WorkspaceDevAnalyst() {
             {/* Top Filter Control Bar */}
             <div className="bg-white border border-gray-200 rounded-2xl p-4 mb-6 shadow-2xs flex flex-col sm:flex-row items-center justify-between gap-4">
                 <div className="flex items-center gap-2">
-                    <Filter size={18} className="text-[#1A56DB]" />
+                    <Filter size={18} className="text-[#00529C]" />
                     <span className="text-sm font-bold text-gray-800">Filter Antrean Proyek:</span>
                 </div>
 
@@ -334,7 +343,7 @@ export default function WorkspaceDevAnalyst() {
                             onClick={() => setSelectedAnalystFilter('MY_PROJECTS')}
                             className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
                                 selectedAnalystFilter === 'MY_PROJECTS'
-                                    ? 'bg-[#1A56DB] text-white shadow-xs'
+                                    ? 'bg-[#00529C] text-white shadow-xs'
                                     : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
                             }`}
                         >
@@ -345,7 +354,7 @@ export default function WorkspaceDevAnalyst() {
                     <select
                         value={['ALL', 'MY_PROJECTS'].includes(selectedAnalystFilter) ? '' : selectedAnalystFilter}
                         onChange={(e) => setSelectedAnalystFilter(e.target.value || 'ALL')}
-                        className="px-3 py-1.5 rounded-xl text-xs font-semibold border border-gray-200 bg-white text-gray-700 outline-none focus:border-[#1A56DB]"
+                        className="px-3 py-1.5 rounded-xl text-xs font-semibold border border-gray-200 bg-white text-gray-700 outline-none focus:border-[#00529C]"
                     >
                         <option value="">-- Filter Per System Analyst --</option>
                         <option value="Citra Kirana">Citra Kirana</option>
@@ -383,7 +392,7 @@ export default function WorkspaceDevAnalyst() {
                                     key={project.id}
                                     onClick={() => setSelectedProject(project)}
                                     className={`p-4 rounded-xl border transition-all cursor-pointer space-y-2.5 ${selectedProject?.id === project.id
-                                            ? 'bg-blue-50/70 border-[#1A56DB] shadow-md ring-2 ring-blue-100'
+                                            ? 'bg-blue-50/70 border-[#00529C] shadow-md ring-2 ring-blue-100'
                                             : 'bg-white border-gray-200 hover:border-blue-300 hover:shadow-xs'
                                         }`}
                                 >
@@ -471,7 +480,7 @@ export default function WorkspaceDevAnalyst() {
                                 {/* Pesan & Arahan Khusus dari Ketua Grup Pengembangan (Lead Dev) */}
                                 <div className="bg-blue-50/90 p-4.5 rounded-xl border border-blue-200 space-y-2 shadow-2xs">
                                     <p className="font-bold text-[#1a365d] uppercase tracking-wider flex items-center gap-1.5 text-xs">
-                                        <MessageSquare size={16} className="text-[#1A56DB]" />
+                                        <MessageSquare size={16} className="text-[#00529C]" />
                                         Pesan &amp; Arahan Khusus dari Ketua Grup Pengembangan (Lead Dev)
                                     </p>
                                     <div className="bg-white p-3 rounded-lg border border-blue-100 text-xs">
@@ -489,7 +498,7 @@ export default function WorkspaceDevAnalyst() {
                                 {/* 1. Dokumen Kelengkapan Proyek (BRD & FSD Perencanaan) */}
                                 <div className="bg-slate-50 p-4.5 rounded-xl border border-slate-200 space-y-3">
                                     <h3 className="text-xs font-extrabold text-[#1a365d] uppercase tracking-wider flex items-center gap-1.5">
-                                        <FolderOpen size={16} className="text-[#1A56DB]" />
+                                        <FolderOpen size={16} className="text-[#00529C]" />
                                         1. Berkas &amp; Dokumen SDLC Proyek (Semua Tahap: Inisiasi &amp; Perencanaan)
                                     </h3>
                                     <div className="space-y-2">
@@ -508,7 +517,7 @@ export default function WorkspaceDevAnalyst() {
                                                     <button
                                                         type="button"
                                                         onClick={() => setPreviewDoc(doc)}
-                                                        className="px-3 py-1.5 border border-[#1A56DB] text-[#1A56DB] hover:bg-blue-50 rounded-lg text-xs font-bold transition-all flex items-center gap-1 cursor-pointer active:scale-95"
+                                                        className="px-3 py-1.5 border border-[#00529C] text-[#00529C] hover:bg-blue-50 rounded-lg text-xs font-bold transition-all flex items-center gap-1 cursor-pointer active:scale-95"
                                                         title="View & Baca Dokumen"
                                                     >
                                                         <Eye size={13} />
@@ -541,7 +550,7 @@ export default function WorkspaceDevAnalyst() {
                                                                 toast.success(`Mengunduh salinan berkas "${fileName}"...`);
                                                             }
                                                         }}
-                                                        className="p-1.5 text-gray-500 hover:text-[#1A56DB] hover:bg-blue-50 rounded-lg transition-colors cursor-pointer"
+                                                        className="p-1.5 text-gray-500 hover:text-[#00529C] hover:bg-blue-50 rounded-lg transition-colors cursor-pointer"
                                                         title="Unduh Dokumen"
                                                     >
                                                         <Download size={15} />
@@ -555,7 +564,7 @@ export default function WorkspaceDevAnalyst() {
                                 {/* 2. Form Kajian Arsitektur Teknis IT */}
                                 <div className="bg-blue-50/40 p-5 rounded-xl border border-blue-100 space-y-4">
                                     <h3 className="text-xs font-extrabold text-[#1a365d] uppercase tracking-wider flex items-center gap-1.5">
-                                        <Cpu size={16} className="text-[#1A56DB]" />
+                                        <Cpu size={16} className="text-[#00529C]" />
                                         2. Formulir Kajian Arsitektur Teknis &amp; Spesifikasi IT
                                     </h3>
 
@@ -567,7 +576,7 @@ export default function WorkspaceDevAnalyst() {
                                             <select
                                                 value={decision}
                                                 onChange={(e) => setDecision(e.target.value)}
-                                                className="w-full px-4 py-2.5 bg-white border border-gray-300 rounded-xl text-sm font-semibold focus:ring-2 focus:ring-blue-100 focus:border-[#1A56DB] outline-none"
+                                                className="w-full px-4 py-2.5 bg-white border border-gray-300 rounded-xl text-sm font-semibold focus:ring-2 focus:ring-blue-100 focus:border-[#00529C] outline-none"
                                             >
                                                 <option value="Disetujui (Layak Develop)">Disetujui (Layak Develop &amp; Lanjut ke Tunjuk PM)</option>
                                                 <option value="Disetujui dengan Rekomendasi Arsitektur">Disetujui dengan Rekomendasi Arsitektur Khusus</option>
@@ -584,7 +593,7 @@ export default function WorkspaceDevAnalyst() {
                                                 value={techStack}
                                                 onChange={(e) => setTechStack(e.target.value)}
                                                 placeholder="Contoh: Microservices Java Spring Boot + React JS + PostgreSQL + RabbitMQ"
-                                                className="w-full px-4 py-2.5 bg-white border border-gray-300 rounded-xl text-xs font-semibold focus:ring-2 focus:ring-blue-100 focus:border-[#1A56DB] outline-none"
+                                                className="w-full px-4 py-2.5 bg-white border border-gray-300 rounded-xl text-xs font-semibold focus:ring-2 focus:ring-blue-100 focus:border-[#00529C] outline-none"
                                             />
                                         </div>
 
@@ -610,7 +619,7 @@ export default function WorkspaceDevAnalyst() {
                                                         }
                                                     }}
                                                     placeholder="Contoh: 30"
-                                                    className="w-full px-4 py-2.5 pr-12 bg-white border border-gray-300 rounded-xl text-xs font-semibold focus:ring-2 focus:ring-blue-100 focus:border-[#1A56DB] outline-none"
+                                                    className="w-full px-4 py-2.5 pr-12 bg-white border border-gray-300 rounded-xl text-xs font-semibold focus:ring-2 focus:ring-blue-100 focus:border-[#00529C] outline-none"
                                                 />
                                                 <span className="absolute right-4 top-1/2 -translate-y-1/2 text-xs font-bold text-gray-400 pointer-events-none">
                                                     Hari
@@ -627,7 +636,7 @@ export default function WorkspaceDevAnalyst() {
                                                 value={notes}
                                                 onChange={(e) => setNotes(e.target.value)}
                                                 placeholder="Tuliskan spesifikasi arsitektur teknis, integrasi API, struktur basis data, dan pertimbangan keamanan IT..."
-                                                className="w-full px-4 py-3 bg-white border border-gray-300 rounded-xl text-xs focus:ring-2 focus:ring-blue-100 focus:border-[#1A56DB] outline-none leading-relaxed"
+                                                className="w-full px-4 py-3 bg-white border border-gray-300 rounded-xl text-xs focus:ring-2 focus:ring-blue-100 focus:border-[#00529C] outline-none leading-relaxed"
                                             />
                                         </div>
 
@@ -640,14 +649,14 @@ export default function WorkspaceDevAnalyst() {
                                                 onClick={() => fileInputRef.current?.click()}
                                                 className="border-2 border-dashed border-blue-200 bg-white p-4 rounded-xl text-center cursor-pointer hover:bg-blue-50/50 transition-colors flex items-center justify-center gap-3"
                                             >
-                                                <Upload size={18} className="text-[#1A56DB]" />
+                                                <Upload size={18} className="text-[#00529C]" />
                                                 <span className="text-xs font-semibold text-gray-700">
                                                     {uploadedFile ? uploadedFile.name : 'Pilih Berkas Spesifikasi PDF (.pdf)'}
                                                 </span>
                                                 <input
                                                     type="file"
                                                     ref={fileInputRef}
-                                                    accept=".pdf"
+                                                    accept=".pdf,.xls,.xlsx,.jpg,.jpeg,.png,.zip"
                                                     onChange={handleFileUpload}
                                                     className="hidden"
                                                 />
