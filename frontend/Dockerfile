@@ -3,6 +3,12 @@ FROM node:20-alpine AS build
 
 WORKDIR /app
 
+# Build-time environment variables for Vite
+ARG VITE_API_URL
+ARG VITE_API_MODE
+ENV VITE_API_URL=${VITE_API_URL}
+ENV VITE_API_MODE=${VITE_API_MODE}
+
 # Copy package descriptors and install dependencies
 COPY package*.json ./
 RUN npm ci

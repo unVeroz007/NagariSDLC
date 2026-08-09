@@ -1,4 +1,5 @@
 import RBBBadge from '../../components/RBBBadge';
+import ProjectTypeBadge from '../../components/ProjectTypeBadge';
 import { useState, useMemo, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
@@ -400,7 +401,7 @@ export default function WorkspaceAnalyst() {
                                         {formatDate(project.deadline || project.submittedAt)}
                                     </span>
                                 </div>
-                                <div className="mb-2"><RBBBadge type={project.type} deadline={project.rbbDeadline} /></div>
+                                <div className="mb-2"><div className="flex items-center gap-1.5 flex-wrap"><RBBBadge type={project.type} deadline={project.rbbDeadline} /><ProjectTypeBadge type={project.project_type} /></div></div>
                                 <h4 className="font-semibold text-gray-800 text-sm mb-1 group-hover:text-[#00529C] transition-colors">{project.name}</h4>
                                 <p className="text-xs text-gray-500 mb-2.5">Peminta: {project.division}</p>
                                 {(project.leadNote || project.leadNotes || project.notes || project.dispositionNotes || project.assignmentNote) && (
@@ -547,7 +548,7 @@ export default function WorkspaceAnalyst() {
                                         Klasifikasi Tipe Proyek SDLC
                                     </span>
                                     <div className="flex items-center gap-2 flex-wrap">
-                                        <RBBBadge type={selectedProject?.type} deadline={selectedProject?.rbbDeadline} />
+                                        <div className="flex items-center gap-1.5 flex-wrap"><RBBBadge type={selectedProject?.type} deadline={selectedProject?.rbbDeadline} /><ProjectTypeBadge type={selectedProject?.project_type} /></div>
                                     </div>
                                 </div>
 

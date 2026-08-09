@@ -1,8 +1,10 @@
 import { useState, useMemo, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useAuth } from '../../contexts/AuthContext';
 import { useProjects } from '../../contexts/ProjectContext';
 import { useNotifications } from '../../contexts/NotificationContext';
 import RBBBadge from '../../components/RBBBadge';
+import ProjectTypeBadge from '../../components/ProjectTypeBadge';
 import toast from 'react-hot-toast';
 import {
     FileCheck,
@@ -41,6 +43,7 @@ const STATUS_CONFIG = {
 
 export default function ReviewDocs() {
     const navigate = useNavigate();
+    const { user } = useAuth();
     const { projects } = useProjects();
     const { addNotification } = useNotifications();
     const rightPanelRef = useRef(null);
@@ -181,7 +184,7 @@ export default function ReviewDocs() {
                                     >
                                         <div className="flex justify-between items-start mb-1.5">
                                             <span className="text-xs font-mono font-bold text-blue-600 bg-blue-50 px-2 py-0.5 rounded">{p.id}</span>
-                                            <RBBBadge type={p.type} />
+                                            <div className="flex items-center gap-1.5 flex-wrap"><RBBBadge type={p.type} /><ProjectTypeBadge type={p.project_type} /></div>
                                         </div>
                                         <h4 className="font-bold text-gray-800 text-sm line-clamp-1 mb-2">{p.name}</h4>
 
@@ -219,7 +222,7 @@ export default function ReviewDocs() {
                             <div className="pb-4 border-b border-gray-100">
                                 <div className="flex items-center justify-between mb-2">
                                     <span className="text-xs font-mono font-bold text-blue-600 bg-blue-50 px-2.5 py-0.5 rounded border border-blue-100">{activeProject.id}</span>
-                                    <RBBBadge type={activeProject.type} />
+                                    <div className="flex items-center gap-1.5 flex-wrap"><RBBBadge type={activeProject.type} /><ProjectTypeBadge type={activeProject.project_type} /></div>
                                 </div>
                                 <h3 className="text-xl font-extrabold text-gray-800">{activeProject.name}</h3>
                                 <div className="flex items-center gap-4 text-xs text-gray-500 mt-1.5 flex-wrap">

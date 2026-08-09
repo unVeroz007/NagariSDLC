@@ -15,8 +15,8 @@ class ProjectStatusHistoryResource extends JsonResource
         return [
             'id' => $this->id,
             'project_id' => $this->project_id,
-            'from_status' => $fromStatus ? ($fromStatus->value ?? $fromStatus) : null,
-            'to_status' => $toStatus->value ?? $toStatus,
+            'from_status' => $fromStatus instanceof \BackedEnum ? $fromStatus->value : $fromStatus,
+            'to_status' => $toStatus instanceof \BackedEnum ? $toStatus->value : $toStatus,
             'changed_by' => new UserResource($this->whenLoaded('changedBy')),
             'notes' => $this->notes,
             'created_at' => $this->created_at?->toIso8601String(),

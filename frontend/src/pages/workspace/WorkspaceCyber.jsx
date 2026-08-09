@@ -3,6 +3,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import { useProjects, getProjectRealDocuments } from '../../contexts/ProjectContext';
 import { useNotifications } from '../../contexts/NotificationContext';
 import RBBBadge from '../../components/RBBBadge';
+import ProjectTypeBadge from '../../components/ProjectTypeBadge';
 import LoadingSpinner from '../../components/LoadingSpinner';
 import DocumentViewerModal from '../../components/DocumentViewerModal';
 import toast from 'react-hot-toast';
@@ -264,7 +265,7 @@ export default function WorkspaceCyber() {
                                 >
                                     <div className="flex justify-between items-start mb-1.5">
                                         <span className="text-xs font-mono font-bold text-blue-600 bg-blue-50 px-2 py-0.5 rounded">{p.id}</span>
-                                        <RBBBadge type={p.type} />
+                                        <div className="flex items-center gap-1.5 flex-wrap"><RBBBadge type={p.type} /><ProjectTypeBadge type={p.project_type} /></div>
                                     </div>
                                     <h4 className="font-bold text-gray-800 text-sm line-clamp-1 mb-1.5">{p.name || p.title}</h4>
                                     <div className="flex items-center justify-between text-xs text-gray-500 pt-2 border-t border-gray-100">
@@ -296,7 +297,7 @@ export default function WorkspaceCyber() {
                                     <span className="text-xs font-mono font-bold text-blue-600 bg-blue-50 px-2.5 py-0.5 rounded border border-blue-100">
                                         {activeProject.id}
                                     </span>
-                                    <RBBBadge type={activeProject.type} deadline={activeProject.rbbDeadline} />
+                                    <div className="flex items-center gap-1.5 flex-wrap"><RBBBadge type={activeProject.type} deadline={activeProject.rbbDeadline} /><ProjectTypeBadge type={activeProject.project_type} /></div>
                                 </div>
                                 <h3 className="text-xl font-extrabold text-gray-800">{activeProject.name || activeProject.title}</h3>
                                 <p className="text-xs text-gray-500 mt-1 flex items-center gap-2">

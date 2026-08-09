@@ -1,5 +1,6 @@
 import { getParallelTestingBadge } from '../../constants/projectStatus';
 import RBBBadge from '../../components/RBBBadge';
+import ProjectTypeBadge from '../../components/ProjectTypeBadge';
 import DocumentViewerModal from '../../components/DocumentViewerModal';
 import {
     generateDocumentName,

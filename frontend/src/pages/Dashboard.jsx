@@ -3,6 +3,7 @@ import { useProjects } from '../contexts/ProjectContext';
 import { useNotifications } from '../contexts/NotificationContext';
 import { useNavigate } from 'react-router-dom';
 import LoadingSpinner from '../components/LoadingSpinner';
+import ProjectTypeBadge from '../components/ProjectTypeBadge';
 import {
     Building2,
     Briefcase,
@@ -477,6 +478,9 @@ export default function Dashboard() {
                                         <div className="flex-1 min-w-0">
                                             <p className="text-sm font-semibold text-gray-800 truncate">{p.name}</p>
                                             <p className="text-xs text-gray-500">{p.id} · {p.division}</p>
+                                            {p.project_type && (
+                                                <div className="mt-1"><ProjectTypeBadge type={p.project_type} /></div>
+                                            )}
                                         </div>
                                         <div className="text-right shrink-0">
                                             <p className={`text-sm font-bold ${daysLeft <= 7 ? 'text-red-600' : 'text-amber-600'}`}>{displayDays}</p>
@@ -582,6 +586,9 @@ export default function Dashboard() {
                                     <td className="py-4 px-5">
                                         <p className="font-semibold text-gray-800 group-hover:text-[#00529C] transition-colors truncate">{proj.name}</p>
                                         <p className="text-xs text-gray-400 mt-0.5">{proj.id}</p>
+                                        {proj.project_type && (
+                                            <div className="mt-1.5"><ProjectTypeBadge type={proj.project_type} /></div>
+                                        )}
                                     </td>
                                     <td className="py-4 px-4">
                                         <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-100/80 text-slate-700 text-xs font-medium border border-slate-200/60 max-w-full">

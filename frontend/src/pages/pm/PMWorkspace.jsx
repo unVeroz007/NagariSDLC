@@ -7,6 +7,7 @@ import { useNavigate } from 'react-router-dom';
 import LoadingSpinner from '../../components/LoadingSpinner';
 import EmptyState from '../../components/EmptyState';
 import RBBBadge from '../../components/RBBBadge';
+import ProjectTypeBadge from '../../components/ProjectTypeBadge';
 import { getParallelTestingBadge } from '../../constants/projectStatus';
 
 
@@ -589,7 +590,10 @@ export default function PMWorkspace() {
                                                     </div>
                                                 </td>
                                                 <td className="px-6 py-4">
-                                                    <RBBBadge type={project.type} deadline={project.rbbDeadline} />
+                                                    <div className="flex items-center gap-1.5 flex-wrap">
+                                                        <RBBBadge type={project.type} deadline={project.rbbDeadline} />
+                                                        <ProjectTypeBadge type={project.project_type} />
+                                                    </div>
                                                 </td>
                                                 <td className="px-6 py-4 text-gray-500 text-xs">
                                                     {project.rbbDeadline ? formatDate(project.rbbDeadline) : '-'}

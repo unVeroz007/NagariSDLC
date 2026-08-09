@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { Outlet, NavLink, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { useProjects } from '../contexts/ProjectContext';
@@ -10,6 +10,8 @@ import {
     LogOut,
     Menu,
     X,
+    UserCircle,
+    AlertTriangle,
 } from 'lucide-react';
 
 export default function MainLayout() {
@@ -18,6 +20,19 @@ export default function MainLayout() {
     const location = useLocation();
     const navigate = useNavigate();
     const [isMobileOpen, setIsMobileOpen] = useState(false);
+    const [isLogoutModalOpen, setIsLogoutModalOpen] = useState(false);
+    const [isProfileMenuOpen, setIsProfileMenuOpen] = useState(false);
+    const profileMenuRef = useRef(null);
+
+    useEffect(() => {
+        const onDocClick = (e) => {
+            if (profileMenuRef.current && !profileMenuRef.current.contains(e.target)) {
+                setIsProfileMenuOpen(false);
+            }
+        };
+        document.addEventListener('mousedown', onDocClick);
+        return () => document.removeEventListener('mousedown', onDocClick);
+    }, []);
 
     // Search Bar State & Functionality
     const [searchQuery, setSearchQuery] = useState('');
@@ -40,6 +55,11 @@ export default function MainLayout() {
     };
 
     const handleLogout = () => {
+        setIsLogoutModalOpen(true);
+    };
+
+    const confirmLogout = () => {
+        setIsLogoutModalOpen(false);
         logout();
         navigate('/login');
     };
@@ -229,9 +249,37 @@ export default function MainLayout() {
                         {/* Notification Bell */}
                         <NotificationBell />
 
-                        {/* User Avatar */}
-                        <div className="w-8 h-8 md:w-9 md:h-9 rounded-full bg-[#D4A017] text-[#001838] flex items-center justify-center font-bold text-xs md:text-sm shadow-xs">
-                            {user?.name?.charAt(0) || 'U'}
+                        {/* User Avatar & Dropdown Menu */}
+                        <div ref={profileMenuRef} className="relative">
+                            <button
+                                onClick={() => setIsProfileMenuOpen(prev => !prev)}
+                                className="w-8 h-8 md:w-9 md:h-9 rounded-full bg-[#D4A017] text-[#001838] flex items-center justify-center font-bold text-xs md:text-sm shadow-xs hover:scale-105 hover:shadow-md transition-all cursor-pointer"
+                                title="Menu Pengguna"
+                            >
+                                {user?.name?.charAt(0) || 'U'}
+                            </button>
+                            {isProfileMenuOpen && (
+                                <div className="absolute right-0 top-full mt-2 w-64 bg-white rounded-2xl shadow-2xl border border-gray-100 py-2 z-50 animate-scale-up">
+                                    <div className="px-4 py-3 border-b border-gray-100">
+                                        <p className="text-xs text-gray-400">Masuk sebagai</p>
+                                        <p className="text-sm font-bold text-gray-800 truncate">{user?.name}</p>
+                                        <p className="text-xs text-gray-500 truncate">{user?.email}</p>
+                                        <p className="text-[10px] text-white bg-[#00529C] inline-block px-2 py-0.5 rounded-full mt-1 font-bold uppercase tracking-wide">{user?.role?.replace('_', ' ')}</p>
+                                    </div>
+                                    <button
+                                        onClick={() => { navigate('/profile'); setIsProfileMenuOpen(false); }}
+                                        className="w-full flex items-center gap-2.5 px-4 py-2.5 text-sm text-gray-700 hover:bg-blue-50 hover:text-[#00529C] transition-colors cursor-pointer"
+                                    >
+                                        <UserCircle size={18} /> Profil Saya
+                                    </button>
+                                    <button
+                                        onClick={() => { handleLogout(); setIsProfileMenuOpen(false); }}
+                                        className="w-full flex items-center gap-2.5 px-4 py-2.5 text-sm text-red-600 hover:bg-red-50 transition-colors cursor-pointer"
+                                    >
+                                        <LogOut size={18} /> Keluar
+                                    </button>
+                                </div>
+                            )}
                         </div>
                     </div>
                 </header>
@@ -240,6 +288,37 @@ export default function MainLayout() {
                     <Outlet />
                 </main>
             </div>
+
+            {/* Modal Konfirmasi Logout */}
+            {isLogoutModalOpen && (
+                <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-[100]">
+                    <div className="bg-white rounded-2xl max-w-sm w-full p-6 shadow-2xl border border-gray-100 animate-scale-up text-center">
+                        <div className="w-14 h-14 rounded-full bg-red-100 text-red-500 flex items-center justify-center mx-auto mb-4">
+                            <AlertTriangle size={28} />
+                        </div>
+                        <h3 className="text-lg font-extrabold text-gray-800 mb-2">Konfirmasi Keluar</h3>
+                        <p className="text-sm text-gray-500 mb-6 leading-relaxed">
+                            Apakah Anda yakin ingin keluar dari sesi <strong className="text-gray-700">{user?.name}</strong>?<br />
+                            Semua perubahan yang belum disimpan akan hilang.
+                        </p>
+                        <div className="flex gap-3">
+                            <button
+                                onClick={() => setIsLogoutModalOpen(false)}
+                                className="flex-1 py-2.5 px-4 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-xl font-bold text-sm transition-all cursor-pointer"
+                            >
+                                Batal
+                            </button>
+                            <button
+                                onClick={confirmLogout}
+                                className="flex-1 py-2.5 px-4 bg-red-600 hover:bg-red-700 text-white rounded-xl font-bold text-sm shadow-sm transition-all cursor-pointer flex items-center justify-center gap-2"
+                            >
+                                <LogOut size={16} />
+                                Keluar
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 }

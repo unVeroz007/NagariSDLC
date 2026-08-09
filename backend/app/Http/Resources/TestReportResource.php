@@ -16,7 +16,7 @@ class TestReportResource extends JsonResource
             'project_id' => $this->project_id,
             'test_type' => $this->test_type,
             'tester' => new UserResource($this->whenLoaded('tester')),
-            'result' => $result ? ($result->value ?? $result) : null,
+            'result' => $result instanceof \BackedEnum ? $result->value : $result,
             'notes' => $this->notes,
             'attachment_url' => $this->attachment_url,
             'reviewer' => new UserResource($this->whenLoaded('reviewer')),

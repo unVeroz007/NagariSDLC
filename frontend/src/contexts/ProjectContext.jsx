@@ -39,7 +39,7 @@ export const getProjectRealDocuments = (project) => {
             size: d.file_size || d.size || 'N/A',
             uploadedAt: d.created_at || d.uploaded_at || 'Terverifikasi',
             author: d.uploader?.name || d.author || 'Tim SDLC',
-            url: d.file_path ? `/api/documents/${d.id}/download` : (d.url || null),
+            url: d.id && !d.url ? `${import.meta.env.VITE_API_URL || 'http://localhost:8000/api/v1'}/documents/${d.id}/download` : (d.url || null),
         }));
     }
     return [];
@@ -63,7 +63,14 @@ export function ProjectProvider({ children }) {
             
             const res = await projectService.getAll();
             if (res && res.data) {
-                setProjects(res.data);
+                // Normalize: API mengembalikan 'title', semua komponen memakai 'name'
+                const normalized = res.data.map(p => ({
+                    ...p,
+                    name: p.name || p.title || 'Tanpa Judul',
+                    reqId: p.reqId || p.req_id || null,
+                    division: typeof p.division === 'string' ? p.division : (p.division?.name || p.division_detail?.name || null),
+                }));
+                setProjects(normalized);
                 setMeta(res.meta || null);
             }
             setLastUpdated(new Date());
@@ -92,6 +99,7 @@ export function ProjectProvider({ children }) {
                 division_id: projectData.division_id,
                 target_date: projectData.targetDate || null,
                 type: projectData.type || 'RBB',
+                project_type: projectData.project_type || 'baru',
             });
             
             if (res && res.data) {

@@ -1,4 +1,5 @@
 import RBBBadge from '../../components/RBBBadge';
+import ProjectTypeBadge from '../../components/ProjectTypeBadge';
 import { useState, useMemo, useRef, useEffect, useCallback } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import {
@@ -21,7 +22,8 @@ import {
     List,
 } from 'lucide-react';
 import { analysts } from '../../data/mockData';
-import { useProjects, getFileFromStore } from '../../contexts/ProjectContext';
+import { useProjects, getFileFromStore, getProjectRealDocuments } from '../../contexts/ProjectContext';
+import { documentService } from '../../services/api';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useNotifications } from '../../contexts/NotificationContext';
 import LoadingSpinner from '../../components/LoadingSpinner';
@@ -40,6 +42,15 @@ export default function WorkspaceLead() {
     const [activeTab, setActiveTab] = useState(initialTab);
     const [isPreviewModalOpen, setIsPreviewModalOpen] = useState(false);
     const [previewFsdDoc, setPreviewFsdDoc] = useState(null);
+
+    // Helper: extract analyst name from various shapes (string, object from API, null)
+    const analystName = (p) => {
+        if (!p) return '';
+        const a = p.analyst || p.assignedAnalyst;
+        if (!a) return '';
+        if (typeof a === 'object') return a?.name || '';
+        return String(a);
+    };
 
     // Filter 1: Antrean Disposisi Proyek Baru (Proyek PENDING yang BELUM ditugaskan ke Analyst)
     const dispositionQueue = useMemo(() => {
@@ -70,46 +81,6 @@ export default function WorkspaceLead() {
     
     // Set default selected project
     const currentSelected = selectedProject || activeQueue[0] || null;
-
-    // Convert Data URL / Store URL to Real Blob URL for embedded PDF reading in Workspace Lead
-    const previewFsdBlobUrl = useMemo(() => {
-        if (!previewFsdDoc) return null;
-        let rawUrl = previewFsdDoc.url || previewFsdDoc.fileUrl || previewFsdDoc.dataUrl;
-        if (!rawUrl && previewFsdDoc.name) {
-            rawUrl = getFileFromStore(previewFsdDoc.name) || getFileFromStore(previewFsdDoc.id);
-        }
-        if (!rawUrl && currentSelected) {
-            rawUrl = getFileFromStore(`fsd_${currentSelected.id}`) || currentSelected.analystResult?.fsdUrl;
-        }
-
-        if (!rawUrl) {
-            const docTitle = (previewFsdDoc.name || 'Dokumen_SDLC.pdf').replace(/[^a-zA-Z0-9_\-\.]/g, '_');
-            const projName = currentSelected?.name || 'Proyek SDLC';
-            const divName = currentSelected?.division || 'Divisi TI';
-            const pdfContent = `%PDF-1.4\n1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>\nendobj\n4 0 obj\n<< /Length 280 >>\nstream\nBT\n/F1 18 Tf\n50 720 Td\n(PT BANK NAGARI - DOKUMEN SDLC RESMI) Tj\n0 -35 Td\n/F1 14 Tf\n(Nama Berkas: ${docTitle}) Tj\n0 -25 Td\n(Proyek: ${projName}) Tj\n0 -25 Td\n(Divisi Peminta: ${divName}) Tj\n0 -25 Td\n(Status: Terverifikasi Quality Gate SDLC Bank Nagari) Tj\n0 -30 Td\n/F1 11 Tf\n(Dokumen ini adalah berkas spesifikasi & kelengkapan proyek SDLC.) Tj\nET\nendstream\nendobj\n5 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\nxref\n0 6\n0000000000 65535 f\n0000000009 00000 n\n0000000058 00000 n\n0000000115 00000 n\n0000000244 00000 n\n0000000575 00000 n\ntrailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n654\n%%EOF`;
-            const blob = new Blob([pdfContent], { type: 'application/pdf' });
-            return URL.createObjectURL(blob);
-        }
-
-        if (rawUrl.startsWith('data:')) {
-            try {
-                const parts = rawUrl.split(',');
-                const mimeMatch = parts[0].match(/:(.*?);/);
-                const mime = mimeMatch ? mimeMatch[1] : 'application/pdf';
-                const bstr = atob(parts[1]);
-                let n = bstr.length;
-                const u8arr = new Uint8Array(n);
-                while (n--) {
-                    u8arr[n] = bstr.charCodeAt(n);
-                }
-                const blob = new Blob([u8arr], { type: mime });
-                return URL.createObjectURL(blob);
-            } catch (e) {
-                return rawUrl;
-            }
-        }
-        return rawUrl;
-    }, [previewFsdDoc, currentSelected]);
 
     const currentFsdDoc = useMemo(() => {
         if (!currentSelected) return null;
@@ -173,10 +144,11 @@ export default function WorkspaceLead() {
         const counts = {};
         (analysts || []).forEach(a => { counts[a.name] = 0; });
         (projects || []).forEach(p => {
-            const analystName = typeof p.assignedAnalyst === 'object' ? (p.assignedAnalyst?.name || '') : String(p.assignedAnalyst || p.analyst || '');
-            if (analystName && counts[analystName] !== undefined) {
+            const analystName3 = typeof p.assignedAnalyst === 'object' ? (p.assignedAnalyst?.name || '')
+                : (typeof p.analyst === 'object' ? (p.analyst?.name || '') : String(p.assignedAnalyst || p.analyst || ''));
+            if (analystName3 && counts[analystName3] !== undefined) {
                 const isFinished = p.status === 'LIVE_PRODUCTION' || p.status === 'CANCELLED' || p.status === 'REJECTED';
-                if (!isFinished) counts[analystName]++;
+                if (!isFinished) counts[analystName3]++;
             }
         });
         return counts;
@@ -203,12 +175,12 @@ export default function WorkspaceLead() {
 
         addNotification(
             'Analisis Diverifikasi Lead',
-            `Hasil analisis teknis untuk ${currentSelected?.name} telah diverifikasi oleh Lead Perencanaan dan diteruskan ke Lead Pengembangan untuk alokasi tim.`,
+            `Hasil analisis teknis untuk ${currentSelected?.title || currentSelected?.name} telah diverifikasi oleh Lead Perencanaan dan diteruskan ke Lead Pengembangan untuk alokasi tim.`,
             'success',
             '/workspace/dev-lead'
         );
         
-        toast.success(`Hasil analisis ${currentSelected?.name} berhasil diverifikasi & dikirim ke Lead Pengembangan!`);
+        toast.success(`Hasil analisis ${currentSelected?.title || currentSelected?.name} berhasil diverifikasi & dikirim ke Lead Pengembangan!`);
         setIsSubmitting(false);
 
         const nextQueue = verificationQueue.filter(p => p.id !== currentSelected.id);
@@ -243,12 +215,12 @@ export default function WorkspaceLead() {
 
         addNotification(
             'Disposisi Berhasil',
-            `Proyek ${currentSelected.name} telah ditugaskan ke ${selectedAnalyst}`,
+            `Proyek ${currentSelected.title || currentSelected.name} telah ditugaskan ke ${selectedAnalyst}`,
             'info',
             '/workspace/analyst'
         );
         
-        toast.success(`Proyek "${currentSelected?.name}" berhasil ditugaskan ke System Analyst ${selectedAnalyst}!`);
+        toast.success(`Proyek "${currentSelected?.title || currentSelected?.name}" berhasil ditugaskan ke System Analyst ${selectedAnalyst}!`);
         setIsSubmitting(false);
 
         const nextQueue = dispositionQueue.filter(p => p.id !== currentSelected.id);
@@ -373,8 +345,8 @@ export default function WorkspaceLead() {
                                         {new Date(project.submittedAt).toLocaleDateString('id-ID', { day: 'numeric', month: 'short' })}
                                     </span>
                                 </div>
-                                <div className="mb-2"><RBBBadge type={project.type} deadline={project.rbbDeadline} status={project.status} /></div>
-                                <h3 className="font-semibold text-gray-800 text-sm mb-1 group-hover:text-[#00529C] transition-colors">{project.name}</h3>
+                                <div className="mb-2"><div className="flex items-center gap-1.5 flex-wrap"><RBBBadge type={project.type} deadline={project.rbbDeadline} status={project.status} /><ProjectTypeBadge type={project.project_type} /></div></div>
+                                <h3 className="font-semibold text-gray-800 text-sm mb-1 group-hover:text-[#00529C] transition-colors">{project.title || project.name}</h3>
                                 <div className="flex items-center gap-1 text-xs text-gray-500">
                                     <Users size={13} />
                                     <span>{project.division}</span>
@@ -415,8 +387,8 @@ export default function WorkspaceLead() {
                                     </span>
                                     <span className="text-xs font-bold text-gray-400 bg-gray-100 px-2 py-0.5 rounded">{currentSelected.id}</span>
                                 </div>
-                                <div className="mb-2"><RBBBadge type={currentSelected.type} deadline={currentSelected.rbbDeadline} status={currentSelected.status} /></div>
-                                <h2 className="text-2xl font-extrabold text-gray-800">{currentSelected.name}</h2>
+                                <div className="mb-2"><div className="flex items-center gap-1.5 flex-wrap"><RBBBadge type={currentSelected.type} deadline={currentSelected.rbbDeadline} status={currentSelected.status} /><ProjectTypeBadge type={currentSelected.project_type} /></div></div>
+                                <h2 className="text-2xl font-extrabold text-gray-800">{currentSelected.title || currentSelected.name}</h2>
                                 <div className="flex items-center gap-2 text-gray-500 text-sm mt-1">
                                     <Users size={15} />
                                     <span>{currentSelected.division}</span>
@@ -454,9 +426,9 @@ export default function WorkspaceLead() {
                                 Dokumen Inisiasi
                             </h3>
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                                {((currentSelected.documents && currentSelected.documents.length > 0)
-                                    ? currentSelected.documents
-                                    : [{ id: 'BRD-01', name: `${currentSelected.name}_BRD_Inisiasi.pdf`, size: '2.4 MB', type: 'pdf', category: 'brd' }]
+                                {(getProjectRealDocuments(currentSelected).length > 0
+                                    ? getProjectRealDocuments(currentSelected)
+                                    : [{ id: 'BRD-01', name: `${currentSelected.title || currentSelected.name || 'Proyek'}_BRD_Inisiasi.pdf`, size: '2.4 MB', type: 'pdf', category: 'brd' }]
                                 ).map((doc, idx) => (
                                     <div key={idx} className="flex items-center justify-between p-3 border border-gray-200 rounded-lg bg-gray-50 hover:border-gray-300 transition-colors group">
                                         <div className="flex items-center gap-3 overflow-hidden min-w-0">
@@ -492,7 +464,7 @@ export default function WorkspaceLead() {
                                                         document.body.removeChild(link);
                                                         toast.success(`Mengunduh file "${fileName}"...`);
                                                     } else {
-                                                        const textContent = `PT BANK NAGARI - DOKUMEN SDLC\n===============================\nNama Dokumen: ${fileName}\nProyek: ${currentSelected?.name || 'Proyek SDLC'}\nTanggal: ${new Date().toLocaleDateString('id-ID')}`;
+                                                        const textContent = `PT BANK NAGARI - DOKUMEN SDLC\n===============================\nNama Dokumen: ${fileName}\nProyek: ${currentSelected?.title || currentSelected?.name || 'Proyek SDLC'}\nTanggal: ${new Date().toLocaleDateString('id-ID')}`;
                                                         const blob = new Blob([textContent], { type: 'text/plain;charset=utf-8' });
                                                         const url = URL.createObjectURL(blob);
                                                         const link = document.createElement('a');
@@ -665,8 +637,8 @@ export default function WorkspaceLead() {
                                                 <span>Analyst Terpilih: <strong className="text-[#00529C] font-bold">{selectedAnalyst}</strong></span>
                                                 <span>Beban Kerja Saat Ini: <strong className="text-gray-800 font-bold">{
                                                     (projects || []).filter(p => {
-                                                        const analystName = typeof p.assignedAnalyst === 'object' ? (p.assignedAnalyst?.name || '') : String(p.assignedAnalyst || p.analyst || '');
-                                                        const matches = analystName.toLowerCase().includes(selectedAnalyst.toLowerCase());
+            const analystName2 = typeof p.assignedAnalyst === 'object' ? (p.assignedAnalyst?.name || '') : (analystName(p) || String(p.analyst || p.assignedAnalyst || ''));
+                                                        const matches = analystName2.toLowerCase().includes(selectedAnalyst.toLowerCase());
                                                         const isFinished = p.status === 'LIVE_PRODUCTION' || p.status === 'CANCELLED' || p.status === 'REJECTED';
                                                         return matches && !isFinished;
                                                     }).length
@@ -701,7 +673,7 @@ export default function WorkspaceLead() {
                                     <div className="flex justify-between items-center text-xs">
                                         <span className="font-bold text-gray-400 uppercase">System Analyst Bertugas:</span>
                                         <span className="font-extrabold text-amber-900 bg-amber-100 px-3 py-1 rounded-lg">
-                                            {currentSelected?.analyst || currentSelected?.assignedAnalyst?.name || 'Ahmad Rifai'}
+                                            {analystName(currentSelected) || 'Belum Ditugaskan'}
                                         </span>
                                     </div>
                                     <div className="flex justify-between items-center text-xs">
@@ -741,7 +713,7 @@ export default function WorkspaceLead() {
                                             <div className="min-w-0">
                                                 <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">BERKAS KAJIAN TEKNIS (FSD)</p>
                                                 <p className="font-bold text-gray-800 text-sm truncate">
-                                                    {currentFsdDoc?.name || `FSD_${currentSelected?.name?.replace(/\s+/g, '_') || 'Dokumen'}.pdf`}
+                                                    {currentFsdDoc?.name || `FSD_${(currentSelected?.title || currentSelected?.name || 'Dokumen').replace(/\s+/g, '_')}.pdf`}
                                                 </p>
                                                 <p className="text-[11px] text-gray-500">
                                                     {currentFsdDoc?.size || '1.8 MB'} • Terlampir Hasil Kajian Analis
@@ -762,7 +734,7 @@ export default function WorkspaceLead() {
                                                 onClick={() => {
                                                     const doc = currentFsdDoc;
                                                     const rawUrl = doc?.url;
-                                                    const fileName = doc?.name || `FSD_${currentSelected?.name?.replace(/\s+/g, '_') || 'Dokumen'}.pdf`;
+                                                    const fileName = doc?.name || `FSD_${(currentSelected?.title || currentSelected?.name || 'Dokumen').replace(/\s+/g, '_')}.pdf`;
                                                     if (rawUrl) {
                                                         const link = document.createElement('a');
                                                         link.href = rawUrl;
@@ -772,7 +744,7 @@ export default function WorkspaceLead() {
                                                         document.body.removeChild(link);
                                                         toast.success(`Mengunduh file FSD "${fileName}"...`);
                                                     } else {
-                                                        const textContent = `PT BANK NAGARI - DOKUMEN FSD RESMI\n===================================\nDokumen: ${fileName}\nProyek: ${currentSelected.name}\nAnalis: ${currentSelected.analystResult?.analystName || 'System Analyst'}\nStatus Kajian: ${currentSelected.analystResult?.decision || 'Disetujui'}`;
+                                                        const textContent = `PT BANK NAGARI - DOKUMEN FSD RESMI\n===================================\nDokumen: ${fileName}\nProyek: ${currentSelected.title || currentSelected.name}\nAnalis: ${currentSelected.analystResult?.analystName || 'System Analyst'}\nStatus Kajian: ${currentSelected.analystResult?.decision || 'Disetujui'}`;
                                                         const blob = new Blob([textContent], { type: 'text/plain;charset=utf-8' });
                                                         const url = URL.createObjectURL(blob);
                                                         const link = document.createElement('a');
@@ -840,7 +812,7 @@ export default function WorkspaceLead() {
                                         {currentSelected.priority === 'High' ? '🔴 High Priority' : currentSelected.priority === 'Medium' ? '🟡 Medium' : '🟢 Low'}
                                     </span>
                                 </div>
-                                <h3 className="text-lg font-bold text-gray-800">{currentSelected.name}</h3>
+                                <h3 className="text-lg font-bold text-gray-800">{currentSelected.title || currentSelected.name}</h3>
                             </div>
                             <button onClick={() => setIsPreviewModalOpen(false)} className="text-gray-400 hover:text-gray-600 p-1 rounded-lg">
                                 <X size={18} />

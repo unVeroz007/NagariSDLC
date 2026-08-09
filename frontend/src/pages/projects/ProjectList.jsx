@@ -1,5 +1,6 @@
 import { useState, useMemo } from 'react';
 import RBBBadge from '../../components/RBBBadge';
+import ProjectTypeBadge from '../../components/ProjectTypeBadge';
 import { useNavigate } from 'react-router-dom';
 import { useProjects } from '../../contexts/ProjectContext';
 import { useAuth } from '../../contexts/AuthContext';
@@ -234,7 +235,7 @@ export default function ProjectList() {
                                                 </td>
                                                 <td className="px-4 py-4">
                                                     <div>
-                                                        <div className="font-semibold text-gray-800 group-hover:text-[#00529C] transition-colors truncate">{project.name}</div>
+                                                        <div className="font-semibold text-gray-800 group-hover:text-[#00529C] transition-colors truncate">{project.title || project.name}</div>
                                                         <div className="text-xs text-gray-400 truncate mt-0.5 font-normal">{project.description}</div>
                                                     </div>
                                                 </td>
@@ -263,7 +264,10 @@ export default function ProjectList() {
                                                 </td>
                                                 <td className="px-3 py-4">
                                                     <div className="flex flex-col gap-1.5 items-start">
-                                                        <RBBBadge type={project.type} deadline={project.rbbDeadline} status={project.status} />
+                                                        <div className="flex items-center gap-1.5 flex-wrap">
+                                                            <RBBBadge type={project.type} deadline={project.rbbDeadline} status={project.status} />
+                                                            <ProjectTypeBadge type={project.project_type} />
+                                                        </div>
                                                         <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-semibold border ${
                                                             PROJECT_STATUS_COLOR[project.status] || project.statusColor || 'bg-gray-100 text-gray-700'
                                                         }`}>

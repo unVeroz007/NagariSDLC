@@ -21,7 +21,7 @@ class ProjectSeeder extends Seeder
         $analyst    = User::where('email', 'analyst@nagari.co.id')->first();
         $devLead    = User::where('email', 'devlead@nagari.co.id')->first();
         $pm         = User::where('email', 'pm@nagari.co.id')->first();
-        $developer  = User::where('email', 'developer@nagari.co.id')->first();
+        $developer  = User::where('email', 'dev1@nagari.co.id')->first();
         $qaLead     = User::where('email', 'qalead@nagari.co.id')->first();
         $qaTester   = User::where('email', 'qatester@nagari.co.id')->first();
         $cyberLead  = User::where('email', 'cyberlead@nagari.co.id')->first();
@@ -41,6 +41,7 @@ class ProjectSeeder extends Seeder
                 'title' => 'Integrasi BI-FAST Payment Gateway',
                 'description' => 'Implementasi layanan transfer real-time BI-FAST pada core banking.',
                 'status' => ProjectStatus::PENDING->value,
+                'project_type' => 'baru',
                 'creator' => $admin,
                 'division' => $devDiv,
                 'target_days' => 60,
@@ -50,6 +51,7 @@ class ProjectSeeder extends Seeder
                 'title' => 'Sistem QRIS Merchant Bank Nagari',
                 'description' => 'Pengembangan portal pendaftaran & MDR merchant QRIS Bank Nagari.',
                 'status' => ProjectStatus::PENDING->value,
+                'project_type' => 'baru',
                 'creator' => $admin,
                 'division' => $dsiDiv,
                 'target_days' => 45,
@@ -59,6 +61,7 @@ class ProjectSeeder extends Seeder
                 'title' => 'Modul Pelaporan OJK Terpusat (OJK Reporting)',
                 'description' => 'Sentralisasi modul pelaporan keuangan dan transaksi untuk regulator OJK.',
                 'status' => ProjectStatus::IN_REVIEW->value,
+                'project_type' => 'update',
                 'creator' => $admin,
                 'division' => $devDiv,
                 'target_days' => 90,
@@ -68,6 +71,7 @@ class ProjectSeeder extends Seeder
                 'title' => 'Sistem Manajemen Dokumen Kredit (LOS Digital)',
                 'description' => 'Digitalisasi berkas agunan dan pengajuan kredit nasabah ritel.',
                 'status' => ProjectStatus::IN_REVIEW->value,
+                'project_type' => 'baru',
                 'creator' => $admin,
                 'division' => $opsDiv,
                 'target_days' => 75,
@@ -77,6 +81,7 @@ class ProjectSeeder extends Seeder
                 'title' => 'Update Core Banking ISO 20022 Standard',
                 'description' => 'Penyesuaian format pesan finansial antarbank sesuai standar internasional.',
                 'status' => ProjectStatus::DEV_ANALYSIS->value,
+                'project_type' => 'update',
                 'creator' => $admin,
                 'analyst' => $analyst,
                 'division' => $devDiv,
@@ -87,6 +92,7 @@ class ProjectSeeder extends Seeder
                 'title' => 'Portal Smart Branch Self-Service Kios',
                 'description' => 'Platform mesin cetak buku tabungan dan ganti kartu ATM mandiri.',
                 'status' => ProjectStatus::DEV_ANALYSIS->value,
+                'project_type' => 'baru',
                 'creator' => $admin,
                 'analyst' => $analyst,
                 'division' => $dsiDiv,
@@ -123,6 +129,7 @@ class ProjectSeeder extends Seeder
                 'title' => 'Nagari Mobile Banking V3 Redesign',
                 'description' => 'Redesain UI/UX serta integrasi fitur transfer biometrik.',
                 'status' => ProjectStatus::IN_DEVELOPMENT->value,
+                'project_type' => 'update',
                 'creator' => $admin,
                 'pm' => $pm,
                 'analyst' => $analyst,
@@ -134,6 +141,7 @@ class ProjectSeeder extends Seeder
                 'title' => 'Portal E-Form Pembukaan Rekening Digital',
                 'description' => 'Portal KYC e-form mandiri calon nasabah Bank Nagari.',
                 'status' => ProjectStatus::IN_DEVELOPMENT->value,
+                'project_type' => 'baru',
                 'creator' => $admin,
                 'pm' => $pm,
                 'analyst' => $analyst,
@@ -145,6 +153,7 @@ class ProjectSeeder extends Seeder
                 'title' => 'Modul Autentikasi Biometrik Face Recognition',
                 'description' => 'Verifikasi wajah untuk transaksi di atas limit harian.',
                 'status' => ProjectStatus::RETURN_TO_DEV->value,
+                'project_type' => 'perbaikan',
                 'creator' => $admin,
                 'pm' => $pm,
                 'analyst' => $analyst,
@@ -156,6 +165,7 @@ class ProjectSeeder extends Seeder
                 'title' => 'Integrasi API Payment Aggregator H2H',
                 'description' => 'Host-to-Host API biller pembayaran listrik, air, dan pulsa.',
                 'status' => ProjectStatus::RETURN_TO_DEV->value,
+                'project_type' => 'perbaikan',
                 'creator' => $admin,
                 'pm' => $pm,
                 'analyst' => $analyst,
@@ -296,6 +306,7 @@ class ProjectSeeder extends Seeder
                 'req_id' => Project::generateReqId(),
                 'title' => $item['title'],
                 'description' => $item['description'],
+                'project_type' => $item['project_type'] ?? 'baru',
                 'status' => $item['status'],
                 'created_by' => $item['creator']?->id,
                 'pm_id' => $item['pm']?->id ?? null,

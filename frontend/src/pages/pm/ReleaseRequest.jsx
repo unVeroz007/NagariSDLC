@@ -5,6 +5,7 @@ import { useNotifications } from '../../contexts/NotificationContext';
 import { useProjects } from '../../contexts/ProjectContext';
 import LoadingSpinner from '../../components/LoadingSpinner';
 import RBBBadge from '../../components/RBBBadge';
+import ProjectTypeBadge from '../../components/ProjectTypeBadge';
 import toast from 'react-hot-toast';
 import { generateDocumentName, DOCUMENT_TYPES, formatFileSize } from '../../utils/documentNaming';
 import {
@@ -260,7 +261,7 @@ export default function ReleaseRequest() {
                             >
                                 <div className="flex justify-between items-start mb-1.5">
                                     <span className="text-xs font-mono font-bold text-blue-600 bg-blue-50 px-2 py-0.5 rounded">{p.id}</span>
-                                    <RBBBadge type={p.type} />
+                                    <div className="flex items-center gap-1.5 flex-wrap"><RBBBadge type={p.type} /><ProjectTypeBadge type={p.project_type} /></div>
                                 </div>
                                 <h4 className="font-bold text-gray-800 text-xs line-clamp-1 mb-1.5">{p.name}</h4>
                                 <div className="flex items-center justify-between text-[11px] text-gray-500 pt-2 border-t border-gray-100">
@@ -287,7 +288,7 @@ export default function ReleaseRequest() {
                                     <span className="text-xs font-mono font-bold text-blue-600 bg-blue-50 px-2.5 py-0.5 rounded border border-blue-100">
                                         {selectedProject.id}
                                     </span>
-                                    <RBBBadge type={selectedProject.type} deadline={selectedProject.rbbDeadline} />
+                                    <div className="flex items-center gap-1.5 flex-wrap"><RBBBadge type={selectedProject.type} deadline={selectedProject.rbbDeadline} /><ProjectTypeBadge type={selectedProject.project_type} /></div>
                                 </div>
                                 <h3 className="text-xl font-extrabold text-gray-800">{selectedProject.name}</h3>
                                 <p className="text-xs text-gray-500 mt-1 flex items-center gap-2">

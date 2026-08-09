@@ -17,6 +17,46 @@ class DocumentController extends Controller
         protected FileUploadService $uploadService
     ) {}
 
+    /**
+     * Format nama dokumen sesuai konvensi Bank Nagari:
+     * XXX/GPTD/TIPE/DD-BulanYYYY_NamaProyek
+     *   XXX = nomor urut dari req_id (contoh: REQ-2026-001 → 001)
+     *   TIPE = kode tipe dokumen (BRD, MEMO, FSD, dll)
+     */
+    protected function generateDocumentFileName(Project $project, string $docType, ?string $originalName = null): string
+    {
+        // Nomor proyek dari req_id
+        $nomor = '001';
+        if ($project->req_id && preg_match('/(\d+)$/', $project->req_id, $m)) {
+            $nomor = str_pad($m[1], 3, '0', STR_PAD_LEFT);
+        }
+
+        // Tanggal
+        $now = now();
+        $bulan = ['Januari','Februari','Maret','April','Mei','Juni',
+                  'Juli','Agustus','September','Oktober','November','Desember'];
+        $dd = $now->format('d');
+        $bl = $bulan[$now->month - 1];
+        $th = $now->format('Y');
+
+        // Nama proyek (aman untuk file system)
+        $pp = preg_replace('/[^a-zA-Z0-9\s]/', '', $project->title);
+        $pp = trim(preg_replace('/\s+/', '_', mb_substr($pp, 0, 30)));
+
+        $prefix = "{$nomor}/GPTD/{$docType}/{$dd}-{$bl}{$th}_{$pp}";
+
+        // Ekstensi dari original filena
+        $ext = '';
+        if ($originalName) {
+            $parts = explode('.', $originalName);
+            if (count($parts) > 1) {
+                $ext = '.' . strtolower(end($parts));
+            }
+        }
+
+        return $prefix . $ext;
+    }
+
     public function index(Request $request): JsonResponse
     {
         $query = DocumentVault::with(['project', 'uploader']);
@@ -46,15 +86,18 @@ class DocumentController extends Controller
         ]);
 
         $project = Project::findOrFail($request->project_id);
-        $fileInfo = $this->uploadService->upload($request->file('file'));
+        $file = $request->file('file');
+        $fileInfo = $this->uploadService->upload($file);
+        $originalName = $request->original_filename ?? $file->getClientOriginalName();
+        $docName = $this->generateDocumentFileName($project, $request->document_type, $originalName);
 
         $document = DocumentVault::create([
             'project_id' => $project->id,
             'uploaded_by' => $request->user()->id,
             'document_type' => $request->document_type,
-            'original_filename' => $request->original_filename ?? $fileInfo['file_name'],
+            'original_filename' => $originalName,
             'file_path' => $fileInfo['file_path'],
-            'file_name' => $fileInfo['file_name'],
+            'file_name' => $docName,
             'file_size' => $fileInfo['file_size'],
             'mime_type' => $fileInfo['mime_type'],
         ]);
@@ -77,12 +120,12 @@ class DocumentController extends Controller
 
         if ($user->role) {
             $roleName = $user->role->name;
-            // Super Admin & Head of IT have full access
-            if (in_array($roleName, ['super_admin', 'head_of_it'])) {
+            // Super Admin, Head of IT, Lead Group (Plan + QA), Dev Lead: full access
+            if (in_array($roleName, ['super_admin', 'head_of_it', 'lead_group', 'development_lead'])) {
                 $isAuthorized = true;
             }
             // Project creator, PM, or analyst
-            elseif (in_array([$project->created_by, $project->pm_id, $project->analyst_id], [$user->id])) {
+            elseif (in_array($user->id, [$project->created_by, $project->pm_id, $project->analyst_id])) {
                 $isAuthorized = true;
             }
             // Team member of this project
@@ -111,7 +154,12 @@ class DocumentController extends Controller
 
         $path = Storage::disk('local')->path($document->file_path);
 
-        return response()->download($path, $document->file_name);
+        // Nama file di DB memakai format "XXX/GPTD/TIPE/DD-BulanYYYY_Nama" yang mengandung "/".
+        // Laravel response()->download() menolak filename dengan "/" atau "\".
+        // Sanitasi untuk Content-Disposition (tampilan download tetap format lengkap, "/" diganti "-").
+        $downloadName = str_replace(['/', '\\'], '-', $document->file_name);
+
+        return response()->download($path, $downloadName);
     }
 
     public function destroy(int $id): JsonResponse

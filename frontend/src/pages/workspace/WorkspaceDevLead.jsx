@@ -4,6 +4,7 @@ import { useProjects, getFileFromStore } from '../../contexts/ProjectContext';
 import { useNotifications } from '../../contexts/NotificationContext';
 import { useNavigate } from 'react-router-dom';
 import RBBBadge from '../../components/RBBBadge';
+import ProjectTypeBadge from '../../components/ProjectTypeBadge';
 import LoadingSpinner from '../../components/LoadingSpinner';
 import DocumentViewerModal from '../../components/DocumentViewerModal';
 import SITUATDocumentModal from '../../components/SITUATDocumentModal';
@@ -114,45 +115,6 @@ export default function WorkspaceDevLead() {
     const [leadNote, setLeadNote] = useState('');
     const [previewDoc, setPreviewDoc] = useState(null);
     const [sitUatModalProject, setSitUatModalProject] = useState(null);
-
-    const previewBlobUrl = useMemo(() => {
-        if (!previewDoc) return null;
-        let rawUrl = previewDoc.url || previewDoc.fileUrl || previewDoc.dataUrl;
-        if (!rawUrl && previewDoc.name) {
-            rawUrl = getFileFromStore(previewDoc.name) || getFileFromStore(previewDoc.id);
-        }
-        if (!rawUrl && targetProjectForAnalyst) {
-            rawUrl = getFileFromStore(`fsd_${targetProjectForAnalyst.id}`) || targetProjectForAnalyst.analystResult?.fsdUrl;
-        }
-
-        if (!rawUrl) {
-            const docTitle = (previewDoc.name || 'Dokumen_SDLC.pdf').replace(/[^a-zA-Z0-9_\-\.]/g, '_');
-            const projName = targetProjectForAnalyst?.name || selectedProject?.name || 'Proyek SDLC';
-            const divName = targetProjectForAnalyst?.division || selectedProject?.division || 'Divisi TI';
-            const pdfContent = `%PDF-1.4\n1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>\nendobj\n4 0 obj\n<< /Length 280 >>\nstream\nBT\n/F1 18 Tf\n50 720 Td\n(PT BANK NAGARI - DOKUMEN SDLC RESMI) Tj\n0 -35 Td\n/F1 14 Tf\n(Nama Berkas: ${docTitle}) Tj\n0 -25 Td\n(Proyek: ${projName}) Tj\n0 -25 Td\n(Divisi Peminta: ${divName}) Tj\n0 -25 Td\n(Status: Terverifikasi Quality Gate SDLC Bank Nagari) Tj\n0 -30 Td\n/F1 11 Tf\n(Dokumen ini adalah berkas spesifikasi & kelengkapan proyek SDLC.) Tj\nET\nendstream\nendobj\n5 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\nxref\n0 6\n0000000000 65535 f\n0000000009 00000 n\n0000000058 00000 n\n0000000115 00000 n\n0000000244 00000 n\n0000000575 00000 n\ntrailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n654\n%%EOF`;
-            const blob = new Blob([pdfContent], { type: 'application/pdf' });
-            return URL.createObjectURL(blob);
-        }
-
-        if (rawUrl.startsWith('data:')) {
-            try {
-                const parts = rawUrl.split(',');
-                const mimeMatch = parts[0].match(/:(.*?);/);
-                const mime = mimeMatch ? mimeMatch[1] : 'application/pdf';
-                const bstr = atob(parts[1]);
-                let n = bstr.length;
-                const u8arr = new Uint8Array(n);
-                while (n--) {
-                    u8arr[n] = bstr.charCodeAt(n);
-                }
-                const blob = new Blob([u8arr], { type: mime });
-                return URL.createObjectURL(blob);
-            } catch (e) {
-                return rawUrl;
-            }
-        }
-        return rawUrl;
-    }, [previewDoc, targetProjectForAnalyst, selectedProject]);
 
     // Form Assign PM State
     const [selectedPM, setSelectedPM] = useState('');
@@ -507,7 +469,7 @@ export default function WorkspaceDevLead() {
                                         <div>
                                             <div className="flex items-center justify-between mb-2">
                                                 <span className="text-xs font-mono font-bold text-blue-600 bg-blue-50 px-2.5 py-0.5 rounded border border-blue-100">{project.id}</span>
-                                                <RBBBadge type={project.type} deadline={project.rbbDeadline} />
+                                                <div className="flex items-center gap-1.5 flex-wrap"><RBBBadge type={project.type} deadline={project.rbbDeadline} /><ProjectTypeBadge type={project.project_type} /></div>
                                             </div>
                                             <h3 className="font-bold text-gray-800 text-base mb-2">{project.name}</h3>
 
@@ -1008,7 +970,7 @@ export default function WorkspaceDevLead() {
                                     <span className="text-[10px] font-extrabold text-[#00529C] uppercase tracking-widest bg-blue-50 px-2.5 py-0.5 rounded border border-blue-100">
                                         {targetProjectForAnalyst.id}
                                     </span>
-                                    <RBBBadge type={targetProjectForAnalyst.type} deadline={targetProjectForAnalyst.rbbDeadline} />
+                                    <div className="flex items-center gap-1.5 flex-wrap"><RBBBadge type={targetProjectForAnalyst.type} deadline={targetProjectForAnalyst.rbbDeadline} /><ProjectTypeBadge type={targetProjectForAnalyst.project_type} /></div>
                                 </div>
                                 <h3 className="font-black text-gray-800 text-xl">
                                     {targetProjectForAnalyst.name}

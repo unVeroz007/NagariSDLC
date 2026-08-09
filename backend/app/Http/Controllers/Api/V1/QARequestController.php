@@ -20,12 +20,20 @@ class QARequestController extends Controller
         protected ProjectWorkflowService $workflowService
     ) {}
 
-    public function index(): JsonResponse
+    public function index(Request $request): JsonResponse
     {
-        $reports = TestReport::with(['project', 'tester', 'reviewer'])
-            ->where('test_type', 'qa')
-            ->orderBy('created_at', 'desc')
-            ->get();
+        $user = $request->user();
+        $user->loadMissing('role');
+        $roleName = $user->role?->name;
+
+        $query = TestReport::with(['project', 'tester', 'reviewer'])
+            ->where('test_type', 'qa');
+
+        if (! in_array($roleName, ['super_admin', 'qa_lead', 'lead_group'])) {
+            $query->where('tester_id', $user->id);
+        }
+
+        $reports = $query->orderBy('created_at', 'desc')->get();
 
         return response()->json([
             'status' => 'success',

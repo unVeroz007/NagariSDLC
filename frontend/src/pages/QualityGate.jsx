@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { useProjects } from '../contexts/ProjectContext';
 import { qualityGateService } from '../services/api';
+import ProjectTypeBadge from '../components/ProjectTypeBadge';
 import toast from 'react-hot-toast';
 
 import {
@@ -45,6 +46,7 @@ export default function QualityGate() {
             projectName: p.name,
             division: p.division || 'Divisi TI',
             type: p.type === 'RBB' ? 'Mayor Release (RBB)' : 'Minor Release',
+            project_type: p.project_type,
             goLiveDate: p.targetDate || '30 Agustus 2026',
             downtime: p.downtime || '60 Menit',
             pm: p.pm || { name: 'Budi Santoso', initial: 'BS' },
@@ -202,6 +204,9 @@ export default function QualityGate() {
                                         {getStatusBadge(rel.status)}
                                     </div>
                                     <h3 className="font-semibold text-gray-800 text-sm line-clamp-1">{rel.projectName}</h3>
+                                    {rel.project_type && (
+                                        <div className="mt-1.5"><ProjectTypeBadge type={rel.project_type} /></div>
+                                    )}
                                     <div className="flex items-center gap-2 mt-2 text-xs text-gray-500">
                                         <Building size={12} />
                                         <span>{rel.division}</span>
@@ -220,6 +225,9 @@ export default function QualityGate() {
                                 </span>
                                 <h2 className="text-xl font-bold text-gray-800 mt-1">{selectedRelease.projectName}</h2>
                                 <p className="text-xs text-gray-500">{selectedRelease.division} • {selectedRelease.type}</p>
+                                {selectedRelease.project_type && (
+                                    <div className="mt-1.5"><ProjectTypeBadge type={selectedRelease.project_type} /></div>
+                                )}
                             </div>
                             <div className="flex items-center gap-3 text-xs bg-gray-50 p-2.5 rounded-xl border border-gray-100">
                                 <div className="flex items-center gap-1.5">

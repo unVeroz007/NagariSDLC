@@ -6,6 +6,7 @@ import { useNotifications } from '../../contexts/NotificationContext';
 import { projectService, userService } from '../../services/api';
 import { PROJECT_STATUS } from '../../constants/projectStatus';
 import RBBBadge from '../../components/RBBBadge';
+import ProjectTypeBadge from '../../components/ProjectTypeBadge';
 import LoadingSpinner from '../../components/LoadingSpinner';
 import toast from 'react-hot-toast';
 import {
@@ -262,7 +263,10 @@ export default function Allocation() {
                                 )}
                                 <div className="flex justify-between items-start mb-1.5">
                                     <span className="text-xs font-mono font-bold text-blue-600 bg-blue-50 px-2 py-0.5 rounded">{project.id}</span>
-                                    <RBBBadge type={project.type} deadline={project.rbbDeadline} />
+                                    <div className="flex items-center gap-1.5 flex-wrap">
+                                        <RBBBadge type={project.type} deadline={project.rbbDeadline} />
+                                        <ProjectTypeBadge type={project.project_type} />
+                                    </div>
                                 </div>
                                 <h4 className="font-bold text-gray-800 text-sm mb-1 line-clamp-1">{project.name}</h4>
                                 <div className="flex items-center gap-2 text-xs text-gray-500 mt-2">
@@ -301,7 +305,10 @@ export default function Allocation() {
                                         <span className="text-xs font-mono font-bold text-blue-600 bg-blue-50 px-2.5 py-0.5 rounded">
                                             {selectedProject.id}
                                         </span>
-                                        <RBBBadge type={selectedProject.type} deadline={selectedProject.rbbDeadline} />
+                                        <div className="flex items-center gap-1.5 flex-wrap">
+                                            <RBBBadge type={selectedProject.type} deadline={selectedProject.rbbDeadline} />
+                                            <ProjectTypeBadge type={selectedProject.project_type} />
+                                        </div>
                                     </div>
                                     <h2 className="text-2xl font-extrabold text-gray-800 mt-2">{selectedProject.name}</h2>
                                     <p className="text-xs text-gray-500 mt-1">{selectedProject.division} • Target Date: {selectedProject.targetDate}</p>

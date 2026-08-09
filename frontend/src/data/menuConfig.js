@@ -105,6 +105,21 @@ export const menuSections = {
                 { label: 'Workspace Lead', path: '/workspace/lead', icon: 'UserCheck' },
                 { label: 'Antrean Review', path: '/queue', icon: 'Clock' },
                 { label: 'Daftar Semua Proyek', path: '/projects', icon: 'List' },
+                { label: 'Lacak Status Proyek', path: '/track', icon: 'MapPin' },
+                { label: 'Manajemen Dokumen', path: '/documents', icon: 'Folders' },
+            ],
+        },
+        {
+            label: 'Perencanaan & QA',
+            items: [
+                { label: 'Workspace QA', path: '/workspace/qa', icon: 'Bug' },
+                { label: 'Tugas QA Saya', path: '/my-tasks/qa', icon: 'CheckSquare' },
+            ],
+        },
+        {
+            label: 'Fase 1 (Inisiasi & Review)',
+            items: [
+                { label: 'Workspace Analyst (Plan)', path: '/workspace/analyst', icon: 'FileText' },
             ],
         },
     ],

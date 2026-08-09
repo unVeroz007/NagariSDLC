@@ -5,6 +5,7 @@ import { useNavigate } from 'react-router-dom';
 import LoadingSpinner from '../components/LoadingSpinner';
 import EmptyState from '../components/EmptyState';
 import RBBBadge from '../components/RBBBadge';
+import ProjectTypeBadge from '../components/ProjectTypeBadge';
 import {
   Search,
   ChevronLeft,
@@ -124,7 +125,7 @@ export default function Queue() {
         <button
           className="px-3 py-1.5 bg-gray-100 text-gray-600 rounded-lg text-xs font-medium cursor-not-allowed flex items-center gap-1"
           disabled
-          title={`Proyek ${project.name} sedang direview oleh Analyst`}
+          title={`Proyek ${project.title || project.name} sedang direview oleh Analyst`}
         >
           <Hourglass size={14} />
           Menunggu
@@ -256,10 +257,13 @@ export default function Queue() {
                       return (
                         <tr key={project.id} className="hover:bg-gray-50 transition-colors group">
                           <td className="px-6 py-4 font-semibold text-[#00529C]">{project.id}</td>
-                          <td className="px-6 py-4 font-medium text-gray-800">{project.name}</td>
+                          <td className="px-6 py-4 font-medium text-gray-800">{project.title || project.name}</td>
                           <td className="px-6 py-4 text-gray-500">{project.division || '-'}</td>
                           <td className="px-6 py-4">
-                            <RBBBadge type={project.type} deadline={project.rbbDeadline} />
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <RBBBadge type={project.type} deadline={project.rbbDeadline} />
+                              <ProjectTypeBadge type={project.project_type} />
+                            </div>
                           </td>
                           <td className="px-6 py-4">
                             <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-bold border uppercase tracking-wider ${statusConfig.className}`}>

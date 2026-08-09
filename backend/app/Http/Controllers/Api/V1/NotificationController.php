@@ -21,9 +21,19 @@ class NotificationController extends Controller
         ]);
     }
 
-    public function markRead(int $id): JsonResponse
+    public function markRead(Request $request, int $id): JsonResponse
     {
-        $notification = Notification::findOrFail($id);
+        $notification = Notification::where('id', $id)
+            ->where('user_id', $request->user()->id)
+            ->first();
+
+        if (! $notification) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Notifikasi tidak ditemukan atau bukan milik Anda.',
+            ], 403);
+        }
+
         $notification->update(['is_read' => true]);
 
         return response()->json([

@@ -33,6 +33,7 @@ import LoadingSpinner from '../../components/LoadingSpinner';
 import EmptyState from '../../components/EmptyState';
 import DocumentViewerModal from '../../components/DocumentViewerModal';
 import { generateDocumentName, DOCUMENT_TYPES, formatFileSize } from '../../utils/documentNaming';
+import { documentService } from '../../services/api';
 
 const mapDocTypeToCategory = (type, fileName = '') => {
     const t = (type || '').toLowerCase();
@@ -150,12 +151,12 @@ export default function Documents() {
                 p.documents.forEach((doc, idx) => {
                     list.push({
                         id: doc.id || `DOC-PRJ-${p.id}-${idx}`,
-                        name: doc.name || doc.file_name || 'Dokumen.pdf',
+                        name: doc.name || doc.file_name || doc.original_filename || 'Dokumen.pdf',
                         size: doc.size || doc.file_size || '1.5 MB',
-                        type: doc.type || doc.doc_type || 'brd',
+                        type: doc.type || doc.document_type || doc.doc_type || 'brd',
                         url: doc.url || doc.fileUrl || doc.dataUrl || null,
                         project: pName,
-                        uploadedBy: doc.uploadedBy || doc.uploaded_by_name || p.creator?.name || user?.name || 'PIC Proyek',
+                        uploadedBy: doc.uploadedBy || doc.author || doc.uploaded_by_name || p.creator?.name || user?.name || 'PIC Proyek',
                         date: doc.uploadedAt || doc.created_at || p.submittedAt || 'Terbaru',
                     });
                 });
@@ -459,8 +460,32 @@ export default function Documents() {
     };
 
     // Download & Delete handlers
-    const handleDownload = (doc) => {
-        showToast(`Mengunduh file ${doc.name}...`);
+    const handleDownload = async (doc) => {
+        try {
+            showToast(`Mengunduh file ${doc.name}...`);
+            if (doc.id && typeof doc.id === 'number') {
+                const blob = await documentService.download(doc.id);
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = doc.name;
+                document.body.appendChild(a);
+                a.click();
+                a.remove();
+                window.URL.revokeObjectURL(url);
+            } else if (doc.url) {
+                const a = document.createElement('a');
+                a.href = doc.url;
+                a.download = doc.name;
+                document.body.appendChild(a);
+                a.click();
+                a.remove();
+            } else {
+                showToast(`File "${doc.name}" tidak tersedia untuk diunduh.`, 'error');
+            }
+        } catch (err) {
+            showToast(`Gagal mengunduh: ${err.message}`, 'error');
+        }
     };
 
     const handleDeleteDoc = (id, name) => {

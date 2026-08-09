@@ -86,7 +86,8 @@ export default function ProjectNew() {
         projectName: '',
         division: currentUserDivision,
         priority: 'Medium',
-        type: 'RBB', // Klasifikasi RBB / Non-RBB ditentukan sejak awal inisiasi divisi
+        type: 'RBB',
+        project_type: 'baru', // Tipe Proyek: baru / perbaikan / update
         targetDate: '',
         description: '',
     });
@@ -120,6 +121,7 @@ export default function ProjectNew() {
             division: getUserDivision(user),
             priority: 'Medium',
             type: 'RBB',
+            project_type: 'baru',
             targetDate: '',
             description: '',
         });
@@ -296,6 +298,7 @@ export default function ProjectNew() {
                 targetDate: formData.targetDate || 'TBD',
                 status: 'PENDING',
                 type: formData.type || 'RBB',
+                project_type: formData.project_type || 'baru',
                 documents: uploadedFiles,
             };
 
@@ -325,6 +328,7 @@ export default function ProjectNew() {
                 division: userDivision,
                 priority: 'Medium',
                 type: 'RBB',
+                project_type: 'baru',
                 targetDate: '',
                 description: '',
             });
@@ -543,6 +547,68 @@ export default function ProjectNew() {
                                             </div>
                                             <p className="text-[11px] text-gray-600 mt-1 leading-relaxed">
                                                 Proyek operasional rutin, insidental, atau penyempurnaan sistem internal divisi dengan target fleksibel.
+                                            </p>
+                                        </div>
+                                    </label>
+                                </div>
+                            </div>
+
+                            {/* Seksi Tipe Proyek: Baru / Perbaikan / Update */}
+                            <div className="space-y-2 md:col-span-2 bg-gradient-to-r from-blue-50/70 to-cyan-50/50 p-4 sm:p-5 rounded-xl border border-blue-100/90 shadow-2xs">
+                                <div className="mb-1">
+                                    <label className="text-sm font-extrabold text-gray-800 flex items-center gap-1.5">
+                                        Tipe Proyek <span className="text-red-500">*</span>
+                                    </label>
+                                </div>
+                                <p className="text-xs text-gray-600 mb-3">
+                                    Pilih tipe sifat pekerjaan proyek ini. Tipe ini dipertahankan di seluruh alur SDLC hingga Go-Live.
+                                </p>
+                                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                                    <label className={`flex items-start gap-3 p-3.5 rounded-xl border-2 cursor-pointer transition-all ${formData.project_type === 'baru' ? 'border-blue-600 bg-blue-50/80 shadow-xs' : 'border-gray-200 bg-white hover:border-blue-200'}`}>
+                                        <input
+                                            type="radio"
+                                            name="project_type"
+                                            value="baru"
+                                            checked={formData.project_type === 'baru'}
+                                            onChange={handleChange}
+                                            className="mt-1 text-blue-600 focus:ring-blue-500"
+                                        />
+                                        <div>
+                                            <span className="font-extrabold text-xs text-blue-900 uppercase tracking-wider bg-blue-100 text-blue-900 px-2 py-0.5 rounded border border-blue-200">Baru</span>
+                                            <p className="text-[11px] text-gray-600 mt-1 leading-relaxed">
+                                                Pengembangan sistem/aplikasi baru dari nol.
+                                            </p>
+                                        </div>
+                                    </label>
+                                    <label className={`flex items-start gap-3 p-3.5 rounded-xl border-2 cursor-pointer transition-all ${formData.project_type === 'perbaikan' ? 'border-amber-600 bg-amber-50/80 shadow-xs' : 'border-gray-200 bg-white hover:border-amber-200'}`}>
+                                        <input
+                                            type="radio"
+                                            name="project_type"
+                                            value="perbaikan"
+                                            checked={formData.project_type === 'perbaikan'}
+                                            onChange={handleChange}
+                                            className="mt-1 text-amber-600 focus:ring-amber-500"
+                                        />
+                                        <div>
+                                            <span className="font-extrabold text-xs text-amber-900 uppercase tracking-wider bg-amber-100 text-amber-900 px-2 py-0.5 rounded border border-amber-200">Perbaikan</span>
+                                            <p className="text-[11px] text-gray-600 mt-1 leading-relaxed">
+                                                Perbaikan bug / defect / penyempurnaan pada sistem berjalan.
+                                            </p>
+                                        </div>
+                                    </label>
+                                    <label className={`flex items-start gap-3 p-3.5 rounded-xl border-2 cursor-pointer transition-all ${formData.project_type === 'update' ? 'border-emerald-600 bg-emerald-50/80 shadow-xs' : 'border-gray-200 bg-white hover:border-emerald-200'}`}>
+                                        <input
+                                            type="radio"
+                                            name="project_type"
+                                            value="update"
+                                            checked={formData.project_type === 'update'}
+                                            onChange={handleChange}
+                                            className="mt-1 text-emerald-600 focus:ring-emerald-500"
+                                        />
+                                        <div>
+                                            <span className="font-extrabold text-xs text-emerald-900 uppercase tracking-wider bg-emerald-100 text-emerald-900 px-2 py-0.5 rounded border border-emerald-200">Update</span>
+                                            <p className="text-[11px] text-gray-600 mt-1 leading-relaxed">
+                                                Peningkatan fitur / pembaruan versi pada sistem berjalan.
                                             </p>
                                         </div>
                                     </label>

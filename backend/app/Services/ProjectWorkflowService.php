@@ -159,7 +159,7 @@ class ProjectWorkflowService
         ProjectStatus::READY_FOR_DEVELOPMENT->value => [UserRole::DEVELOPMENT_LEAD->value, UserRole::SUPER_ADMIN->value],
         ProjectStatus::DEV_ANALYSIS->value => [UserRole::DEVELOPMENT_LEAD->value, UserRole::ANALYST->value, UserRole::SUPER_ADMIN->value],
         ProjectStatus::DEV_ANALYSIS_DONE->value => [UserRole::ANALYST->value, UserRole::SUPER_ADMIN->value],
-        ProjectStatus::IN_DEVELOPMENT->value => [UserRole::PROJECT_MANAGER->value, UserRole::DEVELOPER->value, UserRole::SUPER_ADMIN->value],
+        ProjectStatus::IN_DEVELOPMENT->value => [UserRole::PROJECT_MANAGER->value, UserRole::DEVELOPER->value, UserRole::DEVELOPMENT_LEAD->value, UserRole::SUPER_ADMIN->value],
         ProjectStatus::SIT_IN_PROGRESS->value => [UserRole::PROJECT_MANAGER->value, UserRole::DEVELOPMENT_LEAD->value, UserRole::DEVELOPER->value, UserRole::SUPER_ADMIN->value],
         ProjectStatus::SIT_PASSED->value => [UserRole::PROJECT_MANAGER->value, UserRole::DEVELOPMENT_LEAD->value, UserRole::SUPER_ADMIN->value],
         ProjectStatus::SIT_REVISION->value => [UserRole::PROJECT_MANAGER->value, UserRole::DEVELOPMENT_LEAD->value, UserRole::SUPER_ADMIN->value],
@@ -169,8 +169,8 @@ class ProjectWorkflowService
         ProjectStatus::DEV_COMPLETED->value => [UserRole::PROJECT_MANAGER->value, UserRole::BUSINESS_USER->value, UserRole::SUPER_ADMIN->value],
         ProjectStatus::RETURN_TO_DEV->value => [UserRole::QA_LEAD->value, UserRole::QA_TESTER->value, UserRole::CYBER_LEAD->value, UserRole::PENTESTER->value, UserRole::SUPER_ADMIN->value],
         ProjectStatus::READY_FOR_QA->value => [UserRole::PROJECT_MANAGER->value, UserRole::SUPER_ADMIN->value],
-        ProjectStatus::QA_IN_PROGRESS->value => [UserRole::QA_LEAD->value, UserRole::SUPER_ADMIN->value],
-        ProjectStatus::QA_PASSED->value => [UserRole::QA_TESTER->value, UserRole::QA_LEAD->value, UserRole::SUPER_ADMIN->value],
+        ProjectStatus::QA_IN_PROGRESS->value => [UserRole::QA_LEAD->value, UserRole::LEAD_GROUP->value, UserRole::SUPER_ADMIN->value],
+        ProjectStatus::QA_PASSED->value => [UserRole::QA_TESTER->value, UserRole::QA_LEAD->value, UserRole::LEAD_GROUP->value, UserRole::SUPER_ADMIN->value],
         ProjectStatus::CYBER_IN_PROGRESS->value => [UserRole::CYBER_LEAD->value, UserRole::SUPER_ADMIN->value],
         ProjectStatus::CYBER_PASSED->value => [UserRole::PENTESTER->value, UserRole::CYBER_LEAD->value, UserRole::SUPER_ADMIN->value],
         ProjectStatus::READY_FOR_UAT->value => [UserRole::PROJECT_MANAGER->value, UserRole::SUPER_ADMIN->value],
@@ -267,7 +267,9 @@ class ProjectWorkflowService
         } elseif ($newStatus === ProjectStatus::IN_DEVELOPMENT->value) {
             $rolesToNotify = ['developer', 'super_admin'];
         } elseif ($newStatus === ProjectStatus::READY_FOR_QA->value) {
-            $rolesToNotify = ['qa_lead', 'super_admin'];
+            $rolesToNotify = ['qa_lead', 'lead_group', 'super_admin'];
+        } elseif ($newStatus === ProjectStatus::QA_PASSED->value) {
+            $rolesToNotify = ['project_manager', 'super_admin'];
         } elseif ($newStatus === ProjectStatus::CYBER_IN_PROGRESS->value) {
             $rolesToNotify = ['cyber_lead', 'super_admin'];
         } elseif ($newStatus === ProjectStatus::PENDING_GOLIVE->value) {

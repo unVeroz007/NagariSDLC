@@ -65,7 +65,7 @@ const LEAD_ROLES = ['super_admin', 'lead_group'];
 const ANALYST_ROLES = ['super_admin', 'analyst'];
 const DEV_LEAD_ROLES = ['super_admin', 'development_lead'];
 const DEV_MEMBER_ROLES = ['super_admin', 'project_manager', 'development_lead', 'developer'];
-const QA_ROLES = ['super_admin', 'qa_lead', 'qa_tester'];
+const QA_ROLES = ['super_admin', 'qa_lead', 'qa_tester', 'lead_group'];
 const CYBER_ROLES = ['super_admin', 'cyber_team', 'cyber_lead', 'pentester'];
 const ADMIN_ROLES = ['super_admin'];
 

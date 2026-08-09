@@ -2,6 +2,7 @@ import { useState, useMemo, useEffect, useRef } from 'react';
 import { useLocation, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { useProjects } from '../contexts/ProjectContext';
+import ProjectTypeBadge from '../components/ProjectTypeBadge';
 import {
     Search,
     Bell,
@@ -285,6 +286,7 @@ export default function Track() {
                                                 {activeSelected.type === 'RBB' ? '🔴 RBB (Wajib Selesai)' : '⚪ Non-RBB (Fleksibel)'}
                                             </span>
                                         )}
+                                        <ProjectTypeBadge type={activeSelected?.project_type} />
                                         <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-bold ${getStatusBadge(activeSelected?.status)}`}>
                                             <span className={`w-1.5 h-1.5 rounded-full mr-1.5 ${activeSelected?.status === 'IN DEVELOPMENT' ? 'bg-blue-500 animate-pulse' : 'bg-current'
                                                 }`}></span>

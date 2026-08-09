@@ -8,9 +8,11 @@ import {
     Maximize2,
     Minimize2,
     X,
-    Eye
+    Eye,
+    Loader2,
 } from 'lucide-react';
 import { getFileFromStore } from '../contexts/ProjectContext';
+import { documentService } from '../services/api';
 
 export default function DocumentViewerModal({ doc, project, onClose }) {
     if (!doc) return null;
@@ -26,24 +28,62 @@ export default function DocumentViewerModal({ doc, project, onClose }) {
         year: 'numeric'
     }) : 'Terbaru');
 
+    const [isFullscreen, setIsFullscreen] = useState(false);
+    const [isLoadingUrl, setIsLoadingUrl] = useState(false);
+    const [safeUrl, setSafeUrl] = useState(null);
+
     // File URL resolving logic
-    const rawUrl = useMemo(() => {
-        let url = doc.url || doc.fileUrl || doc.dataUrl || doc.fsdUrl || null;
-        if (!url && doc.name) {
-            url = getFileFromStore(doc.name) || getFileFromStore(doc.id);
-        }
-        if (!url && project?.id) {
-            url = getFileFromStore(`fsd_${project.id}`) || getFileFromStore(`doc_${doc.id}`);
-        }
-        return url;
+    useEffect(() => {
+        let isMounted = true;
+        let createdBlobUrl = null;
+
+        const loadUrl = async () => {
+            let url = doc.url || doc.fileUrl || doc.dataUrl || doc.fsdUrl || null;
+            if (!url && doc.name) url = getFileFromStore(doc.name) || getFileFromStore(doc.id);
+            if (!url && project?.id) url = getFileFromStore(`fsd_${project.id}`) || getFileFromStore(`doc_${doc.id}`);
+
+            // Coba dapatkan Numeric ID untuk API download
+            let numericId = null;
+            if (typeof doc.id === 'number') {
+                numericId = doc.id;
+            } else if (url && url.includes('/documents/')) {
+                const match = url.match(/\/documents\/(\d+)\/download/);
+                if (match) numericId = parseInt(match[1], 10);
+            }
+
+            // Jika ini API URL yang membutuhkan Bearer Token Auth
+            if (numericId) {
+                setIsLoadingUrl(true);
+                try {
+                    const blob = await documentService.download(numericId);
+                    createdBlobUrl = URL.createObjectURL(blob);
+                    if (isMounted) setSafeUrl(createdBlobUrl);
+                } catch (e) {
+                    console.error('[DocumentViewerModal] Gagal mengunduh berkas fisik via API:', e);
+                    // Jangan set safeUrl ke URL backend mentah (akan 401/404 di iframe)
+                    if (isMounted) setSafeUrl(null);
+                } finally {
+                    if (isMounted) setIsLoadingUrl(false);
+                }
+            } else if (url && !url.includes('/api/v1/documents')) {
+                // Hanya gunakan raw URL jika ini DataURL (base64) atau Blob URL lokal
+                if (isMounted) setSafeUrl(url);
+            } else {
+                if (isMounted) setSafeUrl(null);
+            }
+        };
+
+        loadUrl();
+        return () => {
+            isMounted = false;
+            if (createdBlobUrl) URL.revokeObjectURL(createdBlobUrl);
+        };
     }, [doc, project]);
 
     const isImage = useMemo(() => {
         const fn = docName.toLowerCase();
         return /\.(png|jpe?g|gif|webp|svg)$/i.test(fn);
     }, [docName]);
-
-    const [isFullscreen, setIsFullscreen] = useState(false);
 
     // Keyboard ESC listener & body scroll lock for perfect screen centering
     useEffect(() => {
@@ -64,9 +104,9 @@ export default function DocumentViewerModal({ doc, project, onClose }) {
 
     // Handle Download File Action
     const handleDownload = () => {
-        if (rawUrl) {
+        if (safeUrl) {
             const a = document.createElement('a');
-            a.href = rawUrl;
+            a.href = safeUrl;
             a.download = docName;
             document.body.appendChild(a);
             a.click();
@@ -151,42 +191,49 @@ export default function DocumentViewerModal({ doc, project, onClose }) {
 
                 {/* ── CANVAS VIEW CONTAINER (DIRECT ORIGINAL FILE DISPLAY) ── */}
                 <div className="flex-1 bg-slate-950 overflow-y-auto p-3 sm:p-5 md:p-6 flex items-center justify-center relative min-h-0">
-                    {isImage && rawUrl ? (
+                    {isLoadingUrl ? (
+                        <div className="flex flex-col items-center text-slate-400 gap-3">
+                            <Loader2 size={32} className="animate-spin" />
+                            <span className="text-sm">Memuat dokumen aman...</span>
+                        </div>
+                    ) : isImage && safeUrl ? (
                         <div className="flex items-center justify-center p-2 w-full h-full">
                             <img
-                                src={rawUrl}
+                                src={safeUrl}
                                 alt={docName}
                                 className="max-w-full max-h-[80vh] object-contain rounded-2xl shadow-2xl bg-white p-2 border border-slate-700 mx-auto my-auto"
                             />
                         </div>
-                    ) : rawUrl ? (
+                    ) : safeUrl ? (
                         <object
-                            data={rawUrl}
+                            data={safeUrl}
                             type="application/pdf"
                             className="w-full h-full min-h-[650px] bg-white rounded-2xl shadow-2xl border-0"
                         >
                             <iframe
-                                src={rawUrl}
+                                src={safeUrl}
                                 title={docName}
                                 className="w-full h-full min-h-[650px] bg-white rounded-2xl border-0"
                             />
                         </object>
                     ) : (
-                        /* Text / Content Fallback View for Direct Text Documents */
-                        <div className="w-full max-w-4xl bg-white text-slate-900 rounded-2xl shadow-2xl p-6 sm:p-10 border border-slate-200 my-auto overflow-y-auto max-h-[78vh]">
-                            <div className="border-b border-slate-200 pb-4 mb-6 flex justify-between items-start">
-                                <div>
-                                    <span className="text-[10px] font-extrabold bg-blue-50 text-blue-700 px-2.5 py-1 rounded border border-blue-200 uppercase tracking-widest">
-                                        {docType}
-                                    </span>
-                                    <h2 className="text-xl font-extrabold text-slate-900 mt-2">{docName}</h2>
-                                    <p className="text-xs text-slate-500 font-medium mt-1">Proyek: {projName}</p>
-                                </div>
-                                <span className="text-xs text-slate-400 font-mono">Diunggah oleh: {uploadedBy}</span>
-                            </div>
-                            <div className="bg-slate-50 border border-slate-200 p-5 rounded-xl text-xs sm:text-sm font-mono whitespace-pre-wrap leading-relaxed text-slate-800">
-                                {doc.content || `DOKUMEN SDLC BANK NAGARI\n===============================\nNama Dokumen: ${docName}\nStatus: Terverifikasi oleh System Analyst TI.\n\nBerkas ini berisi rincian teknis dan spesifikasi SDLC resmi PT Bank Nagari.`}
-                            </div>
+                        /* Error / Not Loaded State */
+                        <div className="flex flex-col items-center justify-center text-center p-12 text-slate-400">
+                            <FileText size={48} className="mb-4 text-slate-600" />
+                            <h3 className="text-lg font-semibold text-slate-200 mb-2">
+                                Tidak dapat memuat dokumen
+                            </h3>
+                            <p className="text-sm max-w-md mb-4">
+                                Berkas <strong className="text-slate-100">{docName}</strong> gagal dimuat. 
+                                Pastikan koneksi stabil dan Anda memiliki izin akses ke dokumen ini.
+                            </p>
+                            <button
+                                onClick={handleDownload}
+                                className="mt-4 flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-semibold transition-colors"
+                            >
+                                <Download size={16} />
+                                Coba Unduh Manual
+                            </button>
                         </div>
                     )}
                 </div>

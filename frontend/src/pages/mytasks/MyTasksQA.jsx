@@ -3,6 +3,7 @@ import { useAuth } from "../../contexts/AuthContext";
 import { useProjects, getProjectRealDocuments, saveFileToStore } from "../../contexts/ProjectContext";
 import { useNotifications } from "../../contexts/NotificationContext";
 import RBBBadge from "../../components/RBBBadge";
+import ProjectTypeBadge from "../../components/ProjectTypeBadge";
 import DocumentViewerModal from "../../components/DocumentViewerModal";
 import toast from "react-hot-toast";
 import { generateDocumentName, DOCUMENT_TYPES, formatFileSize } from '../../utils/documentNaming';
@@ -129,7 +130,7 @@ export default function MyTasksQA() {
             await updateProject(activeTask.id, { qaStatus: "REVIEW", qa_status: "REVIEW", testerResult });
             toast.success(`Laporan QA (${qaResult}) untuk "${activeTask.name}" berhasil dikirim!`);
             addNotification("Laporan QA Masuk", `Laporan dari ${user?.name || "QA Analis"} untuk ${activeTask.name} menunggu review Lead QA.`, isPass ? "success" : "warning", "/workspace/qa");
-            setQaResult(""); setQaNotes(""); setEvidenceFiles("");
+            setQaResult(""); setQaNotes(""); setEvidenceFiles([]);
         } catch (err) { toast.error(err.message || "Gagal menyimpan laporan QA."); }
         finally { setIsSubmitting(false); }
     };
@@ -167,7 +168,10 @@ export default function MyTasksQA() {
                                 className={`p-4 rounded-xl border cursor-pointer transition-all ${activeTask?.id === t.id ? "border-2 border-[#1a365d] bg-purple-50/40 shadow-sm" : "border-gray-200 hover:border-gray-300 bg-white"}`}>
                                 <div className="flex justify-between items-start mb-1.5">
                                     <span className="text-xs font-mono font-bold text-blue-600 bg-blue-50 px-2 py-0.5 rounded">{t.id}</span>
-                                    <RBBBadge type={t.type} />
+                                    <div className="flex items-center gap-1.5 flex-wrap">
+                                        <RBBBadge type={t.type} />
+                                        <ProjectTypeBadge type={t.project_type} />
+                                    </div>
                                 </div>
                                 <h4 className="font-bold text-gray-800 text-sm line-clamp-1 mb-1.5">{t.name || t.title}</h4>
                                 <div className="flex items-center justify-between text-xs text-gray-500 pt-2 border-t border-gray-100">
@@ -190,7 +194,10 @@ export default function MyTasksQA() {
                             <div className="pb-4 border-b border-gray-100">
                                 <div className="flex items-center justify-between mb-2">
                                     <span className="text-xs font-mono font-bold text-blue-600 bg-blue-50 px-2.5 py-0.5 rounded border border-blue-100">{activeTask.id}</span>
-                                    <RBBBadge type={activeTask.type} deadline={activeTask.rbbDeadline} />
+                                    <div className="flex items-center gap-1.5 flex-wrap">
+                                        <RBBBadge type={activeTask.type} deadline={activeTask.rbbDeadline} />
+                                        <ProjectTypeBadge type={activeTask.project_type} />
+                                    </div>
                                 </div>
                                 <h3 className="text-xl font-extrabold text-gray-800">{activeTask.name || activeTask.title}</h3>
                                 <p className="text-xs text-gray-500 mt-1 flex items-center gap-2 flex-wrap">

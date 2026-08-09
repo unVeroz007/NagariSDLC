@@ -7,6 +7,7 @@ import toast from 'react-hot-toast';
 import LoadingSpinner from '../../components/LoadingSpinner';
 import EmptyState from '../../components/EmptyState';
 import RBBBadge from '../../components/RBBBadge';
+import ProjectTypeBadge from '../../components/ProjectTypeBadge';
 import DocumentViewerModal from '../../components/DocumentViewerModal';
 import {
     Search,
@@ -319,9 +320,9 @@ function ProjectCard({ project, isSelected, onClick }) {
             <div className="flex items-start justify-between gap-2 mb-2">
                 <div className="flex-1 min-w-0">
                     <p className="text-xs font-bold text-[#00529C] mb-0.5">{project.id}</p>
-                    <p className="text-sm font-semibold text-gray-800 leading-tight line-clamp-2">{project.name}</p>
+                    <p className="text-sm font-semibold text-gray-800 leading-tight line-clamp-2">{project.title || project.name}</p>
                 </div>
-                <RBBBadge type={project.type} />
+                <div className="flex items-center gap-1.5 flex-wrap"><RBBBadge type={project.type} /><ProjectTypeBadge type={project.project_type} /></div>
             </div>
 
             <p className="text-xs text-gray-500 mb-3">{project.division || 'Divisi TI'}</p>
@@ -716,13 +717,13 @@ export default function ProjectTracker() {
                                             </span>
                                         </div>
                                         <h1 className="text-2xl font-black text-gray-800 leading-tight mb-2">
-                                            {selectedProject.name}
+                                            {selectedProject.title || selectedProject.name}
                                         </h1>
                                         <p className="text-sm text-gray-500 mb-4">
                                             {selectedProject.description || 'Tidak ada deskripsi.'}
                                         </p>
                                         <div className="flex flex-wrap gap-2">
-                                            <RBBBadge type={selectedProject.type} />
+                                            <div className="flex items-center gap-1.5 flex-wrap"><RBBBadge type={selectedProject.type} /><ProjectTypeBadge type={selectedProject.project_type} /></div>
                                             <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold border ${PROJECT_STATUS_COLOR[selectedProject.status] || 'bg-gray-100 text-gray-600'}`}>
                                                 {PROJECT_STATUS_LABEL[selectedProject.status] || selectedProject.status}
                                             </span>

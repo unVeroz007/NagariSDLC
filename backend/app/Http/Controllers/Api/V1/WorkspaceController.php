@@ -23,6 +23,17 @@ class WorkspaceController extends Controller
 
         $userRole = $user->role?->name;
 
+        if ($userRole !== $role && $userRole !== 'super_admin') {
+            // Lead Group juga Lead QA — boleh akses workspace qa, cyber, analyst
+            $isLeadGroupOverride = $userRole === 'lead_group' && in_array($role, ['qa', 'qa_lead', 'qa_tester', 'cyber', 'cyber_lead', 'pentester', 'analyst']);
+            if (! $isLeadGroupOverride) {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'Role workspace tidak sesuai dengan role Anda.',
+                ], 403);
+            }
+        }
+
         // Mendapatkan proyek yang relevan berdasarkan role
         $query = Project::with(['creator', 'pm', 'analyst', 'division']);
 
@@ -65,6 +76,23 @@ class WorkspaceController extends Controller
 
             case 'cyber':
                 $query->whereIn('status', [ProjectStatus::QA_PASSED->value, ProjectStatus::CYBER_IN_PROGRESS->value]);
+                break;
+
+            case 'qa_lead':
+            case 'lead_group':
+                $query->whereIn('status', [ProjectStatus::READY_FOR_QA->value, ProjectStatus::QA_IN_PROGRESS->value]);
+                break;
+
+            case 'qa_tester':
+                $query->whereIn('status', [ProjectStatus::QA_IN_PROGRESS->value]);
+                break;
+
+            case 'cyber_lead':
+                $query->whereIn('status', [ProjectStatus::QA_PASSED->value, ProjectStatus::CYBER_IN_PROGRESS->value]);
+                break;
+
+            case 'pentester':
+                $query->whereIn('status', [ProjectStatus::CYBER_IN_PROGRESS->value]);
                 break;
 
             case 'business_user':

@@ -9,14 +9,13 @@ class ProjectResource extends JsonResource
 {
     public function toArray(Request $request): array
     {
-        $status = $this->status;
-
         return [
             'id' => $this->id,
             'req_id' => $this->req_id,
             'title' => $this->title,
             'description' => $this->description,
-            'status' => $status ? ($status->value ?? $status) : null,
+            'project_type' => $this->project_type ?? 'baru',
+            'status' => $this->status instanceof \BackedEnum ? $this->status->value : $this->status,
             'creator' => new UserResource($this->whenLoaded('creator')),
             'pm' => new UserResource($this->whenLoaded('pm')),
             'analyst' => new UserResource($this->whenLoaded('analyst')),
@@ -44,6 +43,22 @@ class ProjectResource extends JsonResource
                     'role' => $m->role_in_project,
                 ];
             }) : [],
+            'documents' => $this->whenLoaded('documents', function () {
+                return $this->documents->map(function ($d) {
+                    return [
+                        'id' => $d->id,
+                        'file_name' => $d->file_name,
+                        'original_filename' => $d->original_filename,
+                        'document_type' => $d->document_type,
+                        'file_path' => $d->file_path,
+                        'file_size' => $d->file_size,
+                        'mime_type' => $d->mime_type,
+                        'created_at' => $d->created_at?->toIso8601String(),
+                        'uploaded_by' => $d->uploaded_by,
+                        'author' => $d->uploader?->name,
+                    ];
+                });
+            }) ?? [],
             'status_histories' => ProjectStatusHistoryResource::collection($this->whenLoaded('statusHistories')),
             'created_at' => $this->created_at?->toIso8601String(),
             'updated_at' => $this->updated_at?->toIso8601String(),

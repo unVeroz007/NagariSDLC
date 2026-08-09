@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo } from 'react';
 import RBBBadge from '../../components/RBBBadge';
+import ProjectTypeBadge from '../../components/ProjectTypeBadge';
 import { useAuth } from '../../contexts/AuthContext';
 import { useProjects } from '../../contexts/ProjectContext';
 import { taskService } from '../../services/api';

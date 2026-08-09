@@ -29,7 +29,8 @@ class StoreProjectRequest extends FormRequest
             // FE bisa kirim 'division_id' (int) ATAU 'division' (string)
             'division_id' => ['nullable', 'exists:divisions,id'],
             'division'    => ['nullable', 'string'],
-            'target_date' => ['required', 'date'],
+            'target_date' => ['nullable', 'date'],
+            'project_type'=> ['nullable', 'string', 'in:baru,perbaikan,update'],
             'type'        => ['nullable', 'string'],
             'rbb_deadline'=> ['nullable', 'date'],
         ];

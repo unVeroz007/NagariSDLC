@@ -137,13 +137,14 @@ class ProjectController extends Controller
         }
 
         $project = Project::create([
-            'req_id'      => Project::generateReqId(),
-            'title'       => $title,
-            'description' => $request->description,
-            'division_id' => $divisionId,
-            'target_date' => $request->target_date,
-            'created_by'  => $request->user()->id,
-            'status'      => ProjectStatus::PENDING->value,
+            'req_id'       => Project::generateReqId(),
+            'title'        => $title,
+            'description'  => $request->description,
+            'project_type' => $request->project_type ?? 'baru',
+            'division_id'  => $divisionId,
+            'target_date'  => $request->target_date,
+            'created_by'   => $request->user()->id,
+            'status'       => ProjectStatus::PENDING->value,
         ]);
 
         return response()->json([
@@ -166,7 +167,7 @@ class ProjectController extends Controller
 
     /**
      * General project update (non-status fields: pm_id, analyst_id, staging_url, uat_notes, etc.)
-     * Status changes MUST go through updateStatus() endpoint via ProjectWorkflowService.
+     * If 'status' is provided, routes through ProjectWorkflowService.
      */
     public function update(Request $request, int $id): JsonResponse
     {
@@ -185,16 +186,56 @@ class ProjectController extends Controller
             'sit_uat_data'           => ['sometimes', 'nullable'],
             'qa_status'              => ['sometimes', 'nullable', 'string'],
             'cyber_status'           => ['sometimes', 'nullable', 'string'],
+            'status'                 => ['sometimes', 'string'],
+            'project_type'           => ['sometimes', 'nullable', 'string', 'in:baru,perbaikan,update'],
         ]);
 
-        $updateData = $request->only([
-            'title', 'description', 'pm_id', 'analyst_id',
-            'division_id', 'target_date', 'current_stage_deadline',
-            'staging_url', 'uat_notes', 'sit_uat_data',
-            'qa_status', 'cyber_status',
-        ]);
+        // Resolve analyst_id from analyst name if needed (workspace sends analyst name)
+        $analystId = $request->analyst_id;
+        if (! $analystId && $request->filled('analyst')) {
+            $analystName = $request->analyst;
+            $analystUser = \App\Models\User::where('name', $analystName)
+                ->orWhere('name', 'like', "%{$analystName}%")
+                ->whereHas('role', fn($q) => $q->where('name', 'analyst'))
+                ->first();
+            $analystId = $analystUser?->id;
+        }
 
-        $project->update(array_filter($updateData, fn($v) => !is_null($v)));
+        $updateData = array_filter([
+            'title'                  => $request->title,
+            'description'            => $request->description,
+            'project_type'           => $request->project_type,
+            'pm_id'                  => $request->pm_id,
+            'analyst_id'             => $analystId ?? $request->analyst_id,
+            'division_id'            => $request->division_id,
+            'target_date'            => $request->target_date,
+            'current_stage_deadline' => $request->current_stage_deadline,
+            'staging_url'            => $request->staging_url,
+            'uat_notes'              => $request->uat_notes ?? $request->input('notes'),
+            'sit_uat_data'           => $request->sit_uat_data,
+            'qa_status'              => $request->qa_status,
+            'cyber_status'           => $request->cyber_status,
+        ], fn($v) => ! is_null($v));
+
+        $project->update($updateData);
+
+        // Handle status transition through the state machine
+        if ($request->filled('status')) {
+            try {
+                $targetStatus = ProjectStatus::from($request->status);
+                $this->workflowService->transition(
+                    $project,
+                    $targetStatus,
+                    $request->user(),
+                    $request->input('notes')
+                );
+            } catch (Throwable $e) {
+                return response()->json([
+                    'status'  => 'error',
+                    'message' => 'Data proyek diperbarui, namun transisi status gagal: ' . $e->getMessage(),
+                ], 422);
+            }
+        }
 
 
         if ($request->has('team') || $request->has('team_ids') || $request->has('developers')) {
