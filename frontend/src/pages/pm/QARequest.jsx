@@ -110,7 +110,7 @@ export default function QARequest() {
       setSelectedProject(readyProjects[0]);
       setFormData(prev => ({
         ...prev,
-        stagingUrl: readyProjects[0].stagingUrl || 'https://staging-app.banknagari.co.id',
+        stagingUrl: readyProjects[0].stagingUrl || import.meta.env.VITE_STAGING_URL,
         targetDate: readyProjects[0].targetDate || ''
       }));
     }
@@ -305,7 +305,7 @@ export default function QARequest() {
                     setSelectedProject(project);
                     setFormData(prev => ({
                       ...prev,
-                      stagingUrl: project.stagingUrl || 'https://staging-app.banknagari.co.id',
+                      stagingUrl: project.stagingUrl || import.meta.env.VITE_STAGING_URL,
                       targetDate: project.targetDate || ''
                     }));
                     scrollPageToTop();

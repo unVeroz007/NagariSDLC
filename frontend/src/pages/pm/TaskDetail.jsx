@@ -58,8 +58,6 @@ import {
     FileCheck,
     ArrowRight,
 } from 'lucide-react';
-import { taskProjects } from '../../data/mockData';
-
 
 export default function TaskDetail() {
     const { user } = useAuth();
@@ -95,12 +93,8 @@ export default function TaskDetail() {
             };
         }
 
-        // 2. Fallback ke taskProjects mockData jika belum ada di context
-        let found = taskProjects.find((p) => String(p.id).toLowerCase() === String(projectId).toLowerCase());
-        if (found) return found;
-
-        // 3. Fallback default project
-        return (projects && projects[0]) || taskProjects[0] || null;
+        // 2. Fallback default project
+        return (projects && projects[0]) || null;
     }, [projectId, projects]);
 
 
@@ -1077,8 +1071,7 @@ function DocumentSection({ project, user }) {
             if (res && res.data) {
                 setDocs(res.data);
             }
-        } catch (err) {
-            console.warn('[DocumentSection] Failed to load docs:', err.message);
+        } catch {
         } finally {
             setLoading(false);
         }

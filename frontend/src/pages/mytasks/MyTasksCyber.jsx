@@ -214,9 +214,9 @@ export default function MyTasksCyber() {
                             <div className="bg-orange-50/60 border border-orange-200 p-4 rounded-xl flex items-center justify-between gap-3">
                                 <div className="overflow-hidden">
                                     <div className="text-[10px] font-bold text-orange-800 uppercase tracking-wider">Target Staging URL Penetration Test</div>
-                                    <div className="text-xs font-mono text-orange-600 truncate font-bold mt-0.5">{activeTask.stagingUrl || "https://staging-app.banknagari.co.id"}</div>
+                                    <div className="text-xs font-mono text-orange-600 truncate font-bold mt-0.5">{activeTask.stagingUrl || import.meta.env.VITE_STAGING_URL}</div>
                                 </div>
-                                <button onClick={() => handleCopyStagingUrl(activeTask.stagingUrl || "https://staging-app.banknagari.co.id")}
+                                <button onClick={() => handleCopyStagingUrl(activeTask.stagingUrl || import.meta.env.VITE_STAGING_URL)}
                                     className="px-3 py-1.5 bg-white text-orange-600 hover:bg-orange-100 rounded-lg transition-colors text-xs font-bold shrink-0 shadow-xs cursor-pointer flex items-center gap-1.5">
                                     <Copy size={13} /><span>Salin</span>
                                 </button>

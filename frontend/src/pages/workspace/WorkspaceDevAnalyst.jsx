@@ -110,29 +110,36 @@ export default function WorkspaceDevAnalyst() {
 
     const [selectedAnalystFilter, setSelectedAnalystFilter] = useState(() => {
         if (user?.role === 'super_admin' || user?.role === 'lead_group' || user?.role === 'development_lead') return 'ALL';
-        return user?.name || 'MY_PROJECTS';
+        return 'MY_PROJECTS';
     });
 
-    // Filter antrean proyek yang sedang ditugaskan ke Analyst Pengembangan (status DEV_ANALYSIS)
+    // Helper to safely extract analyst name from string or object
+    const getAnalystName = (p) => {
+        if (!p) return '';
+        const a = p.analyst || p.assignedAnalyst;
+        if (!a) return '';
+        let name = typeof a === 'object' ? (a?.name || '') : String(a);
+        if (name && name.includes('(')) {
+            name = name.split('(')[0].trim();
+        }
+        return name;
+    };
+
+    // Filter antrean proyek yang sedang di tahap DEV_ANALYSIS
     const reviewQueue = useMemo(() => {
         let list = projects.filter(p => p.status === 'DEV_ANALYSIS');
 
         if (selectedAnalystFilter === 'MY_PROJECTS') {
-            const myName = user?.name || '';
             list = list.filter(p => {
                 const analystId = p.analyst?.id || (typeof p.assignedAnalyst === 'object' ? p.assignedAnalyst?.id : null);
                 if (analystId && user?.id) return analystId === user.id;
-                const analystName = typeof p.assignedAnalyst === 'object'
-                    ? (p.assignedAnalyst?.name || '')
-                    : String(p.assignedAnalyst || p.devAnalyst || p.devAnalystName || p.analyst || '');
-                return analystName.toLowerCase().includes(myName.toLowerCase());
+                const analystName = getAnalystName(p);
+                return analystName.toLowerCase().includes((user?.name || '').split('(')[0].trim().toLowerCase());
             });
         } else if (selectedAnalystFilter !== 'ALL') {
             list = list.filter(p => {
-                const analystName = typeof p.assignedAnalyst === 'object'
-                    ? (p.assignedAnalyst?.name || '')
-                    : String(p.assignedAnalyst || p.devAnalyst || p.devAnalystName || p.analyst || '');
-                return analystName.toLowerCase().includes(selectedAnalystFilter.toLowerCase());
+                const analystName = getAnalystName(p);
+                return analystName.toLowerCase().includes(selectedAnalystFilter.split('(')[0].trim().toLowerCase());
             });
         }
 
@@ -246,7 +253,6 @@ export default function WorkspaceDevAnalyst() {
             setNotes('');
             setUploadedFile(null);
         } catch (err) {
-            console.error('Error submitting dev analyst review:', err);
             toast.error('Gagal mengirim kajian teknis.');
             setIsSubmitting(false);
         }
@@ -288,41 +294,36 @@ export default function WorkspaceDevAnalyst() {
                 </div>
 
                 <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
-                    <button
-                        onClick={() => setSelectedAnalystFilter('ALL')}
-                        className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
-                            selectedAnalystFilter === 'ALL'
-                                ? 'bg-[#1a365d] text-white shadow-xs'
-                                : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-                        }`}
-                    >
-                        🌐 Semua Proyek Global
-                    </button>
+                    {(user?.role === 'super_admin' || user?.role === 'lead_group' || user?.role === 'development_lead') && (
+                        <>
+                            <button
+                                onClick={() => setSelectedAnalystFilter('ALL')}
+                                className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                                    selectedAnalystFilter === 'ALL'
+                                        ? 'bg-[#1a365d] text-white shadow-xs'
+                                        : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                                }`}
+                            >
+                                🌐 Semua Proyek Global
+                            </button>
 
-                    {user?.role !== 'super_admin' && (
-                        <button
-                            onClick={() => setSelectedAnalystFilter('MY_PROJECTS')}
-                            className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
-                                selectedAnalystFilter === 'MY_PROJECTS'
-                                    ? 'bg-[#00529C] text-white shadow-xs'
-                                    : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-                            }`}
-                        >
-                            👤 Proyek Tugas Saya
-                        </button>
+                            <select
+                                value={['ALL', 'MY_PROJECTS'].includes(selectedAnalystFilter) ? '' : selectedAnalystFilter}
+                                onChange={(e) => setSelectedAnalystFilter(e.target.value || 'ALL')}
+                                className="px-3 py-1.5 rounded-xl text-xs font-semibold border border-gray-200 bg-white text-gray-700 outline-none focus:border-[#00529C]"
+                            >
+                                <option value="">-- Filter Per System Analyst --</option>
+                                <option value="Citra Kirana">Citra Kirana</option>
+                                <option value="Mustafa Fathur Rahman">Mustafa Fathur Rahman</option>
+                                <option value="Fajar Ramadhan">Fajar Ramadhan</option>
+                                <option value="Ahmad Fauzi">Ahmad Fauzi</option>
+                            </select>
+                        </>
                     )}
 
-                    <select
-                        value={['ALL', 'MY_PROJECTS'].includes(selectedAnalystFilter) ? '' : selectedAnalystFilter}
-                        onChange={(e) => setSelectedAnalystFilter(e.target.value || 'ALL')}
-                        className="px-3 py-1.5 rounded-xl text-xs font-semibold border border-gray-200 bg-white text-gray-700 outline-none focus:border-[#00529C]"
-                    >
-                        <option value="">-- Filter Per System Analyst --</option>
-                        <option value="Citra Kirana">Citra Kirana</option>
-                        <option value="Mustafa Fathur Rahman">Mustafa Fathur Rahman</option>
-                        <option value="Fajar Ramadhan">Fajar Ramadhan</option>
-                        <option value="Ahmad Fauzi">Ahmad Fauzi</option>
-                    </select>
+                    <span className="px-3.5 py-1.5 rounded-xl text-xs font-bold bg-[#00529C] text-white shadow-xs">
+                        👤 Proyek Tugas Saya
+                    </span>
                 </div>
             </div>
 
@@ -368,18 +369,25 @@ export default function WorkspaceDevAnalyst() {
                                     </h3>
                                     <p className="text-xs text-gray-500 line-clamp-2">{project.description}</p>
                                     
-                                    {project.leadNote && (
+                                    {(project.leadNote || project.latest_note) && (
                                         <div className="bg-amber-50 p-2 rounded-lg border border-amber-200 text-[11px] text-amber-900">
                                             <span className="font-bold block text-[10px] text-amber-700 uppercase">Arahan Dev Lead:</span>
-                                            <p className="italic truncate">{project.leadNote}</p>
+                                            <p className="italic truncate">{project.leadNote || project.latest_note}</p>
                                         </div>
                                     )}
 
                                     <div className="flex items-center justify-between text-[11px] text-gray-500 pt-1 border-t border-gray-100">
                                         <span>Peminta: <strong>{project.division}</strong></span>
-                                        <span className="text-amber-700 font-bold bg-amber-50 px-2 py-0.5 rounded flex items-center gap-1">
-                                            <Clock size={10} /> Sedang Analisa
-                                        </span>
+                                        <div className="flex items-center gap-2">
+                                            {(project.deadline || project.current_stage_deadline) && (
+                                                <span className="text-amber-700 font-bold bg-amber-50 px-2 py-0.5 rounded flex items-center gap-1">
+                                                    <Clock size={10} /> Deadline: {new Date(project.deadline || project.current_stage_deadline).toLocaleDateString('id-ID', { day: 'numeric', month: 'short' })}
+                                                </span>
+                                            )}
+                                            <span className="text-amber-700 font-bold bg-amber-50 px-2 py-0.5 rounded flex items-center gap-1">
+                                                <Clock size={10} /> Sedang Analisa
+                                            </span>
+                                        </div>
                                     </div>
                                 </div>
                             ))
@@ -446,7 +454,7 @@ export default function WorkspaceDevAnalyst() {
                                     </p>
                                     <div className="bg-white p-3 rounded-lg border border-blue-100 text-xs">
                                         <p className="text-gray-800 font-medium italic text-[11px] sm:text-xs leading-relaxed">
-                                            "{selectedProject.devLeadNote || selectedProject.leadNote || selectedProject.assignmentNote || 'Tolong kaji kelayakan arsitektur teknis IT, pola integrasi middleware, struktur spesifikasi sistem, serta tentukan estimasi waktu pengerjaan.'}"
+                                            "{selectedProject.devLeadNote || selectedProject.leadNote || selectedProject.latest_note || selectedProject.assignmentNote || 'Tolong kaji kelayakan arsitektur teknis IT, pola integrasi middleware, struktur spesifikasi sistem, serta tentukan estimasi waktu pengerjaan.'}"
                                         </p>
                                         {selectedProject.assignedAnalystAt && (
                                             <p className="text-[10px] text-gray-400 mt-1.5 font-mono">

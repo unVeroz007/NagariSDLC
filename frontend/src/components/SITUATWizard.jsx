@@ -504,7 +504,7 @@ export default function SITUATWizard({ project, updateProject, addNotification, 
                                     <div>
                                         <label className="block text-xs font-bold text-gray-600 uppercase tracking-wider mb-1.5">URL Environment Staging / Testing *</label>
                                         <input type="text" value={sit1.stagingUrl} onChange={e => setSit1(p => ({...p, stagingUrl: e.target.value}))}
-                                            placeholder="https://staging.banknagari.co.id" disabled={sitDone}
+                                            placeholder={import.meta.env.VITE_STAGING_URL || "https://staging.banknagari.co.id"} disabled={sitDone}
                                             className="w-full px-3 py-2.5 border border-gray-200 rounded-xl text-xs font-mono focus:outline-none focus:border-sky-500 bg-gray-50 disabled:bg-gray-100" />
                                     </div>
                                     <div>

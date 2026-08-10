@@ -36,8 +36,6 @@ import {
     Filter,
 } from 'lucide-react';
 
-const MODE = import.meta.env.VITE_API_MODE || 'mock';
-
 const getInitials = (name) => {
     if (!name) return 'U';
     const parts = name.split(' ');

@@ -9,6 +9,7 @@ use App\Models\ProjectStatusHistory;
 use App\Models\User;
 use Exception;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Broadcast;
 
 class ProjectWorkflowService
 {
@@ -156,7 +157,7 @@ class ProjectWorkflowService
         ProjectStatus::IN_REVIEW->value => [UserRole::LEAD_GROUP->value, UserRole::SUPER_ADMIN->value],
         ProjectStatus::ANALYSIS_APPROVED->value => [UserRole::LEAD_GROUP->value, UserRole::ANALYST->value, UserRole::SUPER_ADMIN->value],
         ProjectStatus::REJECTED->value => [UserRole::LEAD_GROUP->value, UserRole::ANALYST->value, UserRole::HEAD_OF_IT->value, UserRole::SUPER_ADMIN->value],
-        ProjectStatus::READY_FOR_DEVELOPMENT->value => [UserRole::DEVELOPMENT_LEAD->value, UserRole::SUPER_ADMIN->value],
+        ProjectStatus::READY_FOR_DEVELOPMENT->value => [UserRole::LEAD_GROUP->value, UserRole::DEVELOPMENT_LEAD->value, UserRole::SUPER_ADMIN->value],
         ProjectStatus::DEV_ANALYSIS->value => [UserRole::DEVELOPMENT_LEAD->value, UserRole::ANALYST->value, UserRole::SUPER_ADMIN->value],
         ProjectStatus::DEV_ANALYSIS_DONE->value => [UserRole::ANALYST->value, UserRole::SUPER_ADMIN->value],
         ProjectStatus::IN_DEVELOPMENT->value => [UserRole::PROJECT_MANAGER->value, UserRole::DEVELOPER->value, UserRole::DEVELOPMENT_LEAD->value, UserRole::SUPER_ADMIN->value],
@@ -238,10 +239,15 @@ class ProjectWorkflowService
             ]);
 
             // Create notification for relevant roles
-            $this->notifyRelevantRoles($project, $currentStatus, $targetStatus->value, $user);
+            $this->notifyRelevantRoles($project, $currentStatus, $targetStatus->value, $user, $notes);
 
-            // Todo: Broadcast event ProjectUpdated when Reverb is installed
-            // event(new \App\Events\ProjectUpdated($project));
+            // Broadcast event ProjectUpdated via Reverb
+            broadcast(new \App\Events\ProjectUpdated(
+                project: $project,
+                oldStatus: $currentStatus,
+                newStatus: $targetStatus->value,
+                actorName: $user->name
+            ));
 
             return $project->fresh(['creator', 'pm', 'analyst', 'division', 'statusHistories']);
         });
@@ -250,7 +256,7 @@ class ProjectWorkflowService
     /**
      * Kirim notifikasi ke role terkait berdasarkan transisi status baru.
      */
-    protected function notifyRelevantRoles(Project $project, ?string $oldStatus, string $newStatus, User $actor): void
+    protected function notifyRelevantRoles(Project $project, ?string $oldStatus, string $newStatus, User $actor, ?string $notes = null): void
     {
         $message = "Proyek '{$project->title}' telah mengubah status dari " . ($oldStatus ?? 'Baru') . " menjadi {$newStatus} oleh {$actor->name}.";
         
@@ -259,7 +265,17 @@ class ProjectWorkflowService
         // Define target audience based on state machine
         if (in_array($newStatus, [ProjectStatus::IN_REVIEW->value, ProjectStatus::REJECTED->value, ProjectStatus::CANCELLED->value])) {
             $rolesToNotify = ['lead_group', 'super_admin'];
-            if ($project->created_by) \App\Models\Notification::create(['user_id' => $project->created_by, 'title' => 'Update Status Proyek', 'message' => $message]);
+            if ($project->created_by) {
+                $rejectMsg = $newStatus === ProjectStatus::REJECTED->value && $notes
+                    ? "Proyek '{$project->title}' DITOLAK. Catatan perbaikan: {$notes}"
+                    : $message;
+                \App\Models\Notification::create([
+                    'user_id' => $project->created_by,
+                    'title' => $newStatus === ProjectStatus::REJECTED->value ? 'Proyek Ditolak — Perlu Perbaikan' : 'Update Status Proyek',
+                    'message' => $rejectMsg,
+                    'type' => $newStatus === ProjectStatus::REJECTED->value ? 'warning' : 'info',
+                ]);
+            }
         } elseif ($newStatus === ProjectStatus::ANALYSIS_APPROVED->value) {
             $rolesToNotify = ['development_lead', 'super_admin'];
         } elseif (in_array($newStatus, [ProjectStatus::READY_FOR_DEVELOPMENT->value, ProjectStatus::DEV_ANALYSIS->value])) {
@@ -296,6 +312,14 @@ class ProjectWorkflowService
                     'created_at' => $now,
                     'updated_at' => $now,
                 ];
+
+                // Broadcast real-time notification via Reverb
+                broadcast(new \App\Events\NotificationCreated(
+                    userId: $u->id,
+                    title: 'Pembaruan Alur Kerja Proyek',
+                    message: $message,
+                    type: 'info'
+                ));
             }
             if (!empty($notifications)) {
                 \App\Models\Notification::insert($notifications);

@@ -27,7 +27,7 @@ class ProjectController extends Controller
         $user = $request->user();
         $roleName = $user->role?->name;
 
-        $query = Project::with(['creator', 'pm', 'analyst', 'division', 'documents', 'teamMembers.user']);
+        $query = Project::with(['creator', 'pm', 'analyst', 'division', 'documents', 'teamMembers.user', 'statusHistories']);
 
         // ─── ROLE-BASED DATA ISOLATION ───
         // Super Admin, Head of IT, Lead Group: bisa lihat SEMUA proyek
@@ -140,6 +140,7 @@ class ProjectController extends Controller
             'req_id'       => Project::generateReqId(),
             'title'        => $title,
             'description'  => $request->description,
+            'type'         => $request->type ?? 'RBB',
             'project_type' => $request->project_type ?? 'baru',
             'division_id'  => $divisionId,
             'target_date'  => $request->target_date,
@@ -204,12 +205,13 @@ class ProjectController extends Controller
         $updateData = array_filter([
             'title'                  => $request->title,
             'description'            => $request->description,
+            'type'                   => $request->type,
             'project_type'           => $request->project_type,
             'pm_id'                  => $request->pm_id,
             'analyst_id'             => $analystId ?? $request->analyst_id,
             'division_id'            => $request->division_id,
             'target_date'            => $request->target_date,
-            'current_stage_deadline' => $request->current_stage_deadline,
+            'current_stage_deadline' => $request->current_stage_deadline ?? $request->input('deadline'),
             'staging_url'            => $request->staging_url,
             'uat_notes'              => $request->uat_notes ?? $request->input('notes'),
             'sit_uat_data'           => $request->sit_uat_data,
@@ -223,11 +225,12 @@ class ProjectController extends Controller
         if ($request->filled('status')) {
             try {
                 $targetStatus = ProjectStatus::from($request->status);
+                $notes = $request->input('notes') ?? $request->input('leadNote') ?? $request->input('lead_note');
                 $this->workflowService->transition(
                     $project,
                     $targetStatus,
                     $request->user(),
-                    $request->input('notes')
+                    $notes
                 );
             } catch (Throwable $e) {
                 return response()->json([

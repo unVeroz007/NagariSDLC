@@ -132,8 +132,7 @@ export default function Documents() {
                 }
                 const blob = new Blob([u8arr], { type: mime });
                 return URL.createObjectURL(blob);
-            } catch (e) {
-                console.warn('Failed to convert Data URL to Blob:', e);
+            } catch {
                 return rawUrl;
             }
         }

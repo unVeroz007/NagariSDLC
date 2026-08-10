@@ -75,13 +75,7 @@ export default function QualityGate() {
         if (!confirm(`Setujui rilis ${selectedRelease.projectName} (${selectedRelease.id}) untuk produksi?`)) return;
         setIsSubmitting(true);
         try {
-            // Gunakan qualityGateService.approve() jika mode API
-            const mode = import.meta.env.VITE_API_MODE || 'mock';
-            if (mode === 'api') {
-                await qualityGateService.approve(selectedRelease.projectId || selectedRelease.id, 'Disetujui oleh Head of IT');
-            } else {
-                await updateProjectStatus(selectedRelease.projectId || selectedRelease.id, 'LIVE_PRODUCTION');
-            }
+            await qualityGateService.approve(selectedRelease.projectId || selectedRelease.id, 'Disetujui oleh Head of IT');
             toast.success(`Rilis ${selectedRelease.projectName} berhasil disetujui untuk produksi (LIVE_PRODUCTION)!`);
             const remaining = queueList.filter(item => item.id !== selectedRelease.id);
             setSelectedRelease(remaining.length > 0 ? remaining[0] : null);

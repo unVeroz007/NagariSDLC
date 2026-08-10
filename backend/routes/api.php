@@ -33,6 +33,7 @@ Route::prefix('v1')->group(function () {
         Route::patch('/auth/profile', [AuthController::class, 'updateProfile']);
         Route::patch('/auth/password', [AuthController::class, 'updatePassword']);
         Route::post('/auth/logout', [AuthController::class, 'logout']);
+        Route::post('/auth/refresh', [AuthController::class, 'refresh']);
 
         // ----- DASHBOARD -----
         Route::get('/dashboard/summary', [DashboardController::class, 'summary']);

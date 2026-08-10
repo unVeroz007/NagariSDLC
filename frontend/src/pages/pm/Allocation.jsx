@@ -65,8 +65,7 @@ export default function Allocation() {
                     setDeveloperCandidates(mapped);
                 }
             })
-            .catch(err => {
-                console.warn('[Allocation] Fallback to default developer candidates:', err);
+            .catch(() => {
             });
         return () => { isMounted = false; };
     }, []);
@@ -187,8 +186,7 @@ export default function Allocation() {
             toast.success(`Tim developer untuk ${targetProjName} berhasil dialokasikan & tersimpan ke database!`);
             setSelectedProject(null);
             setSelectedTeamIds([]);
-        } catch (err) {
-            console.warn('[Allocation] DB write fallback, updating local only:', err);
+        } catch {
             // Fallback: tetap update local jika API error
             await updateProject(selectedProject.id, {
                 team: allocatedTeam,

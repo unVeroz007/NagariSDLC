@@ -117,7 +117,7 @@ export default function Tasks() {
                                 </div>
                                 <h3 className="font-bold text-gray-800 text-base mb-2 line-clamp-1">{project.name}</h3>
                                 <p className="text-xs text-gray-500 flex items-center gap-1.5 mb-4">
-                                    <User size={13} className="text-gray-400" /> PM: <span className="font-semibold text-gray-700">{project.pm}</span>
+                                    <User size={13} className="text-gray-400" /> PM: <span className="font-semibold text-gray-700">{typeof project.pm === 'object' ? (project.pm?.name || '—') : (project.pm || '—')}</span>
                                 </p>
                             </div>
 

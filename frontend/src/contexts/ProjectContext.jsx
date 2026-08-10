@@ -39,7 +39,7 @@ export const getProjectRealDocuments = (project) => {
             size: d.file_size || d.size || 'N/A',
             uploadedAt: d.created_at || d.uploaded_at || 'Terverifikasi',
             author: d.uploader?.name || d.author || 'Tim SDLC',
-            url: d.id && !d.url ? `${import.meta.env.VITE_API_URL || 'http://localhost:8000/api/v1'}/documents/${d.id}/download` : (d.url || null),
+            url: d.id && !d.url ? `${import.meta.env.VITE_API_URL}/documents/${d.id}/download` : (d.url || null),
         }));
     }
     return [];
@@ -68,6 +68,8 @@ export function ProjectProvider({ children }) {
                     ...p,
                     name: p.name || p.title || 'Tanpa Judul',
                     reqId: p.reqId || p.req_id || null,
+                    targetDate: p.targetDate || p.target_date || 'TBD',
+                    submittedAt: p.submittedAt || p.created_at || new Date().toISOString(),
                     division: typeof p.division === 'string' ? p.division : (p.division?.name || p.division_detail?.name || null),
                 }));
                 setProjects(normalized);
@@ -75,7 +77,6 @@ export function ProjectProvider({ children }) {
             }
             setLastUpdated(new Date());
         } catch (err) {
-            console.error('[ProjectContext] Load projects error:', err);
             if (err.status !== 401) {
                 toast.error(`Gagal memuat proyek: ${err.message}`);
             }

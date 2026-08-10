@@ -47,6 +47,7 @@ export default function Track() {
             pm: typeof p.pm === 'object' ? (p.pm?.name || 'Belum Dialokasi') : (p.pm || 'Belum Dialokasi'),
             pmAvatar: (p.pm?.name || 'BD').substring(0, 2).toUpperCase(),
             description: p.description || 'Pengajuan proyek baru.',
+            rejectionReason: p.rejection_reason || p.rejectionReason || null,
             phases: p.phases || [
                 {
                     name: 'Fase 1: Inisiasi & Persetujuan',
@@ -255,7 +256,7 @@ export default function Track() {
                                                 <div className="w-5 h-5 rounded-full bg-blue-100 text-[#00529C] flex items-center justify-center font-bold text-[10px]">
                                                     {project.pmAvatar}
                                                 </div>
-                                                <span className="truncate max-w-[100px]">{project.pm}</span>
+                                                <span className="truncate max-w-[100px]">{typeof project.pm === 'object' ? (project.pm?.name || '—') : (project.pm || '—')}</span>
                                             </div>
                                             <span className="text-gray-400">{project.submittedDate}</span>
                                         </div>
@@ -316,10 +317,28 @@ export default function Track() {
                                         <div className="w-6 h-6 rounded-full bg-[#00529C] text-white flex items-center justify-center text-[10px] font-bold mr-2">
                                             {activeSelected?.pmAvatar}
                                         </div>
-                                        <p className="font-semibold text-gray-800">{activeSelected?.pm}</p>
+                                        <p className="font-semibold text-gray-800">{typeof activeSelected?.pm === 'object' ? (activeSelected.pm?.name || '—') : (activeSelected?.pm || '—')}</p>
                                     </div>
                                 </div>
                             </div>
+
+                            {/* Alasan Penolakan (jika ditolak) */}
+                            {activeSelected?.rejectionReason && (
+                                <div className="bg-red-50 border-2 border-red-200 rounded-2xl p-5 mb-6 animate-scale-up">
+                                    <div className="flex items-start gap-3">
+                                        <div className="w-10 h-10 rounded-xl bg-red-100 text-red-600 flex items-center justify-center shrink-0">
+                                            <AlertCircle size={20} />
+                                        </div>
+                                        <div className="flex-1">
+                                            <h4 className="font-extrabold text-red-800 text-sm mb-1">Proyek Ditolak — Perlu Perbaikan</h4>
+                                            <p className="text-xs text-red-600 mb-2">Berikut adalah catatan dari tim Perencanaan/Analis terkait penolakan proyek Anda. Silakan lakukan perbaikan sesuai arahan dan ajukan kembali.</p>
+                                            <div className="bg-white border border-red-200 rounded-xl p-3 text-xs text-gray-700 leading-relaxed whitespace-pre-wrap font-medium">
+                                                {activeSelected.rejectionReason}
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
 
                             {/* Action Button */}
                             <div className="flex justify-end mb-6">

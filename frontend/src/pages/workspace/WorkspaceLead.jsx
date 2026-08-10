@@ -20,10 +20,12 @@ import {
     Users,
     FolderOpen,
     List,
+    UserX,
+    UserCheck,
+    CheckCircle2,
 } from 'lucide-react';
-import { analysts } from '../../data/mockData';
 import { useProjects, getFileFromStore, getProjectRealDocuments } from '../../contexts/ProjectContext';
-import { documentService } from '../../services/api';
+import { documentService, userService } from '../../services/api';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useNotifications } from '../../contexts/NotificationContext';
 import LoadingSpinner from '../../components/LoadingSpinner';
@@ -42,14 +44,18 @@ export default function WorkspaceLead() {
     const [activeTab, setActiveTab] = useState(initialTab);
     const [isPreviewModalOpen, setIsPreviewModalOpen] = useState(false);
     const [previewFsdDoc, setPreviewFsdDoc] = useState(null);
+    const [analysts, setAnalysts] = useState([]);
 
     // Helper: extract analyst name from various shapes (string, object from API, null)
     const analystName = (p) => {
         if (!p) return '';
         const a = p.analyst || p.assignedAnalyst;
         if (!a) return '';
-        if (typeof a === 'object') return a?.name || '';
-        return String(a);
+        let name = typeof a === 'object' ? (a?.name || '') : String(a);
+        if (name && name.includes('(')) {
+            name = name.split('(')[0].trim();
+        }
+        return name;
     };
 
     // Filter 1: Antrean Disposisi Proyek Baru (Proyek PENDING yang BELUM ditugaskan ke Analyst)
@@ -121,12 +127,43 @@ export default function WorkspaceLead() {
     const [deadline, setDeadline] = useState('');
     const [notes, setNotes] = useState('');
     const [isSubmitting, setIsSubmitting] = useState(false);
+    
+    // State untuk aksi penolakan/revision proyek
+    const [showRejectForm, setShowRejectForm] = useState(false);
+    const [rejectNotes, setRejectNotes] = useState('');
+    const [showRevisionForm, setShowRevisionForm] = useState(false);
+    const [revisionNotes, setRevisionNotes] = useState('');
 
     // Searchable analyst dropdown state
     const [analystSearch, setAnalystSearch] = useState('');
     const [isAnalystDropdownOpen, setIsAnalystDropdownOpen] = useState(false);
     const analystDropdownRef = useRef(null);
     const analystSearchRef = useRef(null);
+
+    // Load analysts from API (users with analyst roles)
+    useEffect(() => {
+        const loadAnalysts = async () => {
+            try {
+                const res = await userService.getAll();
+                const users = res.data || res || [];
+                const analystRoles = ['analyst', 'lead_group'];
+                const filtered = users.filter(u => {
+                    const roleName = u.role_detail?.name || u.role || '';
+                    return analystRoles.includes(roleName);
+                }).map(u => ({
+                    id: u.id,
+                    name: u.name,
+                    email: u.email,
+                    department: u.division_detail?.name || u.division || 'IT',
+                    workload: 0,
+                }));
+                setAnalysts(filtered);
+            } catch {
+                setAnalysts([]);
+            }
+        };
+        loadAnalysts();
+    }, []);
 
     // Close analyst dropdown on outside click
     useEffect(() => {
@@ -165,29 +202,112 @@ export default function WorkspaceLead() {
         );
     }, [analystSearch]);
 
-    const handleVerify = () => {
+    const handleVerify = async () => {
         if (!currentSelected) return;
         setIsSubmitting(true);
-        updateProject(currentSelected.id, {
-            status: 'READY_FOR_DEVELOPMENT',
-            statusColor: 'bg-[#00529C]/10 text-[#00529C] border-blue-200',
-        });
+        try {
+            await updateProject(currentSelected.id, {
+                status: 'READY_FOR_DEVELOPMENT',
+                statusColor: 'bg-[#00529C]/10 text-[#00529C] border-blue-200',
+            });
 
-        addNotification(
-            'Analisis Diverifikasi Lead',
-            `Hasil analisis teknis untuk ${currentSelected?.title || currentSelected?.name} telah diverifikasi oleh Lead Perencanaan dan diteruskan ke Lead Pengembangan untuk alokasi tim.`,
-            'success',
-            '/workspace/dev-lead'
-        );
-        
-        toast.success(`Hasil analisis ${currentSelected?.title || currentSelected?.name} berhasil diverifikasi & dikirim ke Lead Pengembangan!`);
-        setIsSubmitting(false);
+            addNotification(
+                'Analisis Diverifikasi Lead',
+                `Hasil analisis teknis untuk ${currentSelected?.title || currentSelected?.name} telah diverifikasi oleh Lead Perencanaan dan diteruskan ke Lead Pengembangan untuk alokasi tim.`,
+                'success',
+                '/workspace/dev-lead'
+            );
+            
+            toast.success(`Hasil analisis ${currentSelected?.title || currentSelected?.name} berhasil diverifikasi & dikirim ke Lead Pengembangan!`);
 
-        const nextQueue = verificationQueue.filter(p => p.id !== currentSelected.id);
-        if (nextQueue.length > 0) {
-            setSelectedProject(nextQueue[0]);
-        } else {
-            setSelectedProject(null);
+            const nextQueue = verificationQueue.filter(p => p.id !== currentSelected.id);
+            if (nextQueue.length > 0) {
+                setSelectedProject(nextQueue[0]);
+            } else {
+                setSelectedProject(null);
+            }
+        } catch (err) {
+            toast.error('Gagal verifikasi: ' + (err.message || 'Terjadi kesalahan'));
+        } finally {
+            setIsSubmitting(false);
+        }
+    };
+
+    const handleReject = async () => {
+        if (!currentSelected) return;
+        if (!rejectNotes.trim()) {
+            toast.error('Alasan penolakan dari Lead wajib diisi agar User tahu penyebab proyek ditolak!');
+            return;
+        }
+        if (!window.confirm('Apakah Anda yakin ingin MENOLAK proyek ini? Status tidak dapat dibatalkan tanpa perbaikan dari peminta.')) {
+            return;
+        }
+        setIsSubmitting(true);
+        try {
+            await updateProject(currentSelected.id, {
+                status: 'REJECTED',
+                rejection_reason: rejectNotes,
+                rejectionReason: rejectNotes,
+                notes: rejectNotes,
+            });
+            addNotification(
+                'Proyek Ditolak oleh Lead',
+                `Proyek ${currentSelected?.title || currentSelected?.name} DITOLAK oleh Lead Perencanaan. Catatan: ${rejectNotes}`,
+                'warning',
+                '/track'
+            );
+            toast.success('Proyek ditolak dan dikembalikan ke User.');
+            setShowRejectForm(false);
+            setRejectNotes('');
+            const nextQueue = verificationQueue.filter(p => p.id !== currentSelected.id);
+            if (nextQueue.length > 0) {
+                setSelectedProject(nextQueue[0]);
+            } else {
+                setSelectedProject(null);
+            }
+        } catch (err) {
+            toast.error('Gagal menolak: ' + (err.message || 'Terjadi kesalahan'));
+        } finally {
+            setIsSubmitting(false);
+        }
+    };
+
+    const handleRevision = async () => {
+        if (!currentSelected) return;
+        if (!revisionNotes.trim()) {
+            toast.error('Catatan revisi wajib diisi untuk memberi panduan ke Analyst!');
+            return;
+        }
+        if (!window.confirm('Apakah Anda yakin ingin mengembalikan proyek ini ke Analyst untuk direvisi?')) {
+            return;
+        }
+        setIsSubmitting(true);
+        try {
+            await updateProject(currentSelected.id, {
+                status: 'IN_REVIEW',
+                notes: revisionNotes,
+                leadNote: revisionNotes,
+                leadNotes: revisionNotes,
+            });
+            addNotification(
+                'Kajian Dikembalikan ke Analyst',
+                `Proyek ${currentSelected?.title || currentSelected?.name} dikembalikan ke Analyst oleh Lead Perencanaan. Arahan: ${revisionNotes}`,
+                'info',
+                '/workspace/analyst'
+            );
+            toast.success('Proyek dikembalikan ke Analyst untuk direvisi.');
+            setShowRevisionForm(false);
+            setRevisionNotes('');
+            const nextQueue = verificationQueue.filter(p => p.id !== currentSelected.id);
+            if (nextQueue.length > 0) {
+                setSelectedProject(nextQueue[0]);
+            } else {
+                setSelectedProject(null);
+            }
+        } catch (err) {
+            toast.error('Gagal mengembalikan: ' + (err.message || 'Terjadi kesalahan'));
+        } finally {
+            setIsSubmitting(false);
         }
     };
 
@@ -205,7 +325,7 @@ export default function WorkspaceLead() {
             analyst: selectedAnalyst,
             assignedAnalyst: selectedAnalyst,
             status: 'IN_REVIEW',
-            deadline: deadline || new Date().toISOString(),
+            deadline: deadline || null,
             leadNote: assignedNote,
             leadNotes: assignedNote,
             notes: assignedNote,
@@ -312,12 +432,18 @@ export default function WorkspaceLead() {
             <div className="flex flex-col lg:flex-row gap-6 items-start">
                 {/* LEFT PANEL: Antrean */}
                 <div className="w-full lg:w-1/3 flex flex-col bg-white border border-gray-100 rounded-2xl shadow-sm overflow-hidden shrink-0 lg:sticky lg:top-4 lg:max-h-[calc(100vh-100px)]">
-                    <div className="p-4 border-b border-gray-100 flex justify-between items-center shrink-0">
+                    <div className="p-4 border-b border-gray-100 shrink-0">
                         <div>
                             <h2 className="text-base font-bold text-gray-800">
-                                {activeTab === 'disposition' ? 'Antrean Disposisi Baru' : activeTab === 'analyzing' ? 'Proyek Sedang Dikaji Analyst' : 'Antrean Verifikasi FSD'}
+                                {activeTab === 'disposition' && 'Antrean Disposisi Baru'}
+                                {activeTab === 'analyzing' && 'Proyek Sedang Dikaji Analyst'}
+                                {activeTab === 'verification' && 'Antrean Verifikasi FSD'}
                             </h2>
-                            <p className="text-xs text-gray-400 mt-0.5">{activeQueue.length} proyek</p>
+                            <p className="text-xs text-gray-400 mt-0.5">
+                                {activeTab === 'disposition' && `${activeQueue.length} proyek menunggu penugasan analis`}
+                                {activeTab === 'analyzing' && `${activeQueue.length} proyek dalam kajian teknis`}
+                                {activeTab === 'verification' && `${activeQueue.length} proyek menunggu verifikasi FSD`}
+                            </p>
                         </div>
                         <button className="p-2 text-gray-400 hover:text-[#00529C] hover:bg-blue-50 rounded-lg transition-colors">
                             <Filter size={16} />
@@ -327,7 +453,15 @@ export default function WorkspaceLead() {
                         {activeQueue.map((project) => (
                             <div
                                 key={project.id}
-                                onClick={() => setSelectedProject(project)}
+                                onClick={() => {
+                                    setSelectedProject(project);
+                                    if (!deadline && !project.deadline && !project.current_stage_deadline) {
+                                        const d = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000);
+                                        setDeadline(d.toISOString().split('T')[0]);
+                                    } else if (project.deadline || project.current_stage_deadline) {
+                                        setDeadline((project.deadline || project.current_stage_deadline).split('T')[0]);
+                                    }
+                                }}
                                 className={`p-4 rounded-xl cursor-pointer transition-all relative overflow-hidden group ${
                                     selectedProject?.id === project.id
                                         ? 'bg-white border-2 border-[#00529C] shadow-md'
@@ -351,6 +485,33 @@ export default function WorkspaceLead() {
                                     <Users size={13} />
                                     <span>{project.division}</span>
                                 </div>
+
+                                {/* Info Status Analis — sesuai tab aktif */}
+                                {activeTab === 'disposition' && (
+                                    <div className="flex items-center gap-1.5 mt-2.5 bg-gray-50 border border-gray-200 rounded-lg px-2.5 py-1.5">
+                                        <UserX size={13} className="text-gray-400 shrink-0" />
+                                        <span className="text-[11px] text-gray-500 font-medium">
+                                            Belum didisposisi ke analis
+                                        </span>
+                                    </div>
+                                )}
+                                {activeTab === 'analyzing' && (
+                                    <div className="flex items-center gap-1.5 mt-2.5 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-1.5">
+                                        <UserCheck size={13} className="text-amber-600 shrink-0" />
+                                        <span className="text-[11px] text-amber-700 font-medium truncate">
+                                            Analis: {analystName(project) || 'Belum ditugaskan'}
+                                        </span>
+                                    </div>
+                                )}
+                                {activeTab === 'verification' && (
+                                    <div className="flex items-center gap-1.5 mt-2.5 bg-emerald-50 border border-emerald-200 rounded-lg px-2.5 py-1.5">
+                                        <CheckCircle2 size={13} className="text-emerald-600 shrink-0" />
+                                        <span className="text-[11px] text-emerald-700 font-medium truncate">
+                                            Hasil dari: {analystName(project) || 'Analis'}
+                                        </span>
+                                    </div>
+                                )}
+
                                 <div className="flex justify-between items-center pt-2.5 mt-2.5 border-t border-gray-100">
                                     <span className="text-[10px] font-bold text-[#00529C] bg-blue-50 px-2 py-0.5 rounded">{project.id}</span>
                                     <span className="text-[10px] text-gray-400">{project.status}</span>
@@ -765,10 +926,21 @@ export default function WorkspaceLead() {
                                         </div>
                                     </div>
 
-                                    <div className="bg-white p-4 rounded-xl border border-emerald-100 shadow-xs">
-                                        <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-1">Keputusan Analis</p>
-                                        <p className="font-bold text-emerald-800 text-base">{currentSelected.analystDecision || currentSelected.analystResult?.decision || 'Disetujui'}</p>
-                                    </div>
+                                    {(() => {
+                                        const dec = currentSelected.analystDecision || currentSelected.analystResult?.decision || 'Disetujui';
+                                        const isRejectRec = String(dec).toLowerCase().includes('ditolak') || String(dec).toLowerCase().includes('tidak');
+                                        return (
+                                            <div className={`p-4 rounded-xl border shadow-xs ${isRejectRec ? 'bg-red-50 border-red-200' : 'bg-white border-emerald-100'}`}>
+                                                <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-1">Keputusan &amp; Rekomendasi Analis</p>
+                                                <p className={`font-bold text-base ${isRejectRec ? 'text-red-700' : 'text-emerald-800'}`}>{dec}</p>
+                                                {isRejectRec && (
+                                                    <p className="text-xs text-red-600 mt-1 font-medium">
+                                                        ⚠️ Analis merekomendasikan penolakan proyek. Silakan periksa catatan teknis analis di bawah, lalu klik "Tolak Proyek (Kembalikan ke User)" atau "Kembalikan ke Analyst (Revisi)".
+                                                    </p>
+                                                )}
+                                            </div>
+                                        );
+                                    })()}
                                     <div className="bg-white p-4 rounded-xl border border-emerald-100 shadow-xs">
                                         <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-1">Catatan &amp; Rekomendasi Analis</p>
                                         <p className="text-gray-700 text-sm leading-relaxed italic">{currentSelected.analystNotes || currentSelected.analystResult?.notes || currentSelected.notes || '(System Analyst tidak memberikan catatan khusus)'}</p>
@@ -779,7 +951,7 @@ export default function WorkspaceLead() {
                                             <p className="font-semibold text-gray-800 text-sm">{currentSelected.analystResult.estimation}</p>
                                         </div>
                                     )}
-                                    <div className="pt-2">
+                                    <div className="pt-2 space-y-3">
                                         <button
                                             onClick={handleVerify}
                                             disabled={isSubmitting}
@@ -788,6 +960,84 @@ export default function WorkspaceLead() {
                                             {isSubmitting ? <LoadingSpinner size="sm" color="white" /> : <Send size={18} />}
                                             Lanjutkan ke Pengembangan (Alokasi Tim)
                                         </button>
+
+                                        {/* Opsi Revision & Penolakan */}
+                                        {!showRevisionForm && !showRejectForm && (
+                                            <div className="flex flex-col sm:flex-row gap-3">
+                                                <button
+                                                    type="button"
+                                                    onClick={() => { setShowRevisionForm(true); setShowRejectForm(false); }}
+                                                    disabled={isSubmitting}
+                                                    className="flex-1 bg-amber-500 hover:bg-amber-600 text-white font-bold py-2.5 px-4 rounded-xl transition-all shadow-xs flex items-center justify-center gap-2 disabled:opacity-50 cursor-pointer"
+                                                >
+                                                    <AlertCircle size={16} />
+                                                    Kembalikan ke Analyst (Revisi)
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => { setShowRejectForm(true); setShowRevisionForm(false); }}
+                                                    disabled={isSubmitting}
+                                                    className="flex-1 bg-red-600 hover:bg-red-700 text-white font-bold py-2.5 px-4 rounded-xl transition-all shadow-xs flex items-center justify-center gap-2 disabled:opacity-50 cursor-pointer"
+                                                >
+                                                    <X size={16} />
+                                                    Tolak Proyek (Kembalikan ke User)
+                                                </button>
+                                            </div>
+                                        )}
+
+                                        {showRevisionForm && (
+                                            <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 space-y-3 animate-scale-up">
+                                                <div className="flex items-center justify-between">
+                                                    <p className="text-xs font-bold text-amber-900 uppercase tracking-wider flex items-center gap-1.5">
+                                                        <AlertCircle size={14} /> Kembalikan ke Analyst
+                                                    </p>
+                                                    <button onClick={() => setShowRevisionForm(false)} className="text-amber-500 hover:text-amber-700"><X size={16} /></button>
+                                                </div>
+                                                <textarea
+                                                    rows={3}
+                                                    value={revisionNotes}
+                                                    onChange={(e) => setRevisionNotes(e.target.value)}
+                                                    placeholder="Tuliskan arahan perbaikan/komentar untuk Analyst (wajib diisi)..."
+                                                    className="w-full px-3.5 py-2.5 bg-white border border-amber-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-amber-300 transition-all"
+                                                />
+                                                <button
+                                                    type="button"
+                                                    onClick={handleRevision}
+                                                    disabled={isSubmitting}
+                                                    className="w-full bg-amber-600 hover:bg-amber-700 text-white font-bold py-2.5 px-4 rounded-xl transition-all flex items-center justify-center gap-2 disabled:opacity-50 cursor-pointer"
+                                                >
+                                                    {isSubmitting ? <LoadingSpinner size="sm" color="white" /> : <Send size={16} />}
+                                                    Konfirmasi Kembalikan ke Analyst
+                                                </button>
+                                            </div>
+                                        )}
+
+                                        {showRejectForm && (
+                                            <div className="bg-red-50 border border-red-200 rounded-xl p-4 space-y-3 animate-scale-up">
+                                                <div className="flex items-center justify-between">
+                                                    <p className="text-xs font-bold text-red-900 uppercase tracking-wider flex items-center gap-1.5">
+                                                        <X size={14} /> Tolak Proyek
+                                                    </p>
+                                                    <button onClick={() => setShowRejectForm(false)} className="text-red-400 hover:text-red-700"><X size={16} /></button>
+                                                </div>
+                                                <textarea
+                                                    rows={3}
+                                                    value={rejectNotes}
+                                                    onChange={(e) => setRejectNotes(e.target.value)}
+                                                    placeholder="Tuliskan alasan penolakan & perbaikan yang harus dilakukan User (wajib diisi)..."
+                                                    className="w-full px-3.5 py-2.5 bg-white border border-red-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-red-300 transition-all"
+                                                />
+                                                <button
+                                                    type="button"
+                                                    onClick={handleReject}
+                                                    disabled={isSubmitting}
+                                                    className="w-full bg-red-600 hover:bg-red-700 text-white font-bold py-2.5 px-4 rounded-xl transition-all flex items-center justify-center gap-2 disabled:opacity-50 cursor-pointer"
+                                                >
+                                                    {isSubmitting ? <LoadingSpinner size="sm" color="white" /> : <X size={16} />}
+                                                    Konfirmasi Tolak Proyek
+                                                </button>
+                                            </div>
+                                        )}
                                     </div>
                                 </div>
                             </div>

@@ -47,8 +47,7 @@ export function ActivityProvider({ children }) {
             }
 
             setLastUpdated(new Date().toISOString());
-        } catch (err) {
-            console.warn('[ActivityContext] Failed to fetch activity logs:', err);
+        } catch {
         } finally {
             setIsLoading(false);
         }

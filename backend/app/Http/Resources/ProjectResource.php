@@ -7,6 +7,28 @@ use Illuminate\Http\Resources\Json\JsonResource;
 
 class ProjectResource extends JsonResource
 {
+    /**
+     * Ambil catatan dari transisi status yang membawa proyek ke status saat ini.
+     * Fallback: catatan transisi terbaru.
+     */
+    protected function latestNote(): ?string
+    {
+        if (! $this->relationLoaded('statusHistories') || $this->statusHistories->isEmpty()) {
+            return null;
+        }
+
+        $currentStatus = $this->status instanceof \BackedEnum ? $this->status->value : $this->status;
+
+        foreach ($this->statusHistories as $history) {
+            $toStatus = $history->to_status instanceof \BackedEnum ? $history->to_status->value : $history->to_status;
+            if ((string) $toStatus === (string) $currentStatus && $history->notes) {
+                return $history->notes;
+            }
+        }
+
+        return $this->statusHistories->first()?->notes;
+    }
+
     public function toArray(Request $request): array
     {
         return [
@@ -14,6 +36,7 @@ class ProjectResource extends JsonResource
             'req_id' => $this->req_id,
             'title' => $this->title,
             'description' => $this->description,
+            'type' => $this->type ?? 'RBB',
             'project_type' => $this->project_type ?? 'baru',
             'status' => $this->status instanceof \BackedEnum ? $this->status->value : $this->status,
             'creator' => new UserResource($this->whenLoaded('creator')),
@@ -27,12 +50,14 @@ class ProjectResource extends JsonResource
             ] : null,
             'target_date' => $this->target_date?->format('Y-m-d'),
             'current_stage_deadline' => $this->current_stage_deadline?->format('Y-m-d'),
+            'deadline' => $this->current_stage_deadline?->format('Y-m-d'),
             'rejection_reason' => $this->rejection_reason,
             'uat_notes' => $this->uat_notes,
             'staging_url' => $this->staging_url,
             'sit_uat_data' => $this->sit_uat_data,
             'qa_status' => $this->qa_status ?? 'NOT_SUBMITTED',
             'cyber_status' => $this->cyber_status ?? 'NOT_SUBMITTED',
+            'latest_note' => $this->latestNote(),
 
 
             'team' => $this->relationLoaded('teamMembers') && $this->teamMembers ? $this->teamMembers->map(function($m) {

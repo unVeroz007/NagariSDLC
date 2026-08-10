@@ -4,7 +4,7 @@ import { roleService, divisionService } from '../services/api';
 import toast from 'react-hot-toast';
 
 const MasterDataContext = createContext(null);
-const MODE = import.meta.env.VITE_API_MODE || 'mock';
+const MODE = 'api';
 
 export function MasterDataProvider({ children }) {
     const [divisions, setDivisions] = useState([]);
@@ -50,8 +50,7 @@ export function MasterDataProvider({ children }) {
             } else {
                 setDivisions(INITIAL_DIVISIONS);
             }
-        } catch (err) {
-            console.warn('[MasterDataContext] Failed to fetch master data from API:', err);
+        } catch {
             setRoles(INITIAL_ROLES);
             setDivisions(INITIAL_DIVISIONS);
         } finally {

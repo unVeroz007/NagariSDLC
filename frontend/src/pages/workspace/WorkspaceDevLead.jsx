@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import { useProjects, getFileFromStore } from '../../contexts/ProjectContext';
 import { useNotifications } from '../../contexts/NotificationContext';
@@ -30,7 +30,7 @@ import {
     FolderOpen
 } from 'lucide-react';
 import toast from 'react-hot-toast';
-import { analysts, pmCandidates } from '../../data/mockData';
+import { userService } from '../../services/api';
 
 const resolveAllProjectDocs = (project) => {
     if (!project) return [];
@@ -120,6 +120,8 @@ export default function WorkspaceDevLead() {
     const [selectedPM, setSelectedPM] = useState('');
     const [estimationDays, setEstimationDays] = useState('');
     const [isSubmitting, setIsSubmitting] = useState(false);
+    const [analysts, setAnalysts] = useState([]);
+    const [pmCandidates, setPmCandidates] = useState([]);
 
     // Helper ekstraksi angka durasi
     const getNumericEstimation = (proj) => {
@@ -128,6 +130,27 @@ export default function WorkspaceDevLead() {
         const match = String(raw).match(/\d+/);
         return match ? match[0] : '30';
     };
+
+    // Load analysts & PM candidates from API
+    useEffect(() => {
+        const loadUsers = async () => {
+            try {
+                const res = await userService.getAll();
+                const users = res.data || res || [];
+                const analystRoles = ['analyst', 'dev_analyst'];
+                setAnalysts(users.filter(u => analystRoles.includes(u.role_detail?.name || u.role || '')).map(u => ({
+                    id: u.id, name: u.name, email: u.email, department: u.division_detail?.name || u.division || 'IT', workload: 0,
+                })));
+                setPmCandidates(users.filter(u => (u.role_detail?.name || u.role || '') === 'project_manager').map(u => ({
+                    id: u.id, name: u.name, email: u.email, department: u.division_detail?.name || u.division || 'IT', workload: 0,
+                })));
+            } catch {
+                setAnalysts([]);
+                setPmCandidates([]);
+            }
+        };
+        loadUsers();
+    }, []);
 
     // Search filter helper
     const applySearch = (list) => {

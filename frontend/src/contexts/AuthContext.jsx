@@ -33,7 +33,8 @@ export function AuthProvider({ children }) {
                             setUser(meRes.data);
                             localStorage.setItem(SESSION_KEY, JSON.stringify({ 
                                 token: parsed.token, 
-                                user: meRes.data 
+                                user: meRes.data,
+                                issuedAt: parsed.issuedAt || Date.now()
                             }));
                         }
                     } catch (err) {
@@ -42,8 +43,7 @@ export function AuthProvider({ children }) {
                         }
                     }
                 }
-            } catch (err) {
-                console.error('[AuthContext] Session parse error:', err);
+            } catch {
             } finally {
                 setIsLoading(false);
             }
@@ -56,7 +56,6 @@ export function AuthProvider({ children }) {
     }, []);
 
     const handleUnauthorized = () => {
-        console.warn('[AuthContext] 401 Unauthorized detected, logging out...');
         setUser(null);
         setIsLoggedIn(false);
         localStorage.removeItem(SESSION_KEY);
@@ -72,7 +71,7 @@ export function AuthProvider({ children }) {
                 
                 setUser(userData);
                 setIsLoggedIn(true);
-                localStorage.setItem(SESSION_KEY, JSON.stringify({ user: userData, token }));
+                localStorage.setItem(SESSION_KEY, JSON.stringify({ user: userData, token, issuedAt: Date.now() }));
                 return { success: true };
             }
             return { success: false, message: 'Invalid response format from server.' };

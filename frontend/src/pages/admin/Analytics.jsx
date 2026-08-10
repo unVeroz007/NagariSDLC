@@ -31,8 +31,7 @@ export default function Analytics() {
                 if (res && res.data) {
                     setAnalyticsData(res.data);
                 }
-            } catch (err) {
-                console.error('Failed to fetch analytics:', err);
+            } catch {
             } finally {
                 setIsLoading(false);
             }

@@ -23,7 +23,7 @@ import {
     ArrowUpRight,
     Building2,
 } from 'lucide-react';
-import { mockProjects, getProjectStats } from '../../data/mockData';
+import { getProjectStats } from '../../data/mockData';
 import { PROJECT_STATUS_LABEL, PROJECT_STATUS_COLOR } from '../../constants/projectStatus';
 
 export default function ProjectList() {

@@ -52,7 +52,7 @@ import Users from '../pages/admin/Users';
 import Divisions from '../pages/admin/Divisions';
 import Roles from '../pages/admin/Roles';
 import Analytics from '../pages/admin/Analytics';
-import Settings from '../pages/admin/settings';
+import Settings from '../pages/admin/Settings';
 import ActivityLog from '../pages/admin/ActivityLog';
 
 // Other pages

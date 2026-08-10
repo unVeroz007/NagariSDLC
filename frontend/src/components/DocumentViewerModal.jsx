@@ -58,9 +58,7 @@ export default function DocumentViewerModal({ doc, project, onClose }) {
                     const blob = await documentService.download(numericId);
                     createdBlobUrl = URL.createObjectURL(blob);
                     if (isMounted) setSafeUrl(createdBlobUrl);
-                } catch (e) {
-                    console.error('[DocumentViewerModal] Gagal mengunduh berkas fisik via API:', e);
-                    // Jangan set safeUrl ke URL backend mentah (akan 401/404 di iframe)
+                } catch {
                     if (isMounted) setSafeUrl(null);
                 } finally {
                     if (isMounted) setIsLoadingUrl(false);
@@ -83,6 +81,23 @@ export default function DocumentViewerModal({ doc, project, onClose }) {
     const isImage = useMemo(() => {
         const fn = docName.toLowerCase();
         return /\.(png|jpe?g|gif|webp|svg)$/i.test(fn);
+    }, [docName]);
+
+    // Tipe file yang bisa dirender inline di browser (PDF & gambar saja).
+    // Excel/Word/ZIP dsb tidak bisa ditampilkan di <object>/<iframe> → tampilkan panel info + tombol unduh.
+    const canInlinePreview = useMemo(() => {
+        const fn = docName.toLowerCase();
+        return /\.(pdf|png|jpe?g|gif|webp|svg)$/i.test(fn);
+    }, [docName]);
+
+    // Label tipe file untuk file non-preview (Excel/Word/ZIP)
+    const nonPreviewLabel = useMemo(() => {
+        const fn = docName.toLowerCase();
+        if (/\.(xlsx|xls)$/i.test(fn)) return 'Microsoft Excel';
+        if (/\.(docx|doc)$/i.test(fn)) return 'Microsoft Word';
+        if (/\.(zip|rar|7z)$/i.test(fn)) return 'Arsip Terkompresi';
+        if (/\.(csv)$/i.test(fn)) return 'CSV';
+        return 'Berkas';
     }, [docName]);
 
     // Keyboard ESC listener & body scroll lock for perfect screen centering
@@ -204,7 +219,7 @@ export default function DocumentViewerModal({ doc, project, onClose }) {
                                 className="max-w-full max-h-[80vh] object-contain rounded-2xl shadow-2xl bg-white p-2 border border-slate-700 mx-auto my-auto"
                             />
                         </div>
-                    ) : safeUrl ? (
+                    ) : canInlinePreview && safeUrl ? (
                         <object
                             data={safeUrl}
                             type="application/pdf"
@@ -216,6 +231,31 @@ export default function DocumentViewerModal({ doc, project, onClose }) {
                                 className="w-full h-full min-h-[650px] bg-white rounded-2xl border-0"
                             />
                         </object>
+                    ) : !canInlinePreview ? (
+                        /* File tidak dapat dipratinjau inline (Excel/Word/ZIP) — tampilkan panel info + unduh */
+                        <div className="flex flex-col items-center justify-center text-center p-10 w-full h-full bg-white rounded-2xl shadow-2xl">
+                            <div className="w-20 h-20 rounded-2xl bg-emerald-100 text-emerald-700 flex items-center justify-center mb-5">
+                                <FileText size={40} />
+                            </div>
+                            <h3 className="text-xl font-extrabold text-slate-900 mb-2">File {nonPreviewLabel}</h3>
+                            <p className="text-sm text-slate-500 max-w-md mb-6 leading-relaxed">
+                                Dokumen <strong className="text-slate-700">{docName}</strong> berformat <strong>{nonPreviewLabel}</strong>.
+                                Berkas jenis ini tidak dapat ditampilkan langsung di dalam jendela pratinjau.
+                                Silakan unduh untuk membuka dan melihat isinya.
+                            </p>
+                            <div className="flex items-center gap-2 mb-6 text-xs text-slate-400">
+                                <span>Ukuran: {docSize}</span>
+                                <span>•</span>
+                                <span>Diunggah: {uploadedBy}</span>
+                            </div>
+                            <button
+                                onClick={handleDownload}
+                                className="flex items-center gap-2 px-6 py-3 bg-[#00529C] hover:bg-blue-700 text-white rounded-xl text-sm font-bold transition-colors cursor-pointer active:scale-95"
+                            >
+                                <Download size={16} />
+                                Unduh {nonPreviewLabel}
+                            </button>
+                        </div>
                     ) : (
                         /* Error / Not Loaded State */
                         <div className="flex flex-col items-center justify-center text-center p-12 text-slate-400">

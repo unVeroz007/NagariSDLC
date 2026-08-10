@@ -314,11 +314,11 @@ export default function WorkspaceCyber() {
                                 <div className="overflow-hidden">
                                     <div className="text-[10px] font-bold text-orange-800 uppercase tracking-wider">Target Staging URL Penetration Test</div>
                                     <div className="text-xs font-mono text-orange-600 truncate font-semibold">
-                                        {activeProject.stagingUrl || 'https://staging-app.banknagari.co.id'}
+                                        {activeProject.stagingUrl || import.meta.env.VITE_STAGING_URL}
                                     </div>
                                 </div>
                                 <button
-                                    onClick={() => handleCopyStagingUrl(activeProject.stagingUrl || 'https://staging-app.banknagari.co.id')}
+                                    onClick={() => handleCopyStagingUrl(activeProject.stagingUrl || import.meta.env.VITE_STAGING_URL)}
                                     className="p-1.5 bg-white text-orange-600 hover:bg-orange-100 rounded-lg transition-colors shrink-0 shadow-xs cursor-pointer"
                                     title="Salin Target URL"
                                 >

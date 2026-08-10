@@ -27,7 +27,7 @@ import {
     MessageSquare,
     UserCheck,
 } from 'lucide-react';
-import { useProjects, saveFileToStore } from '../../contexts/ProjectContext';
+import { useProjects, saveFileToStore, getProjectRealDocuments } from '../../contexts/ProjectContext';
 import LoadingSpinner from '../../components/LoadingSpinner';
 import EmptyState from '../../components/EmptyState';
 import DocumentViewerModal from '../../components/DocumentViewerModal';
@@ -44,8 +44,20 @@ export default function WorkspaceAnalyst() {
 
     const [selectedAnalystFilter, setSelectedAnalystFilter] = useState(() => {
         if (user?.role === 'super_admin' || user?.role === 'lead_group') return 'ALL';
-        return user?.name || 'MY_PROJECTS';
+        return 'MY_PROJECTS';
     });
+
+    // Helper to safely extract analyst name from string or object
+    const getAnalystName = (p) => {
+        if (!p) return '';
+        const a = p.analyst || p.assignedAnalyst;
+        if (!a) return '';
+        let name = typeof a === 'object' ? (a?.name || '') : String(a);
+        if (name && name.includes('(')) {
+            name = name.split('(')[0].trim();
+        }
+        return name;
+    };
 
     // Filter antrean proyek yang HANYA SUDAH ditugaskan oleh Lead Perencanaan (Status IN_REVIEW)
     const reviewQueue = useMemo(() => {
@@ -56,21 +68,16 @@ export default function WorkspaceAnalyst() {
         );
 
         if (selectedAnalystFilter === 'MY_PROJECTS') {
-            const myName = user?.name || '';
             list = list.filter(p => {
                 const analystId = p.analyst?.id || (typeof p.assignedAnalyst === 'object' ? p.assignedAnalyst?.id : null);
                 if (analystId && user?.id) return analystId === user.id;
-                const analystName = typeof p.assignedAnalyst === 'object'
-                    ? (p.assignedAnalyst?.name || '')
-                    : String(p.assignedAnalyst || p.analyst || '');
-                return analystName.toLowerCase().includes(myName.toLowerCase());
+                const analystName = getAnalystName(p);
+                return analystName.toLowerCase().includes((user?.name || '').split('(')[0].trim().toLowerCase());
             });
         } else if (selectedAnalystFilter !== 'ALL') {
             list = list.filter(p => {
-                const analystName = typeof p.assignedAnalyst === 'object'
-                    ? (p.assignedAnalyst?.name || '')
-                    : String(p.assignedAnalyst || p.analyst || '');
-                return analystName.toLowerCase().includes(selectedAnalystFilter.toLowerCase());
+                const analystName = getAnalystName(p);
+                return analystName.toLowerCase().includes(selectedAnalystFilter.split('(')[0].trim().toLowerCase());
             });
         }
 
@@ -85,6 +92,7 @@ export default function WorkspaceAnalyst() {
     const [projectType, setProjectType] = useState('NON_RBB');
     const [notes, setNotes] = useState('');
     const [estimationDays, setEstimationDays] = useState('30');
+    const [selectedDocType, setSelectedDocType] = useState('FSD');
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [uploadedFile, setUploadedFile] = useState(null);
     const fileInputRef = useRef(null);
@@ -100,17 +108,18 @@ export default function WorkspaceAnalyst() {
                 return;
             }
             const objectUrl = URL.createObjectURL(file);
+            const docTypeCode = DOCUMENT_TYPES[selectedDocType]?.code || 'FSD';
             const autoDocName = generateDocumentName(
                 selectedProject?.req_id || selectedProject?.id,
-                DOCUMENT_TYPES.FSD.code,
+                docTypeCode,
                 selectedProject?.title || selectedProject?.name
             );
             const fileObj = {
                 name: autoDocName,
                 originalName: file.name,
                 size: formatFileSize(file.size),
-                type: 'fsd',
-                doc_type: 'fsd',
+                type: docTypeCode.toLowerCase(),
+                doc_type: docTypeCode,
                 url: objectUrl,
                 rawFile: file,
                 uploadedAt: new Date().toISOString()
@@ -120,7 +129,7 @@ export default function WorkspaceAnalyst() {
                 saveFileToStore(`fsd_${selectedProject.id}`, objectUrl);
             }
             setUploadedFile(fileObj);
-            toast.success(`Dokumen FSD "${autoDocName}" berhasil diunggah.`);
+            toast.success(`Dokumen ${docTypeCode} "${autoDocName}" berhasil diunggah.`);
         }
     };
 
@@ -191,6 +200,11 @@ export default function WorkspaceAnalyst() {
             toast.error('Pilih keputusan review!');
             return;
         }
+        const isApproved = decision.includes('Disetujui');
+        if (!isApproved && !notes.trim()) {
+            toast.error('Alasan penolakan dan catatan perbaikan wajib diisi agar pengaju proyek tahu penyebab ditolak!');
+            return;
+        }
         if (!notes.trim()) {
             toast.error('Masukkan catatan analisis!');
             return;
@@ -198,32 +212,36 @@ export default function WorkspaceAnalyst() {
         setIsSubmitting(true);
         
         try {
-            const isApproved = decision.includes('Disetujui');
-            const finalStatus = isApproved ? 'ANALYSIS_APPROVED' : 'REJECTED';
+            // Analis TIDAK bisa langsung menolak. Status tetap ANALYSIS_APPROVED
+            // agar masuk antrean verifikasi Lead Perencanaan.
+            // Lead yang memutuskan akhir: konfirmasi tolak atau kembalikan ke Analis.
+            const finalStatus = 'ANALYSIS_APPROVED';
+
+            const docTypeCode = (uploadedFile?.doc_type || DOCUMENT_TYPES[selectedDocType]?.code || 'FSD');
 
             const fsdDoc = uploadedFile ? {
                 id: `FSD-${Date.now()}`,
                 name: uploadedFile.name,
                 size: uploadedFile.size,
-                type: 'fsd',
-                doc_type: 'fsd',
+                type: docTypeCode.toLowerCase(),
+                doc_type: docTypeCode,
                 url: uploadedFile.url,
                 uploadedAt: uploadedFile.uploadedAt || new Date().toISOString()
             } : (selectedProject?.documents?.[0] ? {
                 ...selectedProject.documents[0],
-                type: 'fsd',
-                doc_type: 'fsd'
+                type: docTypeCode.toLowerCase(),
+                doc_type: docTypeCode
             } : {
                 id: `FSD-${Date.now()}`,
                 name: 'Dokumen_SDLC.pdf',
                 size: '1.8 MB',
-                type: 'fsd',
-                doc_type: 'fsd',
+                type: docTypeCode.toLowerCase(),
+                doc_type: docTypeCode,
                 uploadedAt: new Date().toISOString()
             });
 
             const existingDocs = selectedProject?.documents || [];
-            const newDocs = [fsdDoc, ...existingDocs.filter(d => d.type !== 'fsd')];
+            const newDocs = [fsdDoc, ...existingDocs.filter(d => d.type !== 'fsd' && d.doc_type !== 'FSD')];
 
             await updateProject(selectedProject.id, {
                 status: finalStatus,
@@ -255,7 +273,6 @@ export default function WorkspaceAnalyst() {
             setNotes('');
             setUploadedFile(null);
         } catch (err) {
-            console.error('[WorkspaceAnalyst] Submit error:', err);
             toast.error('Terjadi kesalahan saat pengiriman: ' + (err?.message || 'Error'));
         } finally {
             setIsSubmitting(false);
@@ -327,41 +344,38 @@ export default function WorkspaceAnalyst() {
                 </div>
 
                 <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
-                    <button
-                        onClick={() => setSelectedAnalystFilter('ALL')}
-                        className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
-                            selectedAnalystFilter === 'ALL'
-                                ? 'bg-[#1a365d] text-white shadow-xs'
-                                : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-                        }`}
-                    >
-                        🌐 Semua Proyek Global
-                    </button>
+                    {/* Hanya super_admin & lead_group yang bisa filter antar analyst */}
+                    {(user?.role === 'super_admin' || user?.role === 'lead_group') && (
+                        <>
+                            <button
+                                onClick={() => setSelectedAnalystFilter('ALL')}
+                                className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                                    selectedAnalystFilter === 'ALL'
+                                        ? 'bg-[#1a365d] text-white shadow-xs'
+                                        : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                                }`}
+                            >
+                                🌐 Semua Proyek Global
+                            </button>
 
-                    {user?.role !== 'super_admin' && (
-                        <button
-                            onClick={() => setSelectedAnalystFilter('MY_PROJECTS')}
-                            className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
-                                selectedAnalystFilter === 'MY_PROJECTS'
-                                    ? 'bg-[#00529C] text-white shadow-xs'
-                                    : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-                            }`}
-                        >
-                            👤 Proyek Tugas Saya
-                        </button>
+                            <select
+                                value={['ALL', 'MY_PROJECTS'].includes(selectedAnalystFilter) ? '' : selectedAnalystFilter}
+                                onChange={(e) => setSelectedAnalystFilter(e.target.value || 'ALL')}
+                                className="px-3 py-1.5 rounded-xl text-xs font-semibold border border-gray-200 bg-white text-gray-700 outline-none focus:border-[#00529C]"
+                            >
+                                <option value="">-- Filter Per System Analyst --</option>
+                                <option value="Citra Kirana">Citra Kirana</option>
+                                <option value="Mustafa Fathur Rahman">Mustafa Fathur Rahman</option>
+                                <option value="Fajar Ramadhan">Fajar Ramadhan</option>
+                                <option value="Ahmad Fauzi">Ahmad Fauzi</option>
+                            </select>
+                        </>
                     )}
 
-                    <select
-                        value={['ALL', 'MY_PROJECTS'].includes(selectedAnalystFilter) ? '' : selectedAnalystFilter}
-                        onChange={(e) => setSelectedAnalystFilter(e.target.value || 'ALL')}
-                        className="px-3 py-1.5 rounded-xl text-xs font-semibold border border-gray-200 bg-white text-gray-700 outline-none focus:border-[#00529C]"
-                    >
-                        <option value="">-- Filter Per System Analyst --</option>
-                        <option value="Citra Kirana">Citra Kirana</option>
-                        <option value="Mustafa Fathur Rahman">Mustafa Fathur Rahman</option>
-                        <option value="Fajar Ramadhan">Fajar Ramadhan</option>
-                        <option value="Ahmad Fauzi">Ahmad Fauzi</option>
-                    </select>
+                    {/* Analyst biasa hanya lihat proyek tugas sendiri */}
+                    <span className="px-3.5 py-1.5 rounded-xl text-xs font-bold bg-[#00529C] text-white shadow-xs">
+                        👤 Proyek Tugas Saya
+                    </span>
                 </div>
             </div>
 
@@ -396,19 +410,27 @@ export default function WorkspaceAnalyst() {
                                     <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold border ${getStatusBadge(project.status)}`}>
                                         {project.status}
                                     </span>
-                                    <span className="text-[10px] text-gray-400 flex items-center gap-1">
-                                        <Clock size={11} />
-                                        {formatDate(project.deadline || project.submittedAt)}
+                                    <span className="text-[10px] flex items-center gap-1 font-bold text-amber-700">
+                                        <Clock size={11} className="text-amber-600" />
+                                        {(() => {
+                                            if (project.deadline || project.current_stage_deadline) {
+                                                return `Deadline: ${formatDate(project.deadline || project.current_stage_deadline)}`;
+                                            }
+                                            // Fallback: 14 hari sejak di-submit jika lead tidak mengisi deadline eksplisit
+                                            const baseDate = new Date(project.assignedAnalystAt || project.submittedAt || Date.now());
+                                            const autoDeadline = new Date(baseDate.setDate(baseDate.getDate() + 14)).toISOString();
+                                            return `Deadline: ${formatDate(autoDeadline)}`;
+                                        })()}
                                     </span>
                                 </div>
                                 <div className="mb-2"><div className="flex items-center gap-1.5 flex-wrap"><RBBBadge type={project.type} deadline={project.rbbDeadline} /><ProjectTypeBadge type={project.project_type} /></div></div>
                                 <h4 className="font-semibold text-gray-800 text-sm mb-1 group-hover:text-[#00529C] transition-colors">{project.name}</h4>
                                 <p className="text-xs text-gray-500 mb-2.5">Peminta: {project.division}</p>
-                                {(project.leadNote || project.leadNotes || project.notes || project.dispositionNotes || project.assignmentNote) && (
+                                {(project.leadNote || project.leadNotes || project.notes || project.dispositionNotes || project.assignmentNote || project.latest_note) && (
                                     <div className="bg-amber-50/90 p-2.5 rounded-lg border border-amber-200 text-xs">
                                         <p className="text-[11px] italic text-amber-900 flex items-start gap-1.5 font-medium leading-relaxed">
                                             <MessageSquare size={13} className="text-amber-600 shrink-0 mt-0.5" />
-                                            "{project.leadNote || project.leadNotes || project.notes || project.dispositionNotes || project.assignmentNote}"
+                                            "{project.leadNote || project.leadNotes || project.notes || project.dispositionNotes || project.assignmentNote || project.latest_note}"
                                         </p>
                                     </div>
                                 )}
@@ -448,8 +470,34 @@ export default function WorkspaceAnalyst() {
                             </div>
                         </div>
 
+                        {/* Target Selesai Analisis dari Lead */}
+                        {(() => {
+                            let dlDateStr = selectedProject.deadline || selectedProject.current_stage_deadline;
+                            if (!dlDateStr) {
+                                const baseDate = new Date(selectedProject.assignedAnalystAt || selectedProject.submittedAt || Date.now());
+                                dlDateStr = new Date(baseDate.setDate(baseDate.getDate() + 14)).toISOString();
+                            }
+                            const dl = new Date(dlDateStr);
+                            const isValid = !isNaN(dl.getTime());
+                            
+                            return isValid && (
+                                <div className="flex items-center gap-2 mt-3 bg-amber-50 border border-amber-200 rounded-xl px-4 py-2.5 text-xs">
+                                    <Clock size={14} className="text-amber-700 shrink-0" />
+                                    <span className="text-amber-900 font-bold">
+                                        Target selesai analisis: {formatDate(dlDateStr)}
+                                    </span>
+                                    {(() => {
+                                        const diffDays = Math.ceil((dl - new Date()) / (1000 * 60 * 60 * 24));
+                                        if (diffDays < 0) return <span className="font-bold text-red-600">(Terlambat {Math.abs(diffDays)} hari)</span>;
+                                        if (diffDays === 0) return <span className="font-bold text-red-600">(Hari ini!)</span>;
+                                        return <span className="text-amber-700 font-medium">({diffDays} hari lagi)</span>;
+                                    })()}
+                                </div>
+                            );
+                        })()}
+
                         {/* Pesan & Catatan Disposisi dari Lead Perencanaan TI */}
-                        {(selectedProject.leadNote || selectedProject.leadNotes || selectedProject.notes || selectedProject.dispositionNotes || selectedProject.assignmentNote) ? (
+                        {(selectedProject.leadNote || selectedProject.leadNotes || selectedProject.notes || selectedProject.dispositionNotes || selectedProject.assignmentNote || selectedProject.latest_note) ? (
                             <div className="bg-amber-50/90 border border-amber-200 p-4 rounded-xl mt-4 space-y-1.5 shadow-2xs">
                                 <div className="flex items-center gap-2 font-bold text-amber-950 text-xs">
                                     <MessageSquare size={16} className="text-amber-600" />
@@ -457,11 +505,11 @@ export default function WorkspaceAnalyst() {
                                 </div>
                                 <div className="bg-white p-3 rounded-lg border border-amber-100 text-xs">
                                     <p className="text-gray-800 font-semibold italic text-xs sm:text-sm leading-relaxed">
-                                        "{selectedProject.leadNote || selectedProject.leadNotes || selectedProject.notes || selectedProject.dispositionNotes || selectedProject.assignmentNote}"
+                                        "{selectedProject.leadNote || selectedProject.leadNotes || selectedProject.notes || selectedProject.dispositionNotes || selectedProject.assignmentNote || selectedProject.latest_note}"
                                     </p>
                                     {(selectedProject.assignedAnalyst || selectedProject.analyst) && (
                                         <p className="text-[10px] text-gray-400 mt-1.5 font-mono">
-                                            Disposisi untuk Analyst: <span className="font-bold text-gray-700">{selectedProject.assignedAnalyst || selectedProject.analyst}</span>
+                                            Disposisi untuk Analyst: <span className="font-bold text-gray-700">{getAnalystName(selectedProject)}</span>
                                         </p>
                                     )}
                                 </div>
@@ -482,43 +530,48 @@ export default function WorkspaceAnalyst() {
                                 Dokumen Inisiasi Peminta
                             </h3>
                             <div className="space-y-3">
-                                {((selectedProject.documents && selectedProject.documents.length > 0)
-                                    ? selectedProject.documents
-                                    : [
-                                        { id: 'BRD-INIT', name: `${selectedProject.name}_BRD_Inisiasi.pdf`, size: '2.4 MB', type: 'pdf', category: 'brd' }
-                                    ]
-                                ).map((doc, idx) => (
-                                    <div key={idx} className="flex flex-col sm:flex-row sm:items-center justify-between p-4 border border-gray-200 rounded-xl bg-gray-50 hover:border-gray-300 transition-all gap-3">
-                                        <div className="flex items-center gap-4">
-                                            <div className="w-10 h-10 bg-red-100 text-red-600 rounded-xl flex items-center justify-center font-bold text-xs shrink-0">
-                                                PDF
+                                {(() => {
+                                    const realDocs = getProjectRealDocuments(selectedProject);
+                                    if (realDocs.length > 0) {
+                                        return realDocs.map((doc, idx) => (
+                                            <div key={idx} className="flex flex-col sm:flex-row sm:items-center justify-between p-4 border border-gray-200 rounded-xl bg-gray-50 hover:border-gray-300 transition-all gap-3">
+                                                <div className="flex items-center gap-4">
+                                                    <div className="w-10 h-10 bg-red-100 text-red-600 rounded-xl flex items-center justify-center font-bold text-xs shrink-0">
+                                                        PDF
+                                                    </div>
+                                                    <div>
+                                                        <p className="font-semibold text-gray-800 text-sm">{doc.name}</p>
+                                                        <p className="text-xs text-gray-500">{doc.size} • {doc.type || 'Dokumen Inisiasi'}</p>
+                                                    </div>
+                                                </div>
+                                                <div className="flex items-center gap-2 shrink-0">
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => setPreviewDoc(doc)}
+                                                        className="px-3.5 py-2 border border-[#00529C] text-[#00529C] rounded-xl font-semibold hover:bg-blue-50 transition-colors flex items-center gap-1.5 text-xs cursor-pointer active:scale-95"
+                                                    >
+                                                        <Eye size={15} />
+                                                        View &amp; Baca
+                                                    </button>
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => handleDownloadFile(doc)}
+                                                        className="px-3.5 py-2 bg-gray-100 text-gray-700 rounded-xl font-semibold hover:bg-gray-200 transition-colors flex items-center gap-1.5 text-xs cursor-pointer active:scale-95"
+                                                        title="Unduh Dokumen"
+                                                    >
+                                                        <Download size={15} />
+                                                        Unduh
+                                                    </button>
+                                                </div>
                                             </div>
-                                            <div>
-                                                <p className="font-semibold text-gray-800 text-sm">{doc.name || doc.title || 'Dokumen_Inisiasi.pdf'}</p>
-                                                <p className="text-xs text-gray-500">{doc.size || '2.4 MB'} • Dokumen BRD Terlampir Peminta</p>
-                                            </div>
+                                        ));
+                                    }
+                                    return (
+                                        <div className="p-4 border border-dashed border-gray-200 rounded-xl bg-gray-50 text-center text-xs text-gray-400 italic">
+                                            Peminta belum mengunggah dokumen inisiasi untuk proyek ini.
                                         </div>
-                                        <div className="flex items-center gap-2 shrink-0">
-                                            <button
-                                                type="button"
-                                                onClick={() => setPreviewDoc(doc)}
-                                                className="px-3.5 py-2 border border-[#00529C] text-[#00529C] rounded-xl font-semibold hover:bg-blue-50 transition-colors flex items-center gap-1.5 text-xs cursor-pointer active:scale-95"
-                                            >
-                                                <Eye size={15} />
-                                                View &amp; Baca
-                                            </button>
-                                            <button
-                                                type="button"
-                                                onClick={() => handleDownloadFile(doc)}
-                                                className="px-3.5 py-2 bg-gray-100 text-gray-700 rounded-xl font-semibold hover:bg-gray-200 transition-colors flex items-center gap-1.5 text-xs cursor-pointer active:scale-95"
-                                                title="Unduh Dokumen"
-                                            >
-                                                <Download size={15} />
-                                                Unduh
-                                            </button>
-                                        </div>
-                                    </div>
-                                ))}
+                                    );
+                                })()}
                             </div>
                         </div>
 
@@ -571,8 +624,27 @@ export default function WorkspaceAnalyst() {
                         <div className="bg-gray-50 rounded-xl p-6 border border-gray-200">
                             <h3 className="text-lg font-semibold text-gray-800 mb-4 flex items-center gap-2">
                                 <Upload size={20} className="text-[#00529C]" />
-                                Unggah Dokumen Analisis Teknis (FSD)
+                                Unggah Dokumen Analisis Teknis &amp; Spesifikasi
                             </h3>
+
+                            {/* Pilihan Tipe Dokumen */}
+                            <div className="mb-4 space-y-1.5">
+                                <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider">
+                                    Pilih Tipe Dokumen <span className="text-red-500">*</span>
+                                </label>
+                                <select
+                                    value={selectedDocType}
+                                    onChange={(e) => setSelectedDocType(e.target.value)}
+                                    className="w-full px-3.5 py-2.5 bg-white border border-gray-200 rounded-xl text-xs md:text-sm font-semibold text-gray-800 outline-none focus:ring-2 focus:ring-[#00529C]/20 focus:border-[#00529C] transition-all cursor-pointer"
+                                >
+                                    <option value="FSD">FSD (Functional Specification Document)</option>
+                                    <option value="ARSITEKTUR">Arsitektur &amp; Desain Sistem</option>
+                                    <option value="BRD">BRD (Business Requirement Document)</option>
+                                    <option value="MEMO">Memo Hasil Kajian Analisis</option>
+                                    <option value="LAMPIRAN">Lampiran Pendukung Teknis</option>
+                                    <option value="LAINNYA">Dokumen Lainnya</option>
+                                </select>
+                            </div>
 
                             <div
                                 onClick={() => fileInputRef.current?.click()}
@@ -604,7 +676,7 @@ export default function WorkspaceAnalyst() {
                                     </div>
                                     <div className="flex items-center gap-2 shrink-0">
                                         <span className="text-xs font-bold text-emerald-700 bg-emerald-100 px-3 py-1 rounded-full border border-emerald-200">
-                                            Dokumen FSD Terlampir
+                                            Dokumen {uploadedFile.doc_type || selectedDocType} Terlampir
                                         </span>
                                         <button
                                             type="button"

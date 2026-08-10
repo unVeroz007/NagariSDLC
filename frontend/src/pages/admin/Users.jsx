@@ -63,8 +63,7 @@ export default function UsersManagement() {
                 }));
                 setUsersList(formatted);
             }
-        } catch (err) {
-            console.error('Failed to fetch users:', err);
+        } catch {
             toast.error('Gagal memuat data pengguna dari server.');
         } finally {
             setIsLoading(false);

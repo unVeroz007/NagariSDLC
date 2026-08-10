@@ -22,7 +22,6 @@ import {
     Eye,
     Download,
 } from 'lucide-react';
-import { mockProjects, dispositionQueue } from '../../data/mockData';
 import {
     generateDocumentName,
     INITIATION_DOC_TYPES,
@@ -64,8 +63,7 @@ export default function ProjectNew() {
                     const merged = Array.from(new Set([...apiNames, ...defaultDivisions]));
                     setDivisionList(merged);
                 }
-            } catch (err) {
-                console.warn('Could not fetch divisions from API, using default list:', err);
+            } catch {
             }
         };
         fetchDivisions();
@@ -336,7 +334,6 @@ export default function ProjectNew() {
             setIsSubmitting(false);
             isSubmittingRef.current = false;
         } catch (err) {
-            console.error('[ProjectNew] Submit error:', err);
             isSubmittingRef.current = false;
             setIsSubmitting(false);
             const serverMsg = err?.response?.data?.message;

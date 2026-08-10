@@ -19,7 +19,10 @@ import {
   UserCheck,
   Hourglass,
   ClipboardCheck,
-  Filter
+  Filter,
+  UserX,
+  UserCheck2,
+  CheckCircle2,
 } from 'lucide-react';
 
 export default function Queue() {
@@ -82,6 +85,18 @@ export default function Queue() {
   const pendingCount = projects.filter(p => p.status === 'PENDING').length;
   const inReviewCount = projects.filter(p => p.status === 'IN_REVIEW').length;
   const completedCount = projects.filter(p => p.status === 'ANALYSIS_APPROVED' || p.status === 'REJECTED').length;
+
+  // Helper untuk ekstrak nama analis dari objek project (hapus title spesialisasi)
+  const getAnalystName = (p) => {
+    if (!p) return null;
+    const a = p.analyst;
+    if (!a) return null;
+    let name = typeof a === 'object' ? (a?.name || null) : (String(a) || null);
+    if (name && name.includes('(')) {
+        name = name.split('(')[0].trim();
+    }
+    return name;
+  };
 
   const getStatusBadge = (status) => {
     const configs = {
@@ -239,13 +254,14 @@ export default function Queue() {
           {/* Table */}
           <div className="bg-white rounded-b-xl shadow-sm border border-gray-200 overflow-hidden">
             <div className="overflow-x-auto">
-              <table className="w-full text-left border-collapse min-w-[800px]">
+              <table className="w-full text-left border-collapse min-w-[1000px]">
                 <thead>
                   <tr className="bg-gray-50 border-b border-gray-200 text-xs uppercase font-semibold text-gray-500">
                     <th className="px-6 py-4">ID Proyek</th>
                     <th className="px-6 py-4">Nama Proyek</th>
                     <th className="px-6 py-4">Divisi</th>
                     <th className="px-6 py-4">Tipe</th>
+                    <th className="px-6 py-4">Analis</th>
                     <th className="px-6 py-4">Status</th>
                     <th className="px-6 py-4 text-right">Aksi</th>
                   </tr>
@@ -254,6 +270,10 @@ export default function Queue() {
                   {currentItems.length > 0 ? (
                     currentItems.map((project) => {
                       const statusConfig = getStatusBadge(project.status);
+                      const analyst = getAnalystName(project);
+                      const isInReview = project.status === 'IN_REVIEW';
+                      const isCompleted = project.status === 'ANALYSIS_APPROVED' || project.status === 'REJECTED';
+                      
                       return (
                         <tr key={project.id} className="hover:bg-gray-50 transition-colors group">
                           <td className="px-6 py-4 font-semibold text-[#00529C]">{project.id}</td>
@@ -263,6 +283,34 @@ export default function Queue() {
                             <div className="flex items-center gap-1.5 flex-wrap">
                               <RBBBadge type={project.type} deadline={project.rbbDeadline} />
                               <ProjectTypeBadge type={project.project_type} />
+                            </div>
+                          </td>
+                          <td className="px-6 py-4">
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              {isInReview && analyst && (
+                                <div className="flex items-center gap-1 px-2 py-1 bg-blue-50 border border-blue-200 rounded-lg text-[10px] font-bold text-blue-700 shrink-0">
+                                  <UserCheck2 size={11} className="text-blue-600" />
+                                  {analyst}
+                                </div>
+                              )}
+                              {isInReview && !analyst && (
+                                <div className="flex items-center gap-1 px-2 py-1 bg-amber-50 border border-amber-200 rounded-lg text-[10px] font-bold text-amber-700 shrink-0">
+                                  <Hourglass size={11} className="text-amber-600 animate-spin" />
+                                  Analis belum ditugaskan
+                                </div>
+                              )}
+                              {!isInReview && analyst && (
+                                <div className="flex items-center gap-1 px-2 py-1 bg-emerald-50 border border-emerald-200 rounded-lg text-[10px] font-bold text-emerald-700 shrink-0">
+                                  <CheckCircle2 size={11} className="text-emerald-600" />
+                                  {isInReview ? 'Sedang' : 'Selesai'} : {analyst}
+                                </div>
+                              )}
+                              {!isInReview && !analyst && (
+                                <div className="flex items-center gap-1 px-2 py-1 bg-gray-50 border border-gray-200 rounded-lg text-[10px] font-bold text-gray-500 shrink-0">
+                                  <UserX size={11} className="text-gray-400" />
+                                  Belum didisposisi
+                                </div>
+                              )}
                             </div>
                           </td>
                           <td className="px-6 py-4">
@@ -279,7 +327,7 @@ export default function Queue() {
                     })
                   ) : (
                     <tr>
-                      <td colSpan="6" className="px-6 py-12 text-center text-gray-500">
+                      <td colSpan="7" className="px-6 py-12 text-center text-gray-500">
                         <div className="flex flex-col items-center">
                           <Inbox size={40} className="text-gray-300 mb-2" />
                           <p>Tidak ada proyek dengan status ini</p>

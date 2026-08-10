@@ -138,4 +138,23 @@ class AuthController extends Controller
             'message' => 'Logout berhasil.',
         ]);
     }
+
+    public function refresh(Request $request): JsonResponse
+    {
+        $user = $request->user();
+        $user->load(['role', 'division']);
+
+        // Revoke old token and issue new one
+        $request->user()->currentAccessToken()->delete();
+        $newToken = $user->createToken('auth_token')->plainTextToken;
+
+        return response()->json([
+            'status' => 'success',
+            'message' => 'Token berhasil diperbarui.',
+            'data' => [
+                'user' => new UserResource($user),
+                'token' => $newToken,
+            ],
+        ]);
+    }
 }

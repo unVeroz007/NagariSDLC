@@ -7,6 +7,11 @@
  */
 
 const BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000/api/v1';
+const TOKEN_EXPIRY_MS = 8 * 60 * 60 * 1000; // 8 hours in ms
+const REFRESH_THRESHOLD_MS = 5 * 60 * 1000; // refresh 5 minutes before expiry
+
+let isRefreshing = false;
+let refreshPromise = null;
 
 // ──────────────────────────────────────────────────────────
 // Helper: buat headers dengan Bearer token
@@ -22,6 +27,93 @@ function authHeaders() {
     } catch {
         return base;
     }
+}
+
+// ──────────────────────────────────────────────────────────
+// Helper: check if token needs refresh
+// ──────────────────────────────────────────────────────────
+function getTokenIssuedAt() {
+    const session = localStorage.getItem('nagari_sdlc_session');
+    if (!session) return null;
+    try {
+        const { issuedAt } = JSON.parse(session);
+        return issuedAt || null;
+    } catch {
+        return null;
+    }
+}
+
+function shouldRefreshToken() {
+    const issuedAt = getTokenIssuedAt();
+    if (!issuedAt) return false;
+    const elapsed = Date.now() - issuedAt;
+    return elapsed > (TOKEN_EXPIRY_MS - REFRESH_THRESHOLD_MS);
+}
+
+// ──────────────────────────────────────────────────────────
+// Helper: refresh token silently
+// ──────────────────────────────────────────────────────────
+async function refreshToken() {
+    if (isRefreshing && refreshPromise) return refreshPromise;
+
+    isRefreshing = true;
+    refreshPromise = (async () => {
+        try {
+            const session = localStorage.getItem('nagari_sdlc_session');
+            if (!session) return null;
+            const { token } = JSON.parse(session);
+            if (!token) return null;
+
+            const res = await fetch(`${BASE_URL}/auth/refresh`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Accept': 'application/json',
+                    Authorization: `Bearer ${token}`,
+                },
+            });
+
+            if (!res.ok) return null;
+
+            const data = await res.json();
+            if (data.status === 'success' && data.data?.token) {
+                const newSession = {
+                    token: data.data.token,
+                    user: data.data.user,
+                    issuedAt: Date.now(),
+                };
+                localStorage.setItem('nagari_sdlc_session', JSON.stringify(newSession));
+                return data.data.token;
+            }
+            return null;
+        } catch {
+            return null;
+        } finally {
+            isRefreshing = false;
+            refreshPromise = null;
+        }
+    })();
+
+    return refreshPromise;
+}
+
+// ──────────────────────────────────────────────────────────
+// Helper: ensure token is fresh before API call
+// ──────────────────────────────────────────────────────────
+async function ensureFreshToken() {
+    if (shouldRefreshToken()) {
+        await refreshToken();
+    }
+}
+
+// ──────────────────────────────────────────────────────────
+// Centralized fetch with auto-refresh token
+// ──────────────────────────────────────────────────────────
+async function apiFetch(url, options = {}) {
+    await ensureFreshToken();
+    const headers = { ...authHeaders(), ...options.headers };
+    const res = await fetch(url, { ...options, headers });
+    return handleResponse(res);
 }
 
 // ──────────────────────────────────────────────────────────
@@ -84,26 +176,21 @@ export const authService = {
     },
 
     getCurrentUser: async () => {
-        const res = await fetch(`${BASE_URL}/auth/me`, { headers: authHeaders() });
-        return handleResponse(res);
+        return apiFetch(`${BASE_URL}/auth/me`);
     },
 
     updateProfile: async (name, phoneNumber) => {
-        const res = await fetch(`${BASE_URL}/auth/profile`, {
+        return apiFetch(`${BASE_URL}/auth/profile`, {
             method: 'PATCH',
-            headers: authHeaders(),
             body: JSON.stringify({ name, phone_number: phoneNumber }),
         });
-        return handleResponse(res);
     },
 
     updatePassword: async (currentPassword, newPassword) => {
-        const res = await fetch(`${BASE_URL}/auth/password`, {
+        return apiFetch(`${BASE_URL}/auth/password`, {
             method: 'PATCH',
-            headers: authHeaders(),
             body: JSON.stringify({ current_password: currentPassword, new_password: newPassword }),
         });
-        return handleResponse(res);
     },
 };
 
@@ -113,57 +200,45 @@ export const authService = {
 export const projectService = {
     getAll: async (filters = {}) => {
         const params = new URLSearchParams(filters).toString();
-        const res = await fetch(`${BASE_URL}/projects?${params}`, { headers: authHeaders() });
-        return handleResponse(res);
+        return apiFetch(`${BASE_URL}/projects?${params}`);
     },
 
     getById: async (id) => {
-        const res = await fetch(`${BASE_URL}/projects/${id}`, { headers: authHeaders() });
-        return handleResponse(res);
+        return apiFetch(`${BASE_URL}/projects/${id}`);
     },
 
     create: async (projectData) => {
-        const res = await fetch(`${BASE_URL}/projects`, {
+        return apiFetch(`${BASE_URL}/projects`, {
             method: 'POST',
-            headers: authHeaders(),
             body: JSON.stringify(projectData),
         });
-        return handleResponse(res);
     },
 
     update: async (id, updates) => {
-        const res = await fetch(`${BASE_URL}/projects/${id}`, {
+        return apiFetch(`${BASE_URL}/projects/${id}`, {
             method: 'PATCH',
-            headers: authHeaders(),
             body: JSON.stringify(updates),
         });
-        return handleResponse(res);
     },
 
     updateStatus: async (id, newStatus, notes = '') => {
-        const res = await fetch(`${BASE_URL}/projects/${id}/status`, {
+        return apiFetch(`${BASE_URL}/projects/${id}/status`, {
             method: 'PATCH',
-            headers: authHeaders(),
             body: JSON.stringify({ status: newStatus, notes }),
         });
-        return handleResponse(res);
     },
 
     delete: async (id) => {
-        const res = await fetch(`${BASE_URL}/projects/${id}`, {
+        return apiFetch(`${BASE_URL}/projects/${id}`, {
             method: 'DELETE',
-            headers: authHeaders(),
         });
-        return handleResponse(res);
     },
 
     allocateTeam: async (projectId, team) => {
-        const res = await fetch(`${BASE_URL}/projects/${projectId}/team`, {
+        return apiFetch(`${BASE_URL}/projects/${projectId}/team`, {
             method: 'POST',
-            headers: authHeaders(),
             body: JSON.stringify({ team }),
         });
-        return handleResponse(res);
     },
 
     getTimeline: async (id) => {
@@ -305,24 +380,19 @@ export const userService = {
 // ──────────────────────────────────────────────────────────
 export const notificationService = {
     getAll: async () => {
-        const res = await fetch(`${BASE_URL}/notifications`, { headers: authHeaders() });
-        return handleResponse(res);
+        return apiFetch(`${BASE_URL}/notifications`);
     },
 
     markRead: async (id) => {
-        const res = await fetch(`${BASE_URL}/notifications/${id}/read`, {
+        return apiFetch(`${BASE_URL}/notifications/${id}/read`, {
             method: 'PATCH',
-            headers: authHeaders(),
         });
-        return handleResponse(res);
     },
 
     markAllRead: async () => {
-        const res = await fetch(`${BASE_URL}/notifications/read-all`, {
+        return apiFetch(`${BASE_URL}/notifications/read-all`, {
             method: 'PATCH',
-            headers: authHeaders(),
         });
-        return handleResponse(res);
     },
 };
 
