@@ -18,14 +18,8 @@ import {
     X,
     CheckCircle2,
     Folder,
-    Printer,
-    Maximize2,
-    Minimize2,
-    ZoomIn,
-    ZoomOut,
     ShieldCheck,
     Verified,
-    FileCheck,
 } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { useProjects } from '../../contexts/ProjectContext';

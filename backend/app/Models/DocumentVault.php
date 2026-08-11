@@ -16,7 +16,9 @@ class DocumentVault extends Model
         'document_type',
         'file_path',
         'file_name',
+        'original_filename',
         'file_size',
+        'mime_type',
     ];
 
     public function project(): BelongsTo

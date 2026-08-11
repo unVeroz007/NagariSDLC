@@ -19,19 +19,19 @@ import {
     Search,
     Users,
     FolderOpen,
-    List,
     UserX,
     UserCheck,
     CheckCircle2,
 } from 'lucide-react';
 import { useProjects, getFileFromStore, getProjectRealDocuments } from '../../contexts/ProjectContext';
-import { documentService, userService } from '../../services/api';
+import { userService } from '../../services/api';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useNotifications } from '../../contexts/NotificationContext';
 import LoadingSpinner from '../../components/LoadingSpinner';
 import EmptyState from '../../components/EmptyState';
 import DocumentViewerModal from '../../components/DocumentViewerModal';
 import toast from 'react-hot-toast';
+import { getDocExtLabel, getDocIconStyle } from '../../utils/documentNaming';
 
 export default function WorkspaceLead() {
     const { user } = useAuth();
@@ -44,7 +44,19 @@ export default function WorkspaceLead() {
     const [activeTab, setActiveTab] = useState(initialTab);
     const [isPreviewModalOpen, setIsPreviewModalOpen] = useState(false);
     const [previewFsdDoc, setPreviewFsdDoc] = useState(null);
+    const [projectSearch, setProjectSearch] = useState('');
     const [analysts, setAnalysts] = useState([]);
+
+    // Search filter helper untuk antrean
+    const applyProjectSearch = (list) => {
+        if (!projectSearch.trim()) return list;
+        const term = projectSearch.toLowerCase();
+        return list.filter(p =>
+            String(p.id || '').toLowerCase().includes(term) ||
+            String(p.title || p.name || '').toLowerCase().includes(term) ||
+            String(p.division || '').toLowerCase().includes(term)
+        );
+    };
 
     // Helper: extract analyst name from various shapes (string, object from API, null)
     const analystName = (p) => {
@@ -78,11 +90,13 @@ export default function WorkspaceLead() {
     }, [projects]);
 
     // Switch queue based on tab ('disposition' | 'analyzing' | 'verification')
-    const activeQueue = activeTab === 'disposition' 
-        ? dispositionQueue 
-        : activeTab === 'analyzing' 
-            ? analyzingQueue 
-            : verificationQueue;
+    const activeQueue = applyProjectSearch(
+        activeTab === 'disposition' 
+            ? dispositionQueue 
+            : activeTab === 'analyzing' 
+                ? analyzingQueue 
+                : verificationQueue
+    );
     const [selectedProject, setSelectedProject] = useState(null);
     
     // Set default selected project
@@ -137,16 +151,18 @@ export default function WorkspaceLead() {
     // Searchable analyst dropdown state
     const [analystSearch, setAnalystSearch] = useState('');
     const [isAnalystDropdownOpen, setIsAnalystDropdownOpen] = useState(false);
+    const [isAnalystLoading, setIsAnalystLoading] = useState(false);
     const analystDropdownRef = useRef(null);
     const analystSearchRef = useRef(null);
 
     // Load analysts from API (users with analyst roles)
     useEffect(() => {
         const loadAnalysts = async () => {
+            setIsAnalystLoading(true);
             try {
                 const res = await userService.getAll();
                 const users = res.data || res || [];
-                const analystRoles = ['analyst', 'lead_group'];
+                const analystRoles = ['analyst'];
                 const filtered = users.filter(u => {
                     const roleName = u.role_detail?.name || u.role || '';
                     return analystRoles.includes(roleName);
@@ -160,6 +176,8 @@ export default function WorkspaceLead() {
                 setAnalysts(filtered);
             } catch {
                 setAnalysts([]);
+            } finally {
+                setIsAnalystLoading(false);
             }
         };
         loadAnalysts();
@@ -179,13 +197,13 @@ export default function WorkspaceLead() {
     // Calculate active workload per analyst
     const analystWorkloads = useMemo(() => {
         const counts = {};
+        const finishedAnalysis = ['ANALYSIS_APPROVED','LIVE_PRODUCTION','CANCELLED','REJECTED','READY_FOR_DEVELOPMENT','DEV_ANALYSIS','DEV_ANALYSIS_DONE','IN_DEVELOPMENT','DEV_COMPLETED','SIT_IN_PROGRESS','SIT_PASSED','SIT_REVISION','READY_FOR_QA','QA_IN_PROGRESS','QA_PASSED','RETURN_TO_DEV','CYBER_IN_PROGRESS','CYBER_PASSED','READY_FOR_UAT','UAT_IN_PROGRESS','UAT_PASSED','UAT_REVISION_SIT','UAT_REVISION_DEV','PENDING_GOLIVE','ON_HOLD'];
         (analysts || []).forEach(a => { counts[a.name] = 0; });
         (projects || []).forEach(p => {
             const analystName3 = typeof p.assignedAnalyst === 'object' ? (p.assignedAnalyst?.name || '')
                 : (typeof p.analyst === 'object' ? (p.analyst?.name || '') : String(p.assignedAnalyst || p.analyst || ''));
             if (analystName3 && counts[analystName3] !== undefined) {
-                const isFinished = p.status === 'LIVE_PRODUCTION' || p.status === 'CANCELLED' || p.status === 'REJECTED';
-                if (!isFinished) counts[analystName3]++;
+                if (!finishedAnalysis.includes(p.status)) counts[analystName3]++;
             }
         });
         return counts;
@@ -200,7 +218,7 @@ export default function WorkspaceLead() {
             a.email.toLowerCase().includes(q) ||
             a.department.toLowerCase().includes(q)
         );
-    }, [analystSearch]);
+    }, [analystSearch, analysts]);
 
     const handleVerify = async () => {
         if (!currentSelected) return;
@@ -429,10 +447,12 @@ export default function WorkspaceLead() {
             </div>
 
             {/* Split Layout */}
-            <div className="flex flex-col lg:flex-row gap-6 items-start">
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                 {/* LEFT PANEL: Antrean */}
-                <div className="w-full lg:w-1/3 flex flex-col bg-white border border-gray-100 rounded-2xl shadow-sm overflow-hidden shrink-0 lg:sticky lg:top-4 lg:max-h-[calc(100vh-100px)]">
+                <div className="flex flex-col overflow-hidden bg-white border border-gray-100 rounded-2xl shadow-sm lg:col-span-1 lg:max-h-[calc(100vh-160px)]">
                     <div className="p-4 border-b border-gray-100 shrink-0">
+
+
                         <div>
                             <h2 className="text-base font-bold text-gray-800">
                                 {activeTab === 'disposition' && 'Antrean Disposisi Baru'}
@@ -445,22 +465,34 @@ export default function WorkspaceLead() {
                                 {activeTab === 'verification' && `${activeQueue.length} proyek menunggu verifikasi FSD`}
                             </p>
                         </div>
-                        <button className="p-2 text-gray-400 hover:text-[#00529C] hover:bg-blue-50 rounded-lg transition-colors">
-                            <Filter size={16} />
-                        </button>
                     </div>
-                    <div className="max-lg:max-h-[280px] flex-1 overflow-y-auto p-3 space-y-2.5 bg-gray-50/40">
+                    <div className="p-3 border-b border-gray-100 shrink-0">
+                        <div className="relative">
+                            <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                            <input
+                                type="text"
+                                value={projectSearch}
+                                onChange={(e) => setProjectSearch(e.target.value)}
+                                placeholder="Cari proyek (ID, nama, divisi)..."
+                                className="w-full pl-9 pr-3 py-2 rounded-lg border border-gray-200 bg-gray-50 text-xs focus:ring-2 focus:ring-[#00529C]/20 focus:border-[#00529C] outline-none transition-all"
+                            />
+                        </div>
+                    </div>
+                    <div className="flex-1 overflow-y-auto p-3 space-y-2.5 bg-gray-50/40">
                         {activeQueue.map((project) => (
                             <div
                                 key={project.id}
                                 onClick={() => {
                                     setSelectedProject(project);
-                                    if (!deadline && !project.deadline && !project.current_stage_deadline) {
-                                        const d = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000);
-                                        setDeadline(d.toISOString().split('T')[0]);
-                                    } else if (project.deadline || project.current_stage_deadline) {
+                                    // Reset deadline: gunakan nilai dari proyek jika ada, jika tidak kosongkan
+                                    if (project.deadline || project.current_stage_deadline) {
                                         setDeadline((project.deadline || project.current_stage_deadline).split('T')[0]);
+                                    } else {
+                                        setDeadline('');
                                     }
+                                    setSelectedAnalyst('');
+                                    setNotes('');
+                                    setAnalystSearch('');
                                 }}
                                 className={`p-4 rounded-xl cursor-pointer transition-all relative overflow-hidden group ${
                                     selectedProject?.id === project.id
@@ -513,7 +545,7 @@ export default function WorkspaceLead() {
                                 )}
 
                                 <div className="flex justify-between items-center pt-2.5 mt-2.5 border-t border-gray-100">
-                                    <span className="text-[10px] font-bold text-[#00529C] bg-blue-50 px-2 py-0.5 rounded">{project.id}</span>
+                                    <span className="text-[10px] font-bold text-[#00529C] bg-blue-50 px-2 py-0.5 rounded">{project.reqId || project.req_id || project.id}</span>
                                     <span className="text-[10px] text-gray-400">{project.status}</span>
                                 </div>
                             </div>
@@ -522,7 +554,7 @@ export default function WorkspaceLead() {
                 </div>
 
                 {/* RIGHT PANEL: Detail & Form */}
-                <div className="w-full lg:w-2/3 bg-white border border-gray-100 rounded-2xl shadow-sm">
+                <div className="lg:col-span-2 bg-white border border-gray-100 rounded-2xl shadow-sm">
                     {!currentSelected ? (
                         <div className="flex-1 flex flex-col items-center justify-center p-8 text-center animate-scale-in min-h-[400px]">
                             <div className="w-24 h-24 rounded-3xl bg-emerald-100 text-emerald-600 flex items-center justify-center mb-6 shadow-sm">
@@ -546,7 +578,7 @@ export default function WorkspaceLead() {
                                     <span className={`px-2.5 py-0.5 rounded-full text-xs font-bold border ${getPriorityColor(currentSelected.priority)}`}>
                                         {currentSelected.priority === 'High' ? '🔴 High Priority' : currentSelected.priority === 'Medium' ? '🟡 Medium' : '🟢 Low'}
                                     </span>
-                                    <span className="text-xs font-bold text-gray-400 bg-gray-100 px-2 py-0.5 rounded">{currentSelected.id}</span>
+                                    <span className="text-xs font-bold text-gray-400 bg-gray-100 px-2 py-0.5 rounded">{currentSelected.reqId || currentSelected.req_id || currentSelected.id}</span>
                                 </div>
                                 <div className="mb-2"><div className="flex items-center gap-1.5 flex-wrap"><RBBBadge type={currentSelected.type} deadline={currentSelected.rbbDeadline} status={currentSelected.status} /><ProjectTypeBadge type={currentSelected.project_type} /></div></div>
                                 <h2 className="text-2xl font-extrabold text-gray-800">{currentSelected.title || currentSelected.name}</h2>
@@ -593,8 +625,8 @@ export default function WorkspaceLead() {
                                 ).map((doc, idx) => (
                                     <div key={idx} className="flex items-center justify-between p-3 border border-gray-200 rounded-lg bg-gray-50 hover:border-gray-300 transition-colors group">
                                         <div className="flex items-center gap-3 overflow-hidden min-w-0">
-                                            <div className={`w-10 h-10 rounded ${getFileIcon(doc.type)} flex items-center justify-center shrink-0 font-bold text-[10px]`}>
-                                                {getFileLabel(doc.type)}
+                                            <div className={`w-10 h-10 rounded flex items-center justify-center shrink-0 font-bold text-[10px] ${getDocIconStyle(doc.name || doc.file_name || doc.type || '')}`}>
+                                                {getDocExtLabel(doc.name || doc.file_name || doc.type || '')}
                                             </div>
                                             <div className="truncate min-w-0">
                                                 <p className="text-sm font-semibold text-gray-800 truncate">{doc.name}</p>
@@ -707,11 +739,16 @@ export default function WorkspaceLead() {
 
                                                     {/* Analyst List */}
                                                     <div className="max-h-[260px] overflow-y-auto">
-                                                        {filteredAnalysts.length === 0 ? (
+                                                        {isAnalystLoading ? (
+                                                            <div className="p-6 text-center">
+                                                                <LoadingSpinner size="sm" />
+                                                                <p className="text-sm text-gray-500 font-medium mt-2">Memuat daftar analis...</p>
+                                                            </div>
+                                                        ) : filteredAnalysts.length === 0 ? (
                                                             <div className="p-6 text-center">
                                                                 <Search size={24} className="mx-auto text-gray-300 mb-2" />
                                                                 <p className="text-sm text-gray-500 font-medium">Tidak ditemukan analis</p>
-                                                                <p className="text-xs text-gray-400">Coba kata kunci lain</p>
+                                                                <p className="text-xs text-gray-400">{analystSearch ? 'Coba kata kunci lain' : 'Belum ada user dengan role analyst'}</p>
                                                             </div>
                                                         ) : (
                                                             filteredAnalysts.map((a, i) => {
@@ -739,8 +776,6 @@ export default function WorkspaceLead() {
                                                                                 <span className="text-sm font-semibold text-gray-800 truncate">{a.name}</span>
                                                                                 {isSelected && <Check size={14} className="text-[#00529C] shrink-0" />}
                                                                             </div>
-                                                                            <p className="text-[11px] text-gray-500 truncate">{a.department}</p>
-                                                                            <p className="text-[10px] text-gray-400 mt-0.5 truncate">{a.email}</p>
                                                                         </div>
                                                                         <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full shrink-0 ${
                                                                             workload >= 3 ? 'bg-red-100 text-red-600' : workload >= 1 ? 'bg-amber-100 text-amber-700' : 'bg-emerald-100 text-emerald-700'
@@ -1049,14 +1084,14 @@ export default function WorkspaceLead() {
             </div>
 
             {/* ── MODAL: Detail Preview Proyek (Tombol Mata) ── */}
-            {isPreviewModalOpen && currentSelected && (
+                {isPreviewModalOpen && currentSelected && (
                 <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-50 flex items-center justify-center p-4">
-                    <div className="bg-white rounded-2xl max-w-xl w-full p-6 shadow-2xl animate-scale-up border border-gray-100">
+                    <div className="bg-white rounded-2xl max-w-xl w-full max-h-[85vh] overflow-y-auto p-6 shadow-2xl animate-scale-up border border-gray-100">
                         <div className="flex justify-between items-start mb-4 border-b border-gray-100 pb-3">
                             <div>
                                 <div className="flex items-center gap-2 mb-1">
                                     <span className="text-xs font-bold text-[#00529C] bg-blue-50 px-2 py-0.5 rounded border border-blue-100">
-                                        {currentSelected.id}
+                                        {currentSelected.reqId || currentSelected.req_id || currentSelected.id}
                                     </span>
                                     <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold border ${getPriorityColor(currentSelected.priority)}`}>
                                         {currentSelected.priority === 'High' ? '🔴 High Priority' : currentSelected.priority === 'Medium' ? '🟡 Medium' : '🟢 Low'}
@@ -1086,17 +1121,13 @@ export default function WorkspaceLead() {
                                     <p className="font-bold text-gray-400 uppercase">Target Selesai</p>
                                     <p className="font-semibold text-gray-800 mt-0.5">{currentSelected.targetDate}</p>
                                 </div>
-                            </div>
-
-                            <div>
-                                <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">Dokumen Terkait</p>
-                                <div className="space-y-2">
-                                    {(currentSelected.documents || []).map((doc, i) => (
-                                        <div key={i} className="flex items-center justify-between p-2.5 bg-blue-50/40 border border-blue-100 rounded-xl text-xs">
-                                            <span className="font-semibold text-gray-800">{doc.name}</span>
-                                            <span className="text-gray-500">{doc.size}</span>
-                                        </div>
-                                    ))}
+                                <div className="bg-gray-50 p-3 rounded-xl border border-gray-100 col-span-2">
+                                    <p className="font-bold text-gray-400 uppercase">Pemohon</p>
+                                    <p className="font-semibold text-gray-800 mt-0.5">
+                                        {typeof currentSelected.creator === 'object'
+                                            ? (currentSelected.creator?.name || '—')
+                                            : (currentSelected.creator || currentSelected.createdBy || '—')}
+                                    </p>
                                 </div>
                             </div>
 

@@ -3,7 +3,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import { useNavigate } from 'react-router-dom';
 import { useNotifications } from '../../contexts/NotificationContext';
 import { useProjects } from '../../contexts/ProjectContext';
-import { divisionService } from '../../services/api';
+import { divisionService, projectService } from '../../services/api';
 import toast from 'react-hot-toast';
 import DocumentViewerModal from '../../components/DocumentViewerModal';
 import {
@@ -20,7 +20,6 @@ import {
     AlertCircle,
     X,
     Eye,
-    Download,
 } from 'lucide-react';
 import {
     generateDocumentName,
@@ -104,6 +103,22 @@ export default function ProjectNew() {
     const [submittedProject, setSubmittedProject] = useState(null);
     const [previewFile, setPreviewFile] = useState(null);
     const [errorMessage, setErrorMessage] = useState('');
+    const [nextReqId, setNextReqId] = useState('');
+
+    // Fetch next req_id from backend before showing document previews
+    useEffect(() => {
+        const fetchReqId = async () => {
+            try {
+                const res = await projectService.getNextReqId();
+                if (res?.data?.req_id) {
+                    setNextReqId(res.data.req_id);
+                }
+            } catch {
+                setNextReqId('');
+            }
+        };
+        fetchReqId();
+    }, []);
 
     const showError = (msg) => {
         setErrorMessage(msg);
@@ -177,7 +192,7 @@ export default function ProjectNew() {
         };
 
         // Generate nama dokumen otomatis
-        const projectReqId = `REQ-PENDING`; // Sebelum disimpan, sementara
+        const projectReqId = nextReqId || 'REQ-PENDING'; // Real req_id from API, or fallback
         const projectName = formData.projectName || 'Proyek_Baru';
 
         const filePromises = validFiles.map((file) => {
@@ -219,10 +234,10 @@ export default function ProjectNew() {
     const handleFileTypeChange = (index, newDocType) => {
         setUploadedFiles((prev) => prev.map((f, i) => {
             if (i !== index) return f;
-            // Regenerate nama dengan tipe baru
-            const projectReqId = `REQ-PENDING`;
+            // Regenerate nama dengan tipe baru & real req_id
+            const currentReqId = nextReqId || 'REQ-PENDING';
             const projectName = formData.projectName || 'Proyek_Baru';
-            const newName = generateDocumentName(projectReqId, newDocType, projectName);
+            const newName = generateDocumentName(currentReqId, newDocType, projectName);
             const fileExt = f.rawFile ? f.rawFile.name.split('.').pop() : 'pdf';
             return {
                 ...f,
@@ -730,14 +745,14 @@ export default function ProjectNew() {
                                             <div className={`w-10 h-10 rounded-xl border flex items-center justify-center font-bold text-xs shrink-0 ${file.color || 'bg-gray-100 text-gray-600 border-gray-200'}`}>
                                                 {file.ext || 'FILE'}
                                             </div>
-                                            <div className="min-w-0 flex-1">
-                                                <p className="text-sm font-bold text-gray-800 truncate" title={file.name}>
-                                                    {file.name}
-                                                </p>
-                                                <p className="text-[11px] text-gray-500 truncate">
-                                                    {file.size} • <span className="text-gray-400 italic">Asli: {file.originalName}</span>
-                                                </p>
-                                            </div>
+                                        <div className="min-w-0 flex-1">
+                                            <p className="text-sm font-bold text-gray-800 truncate" title={file.originalName}>
+                                                {file.originalName}
+                                            </p>
+                                            <p className="text-[11px] text-gray-500 truncate">
+                                                {file.size} • <span className="text-amber-700 font-medium">→ {file.name}</span>
+                                            </p>
+                                        </div>
                                         </div>
 
                                         <div className="flex items-center gap-2.5 shrink-0">
@@ -867,11 +882,25 @@ export default function ProjectNew() {
                                 </span>
                             </div>
                             {submittedProject.documents && submittedProject.documents.length > 0 && (
-                                <div className="flex justify-between items-center pt-1">
-                                    <span className="text-gray-400 font-semibold">DOKUMEN</span>
-                                    <span className="font-bold text-[#00529C]">
-                                        📄 {submittedProject.documents.length} File Terlampir
-                                    </span>
+                                <div className="mt-3 pt-3 border-t border-gray-200/60">
+                                    <div className="flex justify-between items-center mb-2">
+                                        <span className="text-gray-400 font-semibold">DOKUMEN</span>
+                                        <span className="font-bold text-[#00529C]">
+                                            📄 {submittedProject.documents.length} File Terlampir
+                                        </span>
+                                    </div>
+                                    <div className="space-y-1.5 text-left">
+                                        {submittedProject.documents.map((doc, i) => (
+                                            <div key={i} className="flex items-center gap-2 text-[10px] bg-blue-50/50 rounded-lg px-2.5 py-1.5">
+                                                <div className="w-5 h-5 rounded bg-blue-100 text-blue-700 flex items-center justify-center font-bold text-[9px] shrink-0">
+                                                    {(doc.doc_type || doc.type || 'FILE').substring(0, 2)}
+                                                </div>
+                                                <span className="text-gray-700 font-medium truncate">
+                                                    {doc.finalName || doc.originalName || doc.name}
+                                                </span>
+                                            </div>
+                                        ))}
+                                    </div>
                                 </div>
                             )}
                         </div>

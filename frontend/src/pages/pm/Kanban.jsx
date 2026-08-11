@@ -7,32 +7,8 @@ import { taskService } from '../../services/api';
 import { useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import {
-    Plus,
     Search,
-    Bell,
-    Settings,
-    MoreHorizontal,
-    Clock,
-    Paperclip,
-    MessageSquare,
-    AlertTriangle,
-    Lock,
-    Inbox,
-    ChevronRight,
-    User,
-    Check,
-    X,
-    Eye,
-    Edit,
-    Trash2,
-    Tag,
-    Users,
-    Calendar,
     List,
-    Kanban as KanbanIcon,
-    ArrowRight,
-    Briefcase,
-    Layers,
     Filter,
 } from 'lucide-react';
 

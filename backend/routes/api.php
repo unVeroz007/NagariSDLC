@@ -23,6 +23,8 @@ Route::prefix('v1')->group(function () {
     Route::get('/health', [HealthCheckController::class, 'check']);
 
     // Guest Auth Routes (public, rate-limited)
+    Route::post('/auth/register', [AuthController::class, 'register'])
+        ->middleware('throttle:5,1');
     Route::post('/auth/login', [AuthController::class, 'login'])
         ->middleware('throttle:5,1'); // 5 login attempts per minute
 
@@ -69,6 +71,7 @@ Route::prefix('v1')->group(function () {
 
         // ----- PROJECT ROUTES -----
         Route::get('/projects', [ProjectController::class, 'index']);
+        Route::get('/projects/next-req-id', [ProjectController::class, 'nextReqId']);
         Route::post('/projects', [ProjectController::class, 'store']);
         Route::get('/projects/{id}', [ProjectController::class, 'show']);
         Route::patch('/projects/{id}', [ProjectController::class, 'update']);

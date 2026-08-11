@@ -20,31 +20,15 @@ import {
     CheckCircle,
     AlertCircle,
     ArrowRight,
-    PlusCircle,
     Filter,
     Search,
-    Bell,
-    Settings,
-    HelpCircle,
     User,
     Briefcase,
     Activity,
     Zap,
-    TrendingUp,
-    TrendingDown,
-    MoreVertical,
     Eye,
     FileText,
-    MessageSquare,
-    Paperclip,
-    ChevronRight,
-    ChevronLeft,
-    CalendarDays,
-    Timer,
-    Flame,
-    Award,
     Target,
-    BarChart,
     Send,
     Shield,
     FileCheck,
@@ -567,7 +551,7 @@ export default function PMWorkspace() {
                                                 <td className="px-6 py-4 cursor-pointer group-hover:bg-blue-50/40" onClick={() => navigate(`/pm/tasks/${project.id}`)}>
                                                     <div>
                                                         <span className="font-semibold text-gray-800 group-hover:text-[#00529C] transition-colors">{project.name}</span>
-                                                        <p className="text-xs text-gray-400">{project.id}</p>
+                                                        <p className="text-xs text-gray-400">{project.req_id || project.reqId || project.id}</p>
                                                     </div>
                                                 </td>
                                                  <td className="px-6 py-4">

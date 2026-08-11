@@ -8,14 +8,9 @@ import {
     Paperclip,
     ChevronDown,
     ChevronUp,
-    Users,
-    Bell,
     Clock,
     X,
-    Maximize2,
-    Minimize2,
     Zap,
-    Info
 } from 'lucide-react';
 
 export default function ChatBox({

@@ -1,5 +1,5 @@
 // src/components/LogDetailModal.jsx
-import { X, Calendar, Clock, User, Folder, Tag, Server, CheckCircle, AlertCircle } from 'lucide-react';
+import { X, Calendar, Clock, User, CheckCircle, AlertCircle } from 'lucide-react';
 import { actionMap } from '../contexts/ActivityContext';
 
 export default function LogDetailModal({ activity, isOpen, onClose }) {

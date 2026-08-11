@@ -114,3 +114,51 @@ export function detectDocTypeFromFilename(filename) {
     if (fn.includes('.jpg') || fn.includes('.png') || fn.includes('.jpeg') || fn.includes('.gif')) return 'GAMBAR';
     return 'LAINNYA';
 }
+
+/**
+ * Ambil label ekstensi dari nama file untuk ikon.
+ * Contoh: "dokumen.pdf" → "PDF", "foto.jpg" → "JPG", "arsip.zip" → "ZIP"
+ */
+export function getDocExtLabel(fileName) {
+    if (!fileName) return 'FILE';
+    const parts = fileName.split('.');
+    if (parts.length < 2) return 'FILE';
+    const ext = parts[parts.length - 1].toLowerCase();
+    const map = {
+        pdf: 'PDF',
+        xls: 'XLS',
+        xlsx: 'XLSX',
+        doc: 'DOC',
+        docx: 'DOCX',
+        jpg: 'JPG',
+        jpeg: 'JPEG',
+        png: 'PNG',
+        gif: 'GIF',
+        svg: 'SVG',
+        zip: 'ZIP',
+        rar: 'RAR',
+        txt: 'TXT',
+        csv: 'CSV',
+        ppt: 'PPT',
+        pptx: 'PPTX',
+    };
+    return map[ext] || ext.substring(0, 4).toUpperCase();
+}
+
+/**
+ * Ambil style background + text Tailwind untuk ikon ekstensi file.
+ */
+export function getDocIconStyle(fileName) {
+    if (!fileName) return '';
+    const parts = fileName.split('.');
+    if (parts.length < 2) return 'bg-gray-100 text-gray-600';
+    const ext = parts[parts.length - 1].toLowerCase();
+    switch (ext) {
+        case 'pdf': return 'bg-red-100 text-red-600';
+        case 'xls': case 'xlsx': case 'csv': return 'bg-green-100 text-green-600';
+        case 'doc': case 'docx': return 'bg-blue-100 text-blue-600';
+        case 'jpg': case 'jpeg': case 'png': case 'gif': case 'svg': return 'bg-purple-100 text-purple-600';
+        case 'zip': case 'rar': return 'bg-amber-100 text-amber-700';
+        default: return 'bg-gray-100 text-gray-600';
+    }
+}

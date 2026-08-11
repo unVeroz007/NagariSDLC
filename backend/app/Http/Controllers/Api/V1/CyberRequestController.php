@@ -97,8 +97,11 @@ class CyberRequestController extends Controller
             'reviewed_at' => now(),
         ]);
 
-        if ($request->status && $request->status !== $report->result->value) {
+        if ($request->status !== $report->result->value) {
             try {
+                if (! $report->project) {
+                    return response()->json(['status' => 'error', 'message' => 'Proyek terkait tidak ditemukan.'], 404);
+                }
                 $project = $report->project;
                 $targetStatus = ProjectStatus::from($request->status);
                 $this->workflowService->transition(

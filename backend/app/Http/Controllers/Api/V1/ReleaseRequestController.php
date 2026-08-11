@@ -56,7 +56,16 @@ class ReleaseRequestController extends Controller
                 "Pengajuan Rilis Produksi. Target: {$request->target_release_date}"
             );
         } catch (Throwable $e) {
-            // Log exception
+            \Illuminate\Support\Facades\Log::error('ReleaseRequest transition failed: ' . $e->getMessage(), [
+                'project_id' => $project->id,
+                'user_id' => $request->user()->id,
+            ]);
+
+            return response()->json([
+                'status'  => 'success',
+                'message' => 'Pengajuan rilis berhasil dibuat, namun transisi status proyek gagal: ' . $e->getMessage(),
+                'data'    => new ReleaseRequestResource($release->load(['requester', 'project'])),
+            ], 201);
         }
 
         return response()->json([

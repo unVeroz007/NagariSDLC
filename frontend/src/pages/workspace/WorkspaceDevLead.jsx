@@ -1,6 +1,6 @@
 import { useState, useMemo, useEffect } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
-import { useProjects, getFileFromStore } from '../../contexts/ProjectContext';
+import { useProjects, getFileFromStore, getProjectRealDocuments } from '../../contexts/ProjectContext';
 import { useNotifications } from '../../contexts/NotificationContext';
 import { useNavigate } from 'react-router-dom';
 import RBBBadge from '../../components/RBBBadge';
@@ -21,16 +21,17 @@ import {
     X,
     Calendar,
     Briefcase,
-    Shield,
     Check,
-    ChevronRight,
     Building,
     Eye,
     Download,
-    FolderOpen
+    FolderOpen,
+    Rocket
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { userService } from '../../services/api';
+import { projectService } from '../../services/api';
+import { getDocExtLabel, getDocIconStyle } from '../../utils/documentNaming';
 
 const resolveAllProjectDocs = (project) => {
     if (!project) return [];
@@ -42,17 +43,18 @@ const resolveAllProjectDocs = (project) => {
         project.documents.forEach(d => {
             const docName = d.name || d.file_name || 'Dokumen_SDLC.pdf';
             const key = d.id || docName;
-            const isFsd = (d.type === 'fsd' || d.doc_type === 'fsd' || docName.toLowerCase().includes('fsd') || docName.toLowerCase().includes('kajian'));
+            const isFsd = (d.type === 'fsd' || d.doc_type === 'fsd' || d.document_type === 'fsd' || docName.toLowerCase().includes('fsd') || docName.toLowerCase().includes('kajian'));
+            const isFsdDev = (d.type === 'fsd_dev' || d.doc_type === 'fsd_dev' || d.document_type === 'fsd_dev' || d.document_type === 'FSD_DEV');
             docsMap.set(key, {
                 ...d,
                 name: docName,
                 size: d.size || d.file_size || '2.0 MB',
-                label: isFsd 
-                    ? 'Hasil Kajian FSD (Perencanaan TI)' 
-                    : (d.type === 'brd' || d.doc_type === 'brd' || d.category === 'brd' || docName.toLowerCase().includes('brd') || docName.toLowerCase().includes('laprak') || docName.toLowerCase().includes('form') || docName.toLowerCase().includes('kebutuhan') || docName.toLowerCase().includes('bimbingan')) 
-                    ? 'Dokumen BRD Inisiasi' 
-                    : (d.type === 'fsd_dev' || d.doc_type === 'fsd_dev')
+                label: isFsdDev
                     ? 'Spesifikasi Arsitektur (Dev)'
+                    : isFsd 
+                    ? 'Hasil Kajian FSD (Perencanaan TI)' 
+                    : (d.type === 'brd' || d.doc_type === 'brd' || d.category === 'brd' || d.document_type === 'brd' || d.document_type === 'BRD' || docName.toLowerCase().includes('brd') || docName.toLowerCase().includes('laprak') || docName.toLowerCase().includes('form') || docName.toLowerCase().includes('kebutuhan') || docName.toLowerCase().includes('bimbingan')) 
+                    ? 'Dokumen BRD Inisiasi' 
                     : (d.label || 'Dokumen SDLC Terlampir')
             });
         });
@@ -69,24 +71,38 @@ const resolveAllProjectDocs = (project) => {
         });
     }
 
-    // 3. FSD File from Analyst Result / Planning Phase (Guaranteed Minimum 2 Docs)
-    const analystFsdName = project.analystResult?.fsdFile || `Mustafa Fathur Rahman - FSD Kajian Perencanaan.pdf`;
+    // 3. FSD File from real documents uploaded via API (removes old synthetic dummy)
+    const realDocs = getProjectRealDocuments(project);
     let hasFsd = false;
     for (const doc of docsMap.values()) {
-        if (doc.label?.includes('FSD') || doc.name?.toLowerCase().includes('fsd') || doc.type === 'fsd') {
+        if (doc.label?.includes('FSD') || doc.type === 'fsd' || doc.doc_type === 'fsd' || doc.name?.toLowerCase().includes('fsd') || doc.name?.toLowerCase().includes('kajian')) {
             hasFsd = true;
             break;
         }
     }
     if (!hasFsd) {
-        docsMap.set(analystFsdName, {
-            id: `FSD-PLN-${project.id}`,
-            name: analystFsdName,
-            size: '1.8 MB',
-            type: 'fsd',
-            url: project.analystResult?.fsdUrl || null,
-            label: 'Hasil Kajian FSD (Perencanaan TI)'
-        });
+        for (const d of realDocs) {
+            const dt = (d.type || d.doc_type || '').toLowerCase();
+            const fn = (d.name || '').toLowerCase();
+            if (dt === 'fsd' || dt === 'fsd_dev' || fn.includes('fsd') || fn.includes('kajian')) {
+                docsMap.set(d.id || d.name, { ...d, label: 'Hasil Kajian FSD (Perencanaan TI)' });
+                hasFsd = true;
+                break;
+            }
+        }
+    }
+    if (!hasFsd) {
+        const fa = project.analystResult?.fsdFile;
+        if (fa && fa !== 'Dokumen_SDLC.pdf') {
+            docsMap.set(fa, {
+                id: `FSD-PLN-${project.req_id || project.reqId || project.id}`,
+                name: fa,
+                size: '1.8 MB',
+                type: 'fsd',
+                url: project.analystResult?.fsdUrl || null,
+                label: 'Hasil Kajian FSD (Perencanaan TI)',
+            });
+        }
     }
 
     // 4. FSD Dev / Spesifikasi Arsitektur Document
@@ -112,6 +128,7 @@ export default function WorkspaceDevLead() {
     const [isAnalystModalOpen, setIsAnalystModalOpen] = useState(false);
     const [targetProjectForAnalyst, setTargetProjectForAnalyst] = useState(null);
     const [selectedAnalystId, setSelectedAnalystId] = useState('');
+    const [analysisDeadline, setAnalysisDeadline] = useState('');
     const [leadNote, setLeadNote] = useState('');
     const [previewDoc, setPreviewDoc] = useState(null);
     const [sitUatModalProject, setSitUatModalProject] = useState(null);
@@ -122,6 +139,9 @@ export default function WorkspaceDevLead() {
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [analysts, setAnalysts] = useState([]);
     const [pmCandidates, setPmCandidates] = useState([]);
+    const [selectedDeveloperIds, setSelectedDeveloperIds] = useState([]);
+    const [developerCandidates, setDeveloperCandidates] = useState([]);
+    const [developerSearch, setDeveloperSearch] = useState('');
 
     // Helper ekstraksi angka durasi
     const getNumericEstimation = (proj) => {
@@ -137,16 +157,21 @@ export default function WorkspaceDevLead() {
             try {
                 const res = await userService.getAll();
                 const users = res.data || res || [];
-                const analystRoles = ['analyst', 'dev_analyst'];
-                setAnalysts(users.filter(u => analystRoles.includes(u.role_detail?.name || u.role || '')).map(u => ({
+                // Dev Lead "Dev Analis (PM)" dropdown: hanya Project Manager
+                setAnalysts(users.filter(u => (u.role_detail?.name || u.role || '') === 'project_manager').map(u => ({
                     id: u.id, name: u.name, email: u.email, department: u.division_detail?.name || u.division || 'IT', workload: 0,
                 })));
                 setPmCandidates(users.filter(u => (u.role_detail?.name || u.role || '') === 'project_manager').map(u => ({
                     id: u.id, name: u.name, email: u.email, department: u.division_detail?.name || u.division || 'IT', workload: 0,
                 })));
+                // Developer candidates
+                setDeveloperCandidates(users.filter(u => (u.role_detail?.name || u.role || '') === 'developer').map(u => ({
+                    id: u.id, name: u.name, skill: u.division_detail?.name || 'Developer',
+                })));
             } catch {
                 setAnalysts([]);
                 setPmCandidates([]);
+                setDeveloperCandidates([]);
             }
         };
         loadUsers();
@@ -248,6 +273,7 @@ export default function WorkspaceDevLead() {
     const handleOpenAnalystModal = (project) => {
         setTargetProjectForAnalyst(project);
         setSelectedAnalystId('');
+        setAnalysisDeadline('');
         setLeadNote('');
         setIsAnalystModalOpen(true);
     };
@@ -255,7 +281,7 @@ export default function WorkspaceDevLead() {
     // Submit penugasan Analyst
     const handleAssignAnalyst = () => {
         if (!selectedAnalystId) {
-            toast.error('Pilih System Analyst!');
+            toast.error('Pilih Dev Analis (PM)!');
             return;
         }
 
@@ -271,9 +297,13 @@ export default function WorkspaceDevLead() {
                 assignedAnalyst: chosenAnalyst,
                 analyst: chosenAnalyst.name,
                 analyst_id: chosenAnalyst.id,
+                pm_id: chosenAnalyst.id,
+                pm: chosenAnalyst,
                 devAnalyst: chosenAnalyst,
                 devAnalystName: chosenAnalyst.name,
                 leadNote: leadNote || 'Tolong kaji kelayakan arsitektur teknis dan estimasi mandays.',
+                current_stage_deadline: analysisDeadline || null,
+                deadline: analysisDeadline || null,
                 assignedAnalystAt: new Date().toISOString()
             });
 
@@ -297,50 +327,45 @@ export default function WorkspaceDevLead() {
             toast.error('Pilih proyek terlebih dahulu!');
             return;
         }
-        if (!selectedPM) {
-            toast.error('Pilih Project Manager penanggung jawab!');
+        if (!estimationDays) {
+            toast.error('Tentukan target deadline pengembangan!');
             return;
         }
 
         setIsSubmitting(true);
 
-        const pmDetails = pmCandidates.find(pm => pm.id === parseInt(selectedPM));
-        const chosenPMName = pmDetails?.name || selectedPM;
-        const estDays = parseInt(estimationDays || selectedProject.analystResult?.estimation || '30', 10) || 30;
-        
-        const calcDeadline = new Date();
-        calcDeadline.setDate(calcDeadline.getDate() + estDays);
-        const deadlineIso = calcDeadline.toISOString().split('T')[0];
+        const deadlineIso = estimationDays;
 
-        setTimeout(() => {
-            updateProject(selectedProject.id, {
-                status: 'IN_DEVELOPMENT',
-                statusColor: 'bg-indigo-100 text-indigo-700 border-indigo-200',
-                pm: pmDetails ? { id: pmDetails.id, name: pmDetails.name, initial: pmDetails.name.split(' ').map(n=>n[0]).join('').slice(0, 2) } : { name: chosenPMName, initial: 'PM' },
-                pmName: chosenPMName,
-                assignedPM: chosenPMName,
-                pmId: pmDetails?.id || user?.id,
-                estimation: `${estDays} Hari Kerja`,
-                deadline: deadlineIso,
-                targetDate: deadlineIso,
-                rbbDeadline: deadlineIso,
-                assignedBy: user?.name,
-                assignedPMAt: new Date().toISOString()
-            });
+        const devIds = selectedDeveloperIds.length > 0 ? selectedDeveloperIds : [];
 
+        updateProject(selectedProject.id, {
+            status: 'IN_DEVELOPMENT',
+            deadline: deadlineIso,
+            targetDate: deadlineIso,
+            current_stage_deadline: deadlineIso,
+            team_ids: devIds.length > 0 ? devIds : undefined,
+        }).then(() => {
+            // After project update, also call allocateTeam endpoint if dev selected
+            if (devIds.length > 0) {
+                return projectService.allocateTeam(selectedProject.id, devIds.map(id => ({ user_id: id })));
+            }
+        }).then(() => {
             addNotification(
-                'Penugasan PM Proyek Baru',
-                `Anda telah ditunjuk oleh Ketua Grup Pengembangan sebagai PM untuk proyek ${selectedProject.name}. Silakan alokasikan tim & kelola proyek.`,
+                'Proyek Masuk Tahap Pengembangan',
+                `Proyek ${selectedProject.name} telah memasuki tahap pengembangan. PM telah ditentukan dan tim developer telah dialokasikan.`,
                 'success',
                 '/pm/workspace'
             );
-
-            toast.success(`PM ${pmDetails?.name || ''} berhasil ditunjuk untuk memimpin proyek!`);
+            toast.success(`Proyek "${selectedProject.name}" telah memasuki tahap pengembangan!`);
             setIsSubmitting(false);
             setSelectedProject(null);
             setSelectedPM('');
             setEstimationDays('');
-        }, 600);
+            setSelectedDeveloperIds([]);
+        }).catch(err => {
+            toast.error('Gagal memulai pengembangan: ' + (err?.message || 'Error'));
+            setIsSubmitting(false);
+        });
     };
 
     if (isLoading) {
@@ -361,7 +386,7 @@ export default function WorkspaceDevLead() {
                             </span>
                         </div>
                         <p className="text-sm text-gray-500 mt-1">
-                            Kelola alur penerimaan proyek dari Perencanaan, penugasan System Analyst, penunjukan Project Manager, hingga monitoring status pengembangan dan rilis.
+                            Kelola alur penerimaan proyek dari Perencanaan, penugasan Dev Analis (PM), hingga monitoring status pengembangan dan rilis.
                         </p>
                     </div>
 
@@ -423,7 +448,7 @@ export default function WorkspaceDevLead() {
                         }`}
                     >
                         <CheckCircle2 size={16} />
-                        <span>Tab 3: Siap Tunjuk PM</span>
+                        <span>Tab 3: Siap Mulai Pengembangan</span>
                         <span className={`ml-1 text-[11px] px-2 py-0.5 rounded-full ${
                             activeTab === 'ready_pm' ? 'bg-white/20 text-white' : 'bg-indigo-100 text-indigo-700'
                         }`}>
@@ -474,7 +499,7 @@ export default function WorkspaceDevLead() {
                                 <Inbox className="text-blue-600" size={24} />
                                 <div>
                                     <h3 className="font-bold text-blue-900 text-sm">Proyek Baru dari Perencanaan</h3>
-                                    <p className="text-xs text-blue-700">Pelajari detail proyek dan deskripsi kebutuhan sebelum menugaskan System Analyst.</p>
+                                    <p className="text-xs text-blue-700">Pelajari detail proyek dan deskripsi kebutuhan sebelum menugaskan Dev Analis (PM).</p>
                                 </div>
                             </div>
                         </div>
@@ -488,10 +513,10 @@ export default function WorkspaceDevLead() {
                         ) : (
                             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
                                 {incomingProjects.map(project => (
-                                    <div key={project.id} className="bg-white p-5 rounded-2xl border border-gray-200 shadow-sm flex flex-col justify-between hover:shadow-md transition-all space-y-4">
+                                    <div key={project.req_id || project.reqId || project.id} className="bg-white p-5 rounded-2xl border border-gray-200 shadow-sm flex flex-col justify-between hover:shadow-md transition-all space-y-4">
                                         <div>
                                             <div className="flex items-center justify-between mb-2">
-                                                <span className="text-xs font-mono font-bold text-blue-600 bg-blue-50 px-2.5 py-0.5 rounded border border-blue-100">{project.id}</span>
+                                                <span className="text-xs font-mono font-bold text-blue-600 bg-blue-50 px-2.5 py-0.5 rounded border border-blue-100">{project.req_id || project.reqId || project.id}</span>
                                                 <div className="flex items-center gap-1.5 flex-wrap"><RBBBadge type={project.type} deadline={project.rbbDeadline} /><ProjectTypeBadge type={project.project_type} /></div>
                                             </div>
                                             <h3 className="font-bold text-gray-800 text-base mb-2">{project.name}</h3>
@@ -536,7 +561,7 @@ export default function WorkspaceDevLead() {
                                 <Clock className="text-amber-600" size={24} />
                                 <div>
                                     <h3 className="font-bold text-amber-900 text-sm">Proyek Dalam Kajian Analyst</h3>
-                                    <p className="text-xs text-amber-700">Proyek sedang dalam tahap analisa oleh System Analyst.</p>
+                                    <p className="text-xs text-amber-700">Proyek sedang dalam tahap analisa oleh Dev Analis (PM).</p>
                                 </div>
                             </div>
                         </div>
@@ -550,10 +575,10 @@ export default function WorkspaceDevLead() {
                         ) : (
                             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
                                 {analyzingProjects.map(project => (
-                                    <div key={project.id} className="bg-white p-5 rounded-2xl border border-amber-200/60 shadow-sm flex flex-col justify-between">
+                                    <div key={project.req_id || project.reqId || project.id} className="bg-white p-5 rounded-2xl border border-amber-200/60 shadow-sm flex flex-col justify-between">
                                         <div>
                                             <div className="flex items-center justify-between mb-2">
-                                                <span className="text-xs font-mono font-bold text-amber-600 bg-amber-50 px-2 py-0.5 rounded">{project.id}</span>
+                                                <span className="text-xs font-mono font-bold text-amber-600 bg-amber-50 px-2 py-0.5 rounded">{project.req_id || project.reqId || project.id}</span>
                                                 <span className="bg-amber-100 text-amber-800 text-[10px] font-bold px-2.5 py-0.5 rounded-full flex items-center gap-1">
                                                     <Clock size={10} /> Sedang Analisa
                                                 </span>
@@ -565,11 +590,17 @@ export default function WorkspaceDevLead() {
                                             <div className="bg-amber-50/60 p-3 rounded-xl border border-amber-100 mb-2">
                                                 <div className="text-xs text-amber-900 font-semibold flex items-center gap-1.5 mb-1.5">
                                                     <Users size={14} className="text-amber-700 shrink-0" />
-                                                    Analyst Bertugas: <span className="font-bold text-amber-950">{project.assignedAnalyst?.name || 'Citra Kirana'}</span>
+                                                    Dev Analis (PM): <span className="font-bold text-amber-950">{project.assignedAnalyst?.name || (typeof project.pm === 'object' ? project.pm?.name : project.pm) || '—'}</span>
                                                 </div>
+                                                {(project.deadline || project.current_stage_deadline) && (
+                                                    <div className="text-[10px] text-amber-800 flex items-center gap-1 ml-1 mb-1">
+                                                        <Clock size={10} />
+                                                        Deadline: {new Date(project.deadline || project.current_stage_deadline).toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' })}
+                                                    </div>
+                                                )}
                                                 <div className="flex items-center gap-1.5 text-[11px] text-amber-700 font-medium pt-1.5 border-t border-amber-200/50">
                                                     <Clock size={12} className="shrink-0 animate-pulse text-amber-600" />
-                                                    <span>Menunggu Analyst menyelesaikan kajian teknis</span>
+                                                    <span>Menunggu Dev Analis menyelesaikan kajian teknis</span>
                                                 </div>
                                             </div>
                                         </div>
@@ -586,8 +617,8 @@ export default function WorkspaceDevLead() {
                         {/* KIRI: Daftar Proyek Selesai Kajian */}
                         <div className="w-full lg:w-1/3 bg-white border border-gray-200 rounded-2xl shadow-sm overflow-hidden flex flex-col">
                             <div className="p-4 border-b border-gray-100 bg-gray-50 shrink-0">
-                                <h3 className="font-bold text-gray-800 text-sm">Pilih Proyek Siap Ditunjuk PM ({readyForPMProjects.length})</h3>
-                                <p className="text-xs text-gray-500">Proyek yang telah selesai dikaji oleh Analyst.</p>
+                                <h3 className="font-bold text-gray-800 text-sm">Pilih Proyek Siap Pengembangan ({readyForPMProjects.length})</h3>
+                                <p className="text-xs text-gray-500">Proyek yang telah selesai dikaji oleh Dev Analis.</p>
                             </div>
 
                             <div className="flex-1 overflow-y-auto p-3 space-y-3">
@@ -599,7 +630,7 @@ export default function WorkspaceDevLead() {
                                 ) : (
                                     readyForPMProjects.map(project => (
                                         <div
-                                            key={project.id}
+                                            key={project.req_id || project.reqId || project.id}
                                             onClick={() => { setSelectedProject(project); setSelectedPM(''); setEstimationDays(getNumericEstimation(project)); }}
                                             className={`p-4 rounded-xl cursor-pointer transition-all border ${
                                                 selectedProject?.id === project.id
@@ -608,7 +639,7 @@ export default function WorkspaceDevLead() {
                                             }`}
                                         >
                                             <div className="flex justify-between items-start mb-1.5">
-                                                <span className="text-xs font-mono font-bold text-blue-600 bg-blue-50 px-2 py-0.5 rounded">{project.id}</span>
+                                                <span className="text-xs font-mono font-bold text-blue-600 bg-blue-50 px-2 py-0.5 rounded">{project.req_id || project.reqId || project.id}</span>
                                                 <span className="bg-emerald-100 text-emerald-700 text-[10px] font-bold px-2 py-0.5 rounded">FSD Selesai</span>
                                             </div>
                                             <h4 className="font-bold text-gray-800 text-sm mb-1">{project.name}</h4>
@@ -637,15 +668,15 @@ export default function WorkspaceDevLead() {
                                         <p className="text-xs text-gray-500">{selectedProject.division} • Target: {selectedProject.targetDate}</p>
                                     </div>
 
-                                    {/* Hasil Kajian Teknis System Analyst Pengembangan (Sinkron) */}
+                                     {/* Hasil Kajian Teknis Dev Analis (PM) (Sinkron) */}
                                     <div className="bg-emerald-50/80 border border-emerald-200 rounded-xl p-4.5 space-y-3">
                                         <div className="flex justify-between items-center border-b border-emerald-200/60 pb-2 flex-wrap gap-2">
                                             <h4 className="text-xs font-bold text-emerald-950 uppercase tracking-wider flex items-center gap-1.5">
                                                 <FileText size={15} className="text-emerald-700" />
-                                                Hasil Kajian Teknis System Analyst (Pengembangan)
+                                                Hasil Kajian Teknis Dev Analis (PM Pengembangan)
                                             </h4>
                                             <span className="text-[11px] font-bold text-emerald-800 bg-emerald-100 px-2.5 py-0.5 rounded-full">
-                                                {selectedProject.devAnalystResult?.analystName || selectedProject.assignedAnalyst?.name || 'System Analyst Dev'}
+                                                {selectedProject.devAnalystResult?.analystName || selectedProject.assignedAnalyst?.name || 'Dev Analis (PM)'}
                                             </span>
                                         </div>
 
@@ -666,14 +697,23 @@ export default function WorkspaceDevLead() {
 
                                         <div className="bg-white p-3 rounded-lg border border-emerald-100 text-xs">
                                             <span className="text-[10px] font-bold text-gray-400 uppercase block mb-1">Catatan Spesifikasi Arsitektur Teknis:</span>
-                                            <p className="text-gray-800 leading-relaxed font-mono whitespace-pre-wrap">
-                                                "{selectedProject.devAnalystResult?.notes || selectedProject.devAnalystNotes || 'Arsitektur teknis dan integrasi API telah dikaji dan disiapkan untuk tahap pengembangan.'}"
-                                            </p>
-                                        </div>
+                                                <p className="text-gray-800 leading-relaxed font-mono whitespace-pre-wrap">
+                                                    "{selectedProject.devAnalystResult?.notes || selectedProject.devAnalystNotes || 'Arsitektur teknis dan integrasi API telah dikaji dan disiapkan untuk tahap pengembangan.'}"
+                                                </p>
+                                            </div>
+                                            {selectedProject.devAnalystResult?.techStack && (
+                                                <div className="bg-white p-3 rounded-lg border border-emerald-100 text-xs">
+                                                    <span className="text-[10px] font-bold text-gray-400 uppercase block mb-1">Rekomendasi Tech Stack:</span>
+                                                    <p className="text-gray-800 leading-relaxed">{selectedProject.devAnalystResult.techStack}</p>
+                                                </div>
+                                            )}
 
                                         <div className="flex items-center justify-between text-xs pt-1 border-t border-emerald-200/60">
                                             <span className="font-semibold text-emerald-900">
-                                                Estimasi Waktu IT: <strong className="text-emerald-950">{selectedProject.devAnalystResult?.estimation || '30 Hari Kerja'}</strong>
+                                                {selectedProject.devAnalystResult?.estimation
+                                                    ? <>Target Selesai IT: <strong className="text-emerald-950">{new Date(selectedProject.devAnalystResult.estimation).toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' })}</strong></>
+                                                    : <>Estimasi Waktu IT: <strong className="text-emerald-950">30 Hari Kerja</strong></>
+                                                }
                                             </span>
                                         </div>
                                     </div>
@@ -688,8 +728,8 @@ export default function WorkspaceDevLead() {
                                             {resolveAllProjectDocs(selectedProject).map((doc, idx) => (
                                                     <div key={idx} className="flex items-center justify-between p-3 border border-gray-200 rounded-xl bg-white hover:border-blue-300 transition-colors shadow-2xs">
                                                         <div className="flex items-center gap-3 overflow-hidden min-w-0">
-                                                            <div className="w-9 h-9 bg-red-100 text-red-600 rounded-lg flex items-center justify-center shrink-0 font-bold text-[10px]">
-                                                                PDF
+                                                            <div className={`w-9 h-9 rounded-lg flex items-center justify-center shrink-0 font-bold text-[10px] ${getDocIconStyle(doc.name || '')}`}>
+                                                                {getDocExtLabel(doc.name || '')}
                                                             </div>
                                                             <div className="truncate min-w-0">
                                                                 <p className="text-xs font-semibold text-gray-800 truncate">{doc.name}</p>
@@ -744,72 +784,89 @@ export default function WorkspaceDevLead() {
                                         </div>
                                     </div>
 
-                                    {/* Form Penunjukan PM */}
+                                    {/* Finalisasi & Mulai Pengembangan */}
                                     <div className="space-y-4 pt-2">
                                         <h3 className="text-sm font-bold text-gray-800 uppercase tracking-wider flex items-center gap-2">
-                                            <Users size={16} className="text-blue-600" /> Form Penunjukan Project Manager (PM)
+                                            <Rocket size={16} className="text-blue-600" /> Finalisasi &amp; Mulai Pengembangan
                                         </h3>
 
-                                        <div>
-                                            <label className="block text-xs font-bold text-gray-700 mb-1.5">
-                                                Pilih Project Manager <span className="text-red-500">*</span>
-                                            </label>
-                                            <select
-                                                value={selectedPM}
-                                                onChange={(e) => setSelectedPM(e.target.value)}
-                                                className="w-full px-4 py-2.5 rounded-xl border border-gray-200 focus:border-blue-600 focus:ring-2 focus:ring-blue-100 outline-none transition-all text-sm font-medium bg-white text-gray-800"
-                                            >
-                                                <option value="">-- Pilih Project Manager --</option>
-                                                {pmWorkloadStats.map(pm => (
-                                                    <option key={pm.id} value={pm.id}>
-                                                        {pm.name} (Beban: {pm.activeCount} Proyek Aktif)
-                                                    </option>
-                                                ))}
-                                            </select>
+                                        {/* Info: PM sudah auto-assigned */}
+                                        <div className="bg-blue-50/80 border border-blue-200 rounded-xl p-4 text-xs space-y-1">
+                                            <span className="font-bold text-blue-900 block text-[11px] uppercase tracking-wider">Project Manager (Otomatis)</span>
+                                            <p className="text-blue-800 font-semibold">
+                                                {(() => {
+                                                    const pmName = typeof selectedProject.pm === 'object'
+                                                        ? (selectedProject.pm?.name || '—')
+                                                        : (selectedProject.pm || selectedProject.pmName || '—');
+                                                    return pmName;
+                                                })()}
+                                            </p>
+                                            <p className="text-blue-600">PM = Dev Analis yang ditugaskan di tahap sebelumnya. Tidak perlu dipilih ulang.</p>
                                         </div>
 
+                                        {/* Pilih Tim Developer */}
                                         <div>
                                             <label className="block text-xs font-bold text-gray-700 mb-1.5">
-                                                Estimasi Pengerjaan Final (Hari) <span className="text-red-500">*</span>
+                                                Alokasi Tim Developer <span className="text-gray-400 font-normal">(Opsional — bisa dialokasikan nanti oleh PM)</span>
                                             </label>
-                                            <div className="relative">
+                                            <div className="relative mb-2">
+                                                <SearchIcon size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
                                                 <input
-                                                    type="number"
-                                                    min="1"
-                                                    step="1"
-                                                    value={estimationDays}
-                                                    onChange={(e) => {
-                                                        const val = e.target.value;
-                                                        if (val === '') {
-                                                            setEstimationDays('');
-                                                        } else {
-                                                            const num = parseInt(val, 10);
-                                                            if (!isNaN(num) && num > 0) {
-                                                                setEstimationDays(String(num));
-                                                            }
-                                                        }
-                                                    }}
-                                                    placeholder="Contoh: 30"
-                                                    className="w-full px-4 py-2.5 pr-12 rounded-xl border border-gray-200 focus:border-blue-600 focus:ring-2 focus:ring-blue-100 outline-none transition-all text-sm font-semibold text-gray-800 bg-white"
+                                                    type="text"
+                                                    value={developerSearch}
+                                                    onChange={(e) => setDeveloperSearch(e.target.value)}
+                                                    placeholder="Cari developer..."
+                                                    className="w-full pl-9 pr-3 py-2 rounded-lg border border-gray-200 bg-gray-50 text-xs focus:ring-2 focus:ring-[#00529C]/20 focus:border-[#00529C] outline-none transition-all"
                                                 />
-                                                <span className="absolute right-4 top-1/2 -translate-y-1/2 text-xs font-bold text-gray-400 pointer-events-none">
-                                                    Hari
-                                                </span>
+                                            </div>
+                                            <div className="space-y-1.5 max-h-40 overflow-y-auto">
+                                                {developerCandidates.filter(d => {
+                                                    if (!developerSearch.trim()) return true;
+                                                    const q = developerSearch.toLowerCase();
+                                                    return d.name.toLowerCase().includes(q) || d.skill.toLowerCase().includes(q);
+                                                }).map(dev => (
+                                                    <label key={dev.id} className={`flex items-center gap-2 p-2 rounded-lg border cursor-pointer transition-all ${
+                                                        selectedDeveloperIds.includes(dev.id)
+                                                            ? 'bg-blue-50 border-blue-300'
+                                                            : 'bg-white border-gray-200 hover:border-gray-300'
+                                                    }`}>
+                                                        <input
+                                                            type="checkbox"
+                                                            checked={selectedDeveloperIds.includes(dev.id)}
+                                                            onChange={() => {
+                                                                setSelectedDeveloperIds(prev =>
+                                                                    prev.includes(dev.id)
+                                                                        ? prev.filter(id => id !== dev.id)
+                                                                        : [...prev, dev.id]
+                                                                );
+                                                            }}
+                                                            className="text-[#00529C] focus:ring-[#00529C]"
+                                                        />
+                                                        <span className="text-xs font-medium text-gray-800">{dev.name}</span>
+                                                        <span className="text-[10px] text-gray-400 ml-auto">{dev.skill}</span>
+                                                    </label>
+                                                ))}
                                             </div>
                                         </div>
 
-                                        {selectedPM && (
-                                            <div className="p-3.5 bg-blue-50/80 border border-blue-200 rounded-xl text-xs space-y-1.5 animate-fade-in">
-                                                <span className="font-bold text-blue-900 block text-[11px] uppercase tracking-wider">Ringkasan Penunjukan Dev Lead:</span>
-                                                <div className="flex flex-wrap items-center justify-between text-blue-950 font-semibold gap-2">
-                                                    <span>PM Terpilih: <strong className="text-[#00529C] font-bold">{pmWorkloadStats.find(p => String(p.id) === String(selectedPM))?.name}</strong></span>
-                                                    <span>Proyek Aktif: <strong className="text-gray-800 font-bold">{pmWorkloadStats.find(p => String(p.id) === String(selectedPM))?.activeCount} Proyek</strong></span>
-                                                    <span>Perkiraan Tenggat: <strong className="text-emerald-700 font-bold">{(() => {
-                                                        const days = parseInt(estimationDays || '30', 10) || 30;
-                                                        const d = new Date();
-                                                        d.setDate(d.getDate() + days);
-                                                        return d.toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' });
-                                                    })()}</strong></span>
+                                        {/* Target Deadline Final */}
+                                        <div>
+                                            <label className="block text-xs font-bold text-gray-700 mb-1.5">
+                                                Target Deadline Pengembangan <span className="text-red-500">*</span>
+                                            </label>
+                                            <input
+                                                type="date"
+                                                value={estimationDays}
+                                                onChange={(e) => setEstimationDays(e.target.value)}
+                                                className="w-full px-4 py-2.5 rounded-xl border border-gray-200 focus:border-blue-600 focus:ring-2 focus:ring-blue-100 outline-none transition-all text-sm bg-white"
+                                            />
+                                        </div>
+
+                                        {estimationDays && (
+                                            <div className="p-3.5 bg-green-50/80 border border-green-200 rounded-xl text-xs space-y-1.5 animate-fade-in">
+                                                <span className="font-bold text-green-900 block text-[11px] uppercase tracking-wider">Ringkasan Finalisasi:</span>
+                                                <div className="flex flex-wrap items-center justify-between text-green-950 font-semibold gap-2">
+                                                    <span>Tenggat: <strong className="text-green-800 font-bold">{new Date(estimationDays).toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' })}</strong></span>
                                                 </div>
                                             </div>
                                         )}
@@ -817,11 +874,11 @@ export default function WorkspaceDevLead() {
                                         <div className="pt-2">
                                             <button
                                                 onClick={handleAssignPM}
-                                                disabled={isSubmitting}
-                                                className="w-full bg-[#1a365d] hover:bg-[#0f2342] text-white font-bold py-3.5 px-4 rounded-xl transition-all shadow-md flex items-center justify-center gap-2 text-sm disabled:opacity-50 cursor-pointer"
+                                                disabled={isSubmitting || !estimationDays}
+                                                className="w-full bg-[#00529C] hover:bg-[#004080] text-white font-bold py-3.5 px-4 rounded-xl transition-all shadow-md flex items-center justify-center gap-2 text-sm disabled:opacity-50 cursor-pointer"
                                             >
-                                                <Send size={16} />
-                                                Tunjuk PM &amp; Mulai Pengembangan
+                                                <Rocket size={16} />
+                                                Mulai Pengembangan &amp; Lanjutkan ke Development
                                             </button>
                                         </div>
                                     </div>
@@ -853,10 +910,10 @@ export default function WorkspaceDevLead() {
                         ) : (
                             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
                                 {inDevelopmentProjects.map(project => (
-                                    <div key={project.id} className="bg-white p-5 rounded-2xl border border-gray-200 shadow-sm flex flex-col justify-between hover:shadow-md transition-all space-y-4">
+                                    <div key={project.req_id || project.reqId || project.id} className="bg-white p-5 rounded-2xl border border-gray-200 shadow-sm flex flex-col justify-between hover:shadow-md transition-all space-y-4">
                                         <div>
                                             <div className="flex items-center justify-between mb-2">
-                                                <span className="text-xs font-mono font-bold text-blue-600 bg-blue-50 px-2.5 py-0.5 rounded border border-blue-100">{project.id}</span>
+                                                <span className="text-xs font-mono font-bold text-blue-600 bg-blue-50 px-2.5 py-0.5 rounded border border-blue-100">{project.req_id || project.reqId || project.id}</span>
                                                 {(() => {
                                                     const s = String(project.status || '').toUpperCase();
                                                     if (s === 'SIT_IN_PROGRESS') return <span className="px-2.5 py-1 rounded-full text-[11px] font-bold bg-sky-100 text-sky-800 border border-sky-200 animate-pulse">🔄 SIT Berlangsung</span>;
@@ -900,7 +957,7 @@ export default function WorkspaceDevLead() {
 
                                         <div className="pt-2 border-t border-gray-100">
                                             <button
-                                                onClick={() => navigate(`/pm/tasks/${project.id}`)}
+                                                onClick={() => navigate(`/pm/tasks/${project.req_id || project.reqId || project.id}`)}
                                                 className="w-full bg-[#003a73] hover:bg-[#002a5a] text-white text-xs font-bold py-2.5 px-4 rounded-xl transition-all flex items-center justify-center gap-2 shadow-xs cursor-pointer active:scale-98"
                                             >
                                                 <Eye size={15} />
@@ -937,10 +994,10 @@ export default function WorkspaceDevLead() {
                         ) : (
                             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
                                 {completedProjects.map(project => (
-                                    <div key={project.id} className="bg-white p-5 rounded-2xl border border-gray-200 shadow-sm flex flex-col justify-between hover:shadow-md transition-all space-y-4">
+                                    <div key={project.req_id || project.reqId || project.id} className="bg-white p-5 rounded-2xl border border-gray-200 shadow-sm flex flex-col justify-between hover:shadow-md transition-all space-y-4">
                                         <div>
                                             <div className="flex items-center justify-between mb-2">
-                                                <span className="text-xs font-mono font-bold text-blue-600 bg-blue-50 px-2.5 py-0.5 rounded border border-blue-100">{project.id}</span>
+                                                <span className="text-xs font-mono font-bold text-blue-600 bg-blue-50 px-2.5 py-0.5 rounded border border-blue-100">{project.req_id || project.reqId || project.id}</span>
                                                 <span className="px-2.5 py-1 rounded-full text-xs font-bold bg-emerald-100 text-emerald-800 border border-emerald-200 flex items-center gap-1">
                                                     <Check size={13} /> Live Production
                                                 </span>
@@ -1033,10 +1090,10 @@ export default function WorkspaceDevLead() {
                                     </span>
                                 </div>
 
-                                {/* Notes from System Analyst & Lead Perencanaan */}
+                                 {/* Notes from PM Analis & Lead Perencanaan */}
                                 {(targetProjectForAnalyst.analystNotes || targetProjectForAnalyst.analystResult?.notes) && (
                                     <div className="bg-white/90 p-3 rounded-lg border border-emerald-100 text-xs">
-                                        <span className="font-bold text-gray-500 text-[10px] uppercase block mb-0.5">Catatan System Analyst Perencanaan:</span>
+                                        <span className="font-bold text-gray-500 text-[10px] uppercase block mb-0.5">Catatan Lead Perencanaan:</span>
                                         <p className="text-gray-700 italic text-[11px] leading-relaxed">{targetProjectForAnalyst.analystNotes || targetProjectForAnalyst.analystResult?.notes}</p>
                                     </div>
                                 )}
@@ -1115,21 +1172,20 @@ export default function WorkspaceDevLead() {
                                     3. Penunjukan System Analyst
                                 </p>
                                 <div>
-                                    <label className="block text-xs font-bold text-gray-700 mb-1.5">Pilih System Analyst <span className="text-red-500">*</span></label>
+                                    <label className="block text-xs font-bold text-gray-700 mb-1.5">Pilih Dev Analis (PM) <span className="text-red-500">*</span></label>
                                     <select
                                         value={selectedAnalystId}
                                         onChange={(e) => setSelectedAnalystId(e.target.value)}
                                         className="w-full px-4 py-2.5 rounded-xl border border-gray-200 text-sm outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-600 bg-white font-semibold"
                                     >
-                                        <option value="">-- Pilih System Analyst --</option>
+                                        <option value="">-- Pilih Dev Analis (PM) --</option>
                                         {analysts.map(a => {
                                             const activeCount = (projects || []).filter(p => {
-                                                const analystName = typeof p.assignedAnalyst === 'object' 
-                                                    ? (p.assignedAnalyst?.name || '') 
-                                                    : String(p.assignedAnalyst || p.devAnalyst || p.devAnalystName || p.analyst || '');
-                                                const matches = analystName.toLowerCase().includes(a.name.toLowerCase());
-                                                const isFinished = p.status === 'LIVE_PRODUCTION' || p.status === 'CANCELLED' || p.status === 'REJECTED';
-                                                return matches && !isFinished;
+                                                const assignedId = p.analyst_id || (typeof p.assignedAnalyst === 'object' ? p.assignedAnalyst?.id : null);
+                                                const pmId = p.pm_id || (typeof p.pm === 'object' ? p.pm?.id : null);
+                                                const finishedAnalysis = ['ANALYSIS_APPROVED','DEV_ANALYSIS_DONE','LIVE_PRODUCTION','CANCELLED','REJECTED','READY_FOR_DEVELOPMENT','IN_DEVELOPMENT','DEV_COMPLETED','SIT_IN_PROGRESS','SIT_PASSED','SIT_REVISION','READY_FOR_QA','QA_IN_PROGRESS','QA_PASSED','RETURN_TO_DEV','CYBER_IN_PROGRESS','CYBER_PASSED','READY_FOR_UAT','UAT_IN_PROGRESS','UAT_PASSED','UAT_REVISION_SIT','UAT_REVISION_DEV','PENDING_GOLIVE','ON_HOLD'];
+                                                const isFinished = finishedAnalysis.includes(p.status);
+                                                return (assignedId === a.id || pmId === a.id) && !isFinished;
                                             }).length;
                                             return (
                                                 <option key={a.id} value={a.id}>
@@ -1141,7 +1197,17 @@ export default function WorkspaceDevLead() {
                                 </div>
 
                                 <div>
-                                    <label className="block text-xs font-bold text-gray-700 mb-1.5">Catatan Arahan Khusus untuk Analyst (Opsional)</label>
+                                    <label className="block text-xs font-bold text-gray-700 mb-1.5">Target Selesai Analisis (Opsional)</label>
+                                    <input
+                                        type="date"
+                                        value={analysisDeadline}
+                                        onChange={(e) => setAnalysisDeadline(e.target.value)}
+                                        className="w-full px-4 py-2.5 rounded-xl border border-gray-200 text-sm outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-600 bg-white"
+                                    />
+                                </div>
+
+                                <div>
+                                    <label className="block text-xs font-bold text-gray-700 mb-1.5">Catatan Arahan Khusus untuk Dev Analis (Opsional)</label>
                                     <textarea
                                         rows={3}
                                         value={leadNote}

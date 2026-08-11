@@ -29,7 +29,6 @@ import {
     Calendar,
     Clock,
     CheckCircle,
-    CheckCircle2,
     AlertCircle,
     Info,
     Edit,
@@ -56,7 +55,6 @@ import {
     Lock,
     Send,
     FileCheck,
-    ArrowRight,
 } from 'lucide-react';
 
 export default function TaskDetail() {
@@ -379,9 +377,6 @@ export default function TaskDetail() {
                 return <CheckCircle size={14} className="text-emerald-600" />;
             case 'Sedang Dikerjakan':
                 return <Clock size={14} className="text-amber-600" />;
-            case 'ANALYSIS_APPROVED': return 'bg-emerald-100 text-emerald-700 border-emerald-200';
-            case 'READY_FOR_DEVELOPMENT': return 'bg-cyan-100 text-cyan-700 border-cyan-200';
-            case 'IN_DEVELOPMENT': return 'bg-indigo-100 text-indigo-700 border-indigo-200';
             default:
                 return <AlertCircle size={14} className="text-gray-400" />;
         }
@@ -410,7 +405,7 @@ export default function TaskDetail() {
                     <div>
                         <div className="flex items-center gap-2 mb-1">
                             <span className="text-gray-500 text-xs font-semibold uppercase tracking-wider">
-                                {project.id}
+                                {project.req_id || project.reqId || project.id}
                             </span>
                         </div>
                         <h1 className="text-3xl font-bold text-gray-800">{project.name}</h1>

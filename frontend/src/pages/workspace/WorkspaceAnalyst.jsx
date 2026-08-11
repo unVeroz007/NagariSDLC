@@ -8,7 +8,6 @@ import {
     Download,
     Eye,
     CheckCircle,
-    XCircle,
     Clock,
     AlertCircle,
     Send,
@@ -16,23 +15,24 @@ import {
     FileText,
     Users,
     Filter,
+    Search,
     Calendar,
     ChevronRight,
     Upload,
     CloudUpload,
     Trash2,
     File,
-    Edit3,
     X,
     MessageSquare,
     UserCheck,
 } from 'lucide-react';
 import { useProjects, saveFileToStore, getProjectRealDocuments } from '../../contexts/ProjectContext';
+import { documentService } from '../../services/api';
 import LoadingSpinner from '../../components/LoadingSpinner';
 import EmptyState from '../../components/EmptyState';
 import DocumentViewerModal from '../../components/DocumentViewerModal';
 import toast from 'react-hot-toast';
-import { generateDocumentName, DOCUMENT_TYPES, formatFileSize } from '../../utils/documentNaming';
+import { generateDocumentName, DOCUMENT_TYPES, formatFileSize, getDocExtLabel, getDocIconStyle } from '../../utils/documentNaming';
 
 export default function WorkspaceAnalyst() {
     const { user } = useAuth();
@@ -44,7 +44,7 @@ export default function WorkspaceAnalyst() {
 
     const [selectedAnalystFilter, setSelectedAnalystFilter] = useState(() => {
         if (user?.role === 'super_admin' || user?.role === 'lead_group') return 'ALL';
-        return 'MY_PROJECTS';
+        return 'ALL'; // All analysts can see all team tasks
     });
 
     // Helper to safely extract analyst name from string or object
@@ -86,12 +86,24 @@ export default function WorkspaceAnalyst() {
 
 
     const [selectedProjectState, setSelectedProject] = useState(null);
+    const [projectSearch, setProjectSearch] = useState('');
+
+    const applyProjectSearch = (list) => {
+        if (!projectSearch.trim()) return list;
+        const term = projectSearch.toLowerCase();
+        return list.filter(p =>
+            String(p.id || '').toLowerCase().includes(term) ||
+            String(p.name || '').toLowerCase().includes(term) ||
+            String(p.division || '').toLowerCase().includes(term)
+        );
+    };
+
     const selectedProject = selectedProjectState || reviewQueue[0] || null;
 
     const [decision, setDecision] = useState('');
     const [projectType, setProjectType] = useState('NON_RBB');
     const [notes, setNotes] = useState('');
-    const [estimationDays, setEstimationDays] = useState('30');
+    const [estimationDays, setEstimationDays] = useState('');
     const [selectedDocType, setSelectedDocType] = useState('FSD');
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [uploadedFile, setUploadedFile] = useState(null);
@@ -115,7 +127,7 @@ export default function WorkspaceAnalyst() {
                 selectedProject?.title || selectedProject?.name
             );
             const fileObj = {
-                name: autoDocName,
+                name: autoDocName + '.' + (file.name.split('.').pop() || 'pdf'),
                 originalName: file.name,
                 size: formatFileSize(file.size),
                 type: docTypeCode.toLowerCase(),
@@ -212,53 +224,52 @@ export default function WorkspaceAnalyst() {
         setIsSubmitting(true);
         
         try {
-            // Analis TIDAK bisa langsung menolak. Status tetap ANALYSIS_APPROVED
-            // agar masuk antrean verifikasi Lead Perencanaan.
-            // Lead yang memutuskan akhir: konfirmasi tolak atau kembalikan ke Analis.
             const finalStatus = 'ANALYSIS_APPROVED';
-
             const docTypeCode = (uploadedFile?.doc_type || DOCUMENT_TYPES[selectedDocType]?.code || 'FSD');
 
-            const fsdDoc = uploadedFile ? {
-                id: `FSD-${Date.now()}`,
-                name: uploadedFile.name,
-                size: uploadedFile.size,
-                type: docTypeCode.toLowerCase(),
-                doc_type: docTypeCode,
-                url: uploadedFile.url,
-                uploadedAt: uploadedFile.uploadedAt || new Date().toISOString()
-            } : (selectedProject?.documents?.[0] ? {
-                ...selectedProject.documents[0],
-                type: docTypeCode.toLowerCase(),
-                doc_type: docTypeCode
-            } : {
+            let fsdDoc = {
                 id: `FSD-${Date.now()}`,
                 name: 'Dokumen_SDLC.pdf',
                 size: '1.8 MB',
                 type: docTypeCode.toLowerCase(),
                 doc_type: docTypeCode,
-                uploadedAt: new Date().toISOString()
-            });
+                url: null,
+                uploadedAt: new Date().toISOString(),
+            };
 
-            const existingDocs = selectedProject?.documents || [];
-            const newDocs = [fsdDoc, ...existingDocs.filter(d => d.type !== 'fsd' && d.doc_type !== 'FSD')];
+            // Upload file ke backend dulu (agar tersimpan permanen & bisa diakses Dev Lead)
+            if (uploadedFile?.rawFile && selectedProject?.id) {
+                try {
+                    const uploadRes = await documentService.upload(uploadedFile.rawFile, {
+                        project_id: selectedProject.id,
+                        document_type: docTypeCode,
+                        original_filename: uploadedFile.originalName || uploadedFile.rawFile.name,
+                    });
+                    if (uploadRes?.data) {
+                        fsdDoc = {
+                            id: uploadRes.data.id,
+                            name: uploadRes.data.file_name,
+                            size: formatFileSize(uploadRes.data.file_size || 0),
+                            type: docTypeCode.toLowerCase(),
+                            doc_type: docTypeCode,
+                            url: null,
+                            uploadedAt: uploadRes.data.created_at || new Date().toISOString(),
+                        };
+                    }
+                } catch (uploadErr) {
+                    toast.error(`Gagal mengunggah dokumen FSD: ${uploadErr.message}`);
+                }
+            }
 
             await updateProject(selectedProject.id, {
                 status: finalStatus,
-                statusColor: isApproved ? 'bg-purple-100 text-purple-700 border-purple-200' : 'bg-red-100 text-red-700 border-red-200',
-                analystDecision: decision,
-                analystNotes: notes,
-                fsdDocument: fsdDoc,
-                documents: newDocs,
                 analystResult: {
                     decision,
                     notes,
                     estimation: estimationDays || '30 hari pengerjaan',
                     fsdFile: fsdDoc.name,
-                    fsdUrl: fsdDoc.url || null
+                    fsdUrl: fsdDoc.url || null,
                 },
-                type: selectedProject.type || 'RBB',
-                typeLabel: (selectedProject.type || 'RBB') === 'RBB' ? 'RBB (Wajib Selesai)' : 'Non-RBB (Fleksibel)'
             });
 
             addNotification(
@@ -388,12 +399,21 @@ export default function WorkspaceAnalyst() {
                             <h2 className="text-base font-bold text-gray-800">Tugas Review</h2>
                             <p className="text-xs text-gray-500 mt-0.5">{reviewQueue.length} proyek dalam antrean</p>
                         </div>
-                        <button className="p-2 text-gray-400 hover:text-[#00529C] hover:bg-blue-50 rounded-lg transition-colors">
-                            <Filter size={16} />
-                        </button>
+                    </div>
+                    <div className="p-3 border-b border-gray-100 shrink-0">
+                        <div className="relative">
+                            <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                            <input
+                                type="text"
+                                value={projectSearch}
+                                onChange={(e) => setProjectSearch(e.target.value)}
+                                placeholder="Cari proyek..."
+                                className="w-full pl-9 pr-3 py-2 rounded-lg border border-gray-200 bg-gray-50 text-xs focus:ring-2 focus:ring-[#00529C]/20 focus:border-[#00529C] outline-none transition-all"
+                            />
+                        </div>
                     </div>
                     <div className="flex-1 overflow-y-auto p-3 space-y-2.5 bg-gray-50/40 min-h-[500px]">
-                        {reviewQueue.map((project) => (
+                        {applyProjectSearch(reviewQueue).map((project) => (
                             <div
                                 key={project.id}
                                 onClick={() => setSelectedProject(project)}
@@ -536,8 +556,8 @@ export default function WorkspaceAnalyst() {
                                         return realDocs.map((doc, idx) => (
                                             <div key={idx} className="flex flex-col sm:flex-row sm:items-center justify-between p-4 border border-gray-200 rounded-xl bg-gray-50 hover:border-gray-300 transition-all gap-3">
                                                 <div className="flex items-center gap-4">
-                                                    <div className="w-10 h-10 bg-red-100 text-red-600 rounded-xl flex items-center justify-center font-bold text-xs shrink-0">
-                                                        PDF
+                                                    <div className={`w-10 h-10 rounded-xl flex items-center justify-center font-bold text-xs shrink-0 ${getDocIconStyle(doc.name || '')}`}>
+                                                        {getDocExtLabel(doc.name || '')}
                                                     </div>
                                                     <div>
                                                         <p className="font-semibold text-gray-800 text-sm">{doc.name}</p>
@@ -603,6 +623,18 @@ export default function WorkspaceAnalyst() {
                                     <div className="flex items-center gap-2 flex-wrap">
                                         <div className="flex items-center gap-1.5 flex-wrap"><RBBBadge type={selectedProject?.type} deadline={selectedProject?.rbbDeadline} /><ProjectTypeBadge type={selectedProject?.project_type} /></div>
                                     </div>
+                                </div>
+
+                                <div>
+                                    <label className="block text-sm font-semibold text-gray-700 mb-1.5">
+                                        Estimasi Target Selesai Pengerjaan
+                                    </label>
+                                    <input
+                                        type="date"
+                                        value={estimationDays}
+                                        onChange={(e) => setEstimationDays(e.target.value)}
+                                        className="w-full px-4 py-2.5 bg-white border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#00529C] focus:border-[#00529C] transition-all"
+                                    />
                                 </div>
 
                                 <div>

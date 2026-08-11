@@ -1,6 +1,6 @@
 import RBBBadge from '../../components/RBBBadge';
 import ProjectTypeBadge from '../../components/ProjectTypeBadge';
-import { useState, useMemo, useRef } from 'react';
+import { useState, useMemo, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import { useNotifications } from '../../contexts/NotificationContext';
@@ -14,12 +14,12 @@ import {
     FileText,
     Users,
     Filter,
+    Search,
     Calendar,
     ChevronRight,
     Upload,
     CloudUpload,
     Trash2,
-    Briefcase,
     FolderOpen,
     Cpu,
     Layers,
@@ -28,11 +28,12 @@ import {
     MessageSquare
 } from 'lucide-react';
 import { useProjects, saveFileToStore, getFileFromStore } from '../../contexts/ProjectContext';
+import { userService, documentService } from '../../services/api';
 import LoadingSpinner from '../../components/LoadingSpinner';
 import EmptyState from '../../components/EmptyState';
 import DocumentViewerModal from '../../components/DocumentViewerModal';
 import toast from 'react-hot-toast';
-import { generateDocumentName, DOCUMENT_TYPES, formatFileSize } from '../../utils/documentNaming';
+import { generateDocumentName, DOCUMENT_TYPES, formatFileSize, getDocExtLabel, getDocIconStyle } from '../../utils/documentNaming';
 
 const resolveAllProjectDocs = (project) => {
     if (!project) return [];
@@ -110,8 +111,23 @@ export default function WorkspaceDevAnalyst() {
 
     const [selectedAnalystFilter, setSelectedAnalystFilter] = useState(() => {
         if (user?.role === 'super_admin' || user?.role === 'lead_group' || user?.role === 'development_lead') return 'ALL';
-        return 'MY_PROJECTS';
+        return 'ALL'; // All dev analysts can see all team tasks
     });
+    const [devAnalystList, setDevAnalystList] = useState([]);
+
+    // Load PM candidates for filter dropdown
+    useEffect(() => {
+        const loadPMs = async () => {
+            try {
+                const res = await userService.getAll();
+                const users = res.data || res || [];
+                setDevAnalystList(users.filter(u => (u.role_detail?.name || u.role || '') === 'project_manager'));
+            } catch {
+                setDevAnalystList([]);
+            }
+        };
+        loadPMs();
+    }, []);
 
     // Helper to safely extract analyst name from string or object
     const getAnalystName = (p) => {
@@ -147,6 +163,18 @@ export default function WorkspaceDevAnalyst() {
     }, [projects, selectedAnalystFilter, user]);
 
     const [selectedProjectState, setSelectedProject] = useState(null);
+    const [projectSearch, setProjectSearch] = useState('');
+
+    const applyProjectSearch = (list) => {
+        if (!projectSearch.trim()) return list;
+        const term = projectSearch.toLowerCase();
+        return list.filter(p =>
+            String(p.id || '').toLowerCase().includes(term) ||
+            String(p.name || '').toLowerCase().includes(term) ||
+            String(p.division || '').toLowerCase().includes(term)
+        );
+    };
+
     const selectedProject = selectedProjectState || reviewQueue[0] || null;
     const [decision, setDecision] = useState('Disetujui (Layak Develop)');
     const [techStack, setTechStack] = useState('Microservices Java Spring Boot + React JS + PostgreSQL');
@@ -203,42 +231,50 @@ export default function WorkspaceDevAnalyst() {
         setIsSubmitting(true);
 
         try {
-            const fsdDevDoc = uploadedFile ? {
+            let fsdDevDoc = {
                 id: `FSD-DEV-${Date.now()}`,
-                name: uploadedFile.name,
-                size: uploadedFile.size,
+                name: uploadedFile?.name || `Spesifikasi_Arsitektur_${selectedProject?.id || 'Dev'}.pdf`,
+                size: uploadedFile?.size || '2.1 MB',
                 type: 'fsd_dev',
                 doc_type: 'fsd_dev',
-                url: uploadedFile.url,
-                uploadedAt: uploadedFile.uploadedAt || new Date().toISOString()
-            } : {
-                id: `FSD-DEV-${Date.now()}`,
-                name: `Spesifikasi_Arsitektur_${selectedProject?.id || 'Dev'}.pdf`,
-                size: '2.1 MB',
-                type: 'fsd_dev',
-                doc_type: 'fsd_dev',
-                uploadedAt: new Date().toISOString()
+                url: uploadedFile?.url || null,
+                uploadedAt: uploadedFile?.uploadedAt || new Date().toISOString(),
             };
 
-            const existingDocs = selectedProject?.documents || [];
-            const newDocs = [fsdDevDoc, ...existingDocs];
+            // Upload FSD Dev file to backend permanently
+            if (uploadedFile?.rawFile && selectedProject?.id) {
+                try {
+                    const upRes = await documentService.upload(uploadedFile.rawFile, {
+                        project_id: selectedProject.id,
+                        document_type: 'FSD_DEV',
+                        original_filename: uploadedFile.originalName || uploadedFile.rawFile.name,
+                    });
+                    if (upRes?.data) {
+                        fsdDevDoc = {
+                            id: upRes.data.id,
+                            name: upRes.data.file_name,
+                            size: formatFileSize(upRes.data.file_size || 0),
+                            type: 'fsd_dev',
+                            doc_type: 'fsd_dev',
+                            url: null,
+                            uploadedAt: upRes.data.created_at || new Date().toISOString(),
+                        };
+                    }
+                } catch {
+                    // continue with synthetic doc if upload fails
+                }
+            }
 
             await updateProject(selectedProject.id, {
                 status: 'DEV_ANALYSIS_DONE',
-                statusColor: 'bg-indigo-100 text-indigo-700 border-indigo-200',
-                devAnalystDecision: decision,
-                devAnalystNotes: notes,
-                techStack: techStack,
-                fsdDevDocument: fsdDevDoc,
-                documents: newDocs,
                 devAnalystResult: {
                     decision,
                     techStack,
                     notes,
-                    estimation: estimationDays || '30 Hari Kerja',
-                    analystName: user?.name || 'Citra Kirana (Dev Analyst)',
-                    submittedAt: new Date().toISOString()
-                }
+                    estimation: estimationDays || null,
+                    analystName: user?.name || null,
+                    submittedAt: new Date().toISOString(),
+                },
             });
 
             addNotification(
@@ -312,11 +348,10 @@ export default function WorkspaceDevAnalyst() {
                                 onChange={(e) => setSelectedAnalystFilter(e.target.value || 'ALL')}
                                 className="px-3 py-1.5 rounded-xl text-xs font-semibold border border-gray-200 bg-white text-gray-700 outline-none focus:border-[#00529C]"
                             >
-                                <option value="">-- Filter Per System Analyst --</option>
-                                <option value="Citra Kirana">Citra Kirana</option>
-                                <option value="Mustafa Fathur Rahman">Mustafa Fathur Rahman</option>
-                                <option value="Fajar Ramadhan">Fajar Ramadhan</option>
-                                <option value="Ahmad Fauzi">Ahmad Fauzi</option>
+                                <option value="">-- Filter Per Dev Analis (PM) --</option>
+                                {devAnalystList.map(a => (
+                                    <option key={a.id} value={a.name}>{a.name}</option>
+                                ))}
                             </select>
                         </>
                     )}
@@ -336,11 +371,22 @@ export default function WorkspaceDevAnalyst() {
                             <h2 className="text-base font-bold text-gray-800">Tugas Kajian Teknis</h2>
                             <p className="text-xs text-gray-500 mt-0.5">{reviewQueue.length} proyek dalam antrean</p>
                         </div>
-                        <Filter size={16} className="text-gray-400" />
+                    </div>
+                    <div className="p-3 border-b border-gray-100 shrink-0">
+                        <div className="relative">
+                            <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                            <input
+                                type="text"
+                                value={projectSearch}
+                                onChange={(e) => setProjectSearch(e.target.value)}
+                                placeholder="Cari proyek..."
+                                className="w-full pl-9 pr-3 py-2 rounded-lg border border-gray-200 bg-gray-50 text-xs focus:ring-2 focus:ring-[#00529C]/20 focus:border-[#00529C] outline-none transition-all"
+                            />
+                        </div>
                     </div>
 
                     <div className="flex-1 overflow-y-auto p-3 space-y-3 bg-gray-50/40 flex flex-col justify-start min-h-[500px]">
-                        {reviewQueue.length === 0 ? (
+                        {applyProjectSearch(reviewQueue).length === 0 ? (
                             <div className="p-8 text-center text-gray-400 my-auto">
                                 <CheckCircle2 size={36} className="mx-auto mb-2 opacity-50 text-emerald-600" />
                                 <h4 className="text-xs font-bold text-gray-700">Tidak Ada Proyek Menunggu Kajian</h4>
@@ -349,7 +395,7 @@ export default function WorkspaceDevAnalyst() {
                                 </p>
                             </div>
                         ) : (
-                            reviewQueue.map((project) => (
+                            applyProjectSearch(reviewQueue).map((project) => (
                                 <div
                                     key={project.id}
                                     onClick={() => setSelectedProject(project)}
@@ -360,7 +406,7 @@ export default function WorkspaceDevAnalyst() {
                                 >
                                     <div className="flex items-center justify-between">
                                         <span className="text-[11px] font-mono font-bold text-blue-700 bg-blue-50 px-2 py-0.5 rounded border border-blue-100">
-                                            {project.id}
+                                            {project.req_id || project.reqId || project.id}
                                         </span>
                                         <div className="flex items-center gap-1.5 flex-wrap"><RBBBadge type={project.type} deadline={project.rbbDeadline} /><ProjectTypeBadge type={project.project_type} /></div>
                                     </div>
@@ -461,6 +507,11 @@ export default function WorkspaceDevAnalyst() {
                                                 Ditugaskan pada: {new Date(selectedProject.assignedAnalystAt).toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
                                             </p>
                                         )}
+                                        {(selectedProject.deadline || selectedProject.current_stage_deadline) && (
+                                            <p className="text-[10px] text-amber-700 mt-1 font-mono font-bold">
+                                                Target selesai: {new Date(selectedProject.deadline || selectedProject.current_stage_deadline).toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' })}
+                                            </p>
+                                        )}
                                     </div>
                                 </div>
 
@@ -474,8 +525,8 @@ export default function WorkspaceDevAnalyst() {
                                         {resolveAllProjectDocs(selectedProject).map((doc, idx) => (
                                             <div key={idx} className="flex items-center justify-between p-3 border border-gray-200 rounded-xl bg-white hover:border-blue-300 transition-colors shadow-2xs">
                                                 <div className="flex items-center gap-3 overflow-hidden min-w-0">
-                                                    <div className="w-9 h-9 bg-red-100 text-red-600 rounded-lg flex items-center justify-center shrink-0 font-bold text-[10px]">
-                                                        PDF
+                                                    <div className={`w-9 h-9 rounded-lg flex items-center justify-center shrink-0 font-bold text-[10px] ${getDocIconStyle(doc.name || '')}`}>
+                                                        {getDocExtLabel(doc.name || '')}
                                                     </div>
                                                     <div className="truncate min-w-0">
                                                         <p className="text-xs font-semibold text-gray-800 truncate">{doc.name}</p>
@@ -568,32 +619,14 @@ export default function WorkspaceDevAnalyst() {
 
                                         <div>
                                             <label className="block text-xs font-bold text-gray-700 mb-1.5">
-                                                Estimasi Waktu Pengerjaan IT (Hari) <span className="text-red-500">*</span>
+                                                Estimasi Target Selesai Pengerjaan
                                             </label>
-                                            <div className="relative">
-                                                <input
-                                                    type="number"
-                                                    min="1"
-                                                    step="1"
-                                                    value={estimationDays}
-                                                    onChange={(e) => {
-                                                        const val = e.target.value;
-                                                        if (val === '') {
-                                                            setEstimationDays('');
-                                                        } else {
-                                                            const num = parseInt(val, 10);
-                                                            if (!isNaN(num) && num > 0) {
-                                                                setEstimationDays(String(num));
-                                                            }
-                                                        }
-                                                    }}
-                                                    placeholder="Contoh: 30"
-                                                    className="w-full px-4 py-2.5 pr-12 bg-white border border-gray-300 rounded-xl text-xs font-semibold focus:ring-2 focus:ring-blue-100 focus:border-[#00529C] outline-none"
-                                                />
-                                                <span className="absolute right-4 top-1/2 -translate-y-1/2 text-xs font-bold text-gray-400 pointer-events-none">
-                                                    Hari
-                                                </span>
-                                            </div>
+                                            <input
+                                                type="date"
+                                                value={estimationDays}
+                                                onChange={(e) => setEstimationDays(e.target.value)}
+                                                className="w-full px-4 py-2.5 bg-white border border-gray-300 rounded-xl text-xs font-semibold focus:ring-2 focus:ring-blue-100 focus:border-[#00529C] outline-none"
+                                            />
                                         </div>
 
                                         <div>

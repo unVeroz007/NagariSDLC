@@ -11,12 +11,6 @@ import {
     X,
     CheckCircle,
     Edit,
-    Eye,
-    EyeOff,
-    ChevronRight,
-    Bell,
-    Settings,
-    HelpCircle,
 } from 'lucide-react';
 
 export default function Profile() {

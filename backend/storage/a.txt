@@ -1,0 +1,1 @@
+line 620-622: extra closing </div> from old number input's wrapper div. The date input now is self-closing but the old wrapper structure left orphaned end tags. Fix: remove the stray </div> at line 622 and also the orphaned </div> at 621.

@@ -1,5 +1,5 @@
 // src/components/LogTimeline.jsx
-import { Calendar, Clock, Eye, ChevronRight } from 'lucide-react';
+import { Calendar, Clock, Eye } from 'lucide-react';
 import { actionMap } from '../contexts/ActivityContext';
 
 export default function LogTimeline({ activities, onViewDetail }) {

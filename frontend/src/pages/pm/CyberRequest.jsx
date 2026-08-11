@@ -24,13 +24,8 @@ import {
   Eye,
   Download,
   ShieldAlert,
-  Zap,
-  CheckCircle2,
-  Check,
   User,
-  ExternalLink
 } from 'lucide-react';
-import { PROJECT_STATUS } from '../../constants/projectStatus';
 
 export default function CyberRequest() {
   const { user } = useAuth();
@@ -319,7 +314,7 @@ export default function CyberRequest() {
                 >
                   <div className="flex justify-between items-start mb-1.5">
                     <span className="text-xs font-mono font-bold text-blue-600 bg-blue-50 px-2 py-0.5 rounded border border-blue-100">
-                      {project.id}
+                      {project.req_id || project.reqId || project.id}
                     </span>
                     <div className="flex items-center gap-1.5 flex-wrap"><RBBBadge type={project.type} /><ProjectTypeBadge type={project.project_type} /></div>
                   </div>

@@ -12,14 +12,3 @@ export const getProjectStats = (projects) => {
     ).length;
     return { total, inProgress, pendingReview, completed };
 };
-
-// Fungsi untuk mendapatkan statistik dokumen
-export const getDocumentStats = (docs) => {
-    const total = docs.length;
-    const byType = {};
-    docs.forEach(doc => {
-        const typeKey = doc.doc_type || doc.type || 'LAINNYA';
-        byType[typeKey] = (byType[typeKey] || 0) + 1;
-    });
-    return { total, byType };
-};

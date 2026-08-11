@@ -130,6 +130,7 @@ export default function MainLayout() {
                                     <NavLink
                                         key={item.path}
                                         to={item.path}
+                                        end={item.end ?? false}
                                         onClick={() => setIsMobileOpen(false)}
                                         className={({ isActive }) =>
                                             `block px-3 py-1.5 rounded-lg transition-all text-sm ${isActive

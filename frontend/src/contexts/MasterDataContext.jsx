@@ -51,6 +51,7 @@ export function MasterDataProvider({ children }) {
                 setDivisions(INITIAL_DIVISIONS);
             }
         } catch {
+            toast.error('Gagal memuat master data dari server. Menampilkan data default.');
             setRoles(INITIAL_ROLES);
             setDivisions(INITIAL_DIVISIONS);
         } finally {

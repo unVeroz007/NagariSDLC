@@ -42,7 +42,7 @@ class ProjectResource extends JsonResource
             'creator' => new UserResource($this->whenLoaded('creator')),
             'pm' => new UserResource($this->whenLoaded('pm')),
             'analyst' => new UserResource($this->whenLoaded('analyst')),
-            'division' => $this->division?->name ?? 'Divisi TI',
+            'division' => $this->division?->name ?? null,
             'division_detail' => $this->division ? [
                 'id'   => $this->division->id,
                 'code' => $this->division->code,
@@ -53,6 +53,10 @@ class ProjectResource extends JsonResource
             'deadline' => $this->current_stage_deadline?->format('Y-m-d'),
             'rejection_reason' => $this->rejection_reason,
             'uat_notes' => $this->uat_notes,
+            'analystResult' => $this->analyst_result,
+            'analyst_result' => $this->analyst_result,
+            'devAnalystResult' => $this->dev_analyst_result,
+            'dev_analyst_result' => $this->dev_analyst_result,
             'staging_url' => $this->staging_url,
             'sit_uat_data' => $this->sit_uat_data,
             'qa_status' => $this->qa_status ?? 'NOT_SUBMITTED',
@@ -62,7 +66,8 @@ class ProjectResource extends JsonResource
 
             'team' => $this->relationLoaded('teamMembers') && $this->teamMembers ? $this->teamMembers->map(function($m) {
                 return [
-                    'id' => $m->user_id,
+                    'id' => $m->id,
+                    'user_id' => $m->user_id,
                     'name' => $m->user?->name ?? 'Developer',
                     'email' => $m->user?->email,
                     'role' => $m->role_in_project,

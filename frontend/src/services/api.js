@@ -163,6 +163,15 @@ export const authService = {
         return handleResponse(res);
     },
 
+    register: async (data) => {
+        const res = await fetch(`${BASE_URL}/auth/register`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+            body: JSON.stringify(data),
+        });
+        return handleResponse(res);
+    },
+
     logout: async () => {
         try {
             await fetch(`${BASE_URL}/auth/logout`, {
@@ -198,6 +207,10 @@ export const authService = {
 // PROJECT SERVICE
 // ──────────────────────────────────────────────────────────
 export const projectService = {
+    getNextReqId: async () => {
+        return apiFetch(`${BASE_URL}/projects/next-req-id`);
+    },
+
     getAll: async (filters = {}) => {
         const params = new URLSearchParams(filters).toString();
         return apiFetch(`${BASE_URL}/projects?${params}`);
@@ -242,8 +255,7 @@ export const projectService = {
     },
 
     getTimeline: async (id) => {
-        const res = await fetch(`${BASE_URL}/projects/${id}/timeline`, { headers: authHeaders() });
-        return handleResponse(res);
+        return apiFetch(`${BASE_URL}/projects/${id}/timeline`);
     },
 };
 
@@ -252,34 +264,27 @@ export const projectService = {
 // ──────────────────────────────────────────────────────────
 export const taskService = {
     getByProject: async (projectId) => {
-        const res = await fetch(`${BASE_URL}/projects/${projectId}/tasks`, { headers: authHeaders() });
-        return handleResponse(res);
+        return apiFetch(`${BASE_URL}/projects/${projectId}/tasks`);
     },
 
     create: async (projectId, taskData) => {
-        const res = await fetch(`${BASE_URL}/projects/${projectId}/tasks`, {
+        return apiFetch(`${BASE_URL}/projects/${projectId}/tasks`, {
             method: 'POST',
-            headers: authHeaders(),
             body: JSON.stringify(taskData),
         });
-        return handleResponse(res);
     },
 
     update: async (taskId, updates) => {
-        const res = await fetch(`${BASE_URL}/tasks/${taskId}`, {
+        return apiFetch(`${BASE_URL}/tasks/${taskId}`, {
             method: 'PATCH',
-            headers: authHeaders(),
             body: JSON.stringify(updates),
         });
-        return handleResponse(res);
     },
 
     delete: async (taskId) => {
-        const res = await fetch(`${BASE_URL}/tasks/${taskId}`, {
+        return apiFetch(`${BASE_URL}/tasks/${taskId}`, {
             method: 'DELETE',
-            headers: authHeaders(),
         });
-        return handleResponse(res);
     },
 };
 
@@ -288,26 +293,21 @@ export const taskService = {
 // ──────────────────────────────────────────────────────────
 export const qaRequestService = {
     getAll: async () => {
-        const res = await fetch(`${BASE_URL}/qa-requests`, { headers: authHeaders() });
-        return handleResponse(res);
+        return apiFetch(`${BASE_URL}/qa-requests`);
     },
 
     create: async (requestData) => {
-        const res = await fetch(`${BASE_URL}/qa-requests`, {
+        return apiFetch(`${BASE_URL}/qa-requests`, {
             method: 'POST',
-            headers: authHeaders(),
             body: JSON.stringify(requestData),
         });
-        return handleResponse(res);
     },
 
     updateStatus: async (id, status, notes = '') => {
-        const res = await fetch(`${BASE_URL}/qa-requests/${id}/status`, {
+        return apiFetch(`${BASE_URL}/qa-requests/${id}/status`, {
             method: 'PATCH',
-            headers: authHeaders(),
             body: JSON.stringify({ status, notes }),
         });
-        return handleResponse(res);
     },
 };
 
@@ -316,26 +316,21 @@ export const qaRequestService = {
 // ──────────────────────────────────────────────────────────
 export const cyberRequestService = {
     getAll: async () => {
-        const res = await fetch(`${BASE_URL}/cyber-requests`, { headers: authHeaders() });
-        return handleResponse(res);
+        return apiFetch(`${BASE_URL}/cyber-requests`);
     },
 
     create: async (requestData) => {
-        const res = await fetch(`${BASE_URL}/cyber-requests`, {
+        return apiFetch(`${BASE_URL}/cyber-requests`, {
             method: 'POST',
-            headers: authHeaders(),
             body: JSON.stringify(requestData),
         });
-        return handleResponse(res);
     },
 
     updateStatus: async (id, status, notes = '') => {
-        const res = await fetch(`${BASE_URL}/cyber-requests/${id}/status`, {
+        return apiFetch(`${BASE_URL}/cyber-requests/${id}/status`, {
             method: 'PATCH',
-            headers: authHeaders(),
             body: JSON.stringify({ status, notes }),
         });
-        return handleResponse(res);
     },
 };
 
@@ -344,34 +339,27 @@ export const cyberRequestService = {
 // ──────────────────────────────────────────────────────────
 export const userService = {
     getAll: async () => {
-        const res = await fetch(`${BASE_URL}/users`, { headers: authHeaders() });
-        return handleResponse(res);
+        return apiFetch(`${BASE_URL}/users`);
     },
 
     create: async (userData) => {
-        const res = await fetch(`${BASE_URL}/users`, {
+        return apiFetch(`${BASE_URL}/users`, {
             method: 'POST',
-            headers: authHeaders(),
             body: JSON.stringify(userData),
         });
-        return handleResponse(res);
     },
 
     update: async (id, updates) => {
-        const res = await fetch(`${BASE_URL}/users/${id}`, {
+        return apiFetch(`${BASE_URL}/users/${id}`, {
             method: 'PATCH',
-            headers: authHeaders(),
             body: JSON.stringify(updates),
         });
-        return handleResponse(res);
     },
 
     delete: async (id) => {
-        const res = await fetch(`${BASE_URL}/users/${id}`, {
+        return apiFetch(`${BASE_URL}/users/${id}`, {
             method: 'DELETE',
-            headers: authHeaders(),
         });
-        return handleResponse(res);
     },
 };
 
@@ -397,199 +385,81 @@ export const notificationService = {
 };
 
 // ──────────────────────────────────────────────────────────
-// DOCUMENT SERVICE
-// ──────────────────────────────────────────────────────────
+// DOCUMENT SERVICE (upload/download pakai raw fetch karena FormData + blob)
 export const documentService = {
     getAll: async (projectId) => {
         const url = projectId
             ? `${BASE_URL}/documents?project_id=${projectId}`
             : `${BASE_URL}/documents`;
-        const res = await fetch(url, { headers: authHeaders() });
-        return handleResponse(res);
+        return apiFetch(url);
     },
 
     upload: async (file, metadata) => {
         const formData = new FormData();
         formData.append('file', file);
         Object.entries(metadata).forEach(([k, v]) => {
-            if (v !== undefined && v !== null) {
-                formData.append(k, v);
-            }
+            if (v !== undefined && v !== null) formData.append(k, v);
         });
         const headers = { ...authHeaders() };
-        delete headers['Content-Type']; // Let browser set multipart boundary
-        const res = await fetch(`${BASE_URL}/documents`, {
-            method: 'POST',
-            headers,
-            body: formData,
-        });
+        delete headers['Content-Type'];
+        await ensureFreshToken();
+        const res = await fetch(`${BASE_URL}/documents`, { method: 'POST', headers, body: formData });
         return handleResponse(res);
     },
 
     download: async (id) => {
+        await ensureFreshToken();
         const res = await fetch(`${BASE_URL}/documents/${id}/download`, { headers: authHeaders() });
-        if (!res.ok) {
-            throw new Error(`Gagal mengunduh dokumen (HTTP ${res.status})`);
-        }
+        if (!res.ok) throw new Error(`Gagal mengunduh dokumen (HTTP ${res.status})`);
         return res.blob();
     },
 
-    delete: async (id) => {
-        const res = await fetch(`${BASE_URL}/documents/${id}`, {
-            method: 'DELETE',
-            headers: authHeaders(),
-        });
-        return handleResponse(res);
-    },
+    delete: async (id) => apiFetch(`${BASE_URL}/documents/${id}`, { method: 'DELETE' }),
 };
 
-// ──────────────────────────────────────────────────────────
-// ACTIVITY LOG SERVICE
-// ──────────────────────────────────────────────────────────
 export const activityLogService = {
     getAll: async (filters = {}) => {
         const params = new URLSearchParams(filters).toString();
-        const res = await fetch(`${BASE_URL}/activity-logs?${params}`, { headers: authHeaders() });
-        return handleResponse(res);
+        return apiFetch(`${BASE_URL}/activity-logs?${params}`);
     },
-
-    getSummary: async () => {
-        const res = await fetch(`${BASE_URL}/activity-logs/summary`, { headers: authHeaders() });
-        return handleResponse(res);
-    },
+    getSummary: async () => apiFetch(`${BASE_URL}/activity-logs/summary`),
 };
 
-// ──────────────────────────────────────────────────────────
-// WORKSPACE SERVICE
-// ──────────────────────────────────────────────────────────
 export const workspaceService = {
-    getByRole: async (role) => {
-        const res = await fetch(`${BASE_URL}/workspace/${role}`, { headers: authHeaders() });
-        return handleResponse(res);
-    },
+    getByRole: async (role) => apiFetch(`${BASE_URL}/workspace/${role}`),
 };
 
-// ──────────────────────────────────────────────────────────
-// ROLE SERVICE
-// ──────────────────────────────────────────────────────────
 export const roleService = {
-    getAll: async () => {
-        const res = await fetch(`${BASE_URL}/roles`, { headers: authHeaders() });
-        return handleResponse(res);
-    },
-
-    create: async (roleData) => {
-        const res = await fetch(`${BASE_URL}/roles`, {
-            method: 'POST',
-            headers: authHeaders(),
-            body: JSON.stringify(roleData),
-        });
-        return handleResponse(res);
-    },
-
-    update: async (id, updates) => {
-        const res = await fetch(`${BASE_URL}/roles/${id}`, {
-            method: 'PATCH',
-            headers: authHeaders(),
-            body: JSON.stringify(updates),
-        });
-        return handleResponse(res);
-    },
-
-    delete: async (id) => {
-        const res = await fetch(`${BASE_URL}/roles/${id}`, {
-            method: 'DELETE',
-            headers: authHeaders(),
-        });
-        return handleResponse(res);
-    },
+    getAll: async () => apiFetch(`${BASE_URL}/roles`),
+    create: async (roleData) => apiFetch(`${BASE_URL}/roles`, { method: 'POST', body: JSON.stringify(roleData) }),
+    update: async (id, updates) => apiFetch(`${BASE_URL}/roles/${id}`, { method: 'PATCH', body: JSON.stringify(updates) }),
+    delete: async (id) => apiFetch(`${BASE_URL}/roles/${id}`, { method: 'DELETE' }),
 };
 
-// ──────────────────────────────────────────────────────────
-// DIVISION SERVICE
-// ──────────────────────────────────────────────────────────
 export const divisionService = {
-    getAll: async () => {
-        const res = await fetch(`${BASE_URL}/divisions`, { headers: authHeaders() });
-        return handleResponse(res);
-    },
-
-    create: async (divData) => {
-        const res = await fetch(`${BASE_URL}/divisions`, {
-            method: 'POST',
-            headers: authHeaders(),
-            body: JSON.stringify(divData),
-        });
-        return handleResponse(res);
-    },
-
-    update: async (id, updates) => {
-        const res = await fetch(`${BASE_URL}/divisions/${id}`, {
-            method: 'PATCH',
-            headers: authHeaders(),
-            body: JSON.stringify(updates),
-        });
-        return handleResponse(res);
-    },
-
-    delete: async (id) => {
-        const res = await fetch(`${BASE_URL}/divisions/${id}`, {
-            method: 'DELETE',
-            headers: authHeaders(),
-        });
-        return handleResponse(res);
-    },
+    getAll: async () => apiFetch(`${BASE_URL}/divisions`),
+    create: async (divData) => apiFetch(`${BASE_URL}/divisions`, { method: 'POST', body: JSON.stringify(divData) }),
+    update: async (id, updates) => apiFetch(`${BASE_URL}/divisions/${id}`, { method: 'PATCH', body: JSON.stringify(updates) }),
+    delete: async (id) => apiFetch(`${BASE_URL}/divisions/${id}`, { method: 'DELETE' }),
 };
 
-// ──────────────────────────────────────────────────────────
-// DASHBOARD / ANALYTICS SERVICE
-// ──────────────────────────────────────────────────────────
 export const dashboardService = {
-    getSummary: async () => {
-        const res = await fetch(`${BASE_URL}/dashboard/summary`, { headers: authHeaders() });
-        return handleResponse(res);
-    },
-
-    getAnalytics: async () => {
-        const res = await fetch(`${BASE_URL}/dashboard/analytics`, { headers: authHeaders() });
-        return handleResponse(res);
-    },
+    getSummary: async () => apiFetch(`${BASE_URL}/dashboard/summary`),
+    getAnalytics: async () => apiFetch(`${BASE_URL}/dashboard/analytics`),
 };
 
-// ──────────────────────────────────────────────────────────
-// QUALITY GATE SERVICE
-// ──────────────────────────────────────────────────────────
 export const qualityGateService = {
-    getQueue: async () => {
-        const res = await fetch(`${BASE_URL}/quality-gate/queue`, { headers: authHeaders() });
-        return handleResponse(res);
-    },
-
-    approve: async (projectId, notes = '') => {
-        const res = await fetch(`${BASE_URL}/quality-gate/approve`, {
-            method: 'POST',
-            headers: authHeaders(),
-            body: JSON.stringify({ project_id: projectId, notes }),
-        });
-        return handleResponse(res);
-    },
+    getQueue: async () => apiFetch(`${BASE_URL}/quality-gate/queue`),
+    approve: async (projectId, notes = '') => apiFetch(`${BASE_URL}/quality-gate/approve`, {
+        method: 'POST',
+        body: JSON.stringify({ project_id: projectId, notes }),
+    }),
 };
 
-// ──────────────────────────────────────────────────────────
-// RELEASE REQUEST SERVICE
-// ──────────────────────────────────────────────────────────
 export const releaseRequestService = {
-    getAll: async () => {
-        const res = await fetch(`${BASE_URL}/release-requests`, { headers: authHeaders() });
-        return handleResponse(res);
-    },
-
-    store: async (data) => {
-        const res = await fetch(`${BASE_URL}/release-requests`, {
-            method: 'POST',
-            headers: authHeaders(),
-            body: JSON.stringify(data),
-        });
-        return handleResponse(res);
-    },
+    getAll: async () => apiFetch(`${BASE_URL}/release-requests`),
+    create: async (data) => apiFetch(`${BASE_URL}/release-requests`, {
+        method: 'POST',
+        body: JSON.stringify(data),
+    }),
 };

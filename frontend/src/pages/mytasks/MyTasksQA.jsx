@@ -9,7 +9,7 @@ import toast from "react-hot-toast";
 import { generateDocumentName, DOCUMENT_TYPES, formatFileSize } from '../../utils/documentNaming';
 import {
     Send, Eye, Calendar, CheckCircle, Info, FileText, Download, Upload,
-    Trash2, Check, X, Building, User, CheckCircle2, FolderOpen, Zap, Bug,
+    Check, X, Building, User, CheckCircle2, FolderOpen, Bug,
     Square, CheckSquare, Paperclip, ClipboardList, Copy
 } from "lucide-react";
 
@@ -203,10 +203,10 @@ export default function MyTasksQA() {
                                 <p className="text-xs text-gray-500 mt-1 flex items-center gap-2 flex-wrap">
                                     <Building size={14} className="text-gray-400" />
                                     <span>Divisi: <strong className="text-gray-700">{activeTask.division}</strong></span>
-                                    <span>�</span>
+                                    <span className="text-gray-300 mx-1">|</span>
                                     <Calendar size={14} className="text-gray-400" />
                                     <span>Target: <strong className="text-gray-700">{activeTask.targetDate || "2026-09-30"}</strong></span>
-                                    {activeTask.qaAssignee && (<><span>�</span><User size={14} className="text-gray-400" /><span>Ditugaskan: <strong className="text-purple-700">{activeTask.qaAssignee}</strong></span></>)}
+                                    {activeTask.qaAssignee && (<><span className="text-gray-300 mx-1">|</span><User size={14} className="text-gray-400" /><span>Ditugaskan: <strong className="text-purple-700">{activeTask.qaAssignee}</strong></span></>)}
                                 </p>
                             </div>
 

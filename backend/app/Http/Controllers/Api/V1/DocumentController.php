@@ -45,13 +45,25 @@ class DocumentController extends Controller
 
         $prefix = "{$nomor}/GPTD/{$docType}/{$dd}-{$bl}{$th}_{$pp}";
 
-        // Ekstensi dari original filena
+        // Ekstensi dari original filename
         $ext = '';
         if ($originalName) {
             $parts = explode('.', $originalName);
             if (count($parts) > 1) {
                 $ext = '.' . strtolower(end($parts));
             }
+        }
+        // Fallback: ekstensi dari MIME type file jika tidak ada di original name
+        if ($ext === '') {
+            $ext = match ($fileInfo['mime_type'] ?? '') {
+                'application/pdf' => '.pdf',
+                'application/vnd.ms-excel' => '.xls',
+                'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' => '.xlsx',
+                'image/jpeg' => '.jpg',
+                'image/png' => '.png',
+                'application/zip' => '.zip',
+                default => '.bin',
+            };
         }
 
         return $prefix . $ext;
@@ -169,7 +181,7 @@ class DocumentController extends Controller
 
         // Only the uploader, project creator, PM, or admin can delete
         $project = $document->project;
-        $canDelete = in_array($user->role->name, ['super_admin', 'head_of_it'])
+        $canDelete = in_array($user->role?->name ?? '', ['super_admin', 'head_of_it'])
             || $document->uploaded_by === $user->id
             || $project->created_by === $user->id
             || $project->pm_id === $user->id;

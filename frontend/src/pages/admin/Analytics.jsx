@@ -7,13 +7,9 @@ import {
     Bug,
     Gauge,
     ChevronRight,
-    Bell,
-    Settings,
-    HelpCircle,
     TrendingUp,
     TrendingDown,
     BarChart,
-    Activity,
     Loader2,
     Users,
 } from 'lucide-react';

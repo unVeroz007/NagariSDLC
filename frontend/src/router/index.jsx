@@ -60,9 +60,9 @@ import QualityGate from '../pages/QualityGate';
 
 // Role constants
 const ALL_ROLES = ['super_admin', 'lead_group', 'analyst', 'development_lead', 'project_manager', 'qa_lead', 'qa_tester', 'cyber_team', 'developer', 'business_user', 'cyber_lead', 'pentester', 'head_of_it'];
-const PM_ROLES = ['super_admin', 'project_manager'];
+const PM_ROLES = ['super_admin', 'project_manager', 'development_lead'];
 const LEAD_ROLES = ['super_admin', 'lead_group'];
-const ANALYST_ROLES = ['super_admin', 'analyst'];
+const ANALYST_ROLES = ['super_admin', 'analyst', 'dev_analyst'];
 const DEV_LEAD_ROLES = ['super_admin', 'development_lead'];
 const DEV_MEMBER_ROLES = ['super_admin', 'project_manager', 'development_lead', 'developer'];
 const QA_ROLES = ['super_admin', 'qa_lead', 'qa_tester', 'lead_group'];
@@ -322,13 +322,13 @@ const router = createBrowserRouter([
                 ),
             },
             {
-                path: '/pm/release-request', // backward compat (tanpa slash awal)
-                element: <Navigate to="/pm/release-request" replace />,
-            },
-            {
-                path: '/quality-gate',
-                element: <QualityGate />,
-            },
+        path: '/quality-gate',
+        element: (
+            <ProtectedRoute allowedRoles={['super_admin', 'head_of_it']}>
+                <QualityGate />
+            </ProtectedRoute>
+        ),
+    },
 
             // ADMINISTRASI
             {
@@ -369,11 +369,19 @@ const router = createBrowserRouter([
             },
             {
                 path: '/analytics',
-                element: <Analytics />,
+                element: (
+                    <ProtectedRoute allowedRoles={ADMIN_ROLES}>
+                        <Analytics />
+                    </ProtectedRoute>
+                ),
             },
             {
                 path: '/admin/settings',
-                element: <Settings />,
+                element: (
+                    <ProtectedRoute allowedRoles={ADMIN_ROLES}>
+                        <Settings />
+                    </ProtectedRoute>
+                ),
             },
         ],
     },

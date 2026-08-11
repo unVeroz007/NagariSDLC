@@ -16,7 +16,6 @@ import {
     UserPlus,
     ArrowRight,
     ArrowLeft,
-    KeyRound,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 
@@ -119,14 +118,12 @@ export default function Register() {
         setIsLoading(true);
 
         try {
-            await new Promise(resolve => setTimeout(resolve, 800));
-
-            const result = registerUser({
+            const result = await registerUser({
                 name: formData.name,
                 email: formData.email,
                 password: formData.password,
                 department: formData.department,
-                role: 'lead_group', // default role pengusul
+                role: formData.role || 'business_user',
             });
 
             if (!result.success) {

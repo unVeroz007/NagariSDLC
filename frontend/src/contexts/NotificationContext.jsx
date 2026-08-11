@@ -63,24 +63,14 @@ export function NotificationProvider({ children }) {
 
     // Fungsi untuk menghapus notifikasi
     const removeNotification = (id) => {
-        setNotifications(prev => prev.filter(n => n.id !== id));
-        // Update unread count jika notifikasi yang dihapus belum dibaca
-        const removed = notifications.find(n => n.id === id);
-        if (removed && !removed.isRead) {
-            setUnreadCount(prev => Math.max(0, prev - 1));
-        }
+        setNotifications(prev => {
+            const removed = prev.find(n => n.id === id);
+            if (removed && !removed.isRead) {
+                setUnreadCount(p => Math.max(0, p - 1));
+            }
+            return prev.filter(n => n.id !== id);
+        });
     };
-
-    // Simulasi notifikasi masuk dari berbagai event
-    // Ini bisa dijalankan di useEffect atau dipanggil dari komponen lain
-    useEffect(() => {
-        // Simulasi notifikasi periodik (untuk demo)
-        const interval = setInterval(() => {
-            // Hanya tambahkan jika sudah ada notifikasi dari action
-            // Biarkan event yang memicu notifikasi dari action
-        }, 30000);
-        return () => clearInterval(interval);
-    }, []);
 
     return (
         <NotificationContext.Provider value={{

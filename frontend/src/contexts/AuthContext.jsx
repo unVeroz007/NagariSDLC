@@ -43,8 +43,9 @@ export function AuthProvider({ children }) {
                         }
                     }
                 }
-            } catch {
-            } finally {
+        } catch {
+            localStorage.removeItem(SESSION_KEY);
+        } finally {
                 setIsLoading(false);
             }
         };
@@ -93,8 +94,11 @@ export function AuthProvider({ children }) {
             if (res && res.data) {
                 const updatedUser = res.data;
                 setUser(updatedUser);
-                const session = JSON.parse(localStorage.getItem(SESSION_KEY));
-                localStorage.setItem(SESSION_KEY, JSON.stringify({ ...session, user: updatedUser }));
+                const raw = localStorage.getItem(SESSION_KEY);
+                if (raw) {
+                    const session = JSON.parse(raw);
+                    localStorage.setItem(SESSION_KEY, JSON.stringify({ ...session, user: updatedUser }));
+                }
                 toast.success('Profil berhasil diperbarui');
             }
         } catch (err) {
@@ -102,8 +106,20 @@ export function AuthProvider({ children }) {
         }
     };
 
+    const registerUser = async (data) => {
+        try {
+            const res = await authService.register(data);
+            if (res && res.status === 'success') {
+                return { success: true, message: res.message || 'Registrasi berhasil.' };
+            }
+            return { success: false, message: res?.message || 'Registrasi gagal.' };
+        } catch (err) {
+            return { success: false, message: err.message || 'Registrasi gagal, coba lagi.' };
+        }
+    };
+
     return (
-        <AuthContext.Provider value={{ user, isLoggedIn, isLoading, login, logout, updateProfile }}>
+        <AuthContext.Provider value={{ user, isLoggedIn, isLoading, login, logout, updateProfile, registerUser }}>
             {children}
         </AuthContext.Provider>
     );

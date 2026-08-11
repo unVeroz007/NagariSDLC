@@ -20,23 +20,15 @@ import {
     Calendar,
     ChevronRight,
     Search,
-    Bell,
-    History,
-    HelpCircle,
     FileText,
-    File,
     CheckCircle,
     AlertCircle,
     Eye,
-    MoreVertical,
     Users,
     Filter,
     Inbox,
-    ChevronDown,
-    XCircle,
     ShieldAlert,
     AlertTriangle,
-    ArrowRight,
     UserCheck,
     X,
     Building,
@@ -44,11 +36,9 @@ import {
     Check,
     CheckCircle2,
     Bug,
-    Sparkles,
     FileCheck,
     Info,
     Paperclip,
-    ClipboardList
 } from 'lucide-react';
 
 const qaTeamMembers = [
@@ -63,7 +53,18 @@ export default function WorkspaceQA() {
     const { projects, updateProjectStatus } = useProjects();
     const { addNotification } = useNotifications();
 
-    const [activeTab, setActiveTab] = useState('DISPOSITION'); // 'DISPOSITION' | 'REVIEW_LEAD'
+    const [activeTab, setActiveTab] = useState('DISPOSITION');
+    const [projectSearch, setProjectSearch] = useState('');
+
+    const applyProjectSearch = (list) => {
+        if (!projectSearch.trim()) return list;
+        const term = projectSearch.toLowerCase();
+        return list.filter(p =>
+            String(p.id || '').toLowerCase().includes(term) ||
+            String(p.name || '').toLowerCase().includes(term) ||
+            String(p.division || '').toLowerCase().includes(term)
+        );
+    }; // 'DISPOSITION' | 'REVIEW_LEAD'
 
     // Tab 1 (Disposisi): proyek dari PM yang sudah diajukan ke QA Lead untuk ditunjuk testernya
     const qaProjects = useMemo(() => {
@@ -247,14 +248,28 @@ export default function WorkspaceQA() {
                         </button>
                     </div>
 
+                    {/* Search Bar */}
+                    <div className="px-1 pb-3 shrink-0">
+                        <div className="relative">
+                            <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                            <input
+                                type="text"
+                                value={projectSearch}
+                                onChange={(e) => setProjectSearch(e.target.value)}
+                                placeholder="Cari proyek..."
+                                className="w-full pl-9 pr-3 py-2 rounded-lg border border-gray-200 bg-gray-50 text-xs focus:ring-2 focus:ring-[#00529C]/20 focus:border-[#00529C] outline-none transition-all"
+                            />
+                        </div>
+                    </div>
+
                     {/* List Proyek */}
                     <div className="flex-1 overflow-y-auto space-y-3 pr-1">
-                        {activeList.length === 0 ? (
+                        {applyProjectSearch(activeList).length === 0 ? (
                             <div className="p-8 text-center text-gray-400 text-sm border-2 border-dashed border-gray-100 rounded-xl">
                                 Tidak ada proyek dalam tab ini saat ini.
                             </div>
                         ) : (
-                            activeList.map(p => (
+                            applyProjectSearch(activeList).map(p => (
                                 <div
                                     key={p.id}
                                     onClick={() => {

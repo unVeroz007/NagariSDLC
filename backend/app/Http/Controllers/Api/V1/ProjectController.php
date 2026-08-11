@@ -22,6 +22,14 @@ class ProjectController extends Controller
         protected ProjectWorkflowService $workflowService
     ) {}
 
+    public function nextReqId(): JsonResponse
+    {
+        return response()->json([
+            'status' => 'success',
+            'data'   => ['req_id' => Project::generateReqId()],
+        ]);
+    }
+
     public function index(Request $request): JsonResponse
     {
         $user = $request->user();
@@ -35,12 +43,19 @@ class ProjectController extends Controller
         if (! in_array($roleName, ['super_admin', 'head_of_it', 'lead_group'])) {
 
             if ($roleName === 'business_user') {
-                // Business User hanya lihat proyek yang diajukan sendiri
                 $query->where('created_by', $user->id);
 
-            } elseif ($roleName === 'analyst') {
-                // Analyst hanya lihat proyek yang ditugaskan ke dia
-                $query->where('analyst_id', $user->id);
+            } elseif ($roleName === 'analyst' || $roleName === 'dev_analyst') {
+                // Analyst & Dev Analyst dapat melihat semua proyek di fase analisis
+                // Agar saling tahu siapa memegang proyek mana
+                $query->whereIn('status', [
+                    ProjectStatus::PENDING->value,
+                    ProjectStatus::IN_REVIEW->value,
+                    ProjectStatus::ANALYSIS_APPROVED->value,
+                    ProjectStatus::READY_FOR_DEVELOPMENT->value,
+                    ProjectStatus::DEV_ANALYSIS->value,
+                    ProjectStatus::DEV_ANALYSIS_DONE->value,
+                ]);
 
             } elseif ($roleName === 'development_lead') {
                 // Development Lead: semua proyek di fase pengembangan (bukan cuma punya dia)
@@ -105,7 +120,7 @@ class ProjectController extends Controller
             $query->where('pm_id', $request->pm_id);
         }
 
-        $projects = $query->orderBy('created_at', 'desc')->paginate(50);
+        $projects = $query->orderBy('created_at', 'desc')->paginate($request->get('per_page', 50));
 
         return response()->json([
             'status' => 'success',
@@ -133,14 +148,14 @@ class ProjectController extends Controller
             $divisionId = $division?->id;
         }
         if (! $divisionId) {
-            $divisionId = $request->user()->division_id ?? 1;
+            $divisionId = $request->user()->division_id;
         }
 
         $project = Project::create([
             'req_id'       => Project::generateReqId(),
             'title'        => $title,
             'description'  => $request->description,
-            'type'         => $request->type ?? 'RBB',
+            'type'         => $request->type === 'Non-RBB' ? 'NON_RBB' : ($request->type ?? 'RBB'),
             'project_type' => $request->project_type ?? 'baru',
             'division_id'  => $divisionId,
             'target_date'  => $request->target_date,
@@ -177,6 +192,7 @@ class ProjectController extends Controller
         $request->validate([
             'title'                  => ['sometimes', 'string', 'max:255'],
             'description'            => ['sometimes', 'nullable', 'string'],
+            'type'                   => ['sometimes', 'nullable', 'string', 'in:RBB,NON_RBB,Non-RBB'],
             'pm_id'                  => ['sometimes', 'nullable', 'exists:users,id'],
             'analyst_id'             => ['sometimes', 'nullable', 'exists:users,id'],
             'division_id'            => ['sometimes', 'nullable', 'exists:divisions,id'],
@@ -185,7 +201,8 @@ class ProjectController extends Controller
             'staging_url'            => ['sometimes', 'nullable', 'string'],
             'uat_notes'              => ['sometimes', 'nullable', 'string'],
             'sit_uat_data'           => ['sometimes', 'nullable'],
-            'qa_status'              => ['sometimes', 'nullable', 'string'],
+            'analyst_result'         => ['sometimes', 'nullable'],
+            'dev_analyst_result'    => ['sometimes', 'nullable'],            'qa_status'              => ['sometimes', 'nullable', 'string'],
             'cyber_status'           => ['sometimes', 'nullable', 'string'],
             'status'                 => ['sometimes', 'string'],
             'project_type'           => ['sometimes', 'nullable', 'string', 'in:baru,perbaikan,update'],
@@ -202,10 +219,15 @@ class ProjectController extends Controller
             $analystId = $analystUser?->id;
         }
 
+        $typeValue = $request->type;
+        if ($typeValue === 'Non-RBB') {
+            $typeValue = 'NON_RBB';
+        }
+
         $updateData = array_filter([
             'title'                  => $request->title,
             'description'            => $request->description,
-            'type'                   => $request->type,
+            'type'                   => $typeValue,
             'project_type'           => $request->project_type,
             'pm_id'                  => $request->pm_id,
             'analyst_id'             => $analystId ?? $request->analyst_id,
@@ -213,8 +235,10 @@ class ProjectController extends Controller
             'target_date'            => $request->target_date,
             'current_stage_deadline' => $request->current_stage_deadline ?? $request->input('deadline'),
             'staging_url'            => $request->staging_url,
-            'uat_notes'              => $request->uat_notes ?? $request->input('notes'),
+            'uat_notes'              => $request->uat_notes,
             'sit_uat_data'           => $request->sit_uat_data,
+            'analyst_result'         => $request->input('analystResult') ?? $request->input('analyst_result'),
+            'dev_analyst_result'    => $request->input('devAnalystResult') ?? $request->input('dev_analyst_result'),
             'qa_status'              => $request->qa_status,
             'cyber_status'           => $request->cyber_status,
         ], fn($v) => ! is_null($v));
@@ -338,6 +362,20 @@ class ProjectController extends Controller
     public function destroy(int $id): JsonResponse
     {
         $project = Project::findOrFail($id);
+        $user = request()->user();
+
+        // Hanya super_admin/head_of_it yang bisa hapus proyek manapun
+        // PM hanya bisa hapus proyek yang dikelola sendiri
+        if (
+            !in_array($user->role?->name, ['super_admin', 'head_of_it'])
+            && $project->pm_id !== $user->id
+        ) {
+            return response()->json([
+                'status'  => 'error',
+                'message' => 'Anda tidak memiliki wewenang untuk menghapus proyek ini.',
+            ], 403);
+        }
+
         $project->delete();
 
         return response()->json([

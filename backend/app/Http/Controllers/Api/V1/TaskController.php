@@ -38,7 +38,7 @@ class TaskController extends Controller
             'title' => $request->title,
             'description' => $request->description,
             'assignee_id' => $request->assignee_id,
-            'status' => $request->status ? TaskStatus::from($request->status) : TaskStatus::TODO,
+            'status' => $request->filled('status') ? TaskStatus::from($request->status) : TaskStatus::TODO,
             'due_date' => $request->due_date,
         ]);
 

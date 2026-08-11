@@ -3,12 +3,10 @@ import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { getDefaultRouteForRole } from '../data/menuConfig';
 import {
-    CheckCircle,
     User,
     Lock,
     Eye,
     EyeOff,
-    KeyRound,
     Shield,
     Zap,
     BarChart2,

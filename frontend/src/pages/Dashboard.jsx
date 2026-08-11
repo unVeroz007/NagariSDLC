@@ -10,7 +10,6 @@ import {
     FileEdit,
     Bug,
     Verified,
-    MoreVertical,
     FileText,
     CheckCircle,
     PlusCircle,
@@ -21,14 +20,11 @@ import {
     Zap,
     Clock,
     AlertTriangle,
-    Inbox,
     MapPin,
     Flag,
     Rocket,
     ShieldCheck,
-    Send,
     Users,
-    CalendarDays,
     Code,
 } from 'lucide-react';
 import { useEffect, useMemo } from 'react';

@@ -39,7 +39,7 @@ class WorkspaceController extends Controller
 
         switch ($role) {
             case 'lead_group':
-                $query->whereIn('status', [ProjectStatus::IN_REVIEW->value, ProjectStatus::ANALYSIS_APPROVED->value]);
+                $query->whereIn('status', [ProjectStatus::IN_REVIEW->value, ProjectStatus::ANALYSIS_APPROVED->value, ProjectStatus::READY_FOR_QA->value, ProjectStatus::QA_IN_PROGRESS->value]);
                 break;
 
             case 'analyst':
@@ -51,12 +51,13 @@ class WorkspaceController extends Controller
                 break;
 
             case 'project_manager':
-                $query->where('pm_id', $user->id)
+                $query->where(function ($q) use ($user) {
+                    $q->where('pm_id', $user->id)
                       ->orWhereIn('status', [ProjectStatus::DEV_ANALYSIS_DONE->value, ProjectStatus::IN_DEVELOPMENT->value, ProjectStatus::RETURN_TO_DEV->value]);
+                });
                 break;
 
             case 'developer':
-                // Developer melihat task yang diassign padanya
                 $myTasks = ProjectTask::with(['project', 'assignee'])
                     ->where('assignee_id', $user->id)
                     ->orderBy('created_at', 'desc')
@@ -79,7 +80,6 @@ class WorkspaceController extends Controller
                 break;
 
             case 'qa_lead':
-            case 'lead_group':
                 $query->whereIn('status', [ProjectStatus::READY_FOR_QA->value, ProjectStatus::QA_IN_PROGRESS->value]);
                 break;
 

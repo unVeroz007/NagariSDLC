@@ -11,14 +11,9 @@ import {
     CheckCircle2,
     Clock,
     AlertCircle,
-    Filter,
     Search,
-    ChevronDown,
-    Building,
     Calendar,
-    ArrowUpRight,
     Kanban,
-    RefreshCw,
     Layers,
     MessageSquare
 } from 'lucide-react';

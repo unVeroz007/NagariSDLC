@@ -28,6 +28,8 @@ class Project extends Model
         'current_stage_deadline',
         'rejection_reason',
         'uat_notes',
+        'analyst_result',
+        'dev_analyst_result',
         'staging_url',
         'sit_uat_data',
         'qa_status',
@@ -41,6 +43,8 @@ class Project extends Model
             'status' => ProjectStatus::class,
             'target_date' => 'date',
             'current_stage_deadline' => 'date',
+            'analyst_result' => 'array',
+            'dev_analyst_result' => 'array',
             'sit_uat_data' => 'array',
         ];
     }

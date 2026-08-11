@@ -24,15 +24,12 @@ import {
     ShieldCheck,
     Rocket,
     FileCheck,
-    ArrowRight,
     CalendarDays,
     User,
-    RefreshCw,
     MapPin,
     Flag,
     FileText,
     Download,
-    X,
 } from 'lucide-react';
 import {
     PROJECT_STATUS,
@@ -319,7 +316,7 @@ function ProjectCard({ project, isSelected, onClick }) {
         >
             <div className="flex items-start justify-between gap-2 mb-2">
                 <div className="flex-1 min-w-0">
-                    <p className="text-xs font-bold text-[#00529C] mb-0.5">{project.id}</p>
+                    <p className="text-xs font-bold text-[#00529C] mb-0.5">{project.req_id || project.reqId || project.id}</p>
                     <p className="text-sm font-semibold text-gray-800 leading-tight line-clamp-2">{project.title || project.name}</p>
                 </div>
                 <div className="flex items-center gap-1.5 flex-wrap"><RBBBadge type={project.type} /><ProjectTypeBadge type={project.project_type} /></div>

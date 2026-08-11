@@ -167,7 +167,7 @@ class ProjectWorkflowService
         ProjectStatus::UAT_IN_PROGRESS->value => [UserRole::PROJECT_MANAGER->value, UserRole::BUSINESS_USER->value, UserRole::SUPER_ADMIN->value],
         ProjectStatus::UAT_REVISION_SIT->value => [UserRole::PROJECT_MANAGER->value, UserRole::BUSINESS_USER->value, UserRole::SUPER_ADMIN->value],
         ProjectStatus::UAT_REVISION_DEV->value => [UserRole::PROJECT_MANAGER->value, UserRole::BUSINESS_USER->value, UserRole::SUPER_ADMIN->value],
-        ProjectStatus::DEV_COMPLETED->value => [UserRole::PROJECT_MANAGER->value, UserRole::BUSINESS_USER->value, UserRole::SUPER_ADMIN->value],
+        ProjectStatus::DEV_COMPLETED->value => [UserRole::PROJECT_MANAGER->value, UserRole::DEVELOPMENT_LEAD->value, UserRole::DEVELOPER->value, UserRole::SUPER_ADMIN->value],
         ProjectStatus::RETURN_TO_DEV->value => [UserRole::QA_LEAD->value, UserRole::QA_TESTER->value, UserRole::CYBER_LEAD->value, UserRole::PENTESTER->value, UserRole::SUPER_ADMIN->value],
         ProjectStatus::READY_FOR_QA->value => [UserRole::PROJECT_MANAGER->value, UserRole::SUPER_ADMIN->value],
         ProjectStatus::QA_IN_PROGRESS->value => [UserRole::QA_LEAD->value, UserRole::LEAD_GROUP->value, UserRole::SUPER_ADMIN->value],
@@ -178,7 +178,7 @@ class ProjectWorkflowService
         ProjectStatus::UAT_PASSED->value => [UserRole::BUSINESS_USER->value, UserRole::PROJECT_MANAGER->value, UserRole::SUPER_ADMIN->value],
         ProjectStatus::PENDING_GOLIVE->value => [UserRole::PROJECT_MANAGER->value, UserRole::SUPER_ADMIN->value],
         ProjectStatus::LIVE_PRODUCTION->value => [UserRole::HEAD_OF_IT->value, UserRole::SUPER_ADMIN->value],
-        ProjectStatus::ON_HOLD->value => [UserRole::PROJECT_MANAGER->value, UserRole::SUPER_ADMIN->value],
+        ProjectStatus::ON_HOLD->value => [UserRole::PROJECT_MANAGER->value, UserRole::DEVELOPMENT_LEAD->value, UserRole::SUPER_ADMIN->value],
         ProjectStatus::CANCELLED->value => [UserRole::LEAD_GROUP->value, UserRole::HEAD_OF_IT->value, UserRole::SUPER_ADMIN->value],
     ];
 
@@ -194,7 +194,7 @@ class ProjectWorkflowService
         $nextStatus = $targetStatus->value;
 
         if ($currentStatus === $nextStatus) {
-            throw new Exception("Proyek sudah berada pada status '{$nextStatus}'.");
+            return $project;
         }
 
         // 1. Cek transisi non-linear (ON_HOLD / CANCELLED)
@@ -259,61 +259,89 @@ class ProjectWorkflowService
     protected function notifyRelevantRoles(Project $project, ?string $oldStatus, string $newStatus, User $actor, ?string $notes = null): void
     {
         $message = "Proyek '{$project->title}' telah mengubah status dari " . ($oldStatus ?? 'Baru') . " menjadi {$newStatus} oleh {$actor->name}.";
-        
+
         $rolesToNotify = [];
-        
-        // Define target audience based on state machine
-        if (in_array($newStatus, [ProjectStatus::IN_REVIEW->value, ProjectStatus::REJECTED->value, ProjectStatus::CANCELLED->value])) {
-            $rolesToNotify = ['lead_group', 'super_admin'];
-            if ($project->created_by) {
-                $rejectMsg = $newStatus === ProjectStatus::REJECTED->value && $notes
-                    ? "Proyek '{$project->title}' DITOLAK. Catatan perbaikan: {$notes}"
-                    : $message;
-                \App\Models\Notification::create([
-                    'user_id' => $project->created_by,
-                    'title' => $newStatus === ProjectStatus::REJECTED->value ? 'Proyek Ditolak — Perlu Perbaikan' : 'Update Status Proyek',
-                    'message' => $rejectMsg,
-                    'type' => $newStatus === ProjectStatus::REJECTED->value ? 'warning' : 'info',
-                ]);
-            }
-        } elseif ($newStatus === ProjectStatus::ANALYSIS_APPROVED->value) {
-            $rolesToNotify = ['development_lead', 'super_admin'];
-        } elseif (in_array($newStatus, [ProjectStatus::READY_FOR_DEVELOPMENT->value, ProjectStatus::DEV_ANALYSIS->value])) {
-            $rolesToNotify = ['analyst', 'super_admin'];
-        } elseif ($newStatus === ProjectStatus::IN_DEVELOPMENT->value) {
-            $rolesToNotify = ['developer', 'super_admin'];
-        } elseif ($newStatus === ProjectStatus::READY_FOR_QA->value) {
-            $rolesToNotify = ['qa_lead', 'lead_group', 'super_admin'];
-        } elseif ($newStatus === ProjectStatus::QA_PASSED->value) {
-            $rolesToNotify = ['project_manager', 'super_admin'];
-        } elseif ($newStatus === ProjectStatus::CYBER_IN_PROGRESS->value) {
-            $rolesToNotify = ['cyber_lead', 'super_admin'];
-        } elseif ($newStatus === ProjectStatus::PENDING_GOLIVE->value) {
-            $rolesToNotify = ['head_of_it', 'super_admin'];
-        } elseif ($newStatus === ProjectStatus::LIVE_PRODUCTION->value) {
-            // Notify everyone involved
-            if ($project->created_by) \App\Models\Notification::create(['user_id' => $project->created_by, 'title' => 'Proyek Rilis ke Produksi', 'message' => "Selamat! Proyek '{$project->title}' telah berhasil rilis ke production."]);
-            if ($project->pm_id) \App\Models\Notification::create(['user_id' => $project->pm_id, 'title' => 'Proyek Rilis ke Produksi', 'message' => "Proyek '{$project->title}' yang Anda pimpin telah LIVE."]);
+
+        match ($newStatus) {
+            ProjectStatus::IN_REVIEW->value, ProjectStatus::REJECTED->value, ProjectStatus::CANCELLED->value => $rolesToNotify = ['lead_group', 'super_admin'],
+            ProjectStatus::ANALYSIS_APPROVED->value                     => $rolesToNotify = ['development_lead', 'super_admin'],
+            ProjectStatus::READY_FOR_DEVELOPMENT->value,
+            ProjectStatus::DEV_ANALYSIS->value                          => $rolesToNotify = ['analyst', 'super_admin'],
+            ProjectStatus::DEV_ANALYSIS_DONE->value                     => $rolesToNotify = ['development_lead', 'super_admin'],
+            ProjectStatus::DEV_COMPLETED->value                         => $rolesToNotify = ['qa_lead', 'lead_group', 'cyber_lead', 'super_admin'],
+            ProjectStatus::IN_DEVELOPMENT->value                        => $rolesToNotify = ['developer', 'super_admin'],
+            ProjectStatus::SIT_IN_PROGRESS->value                       => $rolesToNotify = ['developer', 'qa_lead', 'super_admin'],
+            ProjectStatus::SIT_PASSED->value                            => $rolesToNotify = ['project_manager', 'super_admin'],
+            ProjectStatus::SIT_REVISION->value                          => $rolesToNotify = ['developer', 'project_manager', 'super_admin'],
+            ProjectStatus::UAT_IN_PROGRESS->value                       => $rolesToNotify = ['business_user', 'super_admin'],
+            ProjectStatus::UAT_REVISION_SIT->value,
+            ProjectStatus::UAT_REVISION_DEV->value                      => $rolesToNotify = ['developer', 'project_manager', 'super_admin'],
+            ProjectStatus::READY_FOR_QA->value                          => $rolesToNotify = ['qa_lead', 'lead_group', 'super_admin'],
+            ProjectStatus::QA_IN_PROGRESS->value                        => $rolesToNotify = ['qa_tester', 'qa_lead', 'super_admin'],
+            ProjectStatus::QA_PASSED->value                             => $rolesToNotify = ['project_manager', 'super_admin'],
+            ProjectStatus::CYBER_IN_PROGRESS->value                     => $rolesToNotify = ['cyber_lead', 'super_admin'],
+            ProjectStatus::CYBER_PASSED->value                          => $rolesToNotify = ['project_manager', 'super_admin'],
+            ProjectStatus::READY_FOR_UAT->value                         => $rolesToNotify = ['business_user', 'project_manager', 'super_admin'],
+            ProjectStatus::UAT_PASSED->value                            => $rolesToNotify = ['project_manager', 'super_admin'],
+            ProjectStatus::PENDING_GOLIVE->value                        => $rolesToNotify = ['head_of_it', 'super_admin'],
+            ProjectStatus::RETURN_TO_DEV->value                         => $rolesToNotify = ['developer', 'project_manager', 'super_admin'],
+            ProjectStatus::ON_HOLD->value                               => $rolesToNotify = ['lead_group', 'super_admin'],
+            default                                                     => null,
+        };
+
+        // Collect unique user IDs to avoid duplicates
+        $notifiedUserIds = [];
+        $notifications = [];
+        $now = now();
+
+        // Add creator notification for rejected/cancelled
+        if (in_array($newStatus, [ProjectStatus::REJECTED->value, ProjectStatus::CANCELLED->value]) && $project->created_by) {
+            $rejectMsg = $newStatus === ProjectStatus::REJECTED->value && $notes
+                ? "Proyek '{$project->title}' DITOLAK. Catatan perbaikan: {$notes}"
+                : $message;
+            $notifiedUserIds[] = $project->created_by;
+            $notifications[] = [
+                'user_id'    => $project->created_by,
+                'title'      => $newStatus === ProjectStatus::REJECTED->value ? 'Proyek Ditolak — Perlu Perbaikan' : 'Update Status Proyek',
+                'message'    => $rejectMsg,
+                'type'       => $newStatus === ProjectStatus::REJECTED->value ? 'warning' : 'info',
+                'created_at' => $now,
+                'updated_at' => $now,
+            ];
         }
 
-        if (!empty($rolesToNotify)) {
-            $users = User::whereHas('role', function ($q) use ($rolesToNotify) {
-                $q->whereIn('name', $rolesToNotify);
-            })->get();
+        // Live in production — notify all stakeholders
+        if ($newStatus === ProjectStatus::LIVE_PRODUCTION->value) {
+            foreach ([$project->created_by, $project->pm_id] as $uid) {
+                if ($uid && !in_array($uid, $notifiedUserIds)) {
+                    $notifiedUserIds[] = $uid;
+                    $notifications[] = [
+                        'user_id'    => $uid,
+                        'title'      => 'Proyek Rilis ke Produksi',
+                        'message'    => "Selamat! Proyek '{$project->title}' telah berhasil rilis ke production.",
+                        'type'       => 'info',
+                        'created_at' => $now,
+                        'updated_at' => $now,
+                    ];
+                }
+            }
+        }
 
-            $notifications = [];
-            $now = now();
+        // Batch insert role-based notifications (deduped)
+        if (!empty($rolesToNotify)) {
+            $users = User::whereHas('role', fn($q) => $q->whereIn('name', $rolesToNotify))->get();
             foreach ($users as $u) {
+                if (in_array($u->id, $notifiedUserIds)) continue;
+                $notifiedUserIds[] = $u->id;
                 $notifications[] = [
-                    'user_id' => $u->id,
-                    'title' => 'Pembaruan Alur Kerja Proyek',
-                    'message' => $message,
-                    'type' => 'info',
+                    'user_id'    => $u->id,
+                    'title'      => 'Pembaruan Alur Kerja Proyek',
+                    'message'    => $message,
+                    'type'       => 'info',
                     'created_at' => $now,
                     'updated_at' => $now,
                 ];
 
-                // Broadcast real-time notification via Reverb
                 broadcast(new \App\Events\NotificationCreated(
                     userId: $u->id,
                     title: 'Pembaruan Alur Kerja Proyek',
@@ -321,9 +349,10 @@ class ProjectWorkflowService
                     type: 'info'
                 ));
             }
-            if (!empty($notifications)) {
-                \App\Models\Notification::insert($notifications);
-            }
+        }
+
+        if (!empty($notifications)) {
+            \App\Models\Notification::insert($notifications);
         }
     }
 }

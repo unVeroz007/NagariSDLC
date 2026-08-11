@@ -16,10 +16,8 @@ import {
     Download,
     RefreshCw,
     Activity,
-    Calendar,
     Clock,
     Users,
-    Folder,
     Inbox,
     Eye,
 } from 'lucide-react';

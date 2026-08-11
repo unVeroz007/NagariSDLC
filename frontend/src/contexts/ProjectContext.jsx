@@ -114,10 +114,14 @@ export function ProjectProvider({ children }) {
                                 const finalName = generateDocumentName(project.req_id, doc.doc_type || doc.type || 'BRD', project.title);
                                 const ext = doc.rawFile.name.split('.').pop();
                                 const finalFile = new File([doc.rawFile], `${finalName}.${ext}`, { type: doc.rawFile.type });
-                                await documentService.upload(finalFile, {
+                                const uploadRes = await documentService.upload(finalFile, {
                                     project_id: project.id,
                                     document_type: doc.doc_type || doc.type || 'BRD',
                                 });
+                                // Simpan nama final dari API untuk ditampilkan di success modal
+                                if (uploadRes?.data?.file_name) {
+                                    doc.finalName = uploadRes.data.file_name;
+                                }
                             } catch (err) {
                                 toast.error(`Gagal upload dokumen "${doc.originalName}": ${err.message}`);
                             }

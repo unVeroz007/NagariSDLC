@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import { useProjects } from '../../contexts/ProjectContext';
@@ -16,14 +16,9 @@ import {
     Building,
     User,
     Check,
-    X,
-    Calendar,
-    Briefcase,
     AlertCircle,
-    ArrowRight,
     Send,
     Clock,
-    Shield
 } from 'lucide-react';
 
 const defaultDeveloperCandidates = [
@@ -260,7 +255,7 @@ export default function Allocation() {
                                     <div className="absolute top-0 left-0 w-1 h-full bg-[#1a365d]"></div>
                                 )}
                                 <div className="flex justify-between items-start mb-1.5">
-                                    <span className="text-xs font-mono font-bold text-blue-600 bg-blue-50 px-2 py-0.5 rounded">{project.id}</span>
+                                    <span className="text-xs font-mono font-bold text-blue-600 bg-blue-50 px-2 py-0.5 rounded">{project.req_id || project.reqId || project.id}</span>
                                     <div className="flex items-center gap-1.5 flex-wrap">
                                         <RBBBadge type={project.type} deadline={project.rbbDeadline} />
                                         <ProjectTypeBadge type={project.project_type} />

@@ -8,8 +8,8 @@ import DocumentViewerModal from "../../components/DocumentViewerModal";
 import toast from "react-hot-toast";
 import { generateDocumentName, DOCUMENT_TYPES, formatFileSize } from '../../utils/documentNaming';
 import {
-    Shield, CheckCircle, FileText, FileCheck, Eye, Lock, AlertTriangle, Clock,
-    User, AlertCircle, FolderOpen, Copy, ShieldAlert, Check, Building, ExternalLink,
+    Shield, CheckCircle, FileText, Eye, AlertTriangle, Clock,
+    User, FolderOpen, Copy, ShieldAlert, Check, Building, ExternalLink,
     Info, Send, Download, Upload, X, Paperclip, Calendar, CheckSquare, Square,
     CheckCircle2, ShieldCheck
 } from "lucide-react";
@@ -204,10 +204,10 @@ export default function MyTasksCyber() {
                                 <p className="text-xs text-gray-500 mt-1 flex items-center gap-2 flex-wrap">
                                     <Building size={14} className="text-gray-400" />
                                     <span>Divisi: <strong className="text-gray-700">{activeTask.division}</strong></span>
-                                    <span>�</span>
+                                    <span className="text-gray-300 mx-1">|</span>
                                     <Calendar size={14} className="text-gray-400" />
                                     <span>Target: <strong className="text-gray-700">{activeTask.targetDate || "2026-10-01"}</strong></span>
-                                    {activeTask.cyberAssignee && (<><span>�</span><User size={14} className="text-gray-400" /><span>Ditugaskan: <strong className="text-orange-700">{activeTask.cyberAssignee}</strong></span></>)}
+                                    {activeTask.cyberAssignee && (<><span className="text-gray-300 mx-1">|</span><User size={14} className="text-gray-400" /><span>Ditugaskan: <strong className="text-orange-700">{activeTask.cyberAssignee}</strong></span></>)}
                                 </p>
                             </div>
 

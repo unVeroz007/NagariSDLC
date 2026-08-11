@@ -80,5 +80,7 @@ export function useActivities() {
 }
 
 export function useActivityLog() {
-    return useContext(ActivityContext);
+    const ctx = useContext(ActivityContext);
+    if (!ctx) throw new Error('useActivityLog must be used within an ActivityProvider');
+    return ctx;
 }

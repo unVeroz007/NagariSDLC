@@ -5,8 +5,6 @@ import { useProjects } from '../contexts/ProjectContext';
 import ProjectTypeBadge from '../components/ProjectTypeBadge';
 import {
     Search,
-    Bell,
-    LogOut,
     Calendar,
     Rocket,
     CheckCircle,
@@ -18,12 +16,8 @@ import {
     ChevronRight,
     Clock,
     AlertCircle,
-    ArrowRight,
     Check,
-    MoreHorizontal,
-    Filter,
     Eye,
-    Download,
 } from 'lucide-react';
 
 // Filter status options
@@ -239,7 +233,7 @@ export default function Track() {
                                     <div className="p-4 pl-5">
                                         <div className="flex justify-between items-start mb-2">
                                             <div className="flex flex-col gap-1">
-                                                <span className="text-xs font-semibold text-gray-500">{project.id}</span>
+                                                <span className="text-xs font-semibold text-gray-500">{project.req_id || project.reqId || project.id}</span>
                                             </div>
                                             <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold ${getStatusBadge(project.status)}`}>
                                                 {project.status}

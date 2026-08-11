@@ -43,7 +43,7 @@ export const menuSections = {
             label: 'UTAMA',
             items: [
                 { label: 'Dashboard Utama', path: '/dashboard', icon: 'LayoutDashboard' },
-                { label: 'Daftar Semua Proyek', path: '/projects', icon: 'List' },
+                { label: 'Daftar Semua Proyek', path: '/projects', icon: 'List', end: true },
                 { label: 'Lacak Status Proyek', path: '/pm/tracker', icon: 'MapPin' },
                 { label: 'Manajemen Dokumen', path: '/documents', icon: 'Folders' },
             ],
@@ -104,7 +104,7 @@ export const menuSections = {
             items: [
                 { label: 'Workspace Lead', path: '/workspace/lead', icon: 'UserCheck' },
                 { label: 'Antrean Review', path: '/queue', icon: 'Clock' },
-                { label: 'Daftar Semua Proyek', path: '/projects', icon: 'List' },
+                { label: 'Daftar Semua Proyek', path: '/projects', icon: 'List', end: true },
                 { label: 'Lacak Status Proyek', path: '/track', icon: 'MapPin' },
                 { label: 'Manajemen Dokumen', path: '/documents', icon: 'Folders' },
             ],
@@ -128,7 +128,7 @@ export const menuSections = {
             label: 'UTAMA',
             items: [
                 { label: 'Workspace Analyst', path: '/workspace/analyst', icon: 'FileText' },
-                { label: 'Daftar Semua Proyek', path: '/projects', icon: 'List' },
+                { label: 'Daftar Semua Proyek', path: '/projects', icon: 'List', end: true },
             ],
         },
     ],
@@ -139,7 +139,7 @@ export const menuSections = {
                 { label: 'Workspace Development', path: '/workspace/dev-lead', icon: 'Users' },
                 { label: 'PM Workspace', path: '/pm/workspace', icon: 'Briefcase' },
                 { label: 'Kanban Board', path: '/pm/kanban', icon: 'Kanban' },
-                { label: 'Daftar Semua Proyek', path: '/projects', icon: 'List' },
+                { label: 'Daftar Semua Proyek', path: '/projects', icon: 'List', end: true },
             ],
         },
     ],
@@ -149,7 +149,7 @@ export const menuSections = {
             items: [
                 { label: 'Tugas Developer Saya', path: '/my-tasks/dev', icon: 'Code' },
                 { label: 'Kanban Board', path: '/pm/kanban', icon: 'Kanban' },
-                { label: 'Daftar Semua Proyek', path: '/projects', icon: 'List' },
+                { label: 'Daftar Semua Proyek', path: '/projects', icon: 'List', end: true },
             ],
         },
     ],
@@ -160,7 +160,7 @@ export const menuSections = {
                 { label: 'PM Workspace', path: '/pm/workspace', icon: 'Briefcase' },
                 { label: 'Kanban Board', path: '/pm/kanban', icon: 'Kanban' },
                 { label: 'Lacak Status Proyek', path: '/pm/tracker', icon: 'MapPin' },
-                { label: 'Daftar Semua Proyek', path: '/projects', icon: 'List' },
+                { label: 'Daftar Semua Proyek', path: '/projects', icon: 'List', end: true },
                 { label: 'Manajemen Dokumen', path: '/documents', icon: 'Folders' },
             ],
         },
@@ -191,7 +191,7 @@ export const menuSections = {
             items: [
                 { label: 'Workspace QA', path: '/workspace/qa', icon: 'Bug' },
                 { label: 'Tugas QA Saya', path: '/my-tasks/qa', icon: 'CheckSquare' },
-                { label: 'Daftar Semua Proyek', path: '/projects', icon: 'List' },
+                { label: 'Daftar Semua Proyek', path: '/projects', icon: 'List', end: true },
             ],
         },
     ],
@@ -210,7 +210,7 @@ export const menuSections = {
             items: [
                 { label: 'Workspace Cyber', path: '/workspace/cyber', icon: 'ShieldCheck' },
                 { label: 'Tugas Siber Saya', path: '/my-tasks/cyber', icon: 'Lock' },
-                { label: 'Daftar Semua Proyek', path: '/projects', icon: 'List' },
+                { label: 'Daftar Semua Proyek', path: '/projects', icon: 'List', end: true },
             ],
         },
     ],
@@ -220,7 +220,7 @@ export const menuSections = {
             items: [
                 { label: 'Workspace Cyber', path: '/workspace/cyber', icon: 'ShieldCheck' },
                 { label: 'Tugas Siber Saya', path: '/my-tasks/cyber', icon: 'Lock' },
-                { label: 'Daftar Semua Proyek', path: '/projects', icon: 'List' },
+                { label: 'Daftar Semua Proyek', path: '/projects', icon: 'List', end: true },
             ],
         },
     ],
@@ -239,7 +239,7 @@ export const menuSections = {
             items: [
                 { label: 'Quality Gate', path: '/quality-gate', icon: 'Verified' },
                 { label: 'Dashboard Utama', path: '/dashboard', icon: 'LayoutDashboard' },
-                { label: 'Daftar Semua Proyek', path: '/projects', icon: 'List' },
+                { label: 'Daftar Semua Proyek', path: '/projects', icon: 'List', end: true },
             ],
         },
         {
@@ -255,7 +255,7 @@ export const menuSections = {
             items: [
                 { label: 'Lacak Pengajuan', path: '/track', icon: 'Search' },
                 { label: 'Inisiasi Proyek Baru', path: '/projects/new', icon: 'PlusCircle' },
-                { label: 'Daftar Semua Proyek', path: '/projects', icon: 'List' },
+                { label: 'Daftar Semua Proyek', path: '/projects', icon: 'List', end: true },
             ],
         },
     ],

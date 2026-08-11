@@ -5,14 +5,11 @@ import { useProjects } from '../../contexts/ProjectContext';
 import {
     Search,
     User,
-    Filter,
     Clock,
     CheckCircle,
     AlertCircle,
-    ChevronRight,
     ArrowUpRight,
     Briefcase,
-    TrendingUp,
 } from 'lucide-react';
 
 export default function Tasks() {
@@ -108,7 +105,7 @@ export default function Tasks() {
                             <div>
                                 <div className="flex justify-between items-start mb-3">
                                     <span className="px-2.5 py-1 bg-gray-100 text-gray-600 rounded-lg text-xs font-mono font-bold">
-                                        {project.id}
+                                        {project.req_id || project.reqId || project.id}
                                     </span>
                                     <span className="flex items-center gap-1.5 text-xs font-bold px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-700">
                                         {getStatusIcon(project.status)}

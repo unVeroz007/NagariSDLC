@@ -11,11 +11,9 @@ import {
     ShieldCheck,
     CheckCircle2,
     CheckCircle,
-    ArrowRight,
     Inbox,
     Building,
     Calendar,
-    Copy,
     Eye,
     Download,
     FileText,
@@ -28,8 +26,6 @@ import {
     User,
     FolderOpen,
     ChevronRight,
-    Star,
-    Zap,
 } from 'lucide-react';
 
 // Status badge config

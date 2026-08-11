@@ -14,7 +14,6 @@ import {
   Clock,
   CheckCircle,
   XCircle,
-  RefreshCw,
   Inbox,
   UserCheck,
   Hourglass,
@@ -276,7 +275,7 @@ export default function Queue() {
                       
                       return (
                         <tr key={project.id} className="hover:bg-gray-50 transition-colors group">
-                          <td className="px-6 py-4 font-semibold text-[#00529C]">{project.id}</td>
+                          <td className="px-6 py-4 font-semibold text-[#00529C]">{project.req_id || project.reqId || project.id}</td>
                           <td className="px-6 py-4 font-medium text-gray-800">{project.title || project.name}</td>
                           <td className="px-6 py-4 text-gray-500">{project.division || '-'}</td>
                           <td className="px-6 py-4">
