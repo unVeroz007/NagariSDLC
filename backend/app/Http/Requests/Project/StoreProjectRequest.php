@@ -30,8 +30,7 @@ class StoreProjectRequest extends FormRequest
             'division_id' => ['nullable', 'exists:divisions,id'],
             'division'    => ['nullable', 'string'],
             'target_date' => ['nullable', 'date'],
-            'project_type'=> ['nullable', 'string', 'in:baru,perbaikan,update'],
-            'type'        => ['sometimes', 'nullable', 'string'],
+            'type'        => ['nullable', 'string'],
             'rbb_deadline'=> ['nullable', 'date'],
         ];
     }

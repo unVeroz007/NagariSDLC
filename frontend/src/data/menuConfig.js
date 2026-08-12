@@ -7,6 +7,7 @@ export const getDefaultRouteForRole = (role) => {
         case 'super_admin':
             return '/dashboard';
         case 'project_manager':
+            // Legacy — redirect to same as dev_analyst
             return '/pm/workspace';
         case 'lead_group':
             return '/workspace/lead';
@@ -15,7 +16,7 @@ export const getDefaultRouteForRole = (role) => {
         case 'development_lead':
             return '/workspace/dev-lead';
         case 'dev_analyst':
-            return '/workspace/dev-analyst';
+            return '/pm/workspace';
         case 'developer':
         case 'dev_team':
             return '/my-tasks/dev';
@@ -105,21 +106,6 @@ export const menuSections = {
                 { label: 'Workspace Lead', path: '/workspace/lead', icon: 'UserCheck' },
                 { label: 'Antrean Review', path: '/queue', icon: 'Clock' },
                 { label: 'Daftar Semua Proyek', path: '/projects', icon: 'List', end: true },
-                { label: 'Lacak Status Proyek', path: '/track', icon: 'MapPin' },
-                { label: 'Manajemen Dokumen', path: '/documents', icon: 'Folders' },
-            ],
-        },
-        {
-            label: 'Perencanaan & QA',
-            items: [
-                { label: 'Workspace QA', path: '/workspace/qa', icon: 'Bug' },
-                { label: 'Tugas QA Saya', path: '/my-tasks/qa', icon: 'CheckSquare' },
-            ],
-        },
-        {
-            label: 'Fase 1 (Inisiasi & Review)',
-            items: [
-                { label: 'Workspace Analyst (Plan)', path: '/workspace/analyst', icon: 'FileText' },
             ],
         },
     ],
@@ -154,9 +140,43 @@ export const menuSections = {
         },
     ],
     project_manager: [
+        // PM legacy — tetap ada tapi fungsinya sudah digabung ke dev_analyst
         {
             label: 'UTAMA',
             items: [
+                { label: 'PM Workspace', path: '/pm/workspace', icon: 'Briefcase' },
+                { label: 'Kanban Board', path: '/pm/kanban', icon: 'Kanban' },
+                { label: 'Lacak Status Proyek', path: '/pm/tracker', icon: 'MapPin' },
+                { label: 'Daftar Semua Proyek', path: '/projects', icon: 'List', end: true },
+                { label: 'Manajemen Dokumen', path: '/documents', icon: 'Folders' },
+            ],
+        },
+        {
+            label: 'Fase 2 (Pengembangan IT)',
+            items: [
+                { label: 'Alokasi Tim', path: '/pm/allocation', icon: 'Users' },
+            ],
+        },
+        {
+            label: 'Fase 3 (Pengujian)',
+            items: [
+                { label: 'Pengajuan QA', path: '/pm/qa-request', icon: 'Send' },
+                { label: 'Pengajuan Cyber', path: '/pm/cyber-request', icon: 'Shield' },
+            ],
+        },
+        {
+            label: 'Fase 4 (Rilis & Kepatuhan)',
+            items: [
+                { label: 'Terima Dok. QA & Cyber', path: '/pm/review-docs', icon: 'FileCheck' },
+                { label: 'Pengajuan Rilis ke INFRA', path: '/pm/release-request', icon: 'Rocket' },
+            ],
+        },
+    ],
+    dev_analyst: [
+        {
+            label: 'UTAMA',
+            items: [
+                { label: 'Workspace Analis (Dev)', path: '/workspace/dev-analyst', icon: 'Cpu' },
                 { label: 'PM Workspace', path: '/pm/workspace', icon: 'Briefcase' },
                 { label: 'Kanban Board', path: '/pm/kanban', icon: 'Kanban' },
                 { label: 'Lacak Status Proyek', path: '/pm/tracker', icon: 'MapPin' },

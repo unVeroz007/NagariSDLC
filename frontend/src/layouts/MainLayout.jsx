@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useMemo } from 'react';
 import { Outlet, NavLink, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { useProjects } from '../contexts/ProjectContext';
@@ -23,6 +23,27 @@ export default function MainLayout() {
     const [isLogoutModalOpen, setIsLogoutModalOpen] = useState(false);
     const [isProfileMenuOpen, setIsProfileMenuOpen] = useState(false);
     const profileMenuRef = useRef(null);
+
+    const pendingProjectsCount = (projects || []).filter(p => p.status === 'PENDING').length;
+    const incomingDevLeadCount = (projects || []).filter(p => p.status === 'READY_FOR_DEVELOPMENT').length;
+    // Personalisasi: masing-masing analis hanya lihat notifikasi proyek tugasnya sendiri
+    const analystPlanCount = useMemo(() => (projects || []).filter(p => {
+        if (p.status !== 'IN_REVIEW') return false;
+        if (user?.role === 'super_admin' || user?.role === 'lead_group') return true;
+        const assignedId = p.analyst_id || (typeof p.analyst === 'object' ? p.analyst?.id : null) || (typeof p.assignedAnalyst === 'object' ? p.assignedAnalyst?.id : null);
+        if (!assignedId || !user?.id) return false;
+        return Number(assignedId) === Number(user.id);
+    }).length, [projects, user]);
+    const devAnalystCount = useMemo(() => (projects || []).filter(p => {
+        if (p.status !== 'DEV_ANALYSIS') return false;
+        if (user?.role === 'super_admin' || user?.role === 'development_lead') return true;
+        if (!user?.id) return false;
+        const analystId = p.analyst_id 
+            || (p.analyst && typeof p.analyst === 'object' ? p.analyst.id : null);
+        const pmId = p.pm_id 
+            || (p.pm && typeof p.pm === 'object' ? p.pm.id : null);
+        return Number(analystId) === Number(user.id) || Number(pmId) === Number(user.id);
+    }).length, [projects, user]);
 
     useEffect(() => {
         const onDocClick = (e) => {
@@ -139,7 +160,29 @@ export default function MainLayout() {
                                             }`
                                         }
                                     >
-                                        <span>{item.label}</span>
+                                        <span className="flex items-center gap-2">
+                                            {item.label}
+                                            {item.path === '/workspace/lead' && pendingProjectsCount > 0 && (
+                                                <span className="inline-flex items-center justify-center min-w-[20px] h-5 px-1.5 rounded-full bg-red-500 text-white text-[10px] font-extrabold leading-none animate-pulse">
+                                                    {pendingProjectsCount}
+                                                </span>
+                                            )}
+                                            {item.path === '/workspace/dev-lead' && incomingDevLeadCount > 0 && (
+                                                <span className="inline-flex items-center justify-center min-w-[20px] h-5 px-1.5 rounded-full bg-amber-500 text-white text-[10px] font-extrabold leading-none animate-pulse">
+                                                    {incomingDevLeadCount}
+                                                </span>
+                                            )}
+                                            {item.path === '/workspace/analyst' && analystPlanCount > 0 && (
+                                                <span className="inline-flex items-center justify-center min-w-[20px] h-5 px-1.5 rounded-full bg-blue-500 text-white text-[10px] font-extrabold leading-none animate-pulse">
+                                                    {analystPlanCount}
+                                                </span>
+                                            )}
+                                            {item.path === '/workspace/dev-analyst' && devAnalystCount > 0 && (
+                                                <span className="inline-flex items-center justify-center min-w-[20px] h-5 px-1.5 rounded-full bg-cyan-500 text-white text-[10px] font-extrabold leading-none animate-pulse">
+                                                    {devAnalystCount}
+                                                </span>
+                                            )}
+                                        </span>
                                     </NavLink>
                                 ))}
                             </div>

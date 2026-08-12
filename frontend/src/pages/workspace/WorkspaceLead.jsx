@@ -25,6 +25,7 @@ import {
 } from 'lucide-react';
 import { useProjects, getFileFromStore, getProjectRealDocuments } from '../../contexts/ProjectContext';
 import { userService } from '../../services/api';
+import { documentService } from '../../services/api';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useNotifications } from '../../contexts/NotificationContext';
 import LoadingSpinner from '../../components/LoadingSpinner';
@@ -98,7 +99,15 @@ export default function WorkspaceLead() {
                 : verificationQueue
     );
     const [selectedProject, setSelectedProject] = useState(null);
-    
+
+    // Re-sync selectedProject to latest project data after each loadProjects refresh
+    useEffect(() => {
+        if (!selectedProject) return;
+        const fresh = (projects || []).find(p => String(p.id) === String(selectedProject.id)
+            || String(p.reqId || p.req_id) === String(selectedProject.reqId || selectedProject.req_id));
+        if (fresh) setSelectedProject(fresh);
+    }, [projects]);
+
     // Set default selected project
     const currentSelected = selectedProject || activeQueue[0] || null;
 
@@ -147,6 +156,23 @@ export default function WorkspaceLead() {
     const [rejectNotes, setRejectNotes] = useState('');
     const [showRevisionForm, setShowRevisionForm] = useState(false);
     const [revisionNotes, setRevisionNotes] = useState('');
+
+    const handleDownloadDoc = async (doc) => {
+        if (!doc?.id) return;
+        try {
+            const blob = await documentService.download(doc.id);
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = doc.name || 'dokumen.pdf';
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        } catch {
+            toast.error('Gagal mengunduh dokumen.');
+        }
+    };
 
     // Searchable analyst dropdown state
     const [analystSearch, setAnalystSearch] = useState('');
@@ -612,17 +638,28 @@ export default function WorkspaceLead() {
                     </div>
 
                     <div className="p-6 space-y-6">
-                        {/* Documents */}
+                        {/* Documents — hanya dokumen inisiasi (BRD, Memo, Lampiran) */}
                         <div className="mb-6">
                             <h3 className="text-lg font-semibold text-gray-800 mb-3 flex items-center gap-2">
                                 <FolderOpen size={20} className="text-[#00529C]" />
                                 Dokumen Inisiasi
                             </h3>
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                                {(getProjectRealDocuments(currentSelected).length > 0
-                                    ? getProjectRealDocuments(currentSelected)
-                                    : [{ id: 'BRD-01', name: `${currentSelected.title || currentSelected.name || 'Proyek'}_BRD_Inisiasi.pdf`, size: '2.4 MB', type: 'pdf', category: 'brd' }]
-                                ).map((doc, idx) => (
+                                {(() => {
+                                    const allDocs = getProjectRealDocuments(currentSelected);
+                                    const initDocs = allDocs.filter(d => {
+                                        const t = (d.type || d.doc_type || d.document_type || '').toUpperCase();
+                                        const n = (d.name || '').toLowerCase();
+                                        return t === 'BRD' || t === 'MEMO' || t === 'LAMPIRAN'
+                                            || n.includes('/brd/') || n.includes('/memo/') || n.includes('/lampiran/');
+                                    });
+                                    const docs = initDocs.length > 0 ? initDocs : allDocs;
+                                    if (docs.length === 0) return (
+                                        <div className="col-span-2 p-4 border border-dashed border-gray-200 rounded-xl bg-gray-50 text-center text-xs text-gray-400 italic">
+                                            Peminta belum mengunggah dokumen inisiasi.
+                                        </div>
+                                    );
+                                    return docs.map((doc, idx) => (
                                     <div key={idx} className="flex items-center justify-between p-3 border border-gray-200 rounded-lg bg-gray-50 hover:border-gray-300 transition-colors group">
                                         <div className="flex items-center gap-3 overflow-hidden min-w-0">
                                             <div className={`w-10 h-10 rounded flex items-center justify-center shrink-0 font-bold text-[10px] ${getDocIconStyle(doc.name || doc.file_name || doc.type || '')}`}>
@@ -677,7 +714,8 @@ export default function WorkspaceLead() {
                                             </button>
                                         </div>
                                     </div>
-                                ))}
+                                ));
+                            })()}
                             </div>
                         </div>
 
@@ -901,65 +939,47 @@ export default function WorkspaceLead() {
                                 </h3>
                                 <div className="space-y-4">
                                     {/* Berkas Kajian Teknis (FSD) Terlampir */}
-                                    <div className="bg-white p-4 rounded-xl border border-emerald-200 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                                        <div className="flex items-center gap-3 min-w-0">
-                                            <div className="w-10 h-10 bg-emerald-100 text-emerald-700 rounded-xl flex items-center justify-center font-bold text-xs shrink-0 border border-emerald-200">
-                                                FSD
+                                    {(() => {
+                                        // Ambil dokumen dari list uploadedDocs di analystResult
+                                        const analystDocIds = currentSelected?.analyst_docs || currentSelected?.analystResult?.uploadedDocs || [];
+                                        if (!analystDocIds.length) return (
+                                            <div className="bg-white p-4 rounded-xl border border-emerald-200 shadow-xs text-center text-xs text-gray-400 italic">
+                                                Analis belum melampirkan dokumen kajian.
+                                            </div>);
+                                        // Cocokkan dengan dokumen real dari API
+                                        const allApiDocs = getProjectRealDocuments(currentSelected);
+                                        const analystDocs = analystDocIds
+                                            .map(docRef => allApiDocs.find(d => String(d.id) === String(docRef.id)))
+                                            .filter(Boolean);
+                                        if (analystDocs.length === 0) return (
+                                            <div className="bg-white p-4 rounded-xl border border-emerald-200 shadow-xs text-center text-xs text-gray-400 italic">
+                                                Analis belum melampirkan dokumen kajian.
+                                            </div>);
+                                        return analystDocs.map((doc, idx) => (
+                                            <div key={idx} className="bg-white p-4 rounded-xl border border-emerald-200 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                                                <div className="flex items-center gap-3 min-w-0">
+                                                    <div className={`w-10 h-10 rounded-xl flex items-center justify-center font-bold text-xs shrink-0 border ${getDocIconStyle(doc.name || doc.file_name || '')}`}>
+                                                        {getDocExtLabel(doc.name || doc.file_name || '')}
+                                                    </div>
+                                                    <div className="min-w-0">
+                                                        <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">BERKAS KAJIAN TEKNIS</p>
+                                                        <p className="font-bold text-gray-800 text-sm truncate">{doc.name}</p>
+                                                        <p className="text-[11px] text-gray-500">{doc.size || 'N/A'} • {new Date(doc.created_at || doc.uploadedAt || Date.now()).toLocaleDateString('id-ID', {day:'numeric',month:'short'})}</p>
+                                                    </div>
+                                                </div>
+                                                <div className="flex items-center gap-2 shrink-0">
+                                                    <button type="button" onClick={() => setPreviewFsdDoc(doc)}
+                                                        className="px-3 py-1.5 border border-[#00529C] text-[#00529C] rounded-lg font-bold hover:bg-blue-50 transition-colors flex items-center gap-1.5 text-xs cursor-pointer">
+                                                        <Eye size={14} /> View &amp; Baca
+                                                    </button>
+                                                    <button type="button" onClick={() => handleDownloadDoc(doc)}
+                                                        className="p-2 text-emerald-700 bg-emerald-100 hover:bg-emerald-200 rounded-lg transition-colors cursor-pointer" title="Unduh">
+                                                        <Download size={16} />
+                                                    </button>
+                                                </div>
                                             </div>
-                                            <div className="min-w-0">
-                                                <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">BERKAS KAJIAN TEKNIS (FSD)</p>
-                                                <p className="font-bold text-gray-800 text-sm truncate">
-                                                    {currentFsdDoc?.name || `FSD_${(currentSelected?.title || currentSelected?.name || 'Dokumen').replace(/\s+/g, '_')}.pdf`}
-                                                </p>
-                                                <p className="text-[11px] text-gray-500">
-                                                    {currentFsdDoc?.size || '1.8 MB'} • Terlampir Hasil Kajian Analis
-                                                </p>
-                                            </div>
-                                        </div>
-                                        <div className="flex items-center gap-2 shrink-0">
-                                            <button
-                                                type="button"
-                                                onClick={() => setPreviewFsdDoc(currentFsdDoc)}
-                                                className="px-3 py-1.5 border border-[#00529C] text-[#00529C] rounded-lg font-bold hover:bg-blue-50 transition-colors flex items-center gap-1.5 text-xs cursor-pointer"
-                                            >
-                                                <Eye size={14} />
-                                                View &amp; Baca FSD
-                                            </button>
-                                            <button
-                                                type="button"
-                                                onClick={() => {
-                                                    const doc = currentFsdDoc;
-                                                    const rawUrl = doc?.url;
-                                                    const fileName = doc?.name || `FSD_${(currentSelected?.title || currentSelected?.name || 'Dokumen').replace(/\s+/g, '_')}.pdf`;
-                                                    if (rawUrl) {
-                                                        const link = document.createElement('a');
-                                                        link.href = rawUrl;
-                                                        link.download = fileName;
-                                                        document.body.appendChild(link);
-                                                        link.click();
-                                                        document.body.removeChild(link);
-                                                        toast.success(`Mengunduh file FSD "${fileName}"...`);
-                                                    } else {
-                                                        const textContent = `PT BANK NAGARI - DOKUMEN FSD RESMI\n===================================\nDokumen: ${fileName}\nProyek: ${currentSelected.title || currentSelected.name}\nAnalis: ${currentSelected.analystResult?.analystName || 'System Analyst'}\nStatus Kajian: ${currentSelected.analystResult?.decision || 'Disetujui'}`;
-                                                        const blob = new Blob([textContent], { type: 'text/plain;charset=utf-8' });
-                                                        const url = URL.createObjectURL(blob);
-                                                        const link = document.createElement('a');
-                                                        link.href = url;
-                                                        link.download = fileName.endsWith('.pdf') ? fileName.replace('.pdf', '_ringkasan.txt') : `${fileName}.txt`;
-                                                        document.body.appendChild(link);
-                                                        link.click();
-                                                        document.body.removeChild(link);
-                                                        URL.revokeObjectURL(url);
-                                                        toast.success(`Mengunduh salinan berkas FSD "${fileName}"...`);
-                                                    }
-                                                }}
-                                                className="p-2 text-emerald-700 bg-emerald-100 hover:bg-emerald-200 rounded-lg transition-colors cursor-pointer"
-                                                title="Unduh FSD"
-                                            >
-                                                <Download size={16} />
-                                            </button>
-                                        </div>
-                                    </div>
+                                        ));
+                                    })()}
 
                                     {(() => {
                                         const dec = currentSelected.analystDecision || currentSelected.analystResult?.decision || 'Disetujui';

@@ -55,6 +55,7 @@ class ProjectResource extends JsonResource
             'uat_notes' => $this->uat_notes,
             'analystResult' => $this->analyst_result,
             'analyst_result' => $this->analyst_result,
+            'analyst_docs' => $this->analyst_result['uploadedDocs'] ?? [],
             'devAnalystResult' => $this->dev_analyst_result,
             'dev_analyst_result' => $this->dev_analyst_result,
             'staging_url' => $this->staging_url,

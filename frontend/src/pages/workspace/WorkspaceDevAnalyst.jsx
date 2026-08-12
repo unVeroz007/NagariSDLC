@@ -619,7 +619,7 @@ export default function WorkspaceDevAnalyst() {
 
                                         <div>
                                             <label className="block text-xs font-bold text-gray-700 mb-1.5">
-                                                Estimasi Target Selesai Pengerjaan
+                                                Target SIT Dilakukan
                                             </label>
                                             <input
                                                 type="date"

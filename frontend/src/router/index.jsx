@@ -59,12 +59,12 @@ import ActivityLog from '../pages/admin/ActivityLog';
 import QualityGate from '../pages/QualityGate';
 
 // Role constants
-const ALL_ROLES = ['super_admin', 'lead_group', 'analyst', 'development_lead', 'project_manager', 'qa_lead', 'qa_tester', 'cyber_team', 'developer', 'business_user', 'cyber_lead', 'pentester', 'head_of_it'];
-const PM_ROLES = ['super_admin', 'project_manager', 'development_lead'];
+const ALL_ROLES = ['super_admin', 'lead_group', 'analyst', 'development_lead', 'project_manager', 'qa_lead', 'qa_tester', 'cyber_team', 'developer', 'business_user', 'cyber_lead', 'pentester', 'head_of_it', 'dev_analyst'];
+const PM_ROLES = ['super_admin', 'dev_analyst', 'project_manager', 'development_lead'];
 const LEAD_ROLES = ['super_admin', 'lead_group'];
-const ANALYST_ROLES = ['super_admin', 'analyst', 'dev_analyst'];
+const ANALYST_ROLES = ['super_admin', 'analyst'];
 const DEV_LEAD_ROLES = ['super_admin', 'development_lead'];
-const DEV_MEMBER_ROLES = ['super_admin', 'project_manager', 'development_lead', 'developer'];
+const DEV_MEMBER_ROLES = ['super_admin', 'development_lead', 'developer', 'dev_analyst', 'project_manager'];
 const QA_ROLES = ['super_admin', 'qa_lead', 'qa_tester', 'lead_group'];
 const CYBER_ROLES = ['super_admin', 'cyber_team', 'cyber_lead', 'pentester'];
 const ADMIN_ROLES = ['super_admin'];
@@ -194,7 +194,7 @@ const router = createBrowserRouter([
             {
                 path: '/workspace/dev-analyst',
                 element: (
-                    <ProtectedRoute allowedRoles={ANALYST_ROLES}>
+                    <ProtectedRoute allowedRoles={[...PM_ROLES]}>
                         <WorkspaceDevAnalyst />
                     </ProtectedRoute>
                 ),
