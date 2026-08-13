@@ -174,11 +174,9 @@ export default function WorkspaceLead() {
         }
     };
 
-    // Searchable analyst dropdown state
+    // Searchable analyst list state
     const [analystSearch, setAnalystSearch] = useState('');
-    const [isAnalystDropdownOpen, setIsAnalystDropdownOpen] = useState(false);
     const [isAnalystLoading, setIsAnalystLoading] = useState(false);
-    const analystDropdownRef = useRef(null);
     const analystSearchRef = useRef(null);
 
     // Load analysts from API (users with analyst roles)
@@ -209,29 +207,64 @@ export default function WorkspaceLead() {
         loadAnalysts();
     }, []);
 
-    // Close analyst dropdown on outside click
-    useEffect(() => {
-        const handleClickOutside = (e) => {
-            if (analystDropdownRef.current && !analystDropdownRef.current.contains(e.target)) {
-                setIsAnalystDropdownOpen(false);
-            }
-        };
-        document.addEventListener('mousedown', handleClickOutside);
-        return () => document.removeEventListener('mousedown', handleClickOutside);
-    }, []);
-
-    // Calculate active workload per analyst
+    // Calculate active workload per analyst (mencakup tugas analisis + tugas PM sekaligus,
+    // karena analis juga merangkap sebagai PM proyek di fase pengembangan).
     const analystWorkloads = useMemo(() => {
         const counts = {};
-        const finishedAnalysis = ['ANALYSIS_APPROVED','LIVE_PRODUCTION','CANCELLED','REJECTED','READY_FOR_DEVELOPMENT','DEV_ANALYSIS','DEV_ANALYSIS_DONE','IN_DEVELOPMENT','DEV_COMPLETED','SIT_IN_PROGRESS','SIT_PASSED','SIT_REVISION','READY_FOR_QA','QA_IN_PROGRESS','QA_PASSED','RETURN_TO_DEV','CYBER_IN_PROGRESS','CYBER_PASSED','READY_FOR_UAT','UAT_IN_PROGRESS','UAT_PASSED','UAT_REVISION_SIT','UAT_REVISION_DEV','PENDING_GOLIVE','ON_HOLD'];
-        (analysts || []).forEach(a => { counts[a.name] = 0; });
-        (projects || []).forEach(p => {
-            const analystName3 = typeof p.assignedAnalyst === 'object' ? (p.assignedAnalyst?.name || '')
-                : (typeof p.analyst === 'object' ? (p.analyst?.name || '') : String(p.assignedAnalyst || p.analyst || ''));
-            if (analystName3 && counts[analystName3] !== undefined) {
-                if (!finishedAnalysis.includes(p.status)) counts[analystName3]++;
-            }
+        const projectSets = {};
+
+        const terminalStatuses = new Set(['LIVE_PRODUCTION', 'CANCELLED', 'REJECTED']);
+        const activeAnalysisStatuses = new Set(['IN_REVIEW', 'PLANNING_ANALYSIS', 'ANALYSIS_IN_PROGRESS']);
+
+        (analysts || []).forEach(a => {
+            counts[a.name] = 0;
+            projectSets[a.name] = new Set();
         });
+
+        (projects || []).forEach(p => {
+            const status = p.status;
+            // Lewati proyek yang sudah berakhir (live/dibatalkan/ditolak)
+            if (terminalStatuses.has(status)) return;
+
+            // Id & nama analis (tugas analisis)
+            const analystObj = (typeof p.assignedAnalyst === 'object' && p.assignedAnalyst)
+                ? p.assignedAnalyst
+                : (typeof p.analyst === 'object' ? p.analyst : null);
+            const analystId = analystObj?.id ?? p.analyst_id ?? null;
+            const analystNameStr = analystObj?.name
+                || (typeof p.assignedAnalyst === 'string' ? p.assignedAnalyst : '')
+                || (typeof p.analyst === 'string' ? p.analyst : '');
+
+            // Id & nama PM (tugas PM)
+            const pmObj = typeof p.pm === 'object' ? p.pm : null;
+            const pmId = pmObj?.id ?? p.pm_id ?? null;
+            const pmNameStr = pmObj?.name || (typeof p.pm === 'string' ? p.pm : '');
+
+            (analysts || []).forEach(a => {
+                const lower = a.name.toLowerCase();
+
+                const isAssignedAnalyst =
+                    (analystId != null && a.id != null && Number(analystId) === Number(a.id))
+                    || (analystNameStr && analystNameStr.toLowerCase() === lower);
+                const isAssignedPm =
+                    (pmId != null && a.id != null && Number(pmId) === Number(a.id))
+                    || (pmNameStr && pmNameStr.toLowerCase() === lower);
+
+                // Beban analisis: proyek yang masih dalam kajian analis
+                const countsAsAnalyst = isAssignedAnalyst && activeAnalysisStatuses.has(status);
+                // Beban PM: proyek aktif yang dikelola sebagai PM
+                const countsAsPm = isAssignedPm;
+
+                if (countsAsAnalyst || countsAsPm) {
+                    projectSets[a.name].add(String(p.id));
+                }
+            });
+        });
+
+        (analysts || []).forEach(a => {
+            counts[a.name] = projectSets[a.name]?.size || 0;
+        });
+
         return counts;
     }, [projects, analysts]);
 
@@ -731,119 +764,106 @@ export default function WorkspaceLead() {
                                 <div className="space-y-4">
                                     <div>
                                         <label className="block text-sm font-semibold text-gray-700 mb-1.5">Pilih System Analyst <span className="text-red-500">*</span></label>
-                                        <div className="relative" ref={analystDropdownRef}>
-                                            {/* Trigger Input */}
-                                            <div
-                                                onClick={() => {
-                                                    setIsAnalystDropdownOpen(!isAnalystDropdownOpen);
-                                                    setTimeout(() => analystSearchRef.current?.focus(), 50);
-                                                }}
-                                                className="w-full px-4 py-2.5 rounded-xl border border-gray-200 focus-within:border-[#00529C] focus-within:ring-2 focus-within:ring-blue-50 transition-all bg-white cursor-pointer flex items-center justify-between"
-                                            >
+
+                                        {/* Search bar / tampilan analis terpilih */}
+                                        <div className="mb-2">
+                                            <div className={`flex items-center gap-2 w-full px-3.5 py-2.5 rounded-xl border-2 bg-white shadow-sm transition-all ${
+                                                selectedAnalyst ? 'border-emerald-400 bg-emerald-50/40' : 'border-[#00529C]'
+                                            }`}>
                                                 {selectedAnalyst ? (
-                                                    <span className="text-sm font-medium text-gray-800 flex items-center gap-2">
-                                                        <span className="w-7 h-7 rounded-full bg-[#00529C] text-white text-xs font-bold flex items-center justify-center shrink-0">
-                                                            {selectedAnalyst.split(' ').map(n => n[0]).join('').slice(0, 2)}
-                                                        </span>
-                                                        <div>
-                                                            <span className="block leading-tight">{selectedAnalyst}</span>
-                                                            <span className="text-[10px] text-gray-400 font-normal">{analystWorkloads[selectedAnalyst] || 0} proyek aktif</span>
-                                                        </div>
-                                                    </span>
+                                                    <UserCheck size={18} className="text-emerald-600 shrink-0" />
                                                 ) : (
-                                                    <span className="text-sm text-gray-400">Ketik nama atau email untuk mencari...</span>
+                                                    <Search size={18} className="text-[#00529C] shrink-0" />
                                                 )}
-                                                <svg className={`w-4 h-4 text-gray-400 shrink-0 transition-transform ${isAnalystDropdownOpen ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
+                                                <input
+                                                    ref={analystSearchRef}
+                                                    type="text"
+                                                    value={selectedAnalyst || analystSearch}
+                                                    onChange={(e) => {
+                                                        // Mengetik hanya saat belum ada pilihan (mencari)
+                                                        setAnalystSearch(e.target.value);
+                                                        setSelectedAnalyst('');
+                                                    }}
+                                                    readOnly={!!selectedAnalyst}
+                                                    placeholder={selectedAnalyst ? '' : 'Cari nama, email, atau departemen analis...'}
+                                                    className={`flex-1 bg-transparent text-sm outline-none ${
+                                                        selectedAnalyst ? 'text-emerald-800 font-semibold cursor-default' : 'text-gray-800 placeholder:text-gray-400'
+                                                    }`}
+                                                />
+                                                {selectedAnalyst ? (
+                                                    <span className="text-[10px] font-bold text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded-full shrink-0">
+                                                        {analystWorkloads[selectedAnalyst] || 0} aktif
+                                                    </span>
+                                                ) : null}
+                                                {(selectedAnalyst || analystSearch) && (
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => {
+                                                            setSelectedAnalyst('');
+                                                            setAnalystSearch('');
+                                                            setTimeout(() => analystSearchRef.current?.focus(), 0);
+                                                        }}
+                                                        className="p-1 rounded-md text-gray-400 hover:text-red-500 hover:bg-red-50 transition-colors shrink-0"
+                                                        title={selectedAnalyst ? 'Hapus pilihan & cari lagi' : 'Hapus kata kunci'}
+                                                    >
+                                                        <X size={16} />
+                                                    </button>
+                                                )}
                                             </div>
+                                        </div>
 
-                                            {/* Dropdown Panel */}
-                                            {isAnalystDropdownOpen && (
-                                                <div className="absolute z-50 mt-2 w-full bg-white border border-gray-200 rounded-xl shadow-xl overflow-hidden animate-scale-up">
-                                                    {/* Search Input */}
-                                                    <div className="p-3 border-b border-gray-100 bg-gray-50/50">
-                                                        <div className="relative">
-                                                            <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-                                                            <input
-                                                                ref={analystSearchRef}
-                                                                type="text"
-                                                                value={analystSearch}
-                                                                onChange={(e) => setAnalystSearch(e.target.value)}
-                                                                onFocus={() => setIsAnalystDropdownOpen(true)}
-                                                                placeholder="Cari berdasarkan nama, email, atau departemen..."
-                                                                className="w-full pl-9 pr-4 py-2 rounded-lg border border-gray-200 bg-white text-sm focus:ring-2 focus:ring-[#00529C]/20 focus:border-[#00529C] outline-none transition-all"
-                                                            />
+                                        {/* Daftar analis — tampil hanya saat BELUM ada pilihan */}
+                                        {!selectedAnalyst && (
+                                            <div className="border border-gray-200 rounded-xl overflow-hidden bg-white">
+                                                <div className="px-4 py-2 border-b border-gray-100 bg-gray-50/60 flex items-center justify-between">
+                                                    <span className="text-[11px] font-bold text-gray-600 uppercase tracking-wider">
+                                                        Daftar System Analyst ({filteredAnalysts.length})
+                                                    </span>
+                                                    <span className="text-[10px] text-gray-400">Beban aktif tertera di kanan</span>
+                                                </div>
+                                                <div className="max-h-[260px] overflow-y-auto">
+                                                    {isAnalystLoading ? (
+                                                        <div className="p-6 text-center">
+                                                            <LoadingSpinner size="sm" />
+                                                            <p className="text-sm text-gray-500 font-medium mt-2">Memuat daftar analis...</p>
                                                         </div>
-                                                    </div>
-
-                                                    {/* Analyst List */}
-                                                    <div className="max-h-[260px] overflow-y-auto">
-                                                        {isAnalystLoading ? (
-                                                            <div className="p-6 text-center">
-                                                                <LoadingSpinner size="sm" />
-                                                                <p className="text-sm text-gray-500 font-medium mt-2">Memuat daftar analis...</p>
-                                                            </div>
-                                                        ) : filteredAnalysts.length === 0 ? (
-                                                            <div className="p-6 text-center">
-                                                                <Search size={24} className="mx-auto text-gray-300 mb-2" />
-                                                                <p className="text-sm text-gray-500 font-medium">Tidak ditemukan analis</p>
-                                                                <p className="text-xs text-gray-400">{analystSearch ? 'Coba kata kunci lain' : 'Belum ada user dengan role analyst'}</p>
-                                                            </div>
-                                                        ) : (
-                                                            filteredAnalysts.map((a, i) => {
-                                                                const workload = analystWorkloads[a.name] || 0;
-                                                                const isSelected = selectedAnalyst === a.name;
-                                                                return (
-                                                                    <div
-                                                                        key={i}
-                                                                        onClick={() => {
-                                                                            setSelectedAnalyst(a.name);
-                                                                            setIsAnalystDropdownOpen(false);
-                                                                            setAnalystSearch('');
-                                                                        }}
-                                                                        className={`px-4 py-3 cursor-pointer transition-all flex items-center gap-3 ${
-                                                                            isSelected
-                                                                                ? 'bg-[#00529C]/5 border-l-3 border-[#00529C]'
-                                                                                : 'hover:bg-blue-50/50 border-l-3 border-transparent'
-                                                                        }`}
-                                                                    >
-                                                                        <span className="w-9 h-9 rounded-full bg-gradient-to-br from-[#00529C] to-[#004080] text-white text-xs font-bold flex items-center justify-center shrink-0">
-                                                                            {a.name.split(' ').map(n => n[0]).join('').slice(0, 2)}
-                                                                        </span>
-                                                                        <div className="flex-1 min-w-0">
-                                                                            <div className="flex items-center gap-2">
-                                                                                <span className="text-sm font-semibold text-gray-800 truncate">{a.name}</span>
-                                                                                {isSelected && <Check size={14} className="text-[#00529C] shrink-0" />}
-                                                                            </div>
-                                                                        </div>
-                                                                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full shrink-0 ${
-                                                                            workload >= 3 ? 'bg-red-100 text-red-600' : workload >= 1 ? 'bg-amber-100 text-amber-700' : 'bg-emerald-100 text-emerald-700'
-                                                                        }`}>
-                                                                            {workload} aktif
-                                                                        </span>
+                                                    ) : filteredAnalysts.length === 0 ? (
+                                                        <div className="p-6 text-center">
+                                                            <Search size={24} className="mx-auto text-gray-300 mb-2" />
+                                                            <p className="text-sm text-gray-500 font-medium">Tidak ditemukan analis</p>
+                                                            <p className="text-xs text-gray-400">{analystSearch ? 'Coba kata kunci lain' : 'Belum ada user dengan role analyst'}</p>
+                                                        </div>
+                                                    ) : (
+                                                        filteredAnalysts.map((a, i) => {
+                                                            const workload = analystWorkloads[a.name] || 0;
+                                                            return (
+                                                                <div
+                                                                    key={a.id ?? a.name ?? i}
+                                                                    onClick={() => {
+                                                                        setSelectedAnalyst(a.name);
+                                                                        setAnalystSearch('');
+                                                                    }}
+                                                                    className="px-4 py-3 cursor-pointer transition-all flex items-center gap-3 border-b border-gray-50 last:border-b-0 hover:bg-blue-50/50 border-l-4 border-l-transparent"
+                                                                >
+                                                                    <span className="w-9 h-9 rounded-full bg-gradient-to-br from-[#00529C] to-[#004080] text-white text-xs font-bold flex items-center justify-center shrink-0">
+                                                                        {a.name.split(' ').map(n => n[0]).join('').slice(0, 2)}
+                                                                    </span>
+                                                                    <div className="flex-1 min-w-0">
+                                                                        <span className="text-sm font-semibold text-gray-800 truncate block">{a.name}</span>
+                                                                        <span className="text-[11px] text-gray-400 truncate block">{a.email}</span>
                                                                     </div>
-                                                                );
-                                                            })
-                                                        )}
-                                                    </div>
-
-                                                    {/* Quick Clear */}
-                                                    {selectedAnalyst && (
-                                                        <div className="p-2 border-t border-gray-100 bg-gray-50/30">
-                                                            <button
-                                                                onClick={(e) => {
-                                                                    e.stopPropagation();
-                                                                    setSelectedAnalyst('');
-                                                                    setAnalystSearch('');
-                                                                }}
-                                                                className="w-full text-center py-1.5 text-xs font-semibold text-red-500 hover:text-red-700 hover:bg-red-50 rounded-lg transition-colors cursor-pointer"
-                                                            >
-                                                                Hapus Pilihan
-                                                            </button>
-                                                        </div>
+                                                                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full shrink-0 ${
+                                                                        workload >= 3 ? 'bg-red-100 text-red-600' : workload >= 1 ? 'bg-amber-100 text-amber-700' : 'bg-emerald-100 text-emerald-700'
+                                                                    }`}>
+                                                                        {workload} aktif
+                                                                    </span>
+                                                                </div>
+                                                            );
+                                                        })
                                                     )}
                                                 </div>
-                                            )}
-                                        </div>
+                                            </div>
+                                        )}
                                     </div>
                                     <div>
                                         <label className="block text-sm font-semibold text-gray-700 mb-1.5">Target Selesai Analisis (Opsional)</label>

@@ -4,21 +4,14 @@ import { useAuth } from '../../contexts/AuthContext';
 import { useProjects } from '../../contexts/ProjectContext';
 import { useNotifications } from '../../contexts/NotificationContext';
 import { projectService, userService } from '../../services/api';
-import { PROJECT_STATUS } from '../../constants/projectStatus';
 import RBBBadge from '../../components/RBBBadge';
 import ProjectTypeBadge from '../../components/ProjectTypeBadge';
-import LoadingSpinner from '../../components/LoadingSpinner';
 import toast from 'react-hot-toast';
 import {
     Users,
     UserCheck,
-    CheckCircle,
-    Building,
-    User,
     Check,
     AlertCircle,
-    Send,
-    Clock,
 } from 'lucide-react';
 
 const defaultDeveloperCandidates = [
@@ -33,7 +26,7 @@ export default function Allocation() {
     const { user } = useAuth();
     const navigate = useNavigate();
     const { addNotification } = useNotifications();
-    const { projects, updateProject, isLoading } = useProjects();
+    const { projects, refreshData } = useProjects();
     const rightPanelRef = useRef(null);
 
     const [developerCandidates, setDeveloperCandidates] = useState(defaultDeveloperCandidates);
@@ -54,7 +47,7 @@ export default function Allocation() {
                         id: u.id,
                         name: u.name,
                         email: u.email,
-                        skill: u.division?.name || 'Developer',
+                        skill: typeof u.division === 'string' ? u.division : (u.division?.name || u.division_detail?.name || 'Developer'),
                         available: true,
                     }));
                     setDeveloperCandidates(mapped);
@@ -65,35 +58,74 @@ export default function Allocation() {
         return () => { isMounted = false; };
     }, []);
 
-    // Filter proyek yang sudah memiliki PM tetapi BELUM dialokasikan tim (Antrean Alokasi Tim PM)
+    // Filter proyek yang sudah memiliki PM dan belum selesai dialokasikan tim.
+    // Kriteria: berstatus IN_DEVELOPMENT ATAU sudah punya PM, dan belum punya tim (team kosong).
+    // Catatan: tidak lagi bergantung pada flag client-only (isTeamAllocated/allocationStatus)
+    // yang tidak tersimpan di backend dan hilang saat refetch.
     const activeProjectsWithPM = useMemo(() => {
+        const hasTeam = (p) => Array.isArray(p.team) && p.team.length > 0;
         let list = projects.filter(p =>
-            (p.status === 'IN_DEVELOPMENT' || (p.pm && p.pm.name)) &&
-            !p.isTeamAllocated &&
-            p.allocationStatus !== 'COMPLETED'
+            (p.status === 'IN_DEVELOPMENT' || (p.pm && (typeof p.pm === 'object' ? p.pm.name : p.pm))) &&
+            !hasTeam(p)
         );
         const isPrivileged = user?.role && ['super_admin', 'lead_group', 'head_of_it', 'development_lead'].includes(user.role);
         if (!isPrivileged && user?.id) {
             const pmId = user.id;
             list = list.filter(p => {
                 const pmObjId = typeof p.pm === 'object' ? p.pm?.id : null;
-                return pmObjId && pmObjId === pmId;
+                return pmObjId && Number(pmObjId) === Number(pmId);
             });
         }
         return list;
     }, [projects, user]);
 
-    const [selectedProject, setSelectedProject] = useState(null);
+    const [selectedProjectId, setSelectedProjectId] = useState(null);
     const [selectedTeamIds, setSelectedTeamIds] = useState([]);
     const [isSubmitting, setIsSubmitting] = useState(false);
 
+    // Proyek terpilih SELALU di-derive dari data projects terbaru (hindari objek stale).
+    const selectedProject = useMemo(() => {
+        if (!selectedProjectId) return null;
+        return (projects || []).find(p => String(p.id) === String(selectedProjectId)) || null;
+    }, [projects, selectedProjectId]);
+
+    // 🔒 Tim yang SUDAH dialokasikan oleh Lead Pengembangan (dari backend project.team).
+    // HANYA anggota dengan assigned_by === 'lead' (bukan yang dipilih PM).
+    const leadAssignedTeam = useMemo(() => {
+        if (selectedProject?.team && Array.isArray(selectedProject.team)) {
+            return selectedProject.team
+                .filter(t => t && (t.user_id || t.id) && String(t.assigned_by ?? 'lead') !== 'pm')
+                .map(t => ({
+                    user_id: t.user_id ?? t.id,
+                    name: t.name || 'Developer',
+                    email: t.email || null,
+                    role: t.role || 'Developer',
+                    assigned_by: t.assigned_by ?? 'lead',
+                }));
+        }
+        return [];
+    }, [selectedProject]);
+
+    // Set user_id yang sudah ditetapkan Lead — developer ini TERKUNCI (tidak bisa dicentang PM)
+    const leadAssignedUserIds = useMemo(
+        () => new Set(leadAssignedTeam.map(t => Number(t.user_id))),
+        [leadAssignedTeam]
+    );
+
+    // Developer yang masih bisa dipilih PM (available & belum ditetapkan Lead).
+    // Anggota yang sudah dipilih PM sebelumnya tetap bisa di-uncheck (boleh dicabut).
+    const selectableDevs = useMemo(
+        () => developerCandidates.filter(d => d.available && !leadAssignedUserIds.has(Number(d.id))),
+        [developerCandidates, leadAssignedUserIds]
+    );
+
     useEffect(() => {
         if (activeProjectsWithPM.length > 0) {
-            if (!selectedProject || !activeProjectsWithPM.find(p => p.id === selectedProject.id)) {
-                setSelectedProject(activeProjectsWithPM[0]);
+            if (!selectedProjectId || !activeProjectsWithPM.find(p => String(p.id) === String(selectedProjectId))) {
+                setSelectedProjectId(activeProjectsWithPM[0].id);
             }
         } else {
-            setSelectedProject(null);
+            setSelectedProjectId(null);
         }
     }, [projects, activeProjectsWithPM.length]);
 
@@ -111,22 +143,31 @@ export default function Allocation() {
 
     // Auto scroll ke atas saat proyek dipilih
     useEffect(() => {
-        if (selectedProject) {
+        if (selectedProjectId) {
             scrollPageToTop();
         }
-    }, [selectedProject?.id]);
+    }, [selectedProjectId]);
 
-    // Update selected team IDs when selected project changes
+    // Update selected team IDs when selected project changes.
+    // Isi awal: hanya anggota yang dipilih PM sebelumnya (assigned_by === 'pm').
+    // Tim Lead ditampilkan terpisah dan terkunci (tidak masuk selectedTeamIds).
     useEffect(() => {
         if (selectedProject?.team && Array.isArray(selectedProject.team)) {
-            const existingIds = selectedProject.team.map(t => typeof t === 'object' ? t.id : t);
-            setSelectedTeamIds(existingIds);
+            const pmIds = selectedProject.team
+                .filter(t => t && t.user_id && String(t.assigned_by) === 'pm')
+                .map(t => Number(t.user_id));
+            setSelectedTeamIds(pmIds);
         } else {
             setSelectedTeamIds([]);
         }
-    }, [selectedProject]);
+    }, [selectedProject?.id]);
 
     const handleToggleDev = (devId) => {
+        // 🔒 Blokir toggle untuk developer yang sudah ditetapkan Lead Pengembangan
+        if (leadAssignedUserIds.has(Number(devId))) {
+            toast.error('Developer ini sudah dipilih oleh Lead Pengembangan dan tidak dapat diubah.');
+            return;
+        }
         if (selectedTeamIds.includes(devId)) {
             setSelectedTeamIds(selectedTeamIds.filter(id => id !== devId));
         } else {
@@ -135,7 +176,7 @@ export default function Allocation() {
     };
 
     const handleSelectAllDevs = () => {
-        const availableDevs = developerCandidates.filter(d => d.available).map(d => d.id);
+        const availableDevs = selectableDevs.map(d => d.id);
         if (selectedTeamIds.length === availableDevs.length) {
             setSelectedTeamIds([]);
         } else {
@@ -148,51 +189,45 @@ export default function Allocation() {
             toast.error('Pilih proyek terlebih dahulu!');
             return;
         }
-        if (selectedTeamIds.length === 0) {
+        if (isSubmitting) return;
+        if (selectedTeamIds.length === 0 && leadAssignedTeam.length === 0) {
             toast.error('Pilih minimal 1 developer untuk dialokasikan!');
             return;
         }
 
         setIsSubmitting(true);
 
-        const allocatedTeam = developerCandidates.filter(d => selectedTeamIds.includes(d.id));
+        // Tim final = tim Lead (terkunci, assigned_by 'lead') + pilihan PM (assigned_by 'pm')
+        const additionalTeam = developerCandidates.filter(d => selectedTeamIds.includes(d.id));
+        const allocatedTeam = [
+            ...leadAssignedTeam.map(t => ({ user_id: t.user_id, skill: t.role || 'Developer', assigned_by: 'lead' })),
+            ...additionalTeam.map(d => ({ user_id: d.id, skill: d.skill || 'Developer', assigned_by: 'pm' })),
+        ];
+        const totalTeam = allocatedTeam.length;
         const targetProjName = selectedProject.name;
+        const targetProjectId = selectedProject.id;
 
+        const loadingToastId = toast.loading('Menyimpan alokasi tim...', { duration: Infinity });
         try {
-            // 1. TULIS LANGSUNG KE DATABASE via API
-            await projectService.allocateTeam(selectedProject.id, allocatedTeam);
-
-            // 2. Update state lokal agar UI langsung update tanpa tunggu refetch
-            await updateProject(selectedProject.id, {
-                team: allocatedTeam,
-                isTeamAllocated: true,
-                allocationStatus: 'COMPLETED',
-                status: PROJECT_STATUS.IN_DEVELOPMENT,
-                allocatedAt: new Date().toISOString(),
-            });
+            await projectService.allocateTeam(targetProjectId, allocatedTeam);
 
             addNotification(
                 'Alokasi Tim Perangkat Lunak',
-                `Tim developer (${allocatedTeam.length} orang) berhasil dialokasikan untuk proyek ${targetProjName}.`,
+                `Tim developer (${totalTeam} orang) berhasil dialokasikan untuk proyek ${targetProjName}.`,
                 'success',
                 '/pm/kanban'
             );
 
-            toast.success(`Tim developer untuk ${targetProjName} berhasil dialokasikan & tersimpan ke database!`);
-            setSelectedProject(null);
+            toast.dismiss(loadingToastId);
+            toast.success(`Tim developer untuk ${targetProjName} berhasil dialokasikan!`);
+
+            // Muat ulang data proyek dari backend agar tim terbaru tercermin & proyek keluar antrean.
+            await refreshData();
             setSelectedTeamIds([]);
-        } catch {
-            // Fallback: tetap update local jika API error
-            await updateProject(selectedProject.id, {
-                team: allocatedTeam,
-                isTeamAllocated: true,
-                allocationStatus: 'COMPLETED',
-                status: PROJECT_STATUS.IN_DEVELOPMENT,
-                allocatedAt: new Date().toISOString(),
-            });
-            toast.success(`Tim berhasil dialokasikan (mode offline)!`);
-            setSelectedProject(null);
-            setSelectedTeamIds([]);
+            setSelectedProjectId(null);
+        } catch (err) {
+            toast.dismiss(loadingToastId);
+            toast.error('Gagal mengalokasikan tim: ' + (err?.message || 'Terjadi kesalahan.'));
         } finally {
             setIsSubmitting(false);
         }
@@ -242,7 +277,7 @@ export default function Allocation() {
                             <div
                                 key={project.id}
                                 onClick={() => {
-                                    setSelectedProject(project);
+                                    setSelectedProjectId(project.id);
                                     scrollPageToTop();
                                 }}
                                 className={`p-4 rounded-xl cursor-pointer transition-all border relative overflow-hidden ${
@@ -341,9 +376,43 @@ export default function Allocation() {
                                         onClick={handleSelectAllDevs}
                                         className="text-xs font-bold text-blue-600 hover:text-blue-800 bg-white border border-blue-200 px-3 py-1.5 rounded-lg transition-all cursor-pointer"
                                     >
-                                        {selectedTeamIds.length === developerCandidates.filter(d => d.available).length ? 'Batal Pilih Semua' : 'Pilih Semua Tersedia'}
+                                        {selectedTeamIds.length === selectableDevs.length && selectableDevs.length > 0 ? 'Batal Pilih Semua' : 'Pilih Semua Tersedia'}
                                     </button>
                                 </div>
+
+                                {/* 🔒 TIM SUDAH DITETAPKAN LEAD PENGEMBANGAN (TERKUNCI) */}
+                                {leadAssignedTeam.length > 0 && (
+                                    <div className="bg-indigo-50 border border-indigo-200 rounded-xl p-4">
+                                        <div className="flex items-center gap-2 mb-3">
+                                            <span className="w-6 h-6 rounded-md bg-indigo-600 text-white flex items-center justify-center shrink-0">
+                                                <Check size={14} />
+                                            </span>
+                                            <div>
+                                                <p className="text-xs font-bold text-indigo-900 uppercase tracking-wider">Tim Dipilih Lead Pengembangan</p>
+                                                <p className="text-[11px] text-indigo-700">Sudah dikunci — tidak dapat diubah/dicabut oleh PM. Gunakan daftar di bawah untuk menambah anggota.</p>
+                                            </div>
+                                        </div>
+                                        <div className="space-y-2">
+                                            {leadAssignedTeam.map((t, idx) => (
+                                                <div key={idx} className="flex items-center gap-3 bg-white rounded-lg border border-indigo-200 px-3 py-2.5">
+                                                    <div className="w-8 h-8 rounded-full bg-indigo-100 text-indigo-700 font-bold flex items-center justify-center text-xs shrink-0">
+                                                        {t.name?.substring(0, 2).toUpperCase() || 'DV'}
+                                                    </div>
+                                                    <div className="flex-1 min-w-0">
+                                                        <p className="text-xs font-bold text-gray-800">{t.name}</p>
+                                                        <p className="text-[11px] text-gray-500">{t.email || '—'}</p>
+                                                    </div>
+                                                    <span className="text-[10px] font-bold text-indigo-700 bg-indigo-100 px-2 py-0.5 rounded-full shrink-0">
+                                                        {t.role || 'Developer'}
+                                                    </span>
+                                                    <span className="inline-flex items-center gap-1 text-[10px] font-bold text-indigo-700 shrink-0">
+                                                        <Check size={12} /> Ditunjuk Lead
+                                                    </span>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                )}
 
                                 <div className="overflow-x-auto">
                                     <table className="w-full text-left border-collapse bg-white rounded-xl overflow-hidden border border-gray-200">
@@ -358,6 +427,7 @@ export default function Allocation() {
                                         <tbody className="divide-y divide-gray-100 text-xs font-medium">
                                             {developerCandidates.map((dev) => {
                                                 const isChecked = selectedTeamIds.includes(dev.id);
+                                                const isLocked = leadAssignedUserIds.has(Number(dev.id));
                                                 const realtimeWorkload = (projects || []).filter(p => {
                                                     if (!p.team || !Array.isArray(p.team)) return false;
                                                     const isFinished = p.status === 'LIVE_PRODUCTION' || p.status === 'CANCELLED' || p.status === 'REJECTED';
@@ -372,22 +442,24 @@ export default function Allocation() {
                                                     <tr
                                                         key={dev.id}
                                                         onClick={() => handleToggleDev(dev.id)}
-                                                        className={`transition-colors cursor-pointer ${
-                                                            isChecked
-                                                                ? 'bg-blue-50/50 font-semibold'
-                                                                : 'hover:bg-gray-50'
-                                                        }`}
+                                                        className={`transition-colors ${isLocked ? 'bg-indigo-50/40 cursor-not-allowed' : `cursor-pointer ${isChecked ? 'bg-blue-50/50 font-semibold' : 'hover:bg-gray-50'}`}`}
                                                     >
                                                         <td className="p-3.5 text-center" onClick={(e) => e.stopPropagation()}>
                                                             <input
                                                                 type="checkbox"
-                                                                checked={isChecked}
+                                                                checked={isLocked ? true : isChecked}
+                                                                disabled={isLocked}
                                                                 onChange={() => handleToggleDev(dev.id)}
-                                                                className="w-4 h-4 text-blue-600 rounded border-gray-300 focus:ring-blue-500 cursor-pointer"
+                                                                className={`w-4 h-4 rounded border-gray-300 focus:ring-blue-500 ${isLocked ? 'text-indigo-500 cursor-not-allowed opacity-60' : 'text-blue-600 cursor-pointer'}`}
                                                             />
                                                         </td>
                                                         <td className="p-3.5 text-gray-800 font-bold">
-                                                            {dev.name}
+                                                            <span>{dev.name}</span>
+                                                            {isLocked && (
+                                                                <span className="ml-2 inline-flex items-center gap-1 text-[10px] font-bold text-indigo-700 bg-indigo-100 px-2 py-0.5 rounded-full">
+                                                                    <Check size={11} /> Dipilih Lead
+                                                                </span>
+                                                            )}
                                                         </td>
                                                         <td className="p-3.5 text-gray-600">
                                                             <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-gray-100 text-gray-700">
@@ -395,9 +467,15 @@ export default function Allocation() {
                                                             </span>
                                                         </td>
                                                         <td className="p-3.5 text-center">
-                                                            <span className="bg-emerald-100 text-emerald-700 px-2.5 py-0.5 rounded-full text-[10px] font-bold">
-                                                                Tersedia
-                                                            </span>
+                                                            {isLocked ? (
+                                                                <span className="bg-indigo-100 text-indigo-700 px-2.5 py-0.5 rounded-full text-[10px] font-bold">
+                                                                    Ditetapkan Lead
+                                                                </span>
+                                                            ) : (
+                                                                <span className="bg-emerald-100 text-emerald-700 px-2.5 py-0.5 rounded-full text-[10px] font-bold">
+                                                                    Tersedia
+                                                                </span>
+                                                            )}
                                                         </td>
                                                     </tr>
                                                 );
@@ -412,7 +490,7 @@ export default function Allocation() {
                                         <div className="flex items-center gap-2">
                                             <Users size={16} className="text-blue-700 shrink-0" />
                                             <span>
-                                                <strong>{selectedTeamIds.length} Developer Terpilih:</strong>{' '}
+                                                <strong>{selectedTeamIds.length} Developer Tambahan Terpilih:</strong>{' '}
                                                 {developerCandidates
                                                     .filter(d => selectedTeamIds.includes(d.id))
                                                     .map(d => d.name)
@@ -425,7 +503,10 @@ export default function Allocation() {
                                 {/* Action Bar / Total Developer & Tombol Alokasi (Diposisikan di Bawah Tabel Tim Dev) */}
                                 <div className="bg-white border border-gray-200 p-4 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-xs mt-4">
                                     <div className="text-xs text-gray-600">
-                                        Total Developer Dipilih: <strong className="text-gray-900 text-sm font-extrabold">{selectedTeamIds.length} Orang</strong>
+                                        Total Tim Akhir: <strong className="text-gray-900 text-sm font-extrabold">{leadAssignedTeam.length + selectedTeamIds.length} Orang</strong>
+                                        {leadAssignedTeam.length > 0 && (
+                                            <span className="ml-2 text-indigo-600 font-semibold">({leadAssignedTeam.length} dari Lead + {selectedTeamIds.length} tambahan PM)</span>
+                                        )}
                                     </div>
                                     <button
                                         onClick={handleSubmit}

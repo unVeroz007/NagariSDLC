@@ -11,7 +11,6 @@ import {
     List,
     Eye,
     Download,
-    Trash2,
     Plus,
     Upload,
     ChevronRight,
@@ -30,7 +29,7 @@ import {
 import { useAuth } from '../../contexts/AuthContext';
 import { useProjects } from '../../contexts/ProjectContext';
 import { documentService } from '../../services/api';
-import { getDocExtLabel, getDocIconStyle } from '../../utils/documentNaming';
+import { getDocExtLabel, getDocIconStyle, generateDocumentName, DOCUMENT_TYPES } from '../../utils/documentNaming';
 import LoadingSpinner from '../../components/LoadingSpinner';
 import EmptyState from '../../components/EmptyState';
 import DocumentViewerModal from '../../components/DocumentViewerModal';
@@ -63,7 +62,7 @@ const iconMap = {
 
 export default function Documents() {
     const { user } = useAuth();
-    const { projects, documents: ctxDocs, addDocument, deleteDocument, isLoading } = useProjects();
+    const { projects, isLoading } = useProjects();
 
     const [searchTerm, setSearchTerm] = useState('');
     const [activeTab, setActiveTab] = useState('Semua File');
@@ -86,10 +85,12 @@ export default function Documents() {
     ]);
 
     const [uploadProject, setUploadProject] = useState('');
-    const [uploadDocType, setUploadDocType] = useState('brd');
+    const [uploadProjectId, setUploadProjectId] = useState('');
+    const [uploadDocType, setUploadDocType] = useState('BRD');
     const [uploadFileName, setUploadFileName] = useState('');
     const [selectedFile, setSelectedFile] = useState(null);
     const [toastMessage, setToastMessage] = useState(null);
+    const [isUploading, setIsUploading] = useState(false);
 
     const fileInputRef = useRef(null);
 
@@ -172,7 +173,7 @@ export default function Documents() {
         });
 
         return unique;
-    }, [ctxDocs, projects, user]);
+    }, [projects, user]);
 
     const mappedDocs = useMemo(() => (allDocs || []).map(doc => {
         const fileName = doc.file_name || doc.name || 'Dokumen.pdf';
@@ -306,11 +307,6 @@ export default function Documents() {
                 e.target.value = '';
                 return;
             }
-            if (!file.name.toLowerCase().endsWith('.pdf')) {
-                showToast('Mohon unggah berkas PDF (.pdf) untuk pratinjau langsung di browser!', 'error');
-                e.target.value = '';
-                return;
-            }
             setSelectedFile(file);
             if (!uploadFileName) {
                 setUploadFileName(file.name);
@@ -334,29 +330,49 @@ export default function Documents() {
         setIsFolderModalOpen(false);
     };
 
-    // Submit Unggah Dokumen
-    const handleUploadSubmit = (e) => {
+    // Submit Unggah Dokumen (via API, nama otomatis masking XXX/GPTD/TIPE/...)
+    const handleUploadSubmit = async (e) => {
         e.preventDefault();
-        const docName = uploadFileName || selectedFile?.name || 'Dokumen_Baru.pdf';
-        const projName = uploadProject || (projects[0]?.name || 'Modul Pelaporan OJK Terpusat');
-        const calcSize = selectedFile ? `${(selectedFile.size / (1024 * 1024)).toFixed(1)} MB` : '1.8 MB';
+        if (!uploadProjectId) {
+            showToast('Pilih proyek terkait terlebih dahulu!', 'error');
+            return;
+        }
+        if (!selectedFile) {
+            showToast('Pilih file dokumen terlebih dahulu!', 'error');
+            return;
+        }
 
-        const dataUrl = selectedFile ? URL.createObjectURL(selectedFile) : null;
-        addDocument({
-            id: Date.now(),
-            file_name: docName,
-            file_size: calcSize,
-            project_name: projName,
-            doc_type: uploadDocType,
-            url: dataUrl,
-            uploaded_by_name: user?.name || 'Super Admin',
-            created_at: new Date().toISOString(),
-        });
+        setIsUploading(true);
+        try {
+            const ext = selectedFile.name.split('.').pop();
+            const finalName = generateDocumentName(
+                (projects || []).find(p => String(p.id) === String(uploadProjectId))?.req_id
+                    || (projects || []).find(p => String(p.id) === String(uploadProjectId))?.reqId
+                    || `REQ-${uploadProjectId}`,
+                uploadDocType,
+                (projects || []).find(p => String(p.id) === String(uploadProjectId))?.name
+                    || uploadProject || 'Proyek'
+            );
+            const renamedFile = new File([selectedFile], `${finalName}.${ext}`, { type: selectedFile.type });
 
-        showToast(`Dokumen "${docName}" berhasil diunggah!`);
-        setIsUploadModalOpen(false);
-        setUploadFileName('');
-        setSelectedFile(null);
+            await documentService.upload(renamedFile, {
+                project_id: uploadProjectId,
+                document_type: uploadDocType,
+                original_filename: selectedFile.name,
+            });
+
+            showToast(`Dokumen "${finalName}" berhasil diunggah!`);
+            setIsUploadModalOpen(false);
+            setUploadFileName('');
+            setSelectedFile(null);
+            setUploadProjectId('');
+            setUploadProject('');
+            window.location.reload();
+        } catch (err) {
+            showToast(`Gagal mengunggah: ${err.message || 'Terjadi kesalahan'}`, 'error');
+        } finally {
+            setIsUploading(false);
+        }
     };
 
     // Download & Delete handlers
@@ -377,13 +393,6 @@ export default function Documents() {
             URL.revokeObjectURL(url);
         } catch {
             toast.error('Gagal mengunduh dokumen. File mungkin telah dipindahkan.');
-        }
-    };
-
-    const handleDeleteDoc = (id, name) => {
-        if (window.confirm(`Apakah Anda yakin ingin menghapus dokumen "${name}"?`)) {
-            deleteDocument(id);
-            showToast(`Dokumen "${name}" berhasil dihapus.`, 'warning');
         }
     };
 
@@ -662,13 +671,6 @@ export default function Documents() {
                                                     >
                                                         <Download size={18} />
                                                     </button>
-                                                    <button
-                                                        onClick={() => handleDeleteDoc(doc.id, doc.name)}
-                                                        className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
-                                                        title="Hapus"
-                                                    >
-                                                        <Trash2 size={18} />
-                                                    </button>
                                                 </div>
                                             </td>
                                         </tr>
@@ -706,9 +708,6 @@ export default function Documents() {
                                             </button>
                                             <button onClick={() => handleDownload(doc)} className="p-1.5 text-gray-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg transition-colors">
                                                 <Download size={16} />
-                                            </button>
-                                            <button onClick={() => handleDeleteDoc(doc.id, doc.name)} className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors">
-                                                <Trash2 size={16} />
                                             </button>
                                         </div>
                                     </div>
@@ -781,13 +780,17 @@ export default function Documents() {
                             <div>
                                 <label className="block text-xs font-bold text-gray-700 uppercase mb-1">Pilih Proyek SDLC</label>
                                 <select
-                                    value={uploadProject}
-                                    onChange={e => setUploadProject(e.target.value)}
+                                    value={uploadProjectId}
+                                    onChange={e => {
+                                        setUploadProjectId(e.target.value);
+                                        const p = projects.find(p => String(p.id) === String(e.target.value));
+                                        setUploadProject(p?.name || '');
+                                    }}
                                     className="w-full px-3.5 py-2.5 border border-gray-200 rounded-xl text-sm outline-none focus:border-[#1A56DB] bg-white"
                                 >
                                     <option value="">Pilih Proyek Terkait...</option>
                                     {projects.map(p => (
-                                        <option key={p.id} value={p.name}>{p.reqId || p.id} - {p.name}</option>
+                                        <option key={p.id} value={p.id}>{p.reqId || p.id} - {p.name}</option>
                                     ))}
                                 </select>
                             </div>
@@ -799,12 +802,9 @@ export default function Documents() {
                                     onChange={e => setUploadDocType(e.target.value)}
                                     className="w-full px-3.5 py-2.5 border border-gray-200 rounded-xl text-sm outline-none focus:border-[#1A56DB] bg-white"
                                 >
-                                    <option value="brd">BRD (Business Requirement Document)</option>
-                                    <option value="fsd">FSD (Functional Specification Document)</option>
-                                    <option value="qa_report">Laporan Testing QA</option>
-                                    <option value="cyber_report">Laporan Audit Cyber Security</option>
-                                    <option value="uat_doc">Berita Acara UAT</option>
-                                    <option value="legal">Kontrak / Dokumen Legal</option>
+                                    {Object.values(DOCUMENT_TYPES).map(dt => (
+                                        <option key={dt.code} value={dt.code}>{dt.label}</option>
+                                    ))}
                                 </select>
                             </div>
 
@@ -814,7 +814,7 @@ export default function Documents() {
                                     type="file"
                                     ref={fileInputRef}
                                     onChange={handleFileChange}
-                                    accept=".pdf,application/pdf"
+                                    accept=".pdf,.xls,.xlsx,.jpg,.jpeg,.png,.zip"
                                     className="hidden"
                                 />
                                 <div
@@ -825,13 +825,13 @@ export default function Documents() {
                                     {selectedFile ? (
                                         <div>
                                             <p className="text-sm font-bold text-[#1A56DB]">{selectedFile.name}</p>
-                                            <p className="text-xs text-gray-500">{(selectedFile.size / (1024 * 1024)).toFixed(2)} MB • PDF Terverifikasi</p>
+                                            <p className="text-xs text-gray-500">{(selectedFile.size / (1024 * 1024)).toFixed(2)} MB</p>
                                         </div>
                                     ) : (
                                         <div>
-                                            <p className="text-sm font-semibold text-gray-800">Klik untuk memilih berkas dokumen PDF</p>
+                                            <p className="text-sm font-semibold text-gray-800">Klik untuk memilih berkas dokumen</p>
                                             <p className="text-xs text-blue-600 font-semibold mt-1 bg-white py-1 px-2.5 rounded-lg border border-blue-200 inline-block shadow-2xs">
-                                                Format Resmi SDLC: Berkas PDF (.pdf) untuk Pratinjau Langsung (maks 25 MB)
+                                                PDF, Excel, Gambar, ZIP (maks 5 MB)
                                             </p>
                                         </div>
                                     )}
@@ -844,25 +844,32 @@ export default function Documents() {
                                     type="text"
                                     value={uploadFileName}
                                     onChange={e => setUploadFileName(e.target.value)}
-                                    placeholder="Contoh: BRD_SistemPelaporan_v1.0.pdf"
-                                    className="w-full px-3.5 py-2.5 border border-gray-200 rounded-xl text-sm outline-none focus:border-[#1A56DB]"
+                                    placeholder="Otomatis mengikuti format XXX/GPTD/TIPE/DD-BulanYYYY_NamaProyek"
+                                    className="w-full px-3.5 py-2.5 border border-gray-200 rounded-xl text-sm outline-none focus:border-[#1A56DB] text-gray-500"
+                                    disabled
                                 />
+                                <p className="text-[10px] text-gray-400 mt-1">Nama file dibuat otomatis sesuai penamaan masking Bank Nagari.</p>
                             </div>
 
                             <div className="flex justify-end gap-3 pt-2">
                                 <button
                                     type="button"
                                     onClick={() => setIsUploadModalOpen(false)}
-                                    className="px-4 py-2 bg-gray-100 text-gray-600 rounded-xl text-sm font-semibold hover:bg-gray-200"
+                                    disabled={isUploading}
+                                    className="px-4 py-2 bg-gray-100 text-gray-600 rounded-xl text-sm font-semibold hover:bg-gray-200 disabled:opacity-50"
                                 >
                                     Batal
                                 </button>
                                 <button
                                     type="submit"
-                                    className="px-4 py-2 bg-[#003a73] text-white rounded-xl text-sm font-bold hover:bg-[#002a5a] shadow-md flex items-center gap-1.5"
+                                    disabled={isUploading}
+                                    className="px-4 py-2 bg-[#003a73] text-white rounded-xl text-sm font-bold hover:bg-[#002a5a] shadow-md flex items-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
                                 >
-                                    <Upload size={16} />
-                                    Unggah Sekarang
+                                    {isUploading ? (
+                                        <><span className="w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin" /> Mengunggah...</>
+                                    ) : (
+                                        <><Upload size={16} /> Unggah Sekarang</>
+                                    )}
                                 </button>
                             </div>
                         </form>

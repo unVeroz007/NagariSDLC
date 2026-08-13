@@ -18,6 +18,7 @@ class ProjectTask extends Model
         'assignee_id',
         'status',
         'due_date',
+        'priority',
     ];
 
     protected function casts(): array

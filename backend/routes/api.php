@@ -41,20 +41,17 @@ Route::prefix('v1')->group(function () {
         Route::get('/dashboard/summary', [DashboardController::class, 'summary']);
         Route::get('/dashboard/analytics', [DashboardController::class, 'analytics']);
 
-        // ----- REFERENCE DATA (Roles & Divisions) — Admin Only -----
+        // ----- REFERENCE DATA (Roles & Divisions) — Admin Only (write) -----
         Route::middleware('role:super_admin')->group(function () {
-            Route::get('/roles', [RoleController::class, 'index']);
             Route::post('/roles', [RoleController::class, 'store']);
             Route::patch('/roles/{id}', [RoleController::class, 'update']);
             Route::delete('/roles/{id}', [RoleController::class, 'destroy']);
 
-            Route::get('/divisions', [DivisionController::class, 'index']);
             Route::post('/divisions', [DivisionController::class, 'store']);
             Route::patch('/divisions/{id}', [DivisionController::class, 'update']);
             Route::delete('/divisions/{id}', [DivisionController::class, 'destroy']);
 
-            // ----- USER MANAGEMENT (Admin CRUD) -----
-            Route::get('/users', [UserController::class, 'index']);
+            // ----- USER MANAGEMENT (Admin CRUD — write) -----
             Route::post('/users', [UserController::class, 'store']);
             Route::patch('/users/{id}', [UserController::class, 'update']);
             Route::delete('/users/{id}', [UserController::class, 'destroy']);

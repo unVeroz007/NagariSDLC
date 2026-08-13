@@ -18,6 +18,7 @@ class ProjectTaskResource extends JsonResource
             'description' => $this->description,
             'assignee' => new UserResource($this->whenLoaded('assignee')),
             'status' => $status instanceof \BackedEnum ? $status->value : $status,
+            'priority' => $this->priority ?? 'Medium',
             'due_date' => $this->due_date?->format('Y-m-d'),
             'created_at' => $this->created_at?->toIso8601String(),
             'updated_at' => $this->updated_at?->toIso8601String(),

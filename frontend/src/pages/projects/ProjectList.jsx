@@ -36,6 +36,11 @@ export default function ProjectList() {
     const [currentPage, setCurrentPage] = useState(1);
     const itemsPerPage = 5;
 
+    // Role yang boleh menginisiasi proyek baru
+    const canCreateProject = ['super_admin', 'head_of_it', 'business_user'].includes(user?.role);
+    // Role yang boleh membuka detail proyek via tracker/track
+    const canViewDetail = ['super_admin', 'head_of_it', 'lead_group', 'project_manager', 'dev_analyst', 'development_lead', 'business_user'].includes(user?.role);
+
     const stats = getProjectStats(projects);
 
     const filteredProjects = useMemo(() => {
@@ -109,13 +114,15 @@ export default function ProjectList() {
                             <Download size={16} />
                             Export
                         </button>
-                        <button
-                            onClick={() => navigate('/projects/new')}
-                            className="flex items-center gap-2 px-5 py-2.5 bg-[#003a73] rounded-xl text-sm font-bold text-white hover:bg-[#002a5a] shadow-md shadow-[#003a73]/20 transition-all hover:shadow-lg hover:shadow-[#003a73]/30 hover:-translate-y-0.5 btn-shimmer"
-                        >
-                            <Plus size={16} />
-                            Proyek Baru
-                        </button>
+                        {canCreateProject && (
+                            <button
+                                onClick={() => navigate('/projects/new')}
+                                className="flex items-center gap-2 px-5 py-2.5 bg-[#003a73] rounded-xl text-sm font-bold text-white hover:bg-[#002a5a] shadow-md shadow-[#003a73]/20 transition-all hover:shadow-lg hover:shadow-[#003a73]/30 hover:-translate-y-0.5 btn-shimmer"
+                            >
+                                <Plus size={16} />
+                                Proyek Baru
+                            </button>
+                        )}
                     </div>
                 </div>
 
@@ -216,17 +223,20 @@ export default function ProjectList() {
                             <tbody className="divide-y divide-gray-50 text-sm">
                                 {currentProjects.length > 0 ? (
                                     currentProjects.map((project) => {
-                                        const isPmOrAdmin = ['project_manager', 'super_admin'].includes(user?.role);
-                                        const targetPath = isPmOrAdmin ? '/pm/tracker' : '/track';
+                                        const isPmOrAdmin = ['project_manager', 'super_admin', 'dev_analyst', 'development_lead', 'head_of_it'].includes(user?.role);
+                                        const isBusinessUser = user?.role === 'business_user';
+                                        const targetPath = isPmOrAdmin ? '/pm/tracker' : (isBusinessUser ? '/track' : null);
                                         const handleNavigate = () => {
-                                            navigate(`${targetPath}?projectId=${project.id}`, { state: { projectId: project.id } });
+                                            if (targetPath) {
+                                                navigate(`${targetPath}?projectId=${project.id}`, { state: { projectId: project.id } });
+                                            }
                                         };
 
                                         return (
                                             <tr
                                                 key={project.id}
-                                                onClick={handleNavigate}
-                                                className="group hover:bg-blue-50/40 transition-colors cursor-pointer"
+                                                onClick={canViewDetail ? handleNavigate : undefined}
+                                                className={`group hover:bg-blue-50/40 transition-colors ${canViewDetail ? 'cursor-pointer' : ''}`}
                                             >
                                                 <td className="pl-5 pr-4 py-4">
                                                     <span className="font-bold text-[#00529C] bg-blue-50 px-2.5 py-1 rounded-lg text-xs border border-blue-100/80">{project.reqId || project.id}</span>
@@ -276,16 +286,18 @@ export default function ProjectList() {
                                                 </td>
                                                 <td className="px-3 py-4 text-gray-500 text-sm">{project.targetDate}</td>
                                                 <td className="pr-5 pl-2 py-4 text-center">
-                                                    <button
-                                                        onClick={(e) => {
-                                                            e.stopPropagation();
-                                                            handleNavigate();
-                                                        }}
-                                                        className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-50 hover:bg-blue-100 text-[#00529C] text-xs font-bold rounded-lg border border-[#00529C]/30 transition-all shadow-sm active:scale-95"
-                                                    >
-                                                        <span>Detail</span>
-                                                        <ArrowUpRight size={14} />
-                                                    </button>
+                                                    {canViewDetail && (
+                                                        <button
+                                                            onClick={(e) => {
+                                                                e.stopPropagation();
+                                                                handleNavigate();
+                                                            }}
+                                                            className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-50 hover:bg-blue-100 text-[#00529C] text-xs font-bold rounded-lg border border-[#00529C]/30 transition-all shadow-sm active:scale-95"
+                                                        >
+                                                            <span>Detail</span>
+                                                            <ArrowUpRight size={14} />
+                                                        </button>
+                                                    )}
                                                 </td>
                                             </tr>
                                         );
@@ -299,13 +311,15 @@ export default function ProjectList() {
                                                 </div>
                                                 <p className="text-gray-800 font-bold text-base">Belum Ada Proyek</p>
                                                 <p className="text-gray-500 text-xs">Belum ada proyek yang terdaftar di sistem. Mulai dengan membuat proyek SDLC pertama Anda.</p>
-                                                <button
-                                                    onClick={() => navigate('/projects/new')}
-                                                    className="mt-2 inline-flex items-center gap-2 px-4 py-2 bg-[#003a73] text-white text-xs font-bold rounded-xl shadow-sm hover:bg-[#002a5a] transition-all"
-                                                >
-                                                    <Plus size={15} />
-                                                    <span>Buat Proyek Baru</span>
-                                                </button>
+                                                {canCreateProject && (
+                                                    <button
+                                                        onClick={() => navigate('/projects/new')}
+                                                        className="mt-2 inline-flex items-center gap-2 px-4 py-2 bg-[#003a73] text-white text-xs font-bold rounded-xl shadow-sm hover:bg-[#002a5a] transition-all"
+                                                    >
+                                                        <Plus size={15} />
+                                                        <span>Buat Proyek Baru</span>
+                                                    </button>
+                                                )}
                                             </div>
                                         </td>
                                     </tr>

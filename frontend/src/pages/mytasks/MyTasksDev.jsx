@@ -1,16 +1,13 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import { useProjects } from '../../contexts/ProjectContext';
 import { useNotifications } from '../../contexts/NotificationContext';
-import RBBBadge from '../../components/RBBBadge';
 import LoadingSpinner from '../../components/LoadingSpinner';
 import toast from 'react-hot-toast';
 import ChatBox from '../../components/ChatBox';
+import { taskService } from '../../services/api';
 import {
     Code,
-    CheckCircle2,
-    Clock,
-    AlertCircle,
     Search,
     Calendar,
     Kanban,
@@ -19,127 +16,113 @@ import {
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 
-const DEFAULT_DEV_TASKS = [
-    {
-        id: 'TSK-101',
-        title: 'Integrasi ISO8583 Message Parser & Payment Gateway Middleware',
-        projectId: 'PRJ-2026-001',
-        projectName: 'Sistem QRIS Dinamis Bank Nagari',
-        assignee: 'Dimas Anggara (Developer)',
-        assigneeEmail: 'developer@nagari.co.id',
-        priority: 'High',
-        deadline: '2026-08-15',
-        status: 'In Progress'
-    },
-    {
-        id: 'TSK-102',
-        title: 'Pengembangan Rest API Endpoint Transaction History & Filter',
-        projectId: 'PRJ-2026-002',
-        projectName: 'Portal Digital Core Banking Retail',
-        assignee: 'Dimas Anggara (Developer)',
-        assigneeEmail: 'developer@nagari.co.id',
-        priority: 'Medium',
-        deadline: '2026-08-20',
-        status: 'To Do'
-    },
-    {
-        id: 'TSK-103',
-        title: 'Pengujian Unit Test Middleware Security & JWT Authentication',
-        projectId: 'PRJ-2026-003',
-        projectName: 'Nagari Mobile Banking Revamp',
-        assignee: 'Dimas Anggara (Developer)',
-        assigneeEmail: 'developer@nagari.co.id',
-        priority: 'High',
-        deadline: '2026-08-25',
-        status: 'Code Review'
-    }
-];
+// Pemetaan status label UI <-> enum backend (TaskStatus: todo, in_progress, review, done)
+const STATUS_ENUM_TO_LABEL = {
+    todo: 'To Do',
+    in_progress: 'In Progress',
+    review: 'Code Review',
+    done: 'Done',
+};
+const STATUS_LABEL_TO_ENUM = {
+    'To Do': 'todo',
+    'In Progress': 'in_progress',
+    'Code Review': 'review',
+    'Done': 'done',
+};
+const STATUS_LABELS = ['To Do', 'In Progress', 'Code Review', 'Done'];
+
+const mapTaskStatusToLabel = (status) => {
+    const s = String(status || '').toLowerCase();
+    if (STATUS_ENUM_TO_LABEL[s]) return STATUS_ENUM_TO_LABEL[s];
+    // Terima label UI yang sudah benar (misal dari data lama)
+    if (STATUS_LABELS.includes(status)) return status;
+    return 'To Do';
+};
 
 export default function MyTasksDev() {
     const { user } = useAuth();
     const navigate = useNavigate();
-    const { projects, updateProject, isLoading } = useProjects();
+    const { projects, refreshData, isLoading } = useProjects();
     const { addNotification } = useNotifications();
 
     const [statusFilter, setStatusFilter] = useState('ALL');
     const [searchTerm, setSearchTerm] = useState('');
     const [selectedTask, setSelectedTask] = useState(null);
-    const [devTasks, setDevTasks] = useState(() => {
-        const saved = localStorage.getItem('nagari_sdlc_dev_tasks');
-        if (saved) {
-            try { return JSON.parse(saved); } catch { }
-        }
-        return DEFAULT_DEV_TASKS;
-    });
+    const [updatingTaskId, setUpdatingTaskId] = useState(null);
 
-    const saveDevTasks = (updated) => {
-        setDevTasks(updated);
-        localStorage.setItem('nagari_sdlc_dev_tasks', JSON.stringify(updated));
-    };
-
-    // Extract tasks assigned to developer from projects in ProjectContext + local devTasks
-    const allCombinedTasks = useMemo(() => {
-        const list = [...devTasks];
-        (projects || []).forEach(p => {
-            if (Array.isArray(p.tasks)) {
-                p.tasks.forEach(t => {
-                    const exists = list.some(item => String(item.id) === String(t.id));
-                    if (!exists) {
-                        list.push({
-                            id: t.id || `TSK-${Math.floor(100 + Math.random() * 900)}`,
-                            title: t.title || t.name || 'Task Pengembangan',
-                            projectId: p.id,
-                            projectName: p.name,
-                            assignee: t.assignee || 'Dimas Anggara',
-                            assigneeEmail: t.assigneeEmail || 'developer@nagari.co.id',
-                            priority: t.priority || 'Medium',
-                            deadline: t.deadline || p.targetDate || '2026-08-30',
-                            status: t.status || 'In Progress'
-                        });
-                    }
-                });
-            }
-        });
-        return list;
-    }, [projects, devTasks]);
-
-    // Filter tasks untuk developer yang sedang login
-    const filteredTasks = useMemo(() => {
-        let list = allCombinedTasks;
+    // Ambil task NYATA dari backend: hanya task di proyek tempat developer ini menjadi anggota tim
+    // DAN yang assignee-nya adalah developer yang sedang login.
+    const devTasks = useMemo(() => {
         const isPrivileged = user?.role && ['super_admin', 'lead_group', 'head_of_it', 'development_lead'].includes(user.role);
-        
-        if (!isPrivileged && user?.id) {
-            list = list.filter(task => {
-                const project = projects?.find(p => String(p.id) === String(task.projectId));
-                if (!project || !project.team) return false;
-                return project.team.some(t => (typeof t === 'object' ? t.id : t) === user.id);
-            });
-        }
+        const tasks = [];
+        (projects || []).forEach(p => {
+            if (!Array.isArray(p.tasks)) return;
+            p.tasks.forEach(t => {
+                const assigneeId = t.assignee_id ?? t.assignee_detail?.id ?? null;
+                const assigneeName = t.assignee_detail?.name || t.assignee || '';
 
-        return list.filter(task => {
+                // Tentukan kepemilikan: task ini untuk developer yang login?
+                const isMine = isPrivileged
+                    ? false // privileged user tidak melihat daftar "saya" (mereka lihat semua via kanban)
+                    : (user?.id && assigneeId != null && Number(assigneeId) === Number(user.id))
+                        || (user?.name && assigneeName && assigneeName.toLowerCase() === user.name.toLowerCase());
+
+                if (!isMine) return;
+
+                tasks.push({
+                    id: t.id,
+                    title: t.title || t.name || 'Task Pengembangan',
+                    projectId: p.id,
+                    projectName: p.name,
+                    assignee: assigneeName,
+                    priority: t.priority || 'Medium',
+                    deadline: t.due_date || t.deadline || '',
+                    status: mapTaskStatusToLabel(t.status),
+                });
+            });
+        });
+        return tasks;
+    }, [projects, user]);
+
+    // Filter berdasarkan pencarian & status
+    const filteredTasks = useMemo(() => {
+        return devTasks.filter(task => {
             const matchesStatus = statusFilter === 'ALL' || task.status === statusFilter;
             const matchesSearch =
-                task.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                task.projectName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                task.id.toLowerCase().includes(searchTerm.toLowerCase());
+                String(task.title).toLowerCase().includes(searchTerm.toLowerCase()) ||
+                String(task.projectName).toLowerCase().includes(searchTerm.toLowerCase()) ||
+                String(task.id).toLowerCase().includes(searchTerm.toLowerCase());
 
             return matchesStatus && matchesSearch;
         });
-    }, [allCombinedTasks, user, projects, statusFilter, searchTerm]);
+    }, [devTasks, statusFilter, searchTerm]);
 
-    const handleUpdateStatus = (taskId, newStatus) => {
-        const updated = devTasks.map(t =>
-            t.id === taskId ? { ...t, status: newStatus, updatedAt: new Date().toISOString() } : t
-        );
-        saveDevTasks(updated);
+    const handleUpdateStatus = async (task, newStatusLabel) => {
+        const enumStatus = STATUS_LABEL_TO_ENUM[newStatusLabel];
+        if (!enumStatus || !task?.id) {
+            toast.error('Status tidak valid.');
+            return;
+        }
 
-        toast.success(`Status task ${taskId} diperbarui menjadi: ${newStatus}`);
-        addNotification(
-            'Perubahan Status Task Developer',
-            `Task ${taskId} diperbarui oleh ${user?.name || 'Developer'} menjadi status: ${newStatus}`,
-            'info',
-            '/pm/kanban'
-        );
+        setUpdatingTaskId(task.id);
+        try {
+            await taskService.update(task.id, { status: enumStatus });
+
+            toast.success(`Status task "${task.title}" diperbarui menjadi: ${newStatusLabel}`);
+            addNotification(
+                'Perubahan Status Task Developer',
+                `Task "${task.title}" diperbarui oleh ${user?.name || 'Developer'} menjadi status: ${newStatusLabel}`,
+                'info',
+                '/pm/kanban'
+            );
+
+            // Muat ulang data proyek agar status terbaru tercermin di semua laman.
+            await refreshData();
+        } catch (err) {
+            toast.error(`Gagal memperbarui status: ${err.message}`);
+        } finally {
+            setUpdatingTaskId(null);
+        }
     };
 
     const getStatusBadge = (status) => {
@@ -291,7 +274,7 @@ export default function MyTasksDev() {
                                             <td className="p-4 text-gray-600">
                                                 <div className="flex items-center gap-1.5">
                                                     <Calendar size={13} className="text-gray-400" />
-                                                    <span>{task.deadline}</span>
+                                                    <span>{task.deadline || '-'}</span>
                                                 </div>
                                             </td>
                                             <td className="p-4">
@@ -302,14 +285,17 @@ export default function MyTasksDev() {
                                             <td className="p-4 text-center">
                                                 <select
                                                     value={task.status}
-                                                    onChange={(e) => handleUpdateStatus(task.id, e.target.value)}
-                                                    className="px-3 py-1.5 rounded-xl border border-gray-200 text-xs font-bold outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-600 bg-white cursor-pointer hover:border-gray-300 transition-all"
+                                                    disabled={updatingTaskId === task.id}
+                                                    onChange={(e) => handleUpdateStatus(task, e.target.value)}
+                                                    className="px-3 py-1.5 rounded-xl border border-gray-200 text-xs font-bold outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-600 bg-white cursor-pointer hover:border-gray-300 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                                                 >
-                                                    <option value="To Do">To Do</option>
-                                                    <option value="In Progress">In Progress</option>
-                                                    <option value="Code Review">Code Review</option>
-                                                    <option value="Done">Done</option>
+                                                    {STATUS_LABELS.map((st) => (
+                                                        <option key={st} value={st}>{st}</option>
+                                                    ))}
                                                 </select>
+                                                {updatingTaskId === task.id && (
+                                                    <span className="block text-[10px] text-blue-600 mt-1">Menyimpan...</span>
+                                                )}
                                             </td>
                                         </tr>
                                     ))}

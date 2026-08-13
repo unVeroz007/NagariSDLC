@@ -72,8 +72,31 @@ class ProjectResource extends JsonResource
                     'name' => $m->user?->name ?? 'Developer',
                     'email' => $m->user?->email,
                     'role' => $m->role_in_project,
+                    'assigned_by' => $m->assigned_by ?? 'lead',
                 ];
             }) : [],
+            'tasks' => $this->whenLoaded('tasks', function () {
+                return $this->tasks->map(function ($t) {
+                    return [
+                        'id' => $t->id,
+                        'name' => $t->title,
+                        'title' => $t->title,
+                        'description' => $t->description,
+                        'assignee_id' => $t->assignee_id,
+                        'assignee' => $t->assignee?->name,
+                        'assignee_detail' => $t->assignee ? [
+                            'id' => $t->assignee->id,
+                            'name' => $t->assignee->name,
+                            'email' => $t->assignee->email,
+                        ] : null,
+                        'status' => $t->status instanceof \BackedEnum ? $t->status->value : $t->status,
+                        'deadline' => $t->due_date?->format('Y-m-d'),
+                        'due_date' => $t->due_date?->format('Y-m-d'),
+                        'priority' => $t->priority ?? 'Medium',
+                        'created_at' => $t->created_at?->toIso8601String(),
+                    ];
+                });
+            }) ?? [],
             'documents' => $this->whenLoaded('documents', function () {
                 return $this->documents->map(function ($d) {
                     return [

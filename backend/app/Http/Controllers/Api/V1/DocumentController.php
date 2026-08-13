@@ -23,7 +23,7 @@ class DocumentController extends Controller
      *   XXX = nomor urut dari req_id (contoh: REQ-2026-001 → 001)
      *   TIPE = kode tipe dokumen (BRD, MEMO, FSD, dll)
      */
-    protected function generateDocumentFileName(Project $project, string $docType, ?string $originalName = null): string
+    protected function generateDocumentFileName(Project $project, string $docType, ?string $originalName = null, ?string $mimeType = null): string
     {
         // Nomor proyek dari req_id
         $nomor = '001';
@@ -55,7 +55,7 @@ class DocumentController extends Controller
         }
         // Fallback: ekstensi dari MIME type file jika tidak ada di original name
         if ($ext === '') {
-            $ext = match ($fileInfo['mime_type'] ?? '') {
+            $ext = match ($mimeType) {
                 'application/pdf' => '.pdf',
                 'application/vnd.ms-excel' => '.xls',
                 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' => '.xlsx',
@@ -101,7 +101,7 @@ class DocumentController extends Controller
         $file = $request->file('file');
         $fileInfo = $this->uploadService->upload($file);
         $originalName = $request->original_filename ?? $file->getClientOriginalName();
-        $docName = $this->generateDocumentFileName($project, $request->document_type, $originalName);
+        $docName = $this->generateDocumentFileName($project, $request->document_type, $originalName, $fileInfo['mime_type']);
 
         $document = DocumentVault::create([
             'project_id' => $project->id,

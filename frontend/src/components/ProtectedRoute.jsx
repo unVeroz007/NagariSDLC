@@ -29,12 +29,9 @@ export default function ProtectedRoute({ children, allowedRoles }) {
 
     // Sudah login tapi role tidak diizinkan → redirect secara ramah
     if (allowedRoles && !allowedRoles.includes(user.role)) {
-        // Jika mencoba membuka /dashboard tapi rolenya bukan admin, alihkan langsung ke workspacenya
-        if (location.pathname === '/dashboard') {
-            const targetRoute = getDefaultRouteForRole(user.role);
-            return <Navigate to={targetRoute} replace />;
-        }
-        return <Navigate to="/unauthorized" state={{ from: location }} replace />;
+        // Alihkan ke workspace/tugas utama sesuai role, bukan halaman 403 mentah
+        const targetRoute = getDefaultRouteForRole(user.role);
+        return <Navigate to={targetRoute} replace state={{ from: location }} />;
     }
 
     // Lolos semua pengecekan → render children

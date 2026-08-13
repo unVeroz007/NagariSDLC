@@ -293,13 +293,15 @@ export default function Kanban() {
                                                 </div>
                                             </div>
 
-                                            <button
-                                                onClick={() => navigate(`/pm/tasks/${p.id}`)}
-                                                className="w-full py-2 bg-[#00529C] text-white hover:bg-blue-700 rounded-xl text-xs font-bold transition-all shadow-xs flex items-center justify-center gap-1.5 cursor-pointer active:scale-95"
-                                            >
-                                                <List size={13} />
-                                                <span>Detail Task &amp; Pekerjaan Dev</span>
-                                            </button>
+                                            {['super_admin', 'development_lead', 'dev_analyst', 'project_manager'].includes(user?.role) && (
+                                                <button
+                                                    onClick={() => navigate(`/pm/tasks/${p.id}`)}
+                                                    className="w-full py-2 bg-[#00529C] text-white hover:bg-blue-700 rounded-xl text-xs font-bold transition-all shadow-xs flex items-center justify-center gap-1.5 cursor-pointer active:scale-95"
+                                                >
+                                                    <List size={13} />
+                                                    <span>Detail Task &amp; Pekerjaan Dev</span>
+                                                </button>
+                                            )}
                                         </div>
                                     ))
                                 )}

@@ -68,6 +68,10 @@ const DEV_MEMBER_ROLES = ['super_admin', 'development_lead', 'developer', 'dev_a
 const QA_ROLES = ['super_admin', 'qa_lead', 'qa_tester', 'lead_group'];
 const CYBER_ROLES = ['super_admin', 'cyber_team', 'cyber_lead', 'pentester'];
 const ADMIN_ROLES = ['super_admin'];
+// Role yang boleh menginisiasi & melacak pengajuan proyek
+const BUSINESS_ROLES = ['super_admin', 'head_of_it', 'business_user'];
+// Role yang boleh mengelola dokumen (upload/hapus)
+const DOC_MANAGEMENT_ROLES = ['super_admin', 'head_of_it', 'lead_group', 'project_manager', 'dev_analyst', 'development_lead'];
 
 const router = createBrowserRouter([
     // ─────────────────────────────────────────────
@@ -147,21 +151,37 @@ const router = createBrowserRouter([
             },
             {
                 path: '/documents',
-                element: <Documents />,
+                element: (
+                    <ProtectedRoute allowedRoles={DOC_MANAGEMENT_ROLES}>
+                        <Documents />
+                    </ProtectedRoute>
+                ),
             },
             {
                 path: '/track',
-                element: <Track />,
+                element: (
+                    <ProtectedRoute allowedRoles={BUSINESS_ROLES}>
+                        <Track />
+                    </ProtectedRoute>
+                ),
             },
             {
                 path: '/queue',
-                element: <Queue />,
+                element: (
+                    <ProtectedRoute allowedRoles={['super_admin', 'lead_group']}>
+                        <Queue />
+                    </ProtectedRoute>
+                ),
             },
 
             // FASE 1 – Inisiasi & Review
             {
                 path: '/projects/new',
-                element: <ProjectNew />,
+                element: (
+                    <ProtectedRoute allowedRoles={BUSINESS_ROLES}>
+                        <ProjectNew />
+                    </ProtectedRoute>
+                ),
             },
             {
                 path: '/newProject',

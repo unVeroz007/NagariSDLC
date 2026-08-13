@@ -151,4 +151,25 @@ class ProjectCrudTest extends TestCase
 
         $response->assertStatus(403);
     }
+
+    public function test_any_authenticated_user_can_read_users_list()
+    {
+        // Non-admin (business user) harus tetap bisa membaca daftar users
+        // (dipakai dropdown assignee/developer/PM di banyak halaman)
+        $response = $this->actingAs($this->businessUser)->getJson('/api/v1/users');
+
+        $response->assertStatus(200)
+            ->assertJsonPath('status', 'success');
+    }
+
+    public function test_business_user_cannot_create_user()
+    {
+        $response = $this->actingAs($this->businessUser)->postJson('/api/v1/users', [
+            'name' => 'Hacker',
+            'email' => 'hacker@nagari.co.id',
+            'password' => 'password123',
+        ]);
+
+        $response->assertStatus(403);
+    }
 }

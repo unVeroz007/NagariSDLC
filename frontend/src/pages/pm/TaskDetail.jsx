@@ -8,7 +8,7 @@ import {
     getDocumentTypeInfo,
     formatFileSize,
 } from '../../utils/documentNaming';
-import { documentService } from '../../services/api';
+import { documentService, taskService } from '../../services/api';
 import ChatBox from '../../components/ChatBox';
 import SITUATDocumentModal from '../../components/SITUATDocumentModal';
 import SITUATWizard from '../../components/SITUATWizard';
@@ -83,7 +83,9 @@ export default function TaskDetail() {
                 id: ctxFound.id,
                 name: ctxFound.name,
                 code: ctxFound.id,
-                pm: typeof ctxFound.pm === 'object' ? (ctxFound.pm?.name || 'Budi Santoso') : (ctxFound.pm || ctxFound.pmName || 'Budi Santoso'),
+                // Pertahankan objek pm & analyst utuh (dengan id) agar bisa di-assign sebagai assignee task
+                pm: ctxFound.pm,
+                analyst: ctxFound.analyst,
                 division: typeof ctxFound.division === 'object' ? (ctxFound.division?.name || 'Divisi TI') : (ctxFound.division || 'Divisi TI'),
                 status: ctxFound.status || 'IN_DEVELOPMENT',
                 progress: ctxFound.progress || 60,
@@ -96,32 +98,47 @@ export default function TaskDetail() {
     }, [projectId, projects]);
 
 
-    // Filter Assignee anggota tim proyek (HANYA Pekerja Teknis/Dev/Analyst, tanpa Management Roles)
-    const validAssignees = useMemo(() => {
-        const isManagementOrLeader = (nameStr) => {
-            const n = String(nameStr || '').toLowerCase();
-            return (
-                n.includes('super admin') ||
-                n.includes('head of it') ||
-                n.includes('lead group') ||
-                n.includes('cyber lead') ||
-                n.includes('qa lead') ||
-                n.includes('budi santoso (head') ||
-                n.includes('dewi lestari (lead') ||
-                n.includes('fajar nugroho (dev lead')
-            );
+    // Daftar anggota tim proyek yang sah menjadi assignee task.
+    // HANYA developer yang sudah dialokasikan ke proyek ini (ditambah PM/Analyst proyek).
+    // Tidak ada fallback hardcode — task wajib diserahkan ke orang yang terlibat di proyek.
+    const teamMembers = useMemo(() => {
+        const rawTeam = Array.isArray(project?.team) ? project.team : [];
+        const members = rawTeam
+            .map(m => {
+                if (!m) return null;
+                if (typeof m === 'object') {
+                    return {
+                        id: m.user_id ?? m.id ?? null,
+                        name: m.name || 'Developer',
+                        email: m.email || null,
+                        role: m.role || 'Developer',
+                    };
+                }
+                return { id: null, name: String(m), email: null, role: 'Developer' };
+            })
+            .filter(m => m && m.name);
+
+        // Tambahkan PM & Analyst proyek bila tersedia (supaya bisa juga di-assign bila dibutuhkan)
+        const seen = new Set(members.map(m => m.name.toLowerCase()));
+        const addPerson = (p, role) => {
+            if (!p) return;
+            const name = typeof p === 'object' ? (p.name || p.email || null) : String(p);
+            if (!name) return;
+            const key = name.toLowerCase();
+            if (seen.has(key)) return;
+            seen.add(key);
+            members.push({
+                id: (typeof p === 'object' && (p.id ?? p.user_id)) ? (p.id ?? p.user_id) : null,
+                name,
+                email: (typeof p === 'object' ? p.email : null) || null,
+                role,
+            });
         };
+        if (project?.pm) addPerson(project.pm, 'Project Manager');
+        if (project?.analyst) addPerson(project.analyst, 'System Analyst');
 
-        const rawTeam = Array.isArray(project?.team) && project.team.length > 0 ? project.team : [];
-        const filtered = rawTeam
-            .map(m => (typeof m === 'object' ? m.name : String(m)))
-            .filter(name => name && !isManagementOrLeader(name));
-
-        if (filtered.length > 0) return filtered;
-
-        // Fallback default: 5 Developer resmi
-        return ['Dimas Anggara', 'Eka Putri', 'Fani Wijaya', 'Gilang Pratama', 'Rina Wati'];
-    }, [project?.team]);
+        return members;
+    }, [project?.team, project?.pm, project?.analyst]);
 
     if (!project) {
         return (
@@ -199,14 +216,61 @@ export default function TaskDetail() {
     // ─────────────────────────────────────────────────────────────────────────
 
     const [searchTask, setSearchTask] = useState('');
-    const [tasks, setTasks] = useState(project ? (project.tasks || []) : []);
-    
-    // Auto sync state tasks bila data project di ProjectContext ter-update
-    useEffect(() => {
-        if (project?.tasks && Array.isArray(project.tasks)) {
-            setTasks(project.tasks);
+    const [tasks, setTasks] = useState([]);
+
+    // Normalisasi task dari backend -> shape yang dipakai UI
+    const normalizeTask = (t) => ({
+        id: t?.id,
+        name: t?.title || t?.name,
+        title: t?.title || t?.name,
+        description: t?.description || '',
+        assignee: t?.assignee_detail?.name || t?.assignee?.name || t?.assignee || '',
+        assignee_id: t?.assignee_id ?? t?.assignee_detail?.id ?? null,
+        deadline: t?.due_date || t?.deadline || '',
+        priority: t?.priority || 'Medium',
+        status: mapTaskStatusToLabel(t?.status),
+    });
+
+    // Resolusi nama assignee -> id anggota tim proyek (fallback: cari di tasks yg sudah ada)
+    const resolveAssigneeId = (value) => {
+        if (!value) return null;
+        if (typeof value === 'object') return value.id ?? value.user_id ?? null;
+        const str = String(value).trim();
+        if (!str) return null;
+
+        // Jika value adalah id numerik anggota tim, langsung kembalikan
+        if (/^\d+$/.test(str)) {
+            const byId = teamMembers.find(m => m.id != null && Number(m.id) === Number(str));
+            if (byId) return byId.id;
+            return Number(str);
         }
-    }, [project?.tasks]);
+
+        const found = teamMembers.find(m => {
+            const name = String(m.name || '').toLowerCase();
+            return name === str.toLowerCase() || name.includes(str.toLowerCase()) || str.toLowerCase().includes(name);
+        });
+        if (found?.id) return found.id;
+        // fallback: cocokkan dengan assignee yang sudah ter-record di task lain
+        const existing = (tasks || []).find(t => String(t.assignee || '').toLowerCase() === str.toLowerCase());
+        return existing?.assignee_id ?? null;
+    };
+
+    // Load task dari backend saat project berubah
+    useEffect(() => {
+        let cancelled = false;
+        if (project?.id) {
+            taskService.getByProject(project.id)
+                .then(res => {
+                    if (cancelled) return;
+                    const list = Array.isArray(res?.data) ? res.data.map(normalizeTask) : [];
+                    setTasks(list);
+                })
+                .catch(() => {
+                    if (!cancelled) setTasks([]);
+                });
+        }
+        return () => { cancelled = true; };
+    }, [project?.id]);
     
     const [isAddTaskModalOpen, setIsAddTaskModalOpen] = useState(false);
     const [newTask, setNewTask] = useState({
@@ -219,6 +283,7 @@ export default function TaskDetail() {
 
     const [isEditTaskModalOpen, setIsEditTaskModalOpen] = useState(false);
     const [editingTask, setEditingTask] = useState(null);
+    const [isSubmittingTask, setIsSubmittingTask] = useState(false); // guard double-submit (tambah/edit task)
     
     // Modal Edit Proyek & Alokasi PM
     const [isEditProjectModalOpen, setIsEditProjectModalOpen] = useState(false);
@@ -282,64 +347,117 @@ export default function TaskDetail() {
         { id: 2, sender: 'Anda', time: '10:05', text: 'Baik, sedang saya siapkan.' },
     ]);
 
-    const handleAddTask = (e) => {
+    const mapTaskStatusToEnum = (status) => {
+        const s = String(status || '').toLowerCase();
+        if (s === 'selesai' || s === 'done') return 'done';
+        if (s === 'sedang dikerjakan' || s === 'in progress' || s === 'in_progress') return 'in_progress';
+        return 'todo';
+    };
+
+    const mapTaskStatusToLabel = (status) => {
+        const s = String(status || '').toLowerCase();
+        if (s === 'done' || s === 'selesai') return 'Selesai';
+        if (s === 'in_progress' || s === 'sedang dikerjakan') return 'Sedang Dikerjakan';
+        return 'Belum Mulai';
+    };
+
+    const handleAddTask = async (e) => {
         e.preventDefault();
+
+        // Cegah double-submit saat request sedang diproses
+        if (isSubmittingTask) return;
 
         if (!newTask.title.trim()) {
             toast.error('Nama task wajib diisi!');
             return;
         }
 
-        const task = {
-            id: Date.now(),
-            name: newTask.title,
-            title: newTask.title,
+        // Resolusi assignee -> id anggota tim proyek
+        const assigneeId = resolveAssigneeId(newTask.assignee);
+        if (newTask.assignee && !assigneeId) {
+            toast.error('Assignee tidak valid. Pilih dari anggota tim proyek.');
+            return;
+        }
+
+        const payload = {
+            title: newTask.title.trim(),
             description: newTask.description || '',
-            assignee: newTask.assignee || 'Belum Dialokasi',
-            deadline: newTask.deadline || new Date().toISOString().split('T')[0],
+            assignee_id: assigneeId || null,
+            due_date: newTask.deadline || null,
             priority: newTask.priority || 'Medium',
-            status: 'Belum Mulai',
-            statusColor: 'bg-gray-100 text-gray-600 border-gray-200'
+            status: mapTaskStatusToEnum('Belum Mulai'),
         };
 
-        const currentTasks = Array.isArray(project?.tasks) ? project.tasks : tasks;
-        const newTasks = [...currentTasks, task];
-
-        setTasks(newTasks);
-        if (project?.id) updateProject(project.id, { tasks: newTasks });
-
-        toast.success(`Task "${task.name}" berhasil ditambahkan!`);
-        setIsAddTaskModalOpen(false);
-        setNewTask({ title: '', assignee: '', deadline: '', priority: 'Medium', description: '' });
+        setIsSubmittingTask(true);
+        const loadingToastId = toast.loading('Menyimpan task... Mohon tunggu.', { duration: Infinity });
+        try {
+            const res = await taskService.create(project.id, payload);
+            const created = normalizeTask(res?.data);
+            setTasks(prev => [...prev, created]);
+            toast.dismiss(loadingToastId);
+            toast.success(`Task "${newTask.title}" berhasil ditambahkan!`);
+            setIsAddTaskModalOpen(false);
+            setNewTask({ title: '', assignee: '', deadline: '', priority: 'Medium', description: '' });
+        } catch (err) {
+            toast.dismiss(loadingToastId);
+            toast.error(`Gagal menambah task: ${err.message}`);
+        } finally {
+            setIsSubmittingTask(false);
+        }
     };
 
-    const handleEditTask = (e) => {
+    const handleEditTask = async (e) => {
         e.preventDefault();
-        
+
+        // Cegah double-submit saat request sedang diproses
+        if (isSubmittingTask) return;
+
         if (!editingTask.name.trim()) {
             toast.error('Nama task wajib diisi!');
             return;
         }
 
-        const currentTasks = Array.isArray(project?.tasks) ? project.tasks : tasks;
-        const updatedTasks = currentTasks.map(t => t.id === editingTask.id ? editingTask : t);
+        const assigneeId = resolveAssigneeId(editingTask.assignee);
+        if (editingTask.assignee && !assigneeId) {
+            toast.error('Assignee tidak valid. Pilih dari anggota tim proyek.');
+            return;
+        }
 
-        setTasks(updatedTasks);
-        if (project?.id) updateProject(project.id, { tasks: updatedTasks });
+        const payload = {
+            title: editingTask.name.trim(),
+            description: editingTask.description || '',
+            assignee_id: assigneeId ?? null,
+            due_date: editingTask.deadline || null,
+            priority: editingTask.priority || 'Medium',
+            status: mapTaskStatusToEnum(editingTask.status),
+        };
 
-        toast.success(`Task "${editingTask.name}" berhasil diperbarui!`);
-        setIsEditTaskModalOpen(false);
+        setIsSubmittingTask(true);
+        const loadingToastId = toast.loading('Menyimpan perubahan task... Mohon tunggu.', { duration: Infinity });
+        try {
+            const res = await taskService.update(editingTask.id, payload);
+            const updated = normalizeTask(res?.data);
+            setTasks(prev => prev.map(t => t.id === editingTask.id ? updated : t));
+            toast.dismiss(loadingToastId);
+            toast.success(`Task "${editingTask.name}" berhasil diperbarui!`);
+            setIsEditTaskModalOpen(false);
+        } catch (err) {
+            toast.dismiss(loadingToastId);
+            toast.error(`Gagal memperbarui task: ${err.message}`);
+        } finally {
+            setIsSubmittingTask(false);
+        }
     };
 
-    const handleDeleteTask = (taskToDelete) => {
-        if(window.confirm(`Apakah Anda yakin ingin menghapus task "${taskToDelete.name}"?`)) {
-            const currentTasks = Array.isArray(project?.tasks) ? project.tasks : tasks;
-            const updatedTasks = currentTasks.filter(t => t.id !== taskToDelete.id);
-
-            setTasks(updatedTasks);
-            if (project?.id) updateProject(project.id, { tasks: updatedTasks });
-            
-            toast.success(`Task "${taskToDelete.name}" berhasil dihapus!`);
+    const handleDeleteTask = async (taskToDelete) => {
+        if (window.confirm(`Apakah Anda yakin ingin menghapus task "${taskToDelete.name}"?`)) {
+            try {
+                await taskService.delete(taskToDelete.id);
+                setTasks(prev => prev.filter(t => t.id !== taskToDelete.id));
+                toast.success(`Task "${taskToDelete.name}" berhasil dihapus!`);
+            } catch (err) {
+                toast.error(`Gagal menghapus task: ${err.message}`);
+            }
         }
     };
 
@@ -785,14 +903,17 @@ export default function TaskDetail() {
                                             className="w-full px-4 py-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-[#00529C] focus:border-[#00529C] outline-none bg-white"
                                         >
                                             <option value="">Pilih Anggota Tim...</option>
-                                            {validAssignees.map((memName, idx) => {
-                                                const activeCount = (project?.tasks || []).filter(t => (t.assignee || '').toLowerCase().includes(memName.toLowerCase()) && t.status !== 'Selesai' && t.status !== 'DONE').length;
+                                            {teamMembers.map((mem) => {
+                                                const activeCount = tasks.filter(t => (t.assignee || '').toLowerCase().includes(mem.name.toLowerCase()) && t.status !== 'Selesai' && t.status !== 'done').length;
                                                 return (
-                                                    <option key={idx} value={memName}>
-                                                        {memName} (Beban: {activeCount} Task Aktif)
+                                                    <option key={mem.id ?? mem.name} value={mem.id ?? mem.name}>
+                                                        {mem.name} — {mem.role || 'Developer'} (Beban: {activeCount} Task Aktif)
                                                     </option>
                                                 );
                                             })}
+                                            {teamMembers.length === 0 && (
+                                                <option value="" disabled>Belum ada tim teralokasi</option>
+                                            )}
                                         </select>
                                     </div>
                                     <div>
@@ -839,16 +960,27 @@ export default function TaskDetail() {
                                     <button
                                         type="button"
                                         onClick={() => setIsAddTaskModalOpen(false)}
-                                        className="px-4 py-2 border border-gray-300 text-gray-700 rounded-lg font-medium hover:bg-gray-50 transition-colors"
+                                        disabled={isSubmittingTask}
+                                        className="px-4 py-2 border border-gray-300 text-gray-700 rounded-lg font-medium hover:bg-gray-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                                     >
                                         Batal
                                     </button>
                                     <button
                                         type="submit"
-                                        className="px-4 py-2 bg-[#003a73] text-white rounded-lg font-medium hover:bg-[#002a5a] transition-colors flex items-center gap-2"
+                                        disabled={isSubmittingTask}
+                                        className="px-4 py-2 bg-[#003a73] text-white rounded-lg font-medium hover:bg-[#002a5a] transition-colors flex items-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed"
                                     >
-                                        <Plus size={16} />
-                                        Tambah Task
+                                        {isSubmittingTask ? (
+                                            <>
+                                                <span className="w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin" />
+                                                Menyimpan...
+                                            </>
+                                        ) : (
+                                            <>
+                                                <Plus size={16} />
+                                                Tambah Task
+                                            </>
+                                        )}
                                     </button>
                                 </div>
                             </form>
@@ -897,14 +1029,17 @@ export default function TaskDetail() {
                                             className="w-full px-4 py-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-[#00529C] focus:border-[#00529C] outline-none bg-white"
                                         >
                                             <option value="">Pilih Anggota Tim...</option>
-                                            {validAssignees.map((memName, idx) => {
-                                                const activeCount = (project?.tasks || []).filter(t => (t.assignee || '').toLowerCase().includes(memName.toLowerCase()) && t.status !== 'Selesai' && t.status !== 'DONE').length;
+                                            {teamMembers.map((mem) => {
+                                                const activeCount = tasks.filter(t => (t.assignee || '').toLowerCase().includes(mem.name.toLowerCase()) && t.status !== 'Selesai' && t.status !== 'done').length;
                                                 return (
-                                                    <option key={idx} value={memName}>
-                                                        {memName} (Beban: {activeCount} Task Aktif)
+                                                    <option key={mem.id ?? mem.name} value={mem.id ?? mem.name}>
+                                                        {mem.name} — {mem.role || 'Developer'} (Beban: {activeCount} Task Aktif)
                                                     </option>
                                                 );
                                             })}
+                                            {teamMembers.length === 0 && (
+                                                <option value="" disabled>Belum ada tim teralokasi</option>
+                                            )}
                                         </select>
                                     </div>
                                     <div>
@@ -927,15 +1062,24 @@ export default function TaskDetail() {
                                     <button
                                         type="button"
                                         onClick={() => setIsEditTaskModalOpen(false)}
-                                        className="px-4 py-2 border border-gray-300 text-gray-700 rounded-lg font-medium hover:bg-gray-50 transition-colors"
+                                        disabled={isSubmittingTask}
+                                        className="px-4 py-2 border border-gray-300 text-gray-700 rounded-lg font-medium hover:bg-gray-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                                     >
                                         Batal
                                     </button>
                                     <button
                                         type="submit"
-                                        className="px-4 py-2 bg-[#00529C] text-white rounded-lg font-medium hover:bg-[#004080] transition-colors flex items-center gap-2"
+                                        disabled={isSubmittingTask}
+                                        className="px-4 py-2 bg-[#00529C] text-white rounded-lg font-medium hover:bg-[#004080] transition-colors flex items-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed"
                                     >
-                                        Simpan
+                                        {isSubmittingTask ? (
+                                            <>
+                                                <span className="w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin" />
+                                                Menyimpan...
+                                            </>
+                                        ) : (
+                                            'Simpan'
+                                        )}
                                     </button>
                                 </div>
                             </form>
@@ -1113,18 +1257,6 @@ function DocumentSection({ project, user }) {
         }
     };
 
-    // Handle delete
-    const handleDelete = async (docId, docName) => {
-        if (!confirm(`Hapus dokumen "${docName}"?`)) return;
-        try {
-            await documentService.delete(docId);
-            toast.success('Dokumen berhasil dihapus.');
-            setDocs(prev => prev.filter(d => d.id !== docId));
-        } catch (err) {
-            toast.error(`Gagal hapus: ${err.message}`);
-        }
-    };
-
     // Handle View / Preview
     const handleView = async (doc) => {
         try {
@@ -1148,7 +1280,7 @@ function DocumentSection({ project, user }) {
             const url = URL.createObjectURL(blob);
             const a = document.createElement('a');
             a.href = url;
-            a.download = doc.original_filename || doc.file_name || 'Dokumen';
+            a.download = doc.file_name || doc.original_filename || 'Dokumen';
             document.body.appendChild(a);
             a.click();
             document.body.removeChild(a);
@@ -1248,9 +1380,14 @@ function DocumentSection({ project, user }) {
                                 {getExtLabel(doc.file_name || doc.name)}
                             </div>
                             <div className="flex-1 min-w-0">
-                                <p className="text-sm font-semibold text-gray-800 truncate group-hover:text-[#00529C] transition-colors" title={doc.original_filename || doc.file_name}>
-                                    {doc.original_filename || doc.file_name || doc.name || 'Dokumen'}
+                                <p className="text-sm font-semibold text-gray-800 truncate group-hover:text-[#00529C] transition-colors" title={doc.file_name || doc.original_filename || doc.name}>
+                                    {doc.file_name || doc.original_filename || doc.name || 'Dokumen'}
                                 </p>
+                                {doc.original_filename && doc.original_filename !== doc.file_name && (
+                                    <p className="text-[10px] text-gray-400 truncate" title={doc.original_filename}>
+                                        File asli: {doc.original_filename}
+                                    </p>
+                                )}
                                 <div className="flex items-center gap-2 mt-1 text-xs text-gray-500">
                                     <span>{formatFileSize(doc.file_size)}</span>
                                     <span>•</span>
@@ -1277,15 +1414,6 @@ function DocumentSection({ project, user }) {
                                 >
                                     <Download size={14} />
                                 </button>
-                                {isPrivileged && (
-                                    <button
-                                        onClick={(e) => { e.stopPropagation(); handleDelete(doc.id, doc.original_filename || doc.file_name); }}
-                                        className="text-gray-400 hover:text-red-500 p-1.5 rounded hover:bg-red-50 cursor-pointer"
-                                        title="Hapus"
-                                    >
-                                        <Trash2 size={14} />
-                                    </button>
-                                )}
                             </div>
                         </div>
                     ))}

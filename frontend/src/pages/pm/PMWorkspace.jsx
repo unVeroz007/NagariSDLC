@@ -60,14 +60,37 @@ export default function PMWorkspace() {
         return ['Budi Santoso', 'Dewi Lestari', 'Andi Wijaya', 'Citra Kirana'];
     }, []);
 
+    // 🔒 Status yang sah tampil di PM Workspace.
+    // Proyek baru (PENDING/IN_REVIEW/ANALYSIS_APPROVED/READY_FOR_DEVELOPMENT/DEV_ANALYSIS)
+    // belum lolos kajian Analis Pengembangan, jadi tidak boleh muncul di sini.
+    const PM_ELIGIBLE_STATUSES = new Set([
+        'DEV_ANALYSIS_DONE', 'IN_DEVELOPMENT',
+        'SIT_IN_PROGRESS', 'SIT_PASSED', 'SIT_REVISION',
+        'UAT_IN_PROGRESS', 'UAT_REVISION_SIT', 'UAT_REVISION_DEV',
+        'DEV_COMPLETED', 'READY_FOR_QA', 'QA_IN_PROGRESS', 'QA_PASSED',
+        'RETURN_TO_DEV', 'CYBER_IN_PROGRESS', 'CYBER_PASSED',
+        'READY_FOR_UAT', 'UAT_PASSED', 'PENDING_GOLIVE', 'LIVE_PRODUCTION',
+        'ON_HOLD',
+    ]);
+
+    const isPmEligible = (p) => {
+        const pmId = typeof p.pm === 'object' ? p.pm?.id : null;
+        const pmName = typeof p.pm === 'object' ? p.pm?.name : (p.pm || p.pmName || p.assignedPM);
+        const hasPm = Boolean(pmId || pmName || p.pm_id);
+        return PM_ELIGIBLE_STATUSES.has(String(p.status || '').toUpperCase()) || hasPm;
+    };
+
     // 🔍 Filter proyek khusus per akun PM (Strict 4 PM Personalization)
     const myProjects = useMemo(() => {
         if (!projects || projects.length === 0) return [];
 
+        // 🔒 Saring dulu: hanya proyek yang sudah lolos analisis pengembangan / sudah punya PM
+        const eligible = projects.filter(isPmEligible);
+
         // Jika akun yang login adalah PM (Project Manager), tampilkan HANYA proyek milik PM tersebut!
         if (user?.role === 'project_manager' || user?.role === 'pm') {
             const pmId = user?.id;
-            return projects.filter(p => {
+            return eligible.filter(p => {
                 const pmObjId = typeof p.pm === 'object' ? p.pm?.id : null;
                 if (pmObjId && pmId) return pmObjId === pmId;
                 return false;
@@ -77,7 +100,7 @@ export default function PMWorkspace() {
         // Jika role Admin / Lead, filter berdasarkan pilihan dropdown PM jika dipilih
         if (selectedPMFilter && selectedPMFilter !== 'ALL') {
             const targetName = selectedPMFilter.toLowerCase();
-            return projects.filter(p => {
+            return eligible.filter(p => {
                 const pmName = typeof p.pm === 'object' ? (p.pm?.name || '') : String(p.pm || '');
                 const assignedPM = String(p.assignedPM || p.pmName || '');
                 return (
@@ -87,7 +110,7 @@ export default function PMWorkspace() {
             });
         }
 
-        return projects;
+        return eligible;
     }, [projects, user, selectedPMFilter]);
 
     // 📊 Statistik

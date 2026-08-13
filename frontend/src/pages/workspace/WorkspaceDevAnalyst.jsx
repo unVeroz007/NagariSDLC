@@ -181,42 +181,72 @@ export default function WorkspaceDevAnalyst() {
     const [notes, setNotes] = useState('');
     const [estimationDays, setEstimationDays] = useState('30');
     const [isSubmitting, setIsSubmitting] = useState(false);
-    const [uploadedFile, setUploadedFile] = useState(null);
+    const [uploadedFiles, setUploadedFiles] = useState([]);
     const fileInputRef = useRef(null);
+
+    // Tipe dokumen yang relevan untuk kajian Analis Pengembangan (Fase 2)
+    const DEV_ANALYST_DOC_TYPES = ['FSD', 'ARSITEKTUR', 'MEMO', 'LAMPIRAN', 'SIT_PLAN', 'LAINNYA'];
+    // Tipe default untuk berkas yang baru diunggah (bisa diubah per file setelah upload)
+    const DEFAULT_DOC_TYPE = 'ARSITEKTUR';
 
     const handleFileUpload = (e) => {
         const files = e.target.files;
-        if (files && files.length > 0) {
-            const file = files[0];
+        if (!files || files.length === 0) return;
+
+        const newFiles = [];
+        Array.from(files).forEach(file => {
             const MAX_SIZE = 5 * 1024 * 1024;
             if (file.size > MAX_SIZE) {
                 toast.error(`Dokumen "${file.name}" ditolak karena ukurannya melebihi batas maksimal 5MB!`);
-                e.target.value = '';
                 return;
             }
             const objectUrl = URL.createObjectURL(file);
+            const docTypeCode = DEFAULT_DOC_TYPE;
             const autoDocName = generateDocumentName(
                 selectedProject?.req_id || selectedProject?.id,
-                DOCUMENT_TYPES.ARSITEKTUR.code,
+                docTypeCode,
                 selectedProject?.title || selectedProject?.name
             );
             const fileObj = {
-                name: autoDocName,
+                name: autoDocName + '.' + (file.name.split('.').pop() || 'pdf'),
                 originalName: file.name,
                 size: formatFileSize(file.size),
-                type: 'fsd_dev',
-                doc_type: 'fsd_dev',
+                type: docTypeCode.toLowerCase(),
+                doc_type: docTypeCode,
                 url: objectUrl,
                 rawFile: file,
-                uploadedAt: new Date().toISOString()
+                uploadedAt: new Date().toISOString(),
             };
             saveFileToStore(autoDocName, objectUrl);
             if (selectedProject?.id) {
                 saveFileToStore(`fsd_dev_${selectedProject.id}`, objectUrl);
             }
-            setUploadedFile(fileObj);
-            toast.success(`Dokumen Arsitektur Teknis "${autoDocName}" berhasil diunggah.`);
-        }
+            newFiles.push(fileObj);
+        });
+
+        setUploadedFiles(prev => [...prev, ...newFiles]);
+        if (newFiles.length > 0) toast.success(`${newFiles.length} dokumen berhasil diunggah.`);
+        e.target.value = '';
+    };
+
+    const removeUploadedFile = (idx) => {
+        setUploadedFiles(prev => prev.filter((_, i) => i !== idx));
+    };
+
+    const handleFileTypeChange = (index, newDocType) => {
+        setUploadedFiles(prev => prev.map((f, i) => {
+            if (i !== index) return f;
+            const projectReqId = selectedProject?.req_id || selectedProject?.id || 'REQ-PENDING';
+            const projectName = selectedProject?.title || selectedProject?.name || 'Proyek_Baru';
+            const newName = generateDocumentName(projectReqId, newDocType, projectName);
+            const fileExt = f.rawFile ? f.rawFile.name.split('.').pop() : 'pdf';
+            return {
+                ...f,
+                doc_type: newDocType,
+                type: newDocType.toLowerCase(),
+                name: newName + '.' + fileExt.toLowerCase(),
+            };
+        }));
     };
 
     const handleSubmit = async () => {
@@ -231,37 +261,30 @@ export default function WorkspaceDevAnalyst() {
         setIsSubmitting(true);
 
         try {
-            let fsdDevDoc = {
-                id: `FSD-DEV-${Date.now()}`,
-                name: uploadedFile?.name || `Spesifikasi_Arsitektur_${selectedProject?.id || 'Dev'}.pdf`,
-                size: uploadedFile?.size || '2.1 MB',
-                type: 'fsd_dev',
-                doc_type: 'fsd_dev',
-                url: uploadedFile?.url || null,
-                uploadedAt: uploadedFile?.uploadedAt || new Date().toISOString(),
-            };
+            const uploadedDocIds = [];
 
-            // Upload FSD Dev file to backend permanently
-            if (uploadedFile?.rawFile && selectedProject?.id) {
-                try {
-                    const upRes = await documentService.upload(uploadedFile.rawFile, {
-                        project_id: selectedProject.id,
-                        document_type: 'FSD_DEV',
-                        original_filename: uploadedFile.originalName || uploadedFile.rawFile.name,
-                    });
-                    if (upRes?.data) {
-                        fsdDevDoc = {
-                            id: upRes.data.id,
-                            name: upRes.data.file_name,
-                            size: formatFileSize(upRes.data.file_size || 0),
-                            type: 'fsd_dev',
-                            doc_type: 'fsd_dev',
-                            url: null,
-                            uploadedAt: upRes.data.created_at || new Date().toISOString(),
-                        };
+            // Upload semua dokumen ke backend secara permanen
+            if (uploadedFiles.length > 0 && selectedProject?.id) {
+                for (const uf of uploadedFiles) {
+                    if (!uf.rawFile) continue;
+                    const docTypeCode = uf.doc_type || 'ARSITEKTUR';
+                    try {
+                        const uploadRes = await documentService.upload(uf.rawFile, {
+                            project_id: selectedProject.id,
+                            document_type: docTypeCode,
+                            original_filename: uf.originalName || uf.rawFile.name,
+                        });
+                        if (uploadRes?.data) {
+                            uploadedDocIds.push({
+                                id: uploadRes.data.id,
+                                name: uploadRes.data.file_name,
+                                size: formatFileSize(uploadRes.data.file_size || 0),
+                                doc_type: docTypeCode,
+                            });
+                        }
+                    } catch (uploadErr) {
+                        toast.error(`Gagal mengunggah "${uf.originalName}": ${uploadErr.message}`);
                     }
-                } catch {
-                    // continue with synthetic doc if upload fails
                 }
             }
 
@@ -274,6 +297,7 @@ export default function WorkspaceDevAnalyst() {
                     estimation: estimationDays || null,
                     analystName: user?.name || null,
                     submittedAt: new Date().toISOString(),
+                    uploadedDocs: uploadedDocIds,
                 },
             });
 
@@ -287,7 +311,7 @@ export default function WorkspaceDevAnalyst() {
             setIsSubmitting(false);
             setSelectedProject(null);
             setNotes('');
-            setUploadedFile(null);
+            setUploadedFiles([]);
         } catch (err) {
             toast.error('Gagal mengirim kajian teknis.');
             setIsSubmitting(false);
@@ -642,27 +666,101 @@ export default function WorkspaceDevAnalyst() {
                                             />
                                         </div>
 
-                                        {/* Upload Berkas FSD Dev / Spesifikasi Arsitektur */}
+                                        {/* Upload Berkas FSD Dev / Spesifikasi Arsitektur (Multi-file) */}
                                         <div className="space-y-2 pt-2 border-t border-blue-100">
                                             <label className="block text-xs font-bold text-gray-700">
-                                                Unggah Berkas Spesifikasi Arsitektur Teknis (Optional)
+                                                Unggah Dokumen Kajian Arsitektur Teknis (Opsional)
                                             </label>
+
                                             <div
                                                 onClick={() => fileInputRef.current?.click()}
-                                                className="border-2 border-dashed border-blue-200 bg-white p-4 rounded-xl text-center cursor-pointer hover:bg-blue-50/50 transition-colors flex items-center justify-center gap-3"
+                                                className="border-2 border-dashed border-blue-200 bg-white p-4 rounded-xl text-center cursor-pointer hover:bg-blue-50/50 transition-colors flex flex-col items-center justify-center gap-2"
                                             >
-                                                <Upload size={18} className="text-[#00529C]" />
+                                                <Upload size={20} className="text-[#00529C]" />
                                                 <span className="text-xs font-semibold text-gray-700">
-                                                    {uploadedFile ? uploadedFile.name : 'Pilih Berkas Spesifikasi PDF (.pdf)'}
+                                                    Klik untuk unggah satu/beberapa berkas (PDF, Excel, Gambar, ZIP — maks 5MB/file)
                                                 </span>
+                                                <span className="text-[10px] text-gray-400">Setelah diunggah, pilih tipe dokumen untuk tiap berkas.</span>
                                                 <input
                                                     type="file"
                                                     ref={fileInputRef}
                                                     accept=".pdf,.xls,.xlsx,.jpg,.jpeg,.png,.zip"
                                                     onChange={handleFileUpload}
                                                     className="hidden"
+                                                    multiple
                                                 />
                                             </div>
+
+                                            {/* Daftar Berkas Terunggah */}
+                                            {uploadedFiles.length > 0 && (
+                                                <div className="space-y-2">
+                                                    <div className="flex items-center gap-2 px-1">
+                                                        <span className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">Pilih tipe dokumen untuk tiap berkas:</span>
+                                                    </div>
+                                                    {uploadedFiles.map((uf, idx) => (
+                                                        <div key={idx} className="flex flex-col sm:flex-row sm:items-center justify-between p-3 border border-blue-200 bg-blue-50/60 rounded-xl gap-2">
+                                                            <div className="flex items-center gap-3 min-w-0 flex-1">
+                                                                <div className={`w-9 h-9 rounded-lg flex items-center justify-center shrink-0 font-bold text-[10px] ${getDocIconStyle(uf.name || '')}`}>
+                                                                    {getDocExtLabel(uf.name || '')}
+                                                                </div>
+                                                                <div className="min-w-0">
+                                                                    <p className="text-xs font-bold text-gray-800 truncate">{uf.name}</p>
+                                                                    <p className="text-[11px] text-gray-500">{uf.size} • Asli: {uf.originalName}</p>
+                                                                </div>
+                                                            </div>
+                                                            <div className="flex items-center gap-2 shrink-0">
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() => setPreviewDoc(uf)}
+                                                                    className="px-2.5 py-1 border border-[#00529C] text-[#00529C] hover:bg-blue-50 rounded-lg text-xs font-bold transition-colors flex items-center gap-1 cursor-pointer"
+                                                                    title="Pratinjau Dokumen"
+                                                                >
+                                                                    <Eye size={13} /> Pratinjau
+                                                                </button>
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() => {
+                                                                        const rawUrl = uf.url || getFileFromStore(uf.name);
+                                                                        const fileName = uf.name || 'Dokumen_SDLC.pdf';
+                                                                        if (rawUrl) {
+                                                                            const link = document.createElement('a');
+                                                                            link.href = rawUrl;
+                                                                            link.download = fileName;
+                                                                            document.body.appendChild(link);
+                                                                            link.click();
+                                                                            document.body.removeChild(link);
+                                                                            toast.success(`Mengunduh file "${fileName}"...`);
+                                                                        } else {
+                                                                            toast.error('Berkas belum tersedia untuk diunduh.');
+                                                                        }
+                                                                    }}
+                                                                    className="px-2.5 py-1 border border-gray-300 text-gray-700 hover:bg-gray-100 rounded-lg text-xs font-bold transition-colors flex items-center gap-1 cursor-pointer"
+                                                                    title="Unduh Dokumen"
+                                                                >
+                                                                    <Download size={13} /> Unduh
+                                                                </button>
+                                                                <select
+                                                                    value={uf.doc_type || 'ARSITEKTUR'}
+                                                                    onChange={(e) => handleFileTypeChange(idx, e.target.value)}
+                                                                    className="px-2 py-1.5 bg-white border border-gray-300 rounded-lg text-xs font-bold text-gray-700 focus:ring-2 focus:ring-[#00529C] outline-none cursor-pointer"
+                                                                >
+                                                                    {DEV_ANALYST_DOC_TYPES.map((dt) => (
+                                                                        <option key={dt} value={dt}>{dt}</option>
+                                                                    ))}
+                                                                </select>
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() => removeUploadedFile(idx)}
+                                                                    className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                                                                    title="Hapus Berkas"
+                                                                >
+                                                                    <Trash2 size={16} />
+                                                                </button>
+                                                            </div>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            )}
                                         </div>
                                     </div>
                                 </div>

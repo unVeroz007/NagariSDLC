@@ -14,6 +14,7 @@ class ProjectTeamMember extends Model
         'project_id',
         'user_id',
         'role_in_project',
+        'assigned_by',
     ];
 
     public function project(): BelongsTo

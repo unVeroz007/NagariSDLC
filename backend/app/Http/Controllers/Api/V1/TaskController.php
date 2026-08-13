@@ -33,13 +33,22 @@ class TaskController extends Controller
     {
         $project = Project::findOrFail($projectId);
 
+        $assigneeId = $request->assignee_id;
+        if ($assigneeId && ! $this->isProjectMember($project, (int) $assigneeId)) {
+            return response()->json([
+                'status'  => 'error',
+                'message' => 'Assignee harus merupakan anggota tim yang sudah dialokasikan ke proyek ini.',
+            ], 422);
+        }
+
         $task = ProjectTask::create([
             'project_id' => $project->id,
             'title' => $request->title,
             'description' => $request->description,
-            'assignee_id' => $request->assignee_id,
+            'assignee_id' => $assigneeId,
             'status' => $request->filled('status') ? TaskStatus::from($request->status) : TaskStatus::TODO,
             'due_date' => $request->due_date,
+            'priority' => $request->priority ?? 'Medium',
         ]);
 
         return response()->json([
@@ -52,6 +61,22 @@ class TaskController extends Controller
     public function update(UpdateTaskRequest $request, int $taskId): JsonResponse
     {
         $task = ProjectTask::findOrFail($taskId);
+        $project = $task->project;
+
+        if (! $this->canModifyTask($request->user(), $project, $task)) {
+            return response()->json([
+                'status'  => 'error',
+                'message' => 'Anda tidak memiliki wewenang untuk mengubah task ini.',
+            ], 403);
+        }
+
+        $assigneeId = $request->has('assignee_id') ? $request->assignee_id : $task->assignee_id;
+        if ($assigneeId && ! $this->isProjectMember($project, (int) $assigneeId)) {
+            return response()->json([
+                'status'  => 'error',
+                'message' => 'Assignee harus merupakan anggota tim yang sudah dialokasikan ke proyek ini.',
+            ], 422);
+        }
 
         $data = $request->validated();
         if (isset($data['status'])) {
@@ -67,9 +92,50 @@ class TaskController extends Controller
         ]);
     }
 
+    /**
+     * Cek apakah seorang user benar-benar terlibat di proyek ini:
+     * anggota tim developer yang dialokasikan, PM, atau analyst proyek.
+     */
+    private function isProjectMember(Project $project, int $userId): bool
+    {
+        return $project->teamMembers()->where('user_id', $userId)->exists()
+            || (int) $project->pm_id === $userId
+            || (int) $project->analyst_id === $userId;
+    }
+
+    /**
+     * Siapa yang boleh mengubah/menghapus task:
+     * super_admin/head_of_it/development_lead (global), PM proyek,
+     * atau developer yang menjadi assignee task itu sendiri.
+     */
+    private function canModifyTask($user, Project $project, ProjectTask $task): bool
+    {
+        $role = $user?->role?->name;
+
+        if (in_array($role, ['super_admin', 'head_of_it', 'development_lead'], true)) {
+            return true;
+        }
+
+        if ($role === 'project_manager' && (int) $project->pm_id === (int) $user->id) {
+            return true;
+        }
+
+        // Assignee task itu sendiri (developer/analyst) boleh update statusnya
+        return (int) $task->assignee_id === (int) $user->id;
+    }
+
     public function destroy(int $taskId): JsonResponse
     {
         $task = ProjectTask::findOrFail($taskId);
+        $project = $task->project;
+
+        if (! $this->canModifyTask(request()->user(), $project, $task)) {
+            return response()->json([
+                'status'  => 'error',
+                'message' => 'Anda tidak memiliki wewenang untuk menghapus task ini.',
+            ], 403);
+        }
+
         $task->delete();
 
         return response()->json([

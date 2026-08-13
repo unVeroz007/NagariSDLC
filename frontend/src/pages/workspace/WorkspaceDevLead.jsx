@@ -142,6 +142,7 @@ export default function WorkspaceDevLead() {
     const [selectedDeveloperIds, setSelectedDeveloperIds] = useState([]);
     const [developerCandidates, setDeveloperCandidates] = useState([]);
     const [developerSearch, setDeveloperSearch] = useState('');
+    const [analystSearch, setAnalystSearch] = useState('');
 
     // Helper ekstraksi angka durasi
     const getNumericEstimation = (proj) => {
@@ -273,6 +274,7 @@ export default function WorkspaceDevLead() {
     const handleOpenAnalystModal = (project) => {
         setTargetProjectForAnalyst(project);
         setSelectedAnalystId('');
+        setAnalystSearch('');
         setAnalysisDeadline('');
         setLeadNote('');
         setIsAnalystModalOpen(true);
@@ -1173,27 +1175,125 @@ export default function WorkspaceDevLead() {
                                 </p>
                                 <div>
                                     <label className="block text-xs font-bold text-gray-700 mb-1.5">Pilih Dev Analis (PM) <span className="text-red-500">*</span></label>
-                                    <select
-                                        value={selectedAnalystId}
-                                        onChange={(e) => setSelectedAnalystId(e.target.value)}
-                                        className="w-full px-4 py-2.5 rounded-xl border border-gray-200 text-sm outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-600 bg-white font-semibold"
-                                    >
-                                        <option value="">-- Pilih Dev Analis (PM) --</option>
-                                        {analysts.map(a => {
-                                            const activeCount = (projects || []).filter(p => {
-                                                const assignedId = p.analyst_id || (typeof p.assignedAnalyst === 'object' ? p.assignedAnalyst?.id : null);
-                                                const pmId = p.pm_id || (typeof p.pm === 'object' ? p.pm?.id : null);
-                                                const finishedAnalysis = ['ANALYSIS_APPROVED','DEV_ANALYSIS_DONE','LIVE_PRODUCTION','CANCELLED','REJECTED','READY_FOR_DEVELOPMENT','IN_DEVELOPMENT','DEV_COMPLETED','SIT_IN_PROGRESS','SIT_PASSED','SIT_REVISION','READY_FOR_QA','QA_IN_PROGRESS','QA_PASSED','RETURN_TO_DEV','CYBER_IN_PROGRESS','CYBER_PASSED','READY_FOR_UAT','UAT_IN_PROGRESS','UAT_PASSED','UAT_REVISION_SIT','UAT_REVISION_DEV','PENDING_GOLIVE','ON_HOLD'];
-                                                const isFinished = finishedAnalysis.includes(p.status);
-                                                return (assignedId === a.id || pmId === a.id) && !isFinished;
-                                            }).length;
-                                            return (
-                                                <option key={a.id} value={a.id}>
-                                                    {a.name} (Beban: {activeCount} Proyek Aktif)
-                                                </option>
-                                            );
-                                        })}
-                                    </select>
+
+                                    {/* Nama analis terpilih / search bar */}
+                                    <div className="mb-2">
+                                        <div className={`flex items-center gap-2 w-full px-3 py-2 rounded-xl border-2 bg-white shadow-sm transition-all ${
+                                            selectedAnalystId ? 'border-emerald-400 bg-emerald-50/40' : 'border-[#00529C]'
+                                        }`}>
+                                            {selectedAnalystId ? (
+                                                <UserCheck size={16} className="text-emerald-600 shrink-0" />
+                                            ) : (
+                                                <SearchIcon size={16} className="text-[#00529C] shrink-0" />
+                                            )}
+                                            <input
+                                                type="text"
+                                                value={selectedAnalystId ? (analysts.find(a => String(a.id) === String(selectedAnalystId))?.name || '') : analystSearch}
+                                                readOnly={!!selectedAnalystId}
+                                                onChange={(e) => { setAnalystSearch(e.target.value); setSelectedAnalystId(''); }}
+                                                placeholder={selectedAnalystId ? '' : 'Cari nama atau email Dev Analis (PM)...'}
+                                                className={`flex-1 bg-transparent text-xs outline-none ${
+                                                    selectedAnalystId ? 'text-emerald-800 font-semibold cursor-default' : 'text-gray-800 placeholder:text-gray-400'
+                                                }`}
+                                            />
+                                            {selectedAnalystId && (() => {
+                                                const sel = analysts.find(a => String(a.id) === String(selectedAnalystId));
+                                                const activeCount = sel ? (projects || []).filter(p => {
+                                                    const assignedId = p.analyst_id || (typeof p.assignedAnalyst === 'object' ? p.assignedAnalyst?.id : null);
+                                                    const pmId = p.pm_id || (typeof p.pm === 'object' ? p.pm?.id : null);
+                                                    const terminalStatuses = ['LIVE_PRODUCTION', 'CANCELLED', 'REJECTED'];
+                                                    const isFinished = terminalStatuses.includes(p.status);
+                                                    const isMine = (assignedId != null && Number(assignedId) === Number(sel.id))
+                                                        || (pmId != null && Number(pmId) === Number(sel.id));
+                                                    return isMine && !isFinished;
+                                                }).length : 0;
+                                                return (
+                                                    <span className="text-[10px] font-bold text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded-full shrink-0">
+                                                        {activeCount} aktif
+                                                    </span>
+                                                );
+                                            })()}
+                                            {(selectedAnalystId || analystSearch) && (
+                                                <button
+                                                    type="button"
+                                                    onClick={() => { setSelectedAnalystId(''); setAnalystSearch(''); }}
+                                                    className="p-1 rounded-md text-gray-400 hover:text-red-500 hover:bg-red-50 transition-colors shrink-0"
+                                                    title={selectedAnalystId ? 'Hapus pilihan & cari lagi' : 'Hapus kata kunci'}
+                                                >
+                                                    <X size={14} />
+                                                </button>
+                                            )}
+                                        </div>
+                                    </div>
+
+                                    {/* Daftar Dev Analis (PM) — tampil hanya saat BELUM ada pilihan */}
+                                    {!selectedAnalystId && (
+                                        <div className="border border-gray-200 rounded-xl overflow-hidden bg-white">
+                                            <div className="px-3 py-2 border-b border-gray-100 bg-gray-50/60 flex items-center justify-between">
+                                                <span className="text-[10px] font-bold text-gray-600 uppercase tracking-wider">
+                                                    Daftar Dev Analis (PM)
+                                                </span>
+                                                <span className="text-[10px] text-gray-400">Beban aktif</span>
+                                            </div>
+                                            <div className="max-h-[220px] overflow-y-auto">
+                                                {analysts.length === 0 ? (
+                                                    <div className="p-6 text-center">
+                                                        <SearchIcon size={24} className="mx-auto text-gray-300 mb-2" />
+                                                        <p className="text-sm text-gray-500 font-medium">Belum ada Dev Analis (PM) tersedia</p>
+                                                    </div>
+                                                ) : (() => {
+                                                    const filtered = analysts.filter(a => {
+                                                        if (!analystSearch.trim()) return true;
+                                                        const q = analystSearch.toLowerCase();
+                                                        return a.name.toLowerCase().includes(q) || (a.email || '').toLowerCase().includes(q);
+                                                    });
+                                                    if (filtered.length === 0) {
+                                                        return (
+                                                            <div className="p-6 text-center">
+                                                                <SearchIcon size={24} className="mx-auto text-gray-300 mb-2" />
+                                                                <p className="text-sm text-gray-500 font-medium">Tidak ditemukan Dev Analis (PM)</p>
+                                                                <p className="text-xs text-gray-400">Coba kata kunci lain</p>
+                                                            </div>
+                                                        );
+                                                    }
+                                                    return filtered.map(a => {
+                                                        const activeCount = (projects || []).filter(p => {
+                                                            const assignedId = p.analyst_id || (typeof p.assignedAnalyst === 'object' ? p.assignedAnalyst?.id : null);
+                                                            const pmId = p.pm_id || (typeof p.pm === 'object' ? p.pm?.id : null);
+                                                            const terminalStatuses = ['LIVE_PRODUCTION', 'CANCELLED', 'REJECTED'];
+                                                            const isFinished = terminalStatuses.includes(p.status);
+                                                            const isMine = (assignedId != null && Number(assignedId) === Number(a.id))
+                                                                || (pmId != null && Number(pmId) === Number(a.id));
+                                                            return isMine && !isFinished;
+                                                        }).length;
+                                                        return (
+                                                            <div
+                                                                key={a.id}
+                                                                onClick={() => {
+                                                                    setSelectedAnalystId(a.id);
+                                                                    setAnalystSearch('');
+                                                                }}
+                                                                className="px-3 py-2.5 cursor-pointer transition-all flex items-center gap-3 border-b border-gray-50 last:border-b-0 hover:bg-blue-50/50 border-l-4 border-l-transparent"
+                                                            >
+                                                                <span className="w-8 h-8 rounded-full bg-gradient-to-br from-[#00529C] to-[#004080] text-white text-xs font-bold flex items-center justify-center shrink-0">
+                                                                    {a.name.split(' ').map(n => n[0]).join('').slice(0, 2)}
+                                                                </span>
+                                                                <div className="flex-1 min-w-0">
+                                                                    <span className="text-sm font-semibold text-gray-800 truncate block">{a.name}</span>
+                                                                    <span className="text-[11px] text-gray-400 truncate block">{a.email}</span>
+                                                                </div>
+                                                                <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full shrink-0 ${
+                                                                    activeCount >= 3 ? 'bg-red-100 text-red-600' : activeCount >= 1 ? 'bg-amber-100 text-amber-700' : 'bg-emerald-100 text-emerald-700'
+                                                                }`}>
+                                                                    {activeCount} aktif
+                                                                </span>
+                                                            </div>
+                                                        );
+                                                    });
+                                                })()}
+                                            </div>
+                                        </div>
+                                    )}
                                 </div>
 
                                 <div>

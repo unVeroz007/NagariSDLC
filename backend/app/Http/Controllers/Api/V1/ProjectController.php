@@ -35,7 +35,7 @@ class ProjectController extends Controller
         $user = $request->user();
         $roleName = $user->role?->name;
 
-        $query = Project::with(['creator', 'pm', 'analyst', 'division', 'documents', 'teamMembers.user', 'statusHistories']);
+        $query = Project::with(['creator', 'pm', 'analyst', 'division', 'documents', 'teamMembers.user', 'statusHistories', 'tasks.assignee']);
 
         // ─── ROLE-BASED DATA ISOLATION ───
         // Super Admin, Head of IT, Lead Group: bisa lihat SEMUA proyek
@@ -172,7 +172,7 @@ class ProjectController extends Controller
 
     public function show(int $id): JsonResponse
     {
-        $project = Project::with(['creator', 'pm', 'analyst', 'division', 'statusHistories.changedBy', 'teamMembers.user'])
+        $project = Project::with(['creator', 'pm', 'analyst', 'division', 'statusHistories.changedBy', 'teamMembers.user', 'tasks.assignee'])
             ->findOrFail($id);
 
         return response()->json([
@@ -275,7 +275,7 @@ class ProjectController extends Controller
 
                     if (is_array($member) || is_object($member)) {
                         $member = (array) $member;
-                        $userId = $member['id'] ?? null;
+                        $userId = $member['user_id'] ?? $member['id'] ?? null;
                         $roleInProject = $member['skill'] ?? $member['role'] ?? 'Developer';
                         if (!$userId && !empty($member['email'])) {
                             $u = \App\Models\User::where('email', $member['email'])->first();
@@ -294,6 +294,7 @@ class ProjectController extends Controller
                             'project_id'      => $project->id,
                             'user_id'         => $userId,
                             'role_in_project' => $roleInProject,
+                            'assigned_by'     => $member['assigned_by'] ?? 'lead',
                         ]);
                     }
                 }
@@ -327,14 +328,17 @@ class ProjectController extends Controller
             \App\Models\ProjectTeamMember::where('project_id', $project->id)->delete();
 
             foreach ($teamData as $member) {
+                $member = (array) $member;
                 $userId = null;
                 $roleInProject = $member['skill'] ?? $member['role'] ?? 'Developer';
 
-                // Resolve by ID first (most reliable)
-                if (!empty($member['id']) && is_numeric($member['id'])) {
+                // Resolve by user_id (explicit) first, then id, then email
+                if (!empty($member['user_id']) && is_numeric($member['user_id'])) {
+                    $userId = (int) $member['user_id'];
+                } elseif (!empty($member['id']) && is_numeric($member['id'])) {
                     $userId = (int) $member['id'];
                 }
-                // Resolve by email as fallback
+
                 if (!$userId && !empty($member['email'])) {
                     $u = \App\Models\User::where('email', $member['email'])->first();
                     if ($u) $userId = $u->id;
@@ -345,6 +349,7 @@ class ProjectController extends Controller
                         'project_id'      => $project->id,
                         'user_id'         => $userId,
                         'role_in_project' => $roleInProject,
+                        'assigned_by'     => $member['assigned_by'] ?? 'lead',
                     ]);
                 }
             }
