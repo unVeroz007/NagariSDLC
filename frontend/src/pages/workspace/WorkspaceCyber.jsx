@@ -2,6 +2,7 @@ import { useState, useMemo, useEffect, useRef } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import { useProjects, getProjectRealDocuments } from '../../contexts/ProjectContext';
 import { useNotifications } from '../../contexts/NotificationContext';
+import { userService } from '../../services/api';
 import RBBBadge from '../../components/RBBBadge';
 import ProjectTypeBadge from '../../components/ProjectTypeBadge';
 import LoadingSpinner from '../../components/LoadingSpinner';
@@ -41,17 +42,54 @@ import {
     Paperclip,
 } from 'lucide-react';
 
-const pentestAuditors = [
-    { id: 1, name: 'Rizal Pratama, CEH', role: 'Lead Pentester & Security Auditor', email: 'pentester@nagari.co.id', activeLoad: 1 },
-    { id: 2, name: 'Kevin Sanjaya, OSCP', role: 'Web & API Security Specialist', email: 'kevin.cyber@nagari.co.id', activeLoad: 0 },
-    { id: 3, name: 'Nadia Utami, CISSP', role: 'Mobile Security Engineer', email: 'nadia.cyber@nagari.co.id', activeLoad: 1 },
-    { id: 4, name: 'Gita Savitri', role: 'Cyber Security Lead', email: 'cyberlead@nagari.co.id', activeLoad: 2 },
-];
-
 export default function WorkspaceCyber() {
     const { user } = useAuth();
     const { projects, updateProjectStatus } = useProjects();
     const { addNotification } = useNotifications();
+
+    // 🔄 Anggota Pentester diambil dari user API (role cyber_lead / pentester), bukan hardcode.
+    // Beban aktif dihitung realtime dari proyek nyata.
+    const [pentestAuditors, setPentestAuditors] = useState([]);
+    const [isCyberLoading, setIsCyberLoading] = useState(true);
+
+    useEffect(() => {
+        let isMounted = true;
+        setIsCyberLoading(true);
+        userService.getAll()
+            .then(res => {
+                if (!isMounted) return;
+                const usersList = Array.isArray(res) ? res : res?.data || [];
+                const cyberUsers = usersList.filter(u => {
+                    const r = (u.role_detail?.name || u.role || '').toString().toLowerCase();
+                    return r.includes('cyber') || r.includes('pentest');
+                });
+                setPentestAuditors(cyberUsers.map(u => ({
+                    id: u.id,
+                    name: u.name,
+                    role: u.division_detail?.name || u.division || 'Pentester',
+                    email: u.email,
+                    activeLoad: 0,
+                })));
+            })
+            .catch(() => setPentestAuditors([]))
+            .finally(() => { if (isMounted) setIsCyberLoading(false); });
+        return () => { isMounted = false; };
+    }, []);
+
+    // 🔢 Beban aktif per pentester (proyek yang cyberAssignee-nya = nama user & status aktif)
+    const cyberWorkloads = useMemo(() => {
+        const terminalStatuses = new Set(['LIVE_PRODUCTION', 'CANCELLED', 'REJECTED']);
+        return (pentestAuditors || []).map(a => {
+            const activeCount = (projects || []).filter(p => {
+                if (terminalStatuses.has(p.status)) return false;
+                const cyberSt = String(p.cyberStatus || p.cyber_status || '').toUpperCase();
+                if (cyberSt === 'PASSED' || cyberSt === 'REVIEW') return false;
+                const assigneeName = String(p.cyberAssignee || p.cyber_assignee || '').toLowerCase();
+                return assigneeName && a.name && assigneeName === a.name.toLowerCase();
+            }).length;
+            return { ...a, activeLoad: activeCount };
+        });
+    }, [pentestAuditors, projects]);
 
     const [activeTab, setActiveTab] = useState('DISPOSITION');
     const [projectSearch, setProjectSearch] = useState('');
@@ -436,11 +474,17 @@ export default function WorkspaceCyber() {
                                                 className="w-full px-3.5 py-2.5 bg-white border border-gray-200 rounded-xl text-xs md:text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-orange-200"
                                             >
                                                 <option value="">-- Pilih Security Auditor --</option>
-                                                {pentestAuditors.map(a => (
-                                                    <option key={a.id} value={a.name}>
-                                                        {a.name} - {a.role} (Beban: {a.activeLoad} Audit Aktif)
-                                                    </option>
-                                                ))}
+                                                {isCyberLoading ? (
+                                                    <option value="" disabled>Memuat daftar pentester...</option>
+                                                ) : cyberWorkloads.length === 0 ? (
+                                                    <option value="" disabled>Belum ada user Cyber terdaftar</option>
+                                                ) : (
+                                                    cyberWorkloads.map(a => (
+                                                        <option key={a.id} value={a.name}>
+                                                            {a.name} - {a.role} (Beban: {a.activeLoad} Audit Aktif)
+                                                        </option>
+                                                    ))
+                                                )}
                                             </select>
                                         </div>
 

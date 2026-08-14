@@ -1,7 +1,9 @@
-// src/components/SITUATWizard.jsx
-// ─── Wizard Multi-Step SIT & UAT Internal untuk Proyek Bank Nagari ─────────
-import { useState, useRef } from 'react';
+﻿// src/components/SITUATWizard.jsx
+// â”€â”€â”€ Wizard Multi-Step SIT & UAT Internal untuk Proyek Bank Nagari â”€â”€â”€â”€â”€â”€â”€â”€â”€
+import { useState, useRef, useEffect, useCallback } from 'react';
 import toast from 'react-hot-toast';
+import { projectService, taskService } from '../services/api';
+import SITTaskExecution from './SITTaskExecution';
 import {
     ShieldCheck, Server, CheckSquare, Lock, CheckCircle2,
     Upload, X, FileText, ArrowRight, ArrowLeft, AlertTriangle,
@@ -12,25 +14,30 @@ import {
 import { generateDocumentName, DOCUMENT_TYPES, formatFileSize } from '../utils/documentNaming';
 
 
-// ─── Helper: safely render object or string field ────────────────────────────
+// â”€â”€â”€ Helper: safely render object or string field â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 const sf = (val, fb = '-') => {
     if (!val) return fb;
     if (typeof val === 'object') return String(val.name || val.label || val.initial || fb);
     return String(val);
 };
 
-// ─── Helper: format timestamp ─────────────────────────────────────────────────
+// â”€â”€â”€ Helper: format timestamp â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 const fmtDate = (iso) => {
     if (!iso) return '-';
     return new Date(iso).toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' });
 };
 
-// ─── Constants ────────────────────────────────────────────────────────────────
+// â”€â”€â”€ Constants â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 const SIT_STATUSES = ['IN_DEVELOPMENT', 'SIT_IN_PROGRESS', 'SIT_REVISION', 'RETURN_TO_DEV'];
 const UAT_STATUSES = ['SIT_PASSED', 'UAT_IN_PROGRESS', 'UAT_REVISION_SIT', 'UAT_REVISION_DEV'];
 const DONE_STATUSES = ['DEV_COMPLETED'];
 
-// ─── Sub-step definitions ─────────────────────────────────────────────────────
+// ðŸ”“ MODE PEMERIKSAAN/UNLOCK: bila true, seluruh tahapan SIT & UAT dapat dibuka
+// dan diedit tanpa terkunci status proyek (untuk keperluan cek/testing/development).
+// Set false untuk kembali ke alur terkunci normal.
+const UNLOCK_ALL_STAGES = true;
+
+// â”€â”€â”€ Sub-step definitions â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 const SIT_STEPS = [
     { id: 1, title: 'Persiapan SIT', icon: <BookOpen size={15} />, desc: 'Test Plan & Environment', color: 'blue' },
     { id: 2, title: 'Eksekusi Pengujian', icon: <Bug size={15} />, desc: 'Test Cases & Defect Log', color: 'indigo' },
@@ -42,7 +49,7 @@ const UAT_STEPS = [
     { id: 3, title: 'Persetujuan Final', icon: <CheckCircle2 size={15} />, desc: 'Sign-off & Terbitkan BAST', color: 'emerald' },
 ];
 
-// ─── File Upload Helper ────────────────────────────────────────────────────────
+// â”€â”€â”€ File Upload Helper â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function useFileUpload(category) {
     const inputRef = useRef(null);
     const createEntries = (files) => files.map(file => ({
@@ -57,7 +64,7 @@ function useFileUpload(category) {
     return { inputRef, createEntries };
 }
 
-// ─── DocList — small list of uploaded files ────────────────────────────────────
+// â”€â”€â”€ DocList â€” small list of uploaded files â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function DocList({ docs, onRemove, readOnly = false }) {
     if (!docs?.length) return (
         <div className="mt-2 py-4 border-2 border-dashed border-gray-200 rounded-xl text-center text-gray-400 text-xs">
@@ -74,7 +81,7 @@ function DocList({ docs, onRemove, readOnly = false }) {
                     </div>
                     <div className="flex-1 min-w-0">
                         <p className="text-xs font-semibold text-gray-800 truncate">{doc.name}</p>
-                        <p className="text-[10px] text-gray-400">{doc.size} • {fmtDate(doc.uploadedAt)}</p>
+                        <p className="text-[10px] text-gray-400">{doc.size} â€¢ {fmtDate(doc.uploadedAt)}</p>
                     </div>
                     {!readOnly && (
                         <button onClick={() => onRemove(i)} className="text-red-400 hover:text-red-600 p-1 rounded-lg hover:bg-red-50 opacity-0 group-hover:opacity-100 transition-all cursor-pointer shrink-0">
@@ -87,7 +94,7 @@ function DocList({ docs, onRemove, readOnly = false }) {
     );
 }
 
-// ─── RevisionBanner — shown when a revision was requested ─────────────────────
+// â”€â”€â”€ RevisionBanner â€” shown when a revision was requested â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function RevisionBanner({ revisions, type }) {
     const filtered = (revisions || []).filter(r => r.type === type);
     if (!filtered.length) return null;
@@ -104,7 +111,7 @@ function RevisionBanner({ revisions, type }) {
     );
 }
 
-// ─── StepTab — sub-step tab button ────────────────────────────────────────────
+// â”€â”€â”€ StepTab â€” sub-step tab button â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function StepTab({ step, isActive, isCompleted, onClick }) {
     return (
         <button
@@ -117,7 +124,7 @@ function StepTab({ step, isActive, isCompleted, onClick }) {
             }`}
         >
             <span className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-black shrink-0 ${isActive ? 'bg-[#003a73] text-white' : isCompleted ? 'bg-emerald-500 text-white' : 'bg-gray-200 text-gray-500'}`}>
-                {isCompleted ? '✓' : step.id}
+                {isCompleted ? 'âœ“' : step.id}
             </span>
             <span className="hidden sm:inline">{step.title}</span>
             <span className="sm:hidden">{step.id}</span>
@@ -125,12 +132,12 @@ function StepTab({ step, isActive, isCompleted, onClick }) {
     );
 }
 
-// ─── MAIN COMPONENT ────────────────────────────────────────────────────────────
+// â”€â”€â”€ MAIN COMPONENT â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 export default function SITUATWizard({ project, updateProject, addNotification, navigate }) {
     const status = project?.status || 'IN_DEVELOPMENT';
     const sitUatData = project?.sitUatData || {};
 
-    // ── State ─────────────────────────────────────────────────────────────────
+    // â”€â”€ State â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     const [activeSitStep, setActiveSitStep] = useState(sitUatData.activeSitStep || 1);
     const [activeUatStep, setActiveUatStep] = useState(sitUatData.activeUatStep || 1);
 
@@ -183,12 +190,18 @@ export default function SITUATWizard({ project, updateProject, addNotification, 
     const [revisionType, setRevisionType] = useState(null); // 'SIT_TO_DEV' | 'UAT_TO_SIT' | 'UAT_TO_DEV'
     const [revisionNotes, setRevisionNotes] = useState('');
     const [submitting, setSubmitting] = useState(false);
+    // Estado persetujuan task untuk tahap Eksekusi SIT (taskId -> true | {approved,note})
+    const [sit2Approvals, setSit2Approvals] = useState(sitUatData.sit2_task_approvals || {});
+    // Sinkronkan kembali saat project berubah
+    useEffect(() => {
+        setSit2Approvals(sitUatData.sit2_task_approvals || {});
+    }, [project?.id]);
 
 
     // Revision history
     const revisions = sitUatData.revisions || [];
 
-    // ── File upload refs ──────────────────────────────────────────────────────
+    // â”€â”€ File upload refs â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     const sit1FileRef = useRef(null);
     const sit2FileRef = useRef(null);
     const sit3FileRef = useRef(null);
@@ -236,7 +249,7 @@ export default function SITUATWizard({ project, updateProject, addNotification, 
         setter(prev => ({ ...prev, docs: prev.docs.filter((_, i) => i !== idx) }));
     };
 
-    // ── Persist helper — saves current form state to project ─────────────────
+    // â”€â”€ Persist helper â€” saves current form state to project â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     const buildSitUatData = (overrides = {}) => ({
         activeSitStep, activeUatStep,
         sit1_stagingUrl: sit1.stagingUrl, sit1_testEnv: sit1.testEnv,
@@ -245,6 +258,7 @@ export default function SITUATWizard({ project, updateProject, addNotification, 
         sit2_totalCases: sit2.totalCases, sit2_passedCases: sit2.passedCases,
         sit2_defects: sit2.defects, sit2_execNotes: sit2.execNotes,
         sit2_docs: sit2.docs,
+        sit2_task_approvals: sit2Approvals,
         sit3_reviewNotes: sit3.reviewNotes, sit3_docs: sit3.docs,
         uat1_scenarioList: uat1.scenarioList, uat1_preparedBy: uat1.preparedBy,
         uat1_prepNotes: uat1.prepNotes, uat1_docs: uat1.docs,
@@ -257,20 +271,42 @@ export default function SITUATWizard({ project, updateProject, addNotification, 
         ...overrides,
     });
 
-    // ── Action handlers ────────────────────────────────────────────────────────
+    // â”€â”€ Action handlers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     const handleStartSIT = () => {
+        // Gatekeeper SIT: semua task (kecuali TAKE_DOWN) harus berstatus Selesai/Done
+        const taskList = Array.isArray(project?.tasks) ? project.tasks : [];
+        const eligible = taskList.filter(t => String(t.status || '').toLowerCase() !== 'take_down');
+        const incomplete = eligible.filter(t => String(t.status || '').toLowerCase() !== 'done');
+        if (eligible.length === 0) {
+            toast.error('Belum ada task developer di proyek ini. Buat & selesaikan task terlebih dahulu sebelum memulai SIT.');
+            return;
+        }
+        if (incomplete.length > 0) {
+            const list = incomplete.map(t => t.title || t.name || 'Task').join(', ');
+            toast.error(`Tidak dapat memulai SIT: masih ada ${incomplete.length} task belum selesai (${list}). Semua task harus berstatus Selesai, kecuali Take Down.`);
+            return;
+        }
         updateProject(project.id, { status: 'SIT_IN_PROGRESS', sitUatData: buildSitUatData({ activeSitStep: 1 }) });
         toast.success(`Pengujian SIT dimulai untuk proyek "${project.name}".`);
     };
-
-    const handleSaveSITStep = (step) => {
+const handleSaveSITStep = (step) => {
+        // Validasi: lanjut dari Eksekusi (step 2) ke Review (step 3) HANYA jika semua task disetujui
+        if (step === 2) {
+            const taskList = Array.isArray(project?.tasks) ? project.tasks : [];
+            const eligible = taskList.filter(t => String(t.status || '').toLowerCase() !== 'take_down');
+            const approvedIds = eligible.filter(t => sit2Approvals?.[t.id] === true).map(t => t.id);
+            const allApproved = eligible.length > 0 && approvedIds.length === eligible.length;
+            if (!allApproved) {
+                toast.error(`Lanjut ke Review & Sign-Off memerlukan SEMUA ${eligible.length} task disetujui (OK). Saat ini ${approvedIds.length} disetujui.`);
+                return;
+            }
+        }
         const nextStep = step + 1;
         setActiveSitStep(nextStep);
         updateProject(project.id, { status: 'SIT_IN_PROGRESS', sitUatData: buildSitUatData({ activeSitStep: nextStep }) });
-        toast.success(`✅ SIT Tahap ${step} tersimpan. Lanjut ke Tahap ${nextStep}.`);
+        toast.success(`SIT Tahap ${step} tersimpan. Lanjut ke Tahap ${nextStep}.`);
     };
-
-    const handleSITPass = () => {
+const handleSITPass = () => {
         setSubmitting(true);
         updateProject(project.id, {
             status: 'SIT_PASSED',
@@ -278,7 +314,7 @@ export default function SITUATWizard({ project, updateProject, addNotification, 
             sitUatData: buildSitUatData({ activeSitStep: 3, activeUatStep: 1 }),
         });
         addNotification?.('SIT Lulus!', `Proyek "${project.name}" lulus SIT. UAT Internal dapat dimulai.`, 'success', '/pm/workspace');
-        toast.success(`🎉 SIT Lulus! Proyek siap melanjutkan ke UAT Internal.`);
+        toast.success(`ðŸŽ‰ SIT Lulus! Proyek siap melanjutkan ke UAT Internal.`);
         setSubmitting(false);
     };
 
@@ -292,7 +328,7 @@ export default function SITUATWizard({ project, updateProject, addNotification, 
             sitUatData: buildSitUatData({ revisions: newRevisions, activeSitStep: 1 }),
         });
         addNotification?.('Revisi SIT Diminta', `Proyek "${project.name}" dikembalikan ke Development karena SIT gagal.`, 'warning', '/pm/workspace');
-        toast.error(`↩️ Revisi diminta. Proyek kembali ke Development.`);
+        toast.error(`â†©ï¸ Revisi diminta. Proyek kembali ke Development.`);
         setRevisionNotes('');
         setShowRevisionModal(false);
         setSubmitting(false);
@@ -307,7 +343,7 @@ export default function SITUATWizard({ project, updateProject, addNotification, 
         const nextStep = step + 1;
         setActiveUatStep(nextStep);
         updateProject(project.id, { status: 'UAT_IN_PROGRESS', sitUatData: buildSitUatData({ activeUatStep: nextStep }) });
-        toast.success(`✅ UAT Tahap ${step} tersimpan. Lanjut ke Tahap ${nextStep}.`);
+        toast.success(`âœ… UAT Tahap ${step} tersimpan. Lanjut ke Tahap ${nextStep}.`);
     };
 
     const handleUATPass = () => {
@@ -317,8 +353,8 @@ export default function SITUATWizard({ project, updateProject, addNotification, 
             uatPassedAt: new Date().toISOString(),
             sitUatData: buildSitUatData({ activeUatStep: 3 }),
         });
-        addNotification?.('✅ BAST Diterbitkan — DEV COMPLETED!', `Proyek "${project.name}" lulus SIT & UAT Internal. Siap QA & Siber.`, 'success', '/pm/workspace');
-        toast.success(`🎉 BAST Diterbitkan! Proyek resmi berstatus DEV_COMPLETED.`);
+        addNotification?.('âœ… BAST Diterbitkan â€” DEV COMPLETED!', `Proyek "${project.name}" lulus SIT & UAT Internal. Siap QA & Siber.`, 'success', '/pm/workspace');
+        toast.success(`ðŸŽ‰ BAST Diterbitkan! Proyek resmi berstatus DEV_COMPLETED.`);
         setSubmitting(false);
     };
 
@@ -334,24 +370,26 @@ export default function SITUATWizard({ project, updateProject, addNotification, 
             sitUatData: buildSitUatData({ revisions: newRevisions, activeUatStep: 1, activeSitStep: nextActiveSit }),
         });
         addNotification?.('Revisi UAT Diminta', `Proyek "${project.name}" dikembalikan ${revisionType === 'UAT_TO_SIT' ? 'ke SIT' : 'ke Development'}.`, 'warning', '/pm/workspace');
-        toast.error(`↩️ Revisi diminta. Proyek kembali ke ${revisionType === 'UAT_TO_SIT' ? 'SIT' : 'Development'}.`);
+        toast.error(`â†©ï¸ Revisi diminta. Proyek kembali ke ${revisionType === 'UAT_TO_SIT' ? 'SIT' : 'Development'}.`);
         setRevisionNotes('');
         setShowRevisionModal(false);
         setSubmitting(false);
     };
 
-    // ── Status helpers ─────────────────────────────────────────────────────────
+    // â”€â”€ Status helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     const stUpper = String(status || '').toUpperCase();
-    const isDev = ['IN_DEVELOPMENT', 'DEVELOPMENT', 'DEV_IN_PROGRESS', 'IN_SPRINT', 'READY_FOR_DEVELOPMENT'].includes(stUpper);
-    const sitActive = isDev || ['SIT_IN_PROGRESS', 'SIT_REVISION', 'UAT_REVISION_DEV', 'RETURN_TO_DEV'].includes(stUpper);
-    const sitDone = ['SIT_PASSED', 'UAT_IN_PROGRESS', 'UAT_REVISION_SIT', 'UAT_PASSED', 'DEV_COMPLETED'].includes(stUpper);
-    const uatUnlocked = ['SIT_PASSED', 'UAT_IN_PROGRESS', 'UAT_REVISION_SIT', 'UAT_PASSED', 'DEV_COMPLETED'].includes(stUpper);
-    const uatActive = ['SIT_PASSED', 'UAT_IN_PROGRESS', 'UAT_REVISION_SIT'].includes(stUpper);
-    const uatDone = ['UAT_PASSED', 'DEV_COMPLETED'].includes(stUpper);
-    const isComplete = stUpper === 'DEV_COMPLETED';
+
+    // ðŸ”“ Mode unlock: semua tahapan bisa diakses & diedit tanpa terkunci status proyek
+    const isDev = ['IN_DEVELOPMENT', 'DEVELOPMENT', 'DEV_IN_PROGRESS', 'IN_SPRINT', 'READY_FOR_DEVELOPMENT'].includes(stUpper) || UNLOCK_ALL_STAGES;
+    const sitActive = isDev || ['SIT_IN_PROGRESS', 'SIT_REVISION', 'UAT_REVISION_DEV', 'RETURN_TO_DEV'].includes(stUpper) || UNLOCK_ALL_STAGES;
+    const sitDone = ['SIT_PASSED', 'UAT_IN_PROGRESS', 'UAT_REVISION_SIT', 'UAT_PASSED', 'DEV_COMPLETED'].includes(stUpper) && !UNLOCK_ALL_STAGES;
+    const uatUnlocked = ['SIT_PASSED', 'UAT_IN_PROGRESS', 'UAT_REVISION_SIT', 'UAT_PASSED', 'DEV_COMPLETED'].includes(stUpper) || UNLOCK_ALL_STAGES;
+    const uatActive = ['SIT_PASSED', 'UAT_IN_PROGRESS', 'UAT_REVISION_SIT'].includes(stUpper) || UNLOCK_ALL_STAGES;
+    const uatDone = ['UAT_PASSED', 'DEV_COMPLETED'].includes(stUpper) && !UNLOCK_ALL_STAGES;
+    const isComplete = stUpper === 'DEV_COMPLETED' && !UNLOCK_ALL_STAGES;
 
 
-    // ── Completion check per step ──────────────────────────────────────────────
+    // â”€â”€ Completion check per step â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     const sit1Done = sitDone || (status === 'SIT_IN_PROGRESS' && activeSitStep > 1);
     const sit2Done = sitDone || (status === 'SIT_IN_PROGRESS' && activeSitStep > 2);
     const sit3Done = sitDone;
@@ -359,11 +397,11 @@ export default function SITUATWizard({ project, updateProject, addNotification, 
     const uat2Done = uatDone || (status === 'UAT_IN_PROGRESS' && activeUatStep > 2);
     const uat3Done = uatDone;
 
-    // ── Render ─────────────────────────────────────────────────────────────────
+    // â”€â”€ Render â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     return (
         <div className="p-5 space-y-5">
 
-            {/* ─── Master Phase Stepper ─────────────────────────────────── */}
+            {/* â”€â”€â”€ Master Phase Stepper â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
             <div className="bg-gradient-to-r from-[#003a73] to-[#00529C] rounded-2xl p-5 text-white">
                 <div className="flex items-center justify-between mb-4">
                     <div className="flex items-center gap-3">
@@ -372,7 +410,7 @@ export default function SITUATWizard({ project, updateProject, addNotification, 
                         </div>
                         <div>
                             <h3 className="font-bold text-base">Verifikasi SIT &amp; UAT Internal</h3>
-                            <p className="text-blue-200 text-xs">{sf(project?.id)} • {sf(project?.name)}</p>
+                            <p className="text-blue-200 text-xs">{sf(project?.id)} â€¢ {sf(project?.name)}</p>
                         </div>
                     </div>
                 </div>
@@ -401,8 +439,45 @@ export default function SITUATWizard({ project, updateProject, addNotification, 
                 </div>
             </div>
 
-            {/* ─── REVISION ALERTS ──────────────────────────────────────── */}
-            {status === 'SIT_REVISION' && (
+            {/* â”€â”€â”€ REVISION ALERTS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
+            
+            {/* Status Kelayakan Mulai SIT (Gatekeeper) */}
+            <div className="bg-white rounded-2xl border border-gray-200 p-4 shadow-sm">
+                <div className="flex items-center gap-2 mb-2">
+                    <ShieldCheck size={16} className="text-sky-600" />
+                    <h4 className="font-bold text-sm text-gray-800">Syarat Masuk SIT (Gate)</h4>
+                </div>
+                {(() => {
+                    const taskList = Array.isArray(project?.tasks) ? project.tasks : [];
+                    const eligible = taskList.filter(t => String(t.status || '').toLowerCase() !== 'take_down');
+                    const doneTasks = eligible.filter(t => String(t.status || '').toLowerCase() === 'done');
+                    const incomplete = eligible.length - doneTasks.length;
+                    const canStart = eligible.length > 0 && incomplete === 0;
+                    return (
+                        <div className="space-y-2">
+                            <div className="flex items-center gap-2 text-xs">
+                                <span className="font-semibold text-gray-700">Progress Task Developer:</span>
+                                <span className="font-bold text-sky-700">{doneTasks.length}/{eligible.length} Selesai</span>
+                                {incomplete > 0 && (
+                                    <span className="text-red-600 font-semibold">({incomplete} belum selesai)</span>
+                                )}
+                            </div>
+                            <div className="w-full h-2 bg-gray-100 rounded-full overflow-hidden">
+                                <div className={`h-full rounded-full transition-all ${canStart ? 'bg-emerald-500' : 'bg-amber-500'}`}
+                                    style={{ width: `${eligible.length ? Math.round((doneTasks.length / eligible.length) * 100) : 0}%` }} />
+                            </div>
+                            <p className="text-xs">
+                                {eligible.length === 0
+                                    ? 'Belum ada task developer. Buat & selesaikan task sebelum memulai SIT.'
+                                    : canStart
+                                        ? 'Semua task telah selesai. SIT siap dimulai.'
+                                        : 'Masih ada task belum selesai. Selesaikan seluruh task (kecuali Take Down) untuk membuka SIT.'}
+                            </p>
+                        </div>
+                    );
+                })()}
+            </div>
+{status === 'SIT_REVISION' && (
                 <div className="p-4 bg-orange-50 border border-orange-300 rounded-2xl flex items-start gap-3">
                     <RotateCcw size={18} className="text-orange-600 shrink-0 mt-0.5" />
                     <div>
@@ -430,9 +505,9 @@ export default function SITUATWizard({ project, updateProject, addNotification, 
                 </div>
             )}
 
-            {/* ═══════════════════════════════════════════════════════════════
+            {/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
                                    SIT PANEL
-                ═══════════════════════════════════════════════════════════════ */}
+                â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */}
             <div className={`bg-white rounded-2xl border-2 shadow-sm overflow-hidden transition-all ${sitDone ? 'border-teal-200' : sitActive ? 'border-sky-300' : 'border-gray-200'}`}>
                 {/* SIT Panel Header */}
                 <div className={`px-5 py-4 flex items-center justify-between ${sitDone ? 'bg-teal-50' : sitActive ? 'bg-sky-50' : 'bg-gray-50'} border-b`}>
@@ -448,14 +523,14 @@ export default function SITUATWizard({ project, updateProject, addNotification, 
                         </div>
                     </div>
                     <div className="flex items-center gap-2">
-                        {sitDone && <span className="px-3 py-1 bg-teal-100 text-teal-700 text-xs font-bold rounded-full border border-teal-300">✅ LULUS</span>}
-                        {status === 'SIT_IN_PROGRESS' && <span className="px-3 py-1 bg-sky-100 text-sky-700 text-xs font-bold rounded-full border border-sky-300 animate-pulse">🔄 BERLANGSUNG</span>}
-                        {['SIT_REVISION', 'UAT_REVISION_DEV'].includes(status) && <span className="px-3 py-1 bg-orange-100 text-orange-700 text-xs font-bold rounded-full border border-orange-300">↩️ REVISI</span>}
+                        {sitDone && <span className="px-3 py-1 bg-teal-100 text-teal-700 text-xs font-bold rounded-full border border-teal-300">âœ… LULUS</span>}
+                        {status === 'SIT_IN_PROGRESS' && <span className="px-3 py-1 bg-sky-100 text-sky-700 text-xs font-bold rounded-full border border-sky-300 animate-pulse">ðŸ”„ BERLANGSUNG</span>}
+                        {['SIT_REVISION', 'UAT_REVISION_DEV'].includes(status) && <span className="px-3 py-1 bg-orange-100 text-orange-700 text-xs font-bold rounded-full border border-orange-300">â†©ï¸ REVISI</span>}
                     </div>
                 </div>
 
                 {/* SIT not started */}
-                {(!sitDone && stUpper !== 'SIT_IN_PROGRESS') && (
+                {(!sitDone && stUpper !== 'SIT_IN_PROGRESS' && !UNLOCK_ALL_STAGES) && (
                     <div className="p-6">
                         <RevisionBanner revisions={revisions} type="SIT_TO_DEV" />
                         <RevisionBanner revisions={revisions} type="UAT_TO_DEV" />
@@ -476,7 +551,7 @@ export default function SITUATWizard({ project, updateProject, addNotification, 
                 )}
 
                 {/* SIT Active or Done */}
-                {(stUpper === 'SIT_IN_PROGRESS' || sitDone) && (
+                {(stUpper === 'SIT_IN_PROGRESS' || sitDone || UNLOCK_ALL_STAGES) && (
 
                     <div>
                         {/* Sub-step tabs */}
@@ -487,18 +562,18 @@ export default function SITUATWizard({ project, updateProject, addNotification, 
                                     step={step}
                                     isActive={activeSitStep === step.id}
                                     isCompleted={step.id === 1 ? sit1Done : step.id === 2 ? sit2Done : sit3Done}
-                                    onClick={() => (sitDone || step.id <= activeSitStep) && setActiveSitStep(step.id)}
+                                    onClick={() => (sitDone || UNLOCK_ALL_STAGES || step.id <= activeSitStep) && setActiveSitStep(step.id)}
                                 />
                             ))}
                         </div>
 
-                        {/* ── SIT Step 1: Persiapan ──────────────────────── */}
+                        {/* â”€â”€ SIT Step 1: Persiapan â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
                         {activeSitStep === 1 && (
                             <div className="p-5 space-y-4">
                                 <div className="flex items-center gap-2 mb-3">
                                     <BookOpen size={16} className="text-blue-600" />
                                     <h5 className="font-bold text-sm text-gray-800">Tahap 1: Persiapan &amp; Test Plan SIT</h5>
-                                    {sit1Done && <span className="ml-auto text-[10px] font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">Selesai ✓</span>}
+                                    {sit1Done && <span className="ml-auto text-[10px] font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">Selesai âœ“</span>}
                                 </div>
                                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                                     <div>
@@ -549,13 +624,13 @@ export default function SITUATWizard({ project, updateProject, addNotification, 
                             </div>
                         )}
 
-                        {/* ── SIT Step 2: Eksekusi ──────────────────────── */}
+                        {/* â”€â”€ SIT Step 2: Eksekusi â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
                         {activeSitStep === 2 && (
                             <div className="p-5 space-y-4">
                                 <div className="flex items-center gap-2 mb-3">
                                     <Bug size={16} className="text-indigo-600" />
                                     <h5 className="font-bold text-sm text-gray-800">Tahap 2: Eksekusi Test Cases &amp; Defect Log</h5>
-                                    {sit2Done && <span className="ml-auto text-[10px] font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">Selesai ✓</span>}
+                                    {sit2Done && <span className="ml-auto text-[10px] font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">Selesai âœ“</span>}
                                 </div>
                                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                                     <div>
@@ -583,7 +658,7 @@ export default function SITUATWizard({ project, updateProject, addNotification, 
                                         <span className="text-indigo-800 font-semibold">
                                             Pass Rate: {Math.round((Number(sit2.passedCases) / Number(sit2.totalCases)) * 100)}%
                                             {Math.round((Number(sit2.passedCases) / Number(sit2.totalCases)) * 100) >= 90
-                                                ? ' ✅ Memenuhi Threshold (≥90%)' : ' ⚠️ Di bawah threshold — pertimbangkan revisi'}
+                                                ? ' âœ… Memenuhi Threshold (â‰¥90%)' : ' âš ï¸ Di bawah threshold â€” pertimbangkan revisi'}
                                         </span>
                                     </div>
                                 )}
@@ -605,7 +680,19 @@ export default function SITUATWizard({ project, updateProject, addNotification, 
                                     </div>
                                     <DocList docs={sit2.docs} onRemove={i => onRemoveDoc(setSit2, i)} readOnly={sitDone} />
                                 </div>
-                                {!sitDone && status === 'SIT_IN_PROGRESS' && activeSitStep === 2 && (
+                                
+                                {/* Tabel Persetujuan Task untuk Eksekusi SIT */}
+                                <div className="pt-2 border-t border-gray-100">
+                                    <div className="flex items-center gap-2 mb-2">
+                                        <CheckCircle2 size={15} className="text-indigo-600" />
+                                        <h5 className="font-bold text-sm text-gray-800">Persetujuan Task Developer (Syarat Lanjut SIT)</h5>
+                                    </div>
+                                    <p className="text-[11px] text-gray-500 mb-2">
+                                        Centang <strong>OK</strong> pada setiap task yang sudah lolos &amp; disetujui tim. Lanjut ke Review &amp; Sign-Off hanya jika SEMUA task disetujui.
+                                    </p>
+                                    <SITTaskExecution project={project} approvals={sit2Approvals} onApprovalsChange={setSit2Approvals} />
+                                </div>
+{!sitDone && status === 'SIT_IN_PROGRESS' && activeSitStep === 2 && (
                                     <div className="flex justify-end pt-2">
                                         <button onClick={() => handleSaveSITStep(2)} disabled={!sit2.totalCases || !sit2.passedCases}
                                             className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-white text-xs font-bold rounded-xl flex items-center gap-2 transition-all cursor-pointer">
@@ -616,13 +703,13 @@ export default function SITUATWizard({ project, updateProject, addNotification, 
                             </div>
                         )}
 
-                        {/* ── SIT Step 3: Sign-off ─────────────────────── */}
+                        {/* â”€â”€ SIT Step 3: Sign-off â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
                         {activeSitStep === 3 && (
                             <div className="p-5 space-y-4">
                                 <div className="flex items-center gap-2 mb-3">
                                     <FileCheck size={16} className="text-teal-600" />
                                     <h5 className="font-bold text-sm text-gray-800">Tahap 3: Review Akhir &amp; Keputusan SIT</h5>
-                                    {sit3Done && <span className="ml-auto text-[10px] font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">Selesai ✓</span>}
+                                    {sit3Done && <span className="ml-auto text-[10px] font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">Selesai âœ“</span>}
                                 </div>
                                 {/* Summary card */}
                                 <div className="bg-slate-50 rounded-xl border border-slate-200 p-4 text-xs space-y-2">
@@ -660,20 +747,20 @@ export default function SITUATWizard({ project, updateProject, addNotification, 
                                     <DocList docs={sit3.docs} onRemove={i => onRemoveDoc(setSit3, i)} readOnly={sitDone} />
                                 </div>
                                 {/* Action buttons */}
-                                {!sitDone && status === 'SIT_IN_PROGRESS' && activeSitStep === 3 && (
+                                {!sitDone && (status === 'SIT_IN_PROGRESS' || UNLOCK_ALL_STAGES) && activeSitStep === 3 && (
                                     <div className="flex flex-col sm:flex-row gap-3 justify-between pt-2 border-t border-gray-100">
                                         <button
                                             onClick={() => { setRevisionType('SIT_TO_DEV'); setShowRevisionModal(true); }}
                                             className="px-5 py-2.5 bg-orange-50 hover:bg-orange-100 border border-orange-300 text-orange-700 text-xs font-bold rounded-xl flex items-center gap-2 transition-all cursor-pointer"
                                         >
-                                            <RotateCcw size={14} /> SIT Perlu Revisi — Kembalikan ke Dev
+                                            <RotateCcw size={14} /> SIT Perlu Revisi â€” Kembalikan ke Dev
                                         </button>
                                         <button
                                             onClick={handleSITPass}
                                             disabled={submitting || !sit3.reviewNotes}
                                             className="px-6 py-2.5 bg-teal-600 hover:bg-teal-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-white text-xs font-bold rounded-xl flex items-center gap-2 transition-all shadow-sm cursor-pointer active:scale-95"
                                         >
-                                            <CheckCircle2 size={14} /> SIT Lulus — Lanjut ke UAT Internal
+                                            <CheckCircle2 size={14} /> SIT Lulus â€” Lanjut ke UAT Internal
                                         </button>
                                     </div>
                                 )}
@@ -689,9 +776,9 @@ export default function SITUATWizard({ project, updateProject, addNotification, 
                 )}
             </div>
 
-            {/* ═══════════════════════════════════════════════════════════════
+            {/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
                                    UAT PANEL
-                ═══════════════════════════════════════════════════════════════ */}
+                â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */}
             <div className={`bg-white rounded-2xl border-2 shadow-sm overflow-hidden transition-all ${uatDone ? 'border-emerald-200' : uatActive ? 'border-amber-300' : uatUnlocked ? 'border-amber-200' : 'border-gray-200 opacity-60'}`}>
                 {/* UAT Panel Header */}
                 <div className={`px-5 py-4 flex items-center justify-between border-b ${uatDone ? 'bg-emerald-50' : uatActive ? 'bg-amber-50' : uatUnlocked ? 'bg-amber-50/50' : 'bg-gray-50'}`}>
@@ -707,10 +794,10 @@ export default function SITUATWizard({ project, updateProject, addNotification, 
                         </div>
                     </div>
                     <div className="flex items-center gap-2">
-                        {uatDone && <span className="px-3 py-1 bg-emerald-100 text-emerald-700 text-xs font-bold rounded-full border border-emerald-300">✅ LULUS</span>}
-                        {uatActive && status !== 'SIT_PASSED' && <span className="px-3 py-1 bg-amber-100 text-amber-700 text-xs font-bold rounded-full border border-amber-300 animate-pulse">🔄 BERLANGSUNG</span>}
-                        {!uatUnlocked && <span className="px-3 py-1 bg-gray-100 text-gray-500 text-xs font-bold rounded-full border border-gray-200">🔒 Tunggu SIT Lulus</span>}
-                        {['UAT_REVISION_SIT', 'UAT_REVISION_DEV'].includes(status) && <span className="px-3 py-1 bg-orange-100 text-orange-700 text-xs font-bold rounded-full border border-orange-300">↩️ REVISI</span>}
+                        {uatDone && <span className="px-3 py-1 bg-emerald-100 text-emerald-700 text-xs font-bold rounded-full border border-emerald-300">âœ… LULUS</span>}
+                        {uatActive && status !== 'SIT_PASSED' && <span className="px-3 py-1 bg-amber-100 text-amber-700 text-xs font-bold rounded-full border border-amber-300 animate-pulse">ðŸ”„ BERLANGSUNG</span>}
+                        {!uatUnlocked && <span className="px-3 py-1 bg-gray-100 text-gray-500 text-xs font-bold rounded-full border border-gray-200">ðŸ”’ Tunggu SIT Lulus</span>}
+                        {['UAT_REVISION_SIT', 'UAT_REVISION_DEV'].includes(status) && <span className="px-3 py-1 bg-orange-100 text-orange-700 text-xs font-bold rounded-full border border-orange-300">â†©ï¸ REVISI</span>}
                     </div>
                 </div>
 
@@ -724,7 +811,7 @@ export default function SITUATWizard({ project, updateProject, addNotification, 
                 )}
 
                 {/* UAT ready to start */}
-                {status === 'SIT_PASSED' && (
+                {(status === 'SIT_PASSED' && !UNLOCK_ALL_STAGES) && (
                     <div className="p-6 text-center">
                         <CheckSquare size={36} className="mx-auto text-amber-400 mb-3" />
                         <p className="text-sm font-semibold text-gray-700 mb-1">SIT telah lulus! Siap memulai UAT Internal.</p>
@@ -750,7 +837,7 @@ export default function SITUATWizard({ project, updateProject, addNotification, 
                 )}
 
                 {/* UAT Active or Done */}
-                {(status === 'UAT_IN_PROGRESS' || uatDone) && (
+                {(status === 'UAT_IN_PROGRESS' || uatDone || UNLOCK_ALL_STAGES) && (
                     <div>
                         {/* Sub-step tabs */}
                         <div className="flex border-b border-gray-100 bg-gray-50/50 px-3 overflow-x-auto">
@@ -760,18 +847,18 @@ export default function SITUATWizard({ project, updateProject, addNotification, 
                                     step={step}
                                     isActive={activeUatStep === step.id}
                                     isCompleted={step.id === 1 ? uat1Done : step.id === 2 ? uat2Done : uat3Done}
-                                    onClick={() => (uatDone || step.id <= activeUatStep) && setActiveUatStep(step.id)}
+                                    onClick={() => (uatDone || UNLOCK_ALL_STAGES || step.id <= activeUatStep) && setActiveUatStep(step.id)}
                                 />
                             ))}
                         </div>
 
-                        {/* ── UAT Step 1: Skenario ──────────────────────── */}
+                        {/* â”€â”€ UAT Step 1: Skenario â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
                         {activeUatStep === 1 && (
                             <div className="p-5 space-y-4">
                                 <div className="flex items-center gap-2 mb-3">
                                     <ClipboardList size={16} className="text-amber-600" />
                                     <h5 className="font-bold text-sm text-gray-800">Tahap 1: Persiapan Skenario UAT</h5>
-                                    {uat1Done && <span className="ml-auto text-[10px] font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">Selesai ✓</span>}
+                                    {uat1Done && <span className="ml-auto text-[10px] font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">Selesai âœ“</span>}
                                 </div>
                                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                                     <div className="sm:col-span-2">
@@ -805,7 +892,7 @@ export default function SITUATWizard({ project, updateProject, addNotification, 
                                     </div>
                                     <DocList docs={uat1.docs} onRemove={i => onRemoveDoc(setUat1, i)} readOnly={uatDone} />
                                 </div>
-                                {!uatDone && status === 'UAT_IN_PROGRESS' && activeUatStep === 1 && (
+                                {!uatDone && (status === 'UAT_IN_PROGRESS' || UNLOCK_ALL_STAGES) && activeUatStep === 1 && (
                                     <div className="flex justify-end pt-2">
                                         <button onClick={() => handleSaveUATStep(1)} disabled={!uat1.scenarioList || !uat1.preparedBy}
                                             className="px-5 py-2.5 bg-amber-500 hover:bg-amber-600 disabled:bg-gray-300 disabled:cursor-not-allowed text-white text-xs font-bold rounded-xl flex items-center gap-2 transition-all cursor-pointer">
@@ -816,13 +903,13 @@ export default function SITUATWizard({ project, updateProject, addNotification, 
                             </div>
                         )}
 
-                        {/* ── UAT Step 2: Eksekusi ─────────────────────── */}
+                        {/* â”€â”€ UAT Step 2: Eksekusi â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
                         {activeUatStep === 2 && (
                             <div className="p-5 space-y-4">
                                 <div className="flex items-center gap-2 mb-3">
                                     <UserCheck size={16} className="text-orange-600" />
                                     <h5 className="font-bold text-sm text-gray-800">Tahap 2: Eksekusi UAT Internal &amp; Temuan</h5>
-                                    {uat2Done && <span className="ml-auto text-[10px] font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">Selesai ✓</span>}
+                                    {uat2Done && <span className="ml-auto text-[10px] font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">Selesai âœ“</span>}
                                 </div>
                                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                                     <div>
@@ -862,7 +949,7 @@ export default function SITUATWizard({ project, updateProject, addNotification, 
                                     </div>
                                     <DocList docs={uat2.docs} onRemove={i => onRemoveDoc(setUat2, i)} readOnly={uatDone} />
                                 </div>
-                                {!uatDone && status === 'UAT_IN_PROGRESS' && activeUatStep === 2 && (
+                                {!uatDone && (status === 'UAT_IN_PROGRESS' || UNLOCK_ALL_STAGES) && activeUatStep === 2 && (
                                     <div className="flex justify-end pt-2">
                                         <button onClick={() => handleSaveUATStep(2)} disabled={!uat2.executedCount || !uat2.passedCount}
                                             className="px-5 py-2.5 bg-orange-500 hover:bg-orange-600 disabled:bg-gray-300 disabled:cursor-not-allowed text-white text-xs font-bold rounded-xl flex items-center gap-2 transition-all cursor-pointer">
@@ -873,13 +960,13 @@ export default function SITUATWizard({ project, updateProject, addNotification, 
                             </div>
                         )}
 
-                        {/* ── UAT Step 3: Persetujuan Final ────────────── */}
+                        {/* â”€â”€ UAT Step 3: Persetujuan Final â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
                         {activeUatStep === 3 && (
                             <div className="p-5 space-y-4">
                                 <div className="flex items-center gap-2 mb-3">
                                     <CheckCircle2 size={16} className="text-emerald-600" />
                                     <h5 className="font-bold text-sm text-gray-800">Tahap 3: Persetujuan Final &amp; Penerbitan BAST</h5>
-                                    {uat3Done && <span className="ml-auto text-[10px] font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">Selesai ✓</span>}
+                                    {uat3Done && <span className="ml-auto text-[10px] font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">Selesai âœ“</span>}
                                 </div>
                                 {/* UAT Summary */}
                                 <div className="bg-slate-50 rounded-xl border border-slate-200 p-4 text-xs space-y-2">
@@ -925,20 +1012,20 @@ export default function SITUATWizard({ project, updateProject, addNotification, 
                                     <DocList docs={uat3.docs} onRemove={i => onRemoveDoc(setUat3, i)} readOnly={uatDone} />
                                 </div>
                                 {/* Action buttons */}
-                                {!uatDone && status === 'UAT_IN_PROGRESS' && activeUatStep === 3 && (
+                                {!uatDone && (status === 'UAT_IN_PROGRESS' || UNLOCK_ALL_STAGES) && activeUatStep === 3 && (
                                     <div className="flex flex-col gap-3 pt-2 border-t border-gray-100">
                                         <div className="flex flex-col sm:flex-row gap-2">
                                             <button
                                                 onClick={() => { setRevisionType('UAT_TO_SIT'); setShowRevisionModal(true); }}
                                                 className="flex-1 px-4 py-2.5 bg-orange-50 hover:bg-orange-100 border border-orange-300 text-orange-700 text-xs font-bold rounded-xl flex items-center justify-center gap-2 transition-all cursor-pointer"
                                             >
-                                                <RotateCcw size={13} /> Revisi Minor — Ulang SIT
+                                                <RotateCcw size={13} /> Revisi Minor â€” Ulang SIT
                                             </button>
                                             <button
                                                 onClick={() => { setRevisionType('UAT_TO_DEV'); setShowRevisionModal(true); }}
                                                 className="flex-1 px-4 py-2.5 bg-red-50 hover:bg-red-100 border border-red-300 text-red-700 text-xs font-bold rounded-xl flex items-center justify-center gap-2 transition-all cursor-pointer"
                                             >
-                                                <AlertTriangle size={13} /> Revisi Mayor — Kembali ke Dev
+                                                <AlertTriangle size={13} /> Revisi Mayor â€” Kembali ke Dev
                                             </button>
                                         </div>
                                         <button
@@ -946,7 +1033,7 @@ export default function SITUATWizard({ project, updateProject, addNotification, 
                                             disabled={submitting || !uat3.approvalNotes || !uat3.approvedBy}
                                             className="w-full px-6 py-3 bg-emerald-600 hover:bg-emerald-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-white text-sm font-bold rounded-xl flex items-center justify-center gap-2 transition-all shadow-md cursor-pointer active:scale-95"
                                         >
-                                            <Send size={16} /> UAT Lulus — Tetapkan DEV_COMPLETED &amp; Lanjut ke QA / Siber
+                                            <Send size={16} /> UAT Lulus â€” Tetapkan DEV_COMPLETED &amp; Lanjut ke QA / Siber
                                         </button>
                                     </div>
                                 )}
@@ -962,9 +1049,9 @@ export default function SITUATWizard({ project, updateProject, addNotification, 
                 )}
             </div>
 
-            {/* ═══════════════════════════════════════════════════════════════
+            {/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
                               COMPLETION CARD
-                ═══════════════════════════════════════════════════════════════ */}
+                â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */}
             {isComplete && (
                 <div className="bg-gradient-to-r from-emerald-600 to-teal-600 rounded-2xl p-6 text-white">
                     <div className="flex items-start gap-4">
@@ -972,7 +1059,7 @@ export default function SITUATWizard({ project, updateProject, addNotification, 
                             <Lock size={24} className="text-white" />
                         </div>
                         <div className="flex-1">
-                            <h4 className="font-bold text-lg">🎉 Pengujian SIT &amp; UAT Internal Selesai — DEV COMPLETED!</h4>
+                            <h4 className="font-bold text-lg">ðŸŽ‰ Pengujian SIT &amp; UAT Internal Selesai â€” DEV COMPLETED!</h4>
                             <p className="text-emerald-100 text-xs mt-1 leading-relaxed">
                                 Proyek <strong>{sf(project?.name)}</strong> telah lulus seluruh pengujian SIT &amp; UAT Internal.
                                 Source code dibekukan (<em>code freeze</em>). Silakan ajukan proyek ke pengujian independen QA &amp; Pentest Siber.
@@ -997,7 +1084,7 @@ export default function SITUATWizard({ project, updateProject, addNotification, 
             )}
 
 
-            {/* ─── Audit Trail Revisi ───────────────────────────────────── */}
+            {/* â”€â”€â”€ Audit Trail Revisi â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
             {revisions.length > 0 && (
                 <div className="bg-white rounded-2xl border border-gray-200 p-5 shadow-sm">
                     <h4 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-3 flex items-center gap-2">
@@ -1009,8 +1096,8 @@ export default function SITUATWizard({ project, updateProject, addNotification, 
                                 <RotateCcw size={13} className="text-orange-500 shrink-0 mt-0.5" />
                                 <div>
                                     <p className="font-bold text-orange-900">
-                                        {rev.type === 'SIT_TO_DEV' ? 'SIT → Revisi ke Dev' : rev.type === 'UAT_TO_SIT' ? 'UAT → Ulang SIT' : 'UAT → Revisi ke Dev'}
-                                        <span className="ml-2 font-normal text-orange-600">• {fmtDate(rev.at)}</span>
+                                        {rev.type === 'SIT_TO_DEV' ? 'SIT â†’ Revisi ke Dev' : rev.type === 'UAT_TO_SIT' ? 'UAT â†’ Ulang SIT' : 'UAT â†’ Revisi ke Dev'}
+                                        <span className="ml-2 font-normal text-orange-600">â€¢ {fmtDate(rev.at)}</span>
                                     </p>
                                     <p className="text-orange-800 mt-0.5">{rev.notes}</p>
                                     <p className="text-orange-500 mt-0.5">Oleh: {rev.by}</p>
@@ -1021,7 +1108,7 @@ export default function SITUATWizard({ project, updateProject, addNotification, 
                 </div>
             )}
 
-            {/* ─── Revision Modal ───────────────────────────────────────── */}
+            {/* â”€â”€â”€ Revision Modal â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
             {showRevisionModal && (
                 <div className="fixed inset-0 z-[99998] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
                     <div className="bg-white rounded-2xl shadow-2xl max-w-lg w-full p-6 border border-gray-100">
@@ -1031,9 +1118,9 @@ export default function SITUATWizard({ project, updateProject, addNotification, 
                             </div>
                             <div>
                                 <h3 className="font-bold text-gray-800 text-base">
-                                    {revisionType === 'SIT_TO_DEV' && 'Konfirmasi Revisi SIT → Development'}
-                                    {revisionType === 'UAT_TO_SIT' && 'Konfirmasi Revisi UAT → Ulang SIT'}
-                                    {revisionType === 'UAT_TO_DEV' && 'Konfirmasi Revisi UAT → Development (Mayor)'}
+                                    {revisionType === 'SIT_TO_DEV' && 'Konfirmasi Revisi SIT â†’ Development'}
+                                    {revisionType === 'UAT_TO_SIT' && 'Konfirmasi Revisi UAT â†’ Ulang SIT'}
+                                    {revisionType === 'UAT_TO_DEV' && 'Konfirmasi Revisi UAT â†’ Development (Mayor)'}
                                 </h3>
                                 <p className="text-xs text-gray-500 mt-0.5">
                                     {revisionType === 'SIT_TO_DEV' && 'Proyek akan dikembalikan ke tim Development.'}

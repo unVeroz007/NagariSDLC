@@ -34,6 +34,7 @@ class Project extends Model
         'sit_uat_data',
         'qa_status',
         'cyber_status',
+        'team_allocated_by_pm',
     ];
 
 
@@ -46,6 +47,7 @@ class Project extends Model
             'analyst_result' => 'array',
             'dev_analyst_result' => 'array',
             'sit_uat_data' => 'array',
+            'team_allocated_by_pm' => 'boolean',
         ];
     }
 

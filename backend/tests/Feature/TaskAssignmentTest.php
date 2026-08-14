@@ -225,4 +225,46 @@ class TaskAssignmentTest extends TestCase
             'assignee_id' => $analyst->id,
         ]);
     }
+
+    public function test_task_create_records_activity_log_with_project_metadata()
+    {
+        $project = $this->makeProject();
+        $dev = $this->makeDeveloper('Dimas Anggara', 'dev1@nagari.co.id');
+
+        $project->teamMembers()->create([
+            'user_id' => $dev->id,
+            'role_in_project' => 'Backend',
+        ]);
+
+        $this->actingAs($this->admin)->postJson("/api/v1/projects/{$project->id}/tasks", [
+            'title' => 'Setup Env',
+            'assignee_id' => $dev->id,
+        ])->assertStatus(201);
+
+        $this->assertDatabaseHas('activity_logs', [
+            'action' => 'create_task',
+            'subject_type' => ProjectTask::class,
+        ]);
+    }
+
+    public function test_activity_logs_filtered_by_project_id()
+    {
+        $project = $this->makeProject();
+        $dev = $this->makeDeveloper('Dimas Anggara', 'dev1@nagari.co.id');
+        $project->teamMembers()->create(['user_id' => $dev->id, 'role_in_project' => 'Backend']);
+
+        $this->actingAs($this->admin)->postJson("/api/v1/projects/{$project->id}/tasks", [
+            'title' => 'Setup Env',
+            'assignee_id' => $dev->id,
+        ])->assertStatus(201);
+
+        $response = $this->actingAs($this->admin)->getJson("/api/v1/activity-logs?project_id={$project->id}");
+
+        $response->assertStatus(200)
+            ->assertJsonPath('status', 'success');
+
+        $titles = collect($response->json('data'))->pluck('description')->all();
+        $this->assertNotEmpty($titles);
+        $this->assertStringContainsString('Setup Env', $titles[0]);
+    }
 }

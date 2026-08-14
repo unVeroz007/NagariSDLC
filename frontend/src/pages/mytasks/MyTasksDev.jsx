@@ -12,31 +12,36 @@ import {
     Calendar,
     Kanban,
     Layers,
-    MessageSquare
+    MessageSquare,
+    AlertCircle
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 
-// Pemetaan status label UI <-> enum backend (TaskStatus: todo, in_progress, review, done)
+// Pemetaan status label UI <-> enum backend (TaskStatus: todo, in_progress, hold, done, take_down)
 const STATUS_ENUM_TO_LABEL = {
-    todo: 'To Do',
-    in_progress: 'In Progress',
-    review: 'Code Review',
-    done: 'Done',
+    todo: 'Belum Mulai',
+    in_progress: 'Sedang Dikerjakan',
+    hold: 'Hold',
+    done: 'Selesai',
+    take_down: 'Take Down',
 };
 const STATUS_LABEL_TO_ENUM = {
-    'To Do': 'todo',
-    'In Progress': 'in_progress',
-    'Code Review': 'review',
-    'Done': 'done',
+    'Belum Mulai': 'todo',
+    'Sedang Dikerjakan': 'in_progress',
+    'Hold': 'hold',
+    'Selesai': 'done',
+    'Take Down': 'take_down',
 };
-const STATUS_LABELS = ['To Do', 'In Progress', 'Code Review', 'Done'];
+const STATUS_LABELS = ['Belum Mulai', 'Sedang Dikerjakan', 'Hold', 'Selesai', 'Take Down'];
 
 const mapTaskStatusToLabel = (status) => {
     const s = String(status || '').toLowerCase();
     if (STATUS_ENUM_TO_LABEL[s]) return STATUS_ENUM_TO_LABEL[s];
     // Terima label UI yang sudah benar (misal dari data lama)
     if (STATUS_LABELS.includes(status)) return status;
-    return 'To Do';
+    // Migrasi status lama 'review' (Code Review) -> dianggap Sedang Dikerjakan
+    if (s === 'review' || s === 'code review') return 'Sedang Dikerjakan';
+    return 'Belum Mulai';
 };
 
 export default function MyTasksDev() {
@@ -78,6 +83,9 @@ export default function MyTasksDev() {
                     priority: t.priority || 'Medium',
                     deadline: t.due_date || t.deadline || '',
                     status: mapTaskStatusToLabel(t.status),
+                    revisionNote: t.revision_note || '',
+                    revisionRequestedBy: t.revision_requested_by || '',
+                    revisionRequestedAt: t.revision_requested_at || null,
                 });
             });
         });
@@ -127,14 +135,16 @@ export default function MyTasksDev() {
 
     const getStatusBadge = (status) => {
         switch (status) {
-            case 'To Do':
+            case 'Belum Mulai':
                 return 'bg-gray-100 text-gray-700 border-gray-200';
-            case 'In Progress':
+            case 'Sedang Dikerjakan':
                 return 'bg-blue-100 text-blue-800 border-blue-200 font-bold';
-            case 'Code Review':
-                return 'bg-purple-100 text-purple-800 border-purple-200 font-bold';
-            case 'Done':
+            case 'Hold':
+                return 'bg-amber-100 text-amber-800 border-amber-200 font-bold';
+            case 'Selesai':
                 return 'bg-emerald-100 text-emerald-800 border-emerald-200 font-bold';
+            case 'Take Down':
+                return 'bg-red-100 text-red-800 border-red-200 font-bold';
             default:
                 return 'bg-gray-100 text-gray-700';
         }
@@ -200,7 +210,7 @@ export default function MyTasksDev() {
 
                     {/* Status Filter */}
                     <div className="flex items-center gap-2 w-full sm:w-auto overflow-x-auto pb-2 sm:pb-0">
-                        {['ALL', 'To Do', 'In Progress', 'Code Review', 'Done'].map((st) => (
+                        {['ALL', 'Belum Mulai', 'Sedang Dikerjakan', 'Hold', 'Selesai', 'Take Down'].map((st) => (
                             <button
                                 key={st}
                                 onClick={() => setStatusFilter(st)}
@@ -261,6 +271,18 @@ export default function MyTasksDev() {
                                                     {task.id}
                                                 </span>
                                                 <div className="mt-1 font-bold text-gray-900 line-clamp-2">{task.title}</div>
+                                                {task.revisionNote && (
+                                                    <div className="mt-2 p-2 bg-orange-50 border border-orange-200 rounded-lg text-[11px] text-orange-800">
+                                                        <div className="flex items-center gap-1 font-bold mb-0.5">
+                                                            <AlertCircle size={11} className="text-orange-500" />
+                                                            Permintaan Revisi dari PM
+                                                        </div>
+                                                        <p className="leading-relaxed">{task.revisionNote}</p>
+                                                        {task.revisionRequestedBy && (
+                                                            <p className="text-[10px] text-orange-600 mt-1">Oleh: {task.revisionRequestedBy}</p>
+                                                        )}
+                                                    </div>
+                                                )}
                                             </td>
                                             <td className="p-4 text-gray-600">
                                                 <div className="font-semibold text-gray-800 line-clamp-1">{task.projectName}</div>

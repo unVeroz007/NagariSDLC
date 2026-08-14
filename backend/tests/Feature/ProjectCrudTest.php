@@ -121,6 +121,69 @@ class ProjectCrudTest extends TestCase
         ]);
     }
 
+    public function test_update_project_saves_team_allocated_by_pm()
+    {
+        $project = Project::create([
+            'req_id' => Project::generateReqId(),
+            'title' => 'Proyek Alokasi PM',
+            'created_by' => $this->admin->id,
+            'division_id' => $this->division->id,
+            'status' => ProjectStatus::IN_DEVELOPMENT->value,
+        ]);
+
+        $response = $this->actingAs($this->admin)->patchJson("/api/v1/projects/{$project->id}", [
+            'team_allocated_by_pm' => true,
+        ]);
+
+        $response->assertStatus(200)
+            ->assertJsonPath('status', 'success')
+            ->assertJsonPath('data.team_allocated_by_pm', true);
+
+        $this->assertDatabaseHas('projects', [
+            'id' => $project->id,
+            'team_allocated_by_pm' => 1,
+        ]);
+    }
+
+    public function test_pm_sees_only_projects_they_manage_in_development()
+    {
+        $pmRole = Role::create(['name' => UserRole::PROJECT_MANAGER->value, 'display_name' => 'Project Manager']);
+        $pm = User::create([
+            'name' => 'Andi Wijaya',
+            'email' => 'pmtest@nagari.co.id',
+            'password' => bcrypt('password123'),
+            'role_id' => $pmRole->id,
+            'division_id' => $this->division->id,
+            'is_active' => true,
+        ]);
+
+        $managedProject = Project::create([
+            'req_id' => Project::generateReqId(),
+            'title' => 'Proyek Dikelola PM',
+            'created_by' => $this->admin->id,
+            'division_id' => $this->division->id,
+            'status' => ProjectStatus::IN_DEVELOPMENT->value,
+            'pm_id' => $pm->id,
+        ]);
+
+        $otherProject = Project::create([
+            'req_id' => Project::generateReqId(),
+            'title' => 'Proyek Orang Lain',
+            'created_by' => $this->admin->id,
+            'division_id' => $this->division->id,
+            'status' => ProjectStatus::IN_DEVELOPMENT->value,
+        ]);
+
+        $response = $this->actingAs($pm)->getJson('/api/v1/projects');
+
+        $response->assertStatus(200)
+            ->assertJsonPath('status', 'success');
+
+        $titles = collect($response->json('data'))->pluck('title')->all();
+        $this->assertContains('Proyek Dikelola PM', $titles);
+        $this->assertNotContains('Proyek Orang Lain', $titles);
+    }
+
     public function test_delete_project_admin()
     {
         $project = Project::create([

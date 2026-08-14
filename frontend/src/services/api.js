@@ -257,6 +257,10 @@ export const projectService = {
     getTimeline: async (id) => {
         return apiFetch(`${BASE_URL}/projects/${id}/timeline`);
     },
+
+    getSitGate: async (id) => {
+        return apiFetch(`${BASE_URL}/projects/${id}/sit-gate`);
+    },
 };
 
 // ──────────────────────────────────────────────────────────
@@ -284,6 +288,13 @@ export const taskService = {
     delete: async (taskId) => {
         return apiFetch(`${BASE_URL}/tasks/${taskId}`, {
             method: 'DELETE',
+        });
+    },
+
+    requestRevision: async (taskId, revisionNote) => {
+        return apiFetch(`${BASE_URL}/tasks/${taskId}/request-revision`, {
+            method: 'POST',
+            body: JSON.stringify({ revision_note: revisionNote }),
         });
     },
 };
@@ -338,28 +349,56 @@ export const cyberRequestService = {
 // USER SERVICE
 // ──────────────────────────────────────────────────────────
 export const userService = {
-    getAll: async () => {
-        return apiFetch(`${BASE_URL}/users`);
+    // Cache module-level untuk daftar user (jarang berubah). TTL 5 menit.
+    // Menghindari request GET /users berulang setiap kali halaman dibuka.
+    _cache: null,
+    _cacheAt: null,
+    CACHE_TTL_MS: 5 * 60 * 1000,
+
+    getAll: async (force = false) => {
+        const now = Date.now();
+        if (!force && userService._cache && userService._cacheAt && (now - userService._cacheAt < userService.CACHE_TTL_MS)) {
+            return userService._cache;
+        }
+        const res = await apiFetch(`${BASE_URL}/users`);
+        // Cache hanya jika sukses (res.data berupa array)
+        if (res && Array.isArray(res.data)) {
+            userService._cache = res;
+            userService._cacheAt = now;
+        }
+        return res;
+    },
+
+    // Paksa refresh cache (misal setelah create/update user)
+    invalidateCache: () => {
+        userService._cache = null;
+        userService._cacheAt = null;
     },
 
     create: async (userData) => {
-        return apiFetch(`${BASE_URL}/users`, {
+        const res = await apiFetch(`${BASE_URL}/users`, {
             method: 'POST',
             body: JSON.stringify(userData),
         });
+        userService.invalidateCache();
+        return res;
     },
 
     update: async (id, updates) => {
-        return apiFetch(`${BASE_URL}/users/${id}`, {
+        const res = await apiFetch(`${BASE_URL}/users/${id}`, {
             method: 'PATCH',
             body: JSON.stringify(updates),
         });
+        userService.invalidateCache();
+        return res;
     },
 
     delete: async (id) => {
-        return apiFetch(`${BASE_URL}/users/${id}`, {
+        const res = await apiFetch(`${BASE_URL}/users/${id}`, {
             method: 'DELETE',
         });
+        userService.invalidateCache();
+        return res;
     },
 };
 
@@ -420,6 +459,11 @@ export const documentService = {
 export const activityLogService = {
     getAll: async (filters = {}) => {
         const params = new URLSearchParams(filters).toString();
+        return apiFetch(`${BASE_URL}/activity-logs?${params}`);
+    },
+    // Log aktivitas untuk satu proyek (filter metadata.project_id)
+    getByProject: async (projectId, perPage = 100) => {
+        const params = new URLSearchParams({ project_id: projectId, per_page: perPage }).toString();
         return apiFetch(`${BASE_URL}/activity-logs?${params}`);
     },
     getSummary: async () => apiFetch(`${BASE_URL}/activity-logs/summary`),

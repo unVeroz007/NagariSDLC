@@ -2,6 +2,7 @@ import { useState, useMemo, useEffect, useRef } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import { useProjects, getProjectRealDocuments } from '../../contexts/ProjectContext';
 import { useNotifications } from '../../contexts/NotificationContext';
+import { userService } from '../../services/api';
 import RBBBadge from '../../components/RBBBadge';
 import ProjectTypeBadge from '../../components/ProjectTypeBadge';
 import LoadingSpinner from '../../components/LoadingSpinner';
@@ -41,17 +42,54 @@ import {
     Paperclip,
 } from 'lucide-react';
 
-const qaTeamMembers = [
-    { id: 1, name: 'Siti Rahmawati', role: 'Senior QA Automation', email: 'qatester@nagari.co.id', activeLoad: 1 },
-    { id: 2, name: 'Rian Hidayat', role: 'Functional QA Tester', email: 'rian.qa@nagari.co.id', activeLoad: 0 },
-    { id: 3, name: 'Bayu Perkasa', role: 'Mobile QA Specialist', email: 'bayu.qa@nagari.co.id', activeLoad: 1 },
-    { id: 4, name: 'Eko Prasetyo', role: 'Lead QA Engineer', email: 'qalead@nagari.co.id', activeLoad: 2 },
-];
-
 export default function WorkspaceQA() {
     const { user } = useAuth();
     const { projects, updateProjectStatus } = useProjects();
     const { addNotification } = useNotifications();
+
+    // 🔄 Anggota QA diambil dari user API (role qa_lead / qa_tester), bukan hardcode.
+    // Beban aktif dihitung realtime dari proyek nyata.
+    const [qaTeamMembers, setQaTeamMembers] = useState([]);
+    const [isQaLoading, setIsQaLoading] = useState(true);
+
+    useEffect(() => {
+        let isMounted = true;
+        setIsQaLoading(true);
+        userService.getAll()
+            .then(res => {
+                if (!isMounted) return;
+                const usersList = Array.isArray(res) ? res : res?.data || [];
+                const qaUsers = usersList.filter(u => {
+                    const r = (u.role_detail?.name || u.role || '').toString().toLowerCase();
+                    return r.includes('qa');
+                });
+                setQaTeamMembers(qaUsers.map(u => ({
+                    id: u.id,
+                    name: u.name,
+                    role: u.division_detail?.name || u.division || 'QA Tester',
+                    email: u.email,
+                    activeLoad: 0,
+                })));
+            })
+            .catch(() => setQaTeamMembers([]))
+            .finally(() => { if (isMounted) setIsQaLoading(false); });
+        return () => { isMounted = false; };
+    }, []);
+
+    // 🔢 Beban aktif per anggota QA (proyek yang qaAssignee-nya = nama user & status aktif)
+    const qaWorkloads = useMemo(() => {
+        const terminalStatuses = new Set(['LIVE_PRODUCTION', 'CANCELLED', 'REJECTED']);
+        return (qaTeamMembers || []).map(a => {
+            const activeCount = (projects || []).filter(p => {
+                if (terminalStatuses.has(p.status)) return false;
+                const qaSt = String(p.qaStatus || p.qa_status || '').toUpperCase();
+                if (qaSt === 'PASSED' || qaSt === 'REVIEW') return false;
+                const assigneeName = String(p.qaAssignee || p.qa_assignee || '').toLowerCase();
+                return assigneeName && a.name && assigneeName === a.name.toLowerCase();
+            }).length;
+            return { ...a, activeLoad: activeCount };
+        });
+    }, [qaTeamMembers, projects]);
 
     const [activeTab, setActiveTab] = useState('DISPOSITION');
     const [projectSearch, setProjectSearch] = useState('');
@@ -438,11 +476,17 @@ export default function WorkspaceQA() {
                                                 className="w-full px-3.5 py-2.5 bg-white border border-gray-200 rounded-xl text-xs md:text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-blue-200"
                                             >
                                                 <option value="">-- Pilih QA Tester --</option>
-                                                {qaTeamMembers.map(a => (
-                                                    <option key={a.id} value={a.name}>
-                                                        {a.name} - {a.role} (Beban: {a.activeLoad} Pengujian Aktif)
-                                                    </option>
-                                                ))}
+                                                {isQaLoading ? (
+                                                    <option value="" disabled>Memuat daftar QA...</option>
+                                                ) : qaWorkloads.length === 0 ? (
+                                                    <option value="" disabled>Belum ada user QA terdaftar</option>
+                                                ) : (
+                                                    qaWorkloads.map(a => (
+                                                        <option key={a.id} value={a.name}>
+                                                            {a.name} - {a.role} (Beban: {a.activeLoad} Pengujian Aktif)
+                                                        </option>
+                                                    ))
+                                                )}
                                             </select>
                                         </div>
 

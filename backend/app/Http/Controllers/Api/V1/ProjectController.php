@@ -35,7 +35,7 @@ class ProjectController extends Controller
         $user = $request->user();
         $roleName = $user->role?->name;
 
-        $query = Project::with(['creator', 'pm', 'analyst', 'division', 'documents', 'teamMembers.user', 'statusHistories', 'tasks.assignee']);
+        $query = Project::with(['creator', 'pm', 'analyst', 'division', 'documents', 'teamMembers.user', 'statusHistories.changedBy', 'tasks.assignee']);
 
         // ─── ROLE-BASED DATA ISOLATION ───
         // Super Admin, Head of IT, Lead Group: bisa lihat SEMUA proyek
@@ -46,16 +46,22 @@ class ProjectController extends Controller
                 $query->where('created_by', $user->id);
 
             } elseif ($roleName === 'analyst' || $roleName === 'dev_analyst') {
-                // Analyst & Dev Analyst dapat melihat semua proyek di fase analisis
-                // Agar saling tahu siapa memegang proyek mana
-                $query->whereIn('status', [
-                    ProjectStatus::PENDING->value,
-                    ProjectStatus::IN_REVIEW->value,
-                    ProjectStatus::ANALYSIS_APPROVED->value,
-                    ProjectStatus::READY_FOR_DEVELOPMENT->value,
-                    ProjectStatus::DEV_ANALYSIS->value,
-                    ProjectStatus::DEV_ANALYSIS_DONE->value,
-                ]);
+                // Analyst: melihat proyek di fase analisis (agar saling tahu siapa pegang proyek mana)
+                // Dev Analyst (= PM): melihat proyek fase analisis (konteks kerja analis)
+                // + proyek yang DIA kelola sebagai PM (pm_id = dia) di SEMUA tahap
+                $query->where(function ($q) use ($user, $roleName) {
+                    $q->whereIn('status', [
+                        ProjectStatus::PENDING->value,
+                        ProjectStatus::IN_REVIEW->value,
+                        ProjectStatus::ANALYSIS_APPROVED->value,
+                        ProjectStatus::READY_FOR_DEVELOPMENT->value,
+                        ProjectStatus::DEV_ANALYSIS->value,
+                        ProjectStatus::DEV_ANALYSIS_DONE->value,
+                    ]);
+                    if ($roleName === 'dev_analyst') {
+                        $q->orWhere('pm_id', $user->id);
+                    }
+                });
 
             } elseif ($roleName === 'development_lead') {
                 // Development Lead: semua proyek di fase pengembangan (bukan cuma punya dia)
@@ -204,6 +210,7 @@ class ProjectController extends Controller
             'analyst_result'         => ['sometimes', 'nullable'],
             'dev_analyst_result'    => ['sometimes', 'nullable'],            'qa_status'              => ['sometimes', 'nullable', 'string'],
             'cyber_status'           => ['sometimes', 'nullable', 'string'],
+            'team_allocated_by_pm'   => ['sometimes', 'nullable', 'boolean'],
             'status'                 => ['sometimes', 'string'],
             'project_type'           => ['sometimes', 'nullable', 'string', 'in:baru,perbaikan,update'],
         ]);
@@ -241,6 +248,7 @@ class ProjectController extends Controller
             'dev_analyst_result'    => $request->input('devAnalystResult') ?? $request->input('dev_analyst_result'),
             'qa_status'              => $request->qa_status,
             'cyber_status'           => $request->cyber_status,
+            'team_allocated_by_pm'   => $request->has('team_allocated_by_pm') ? (bool) $request->team_allocated_by_pm : null,
         ], fn($v) => ! is_null($v));
 
         $project->update($updateData);
@@ -423,6 +431,49 @@ class ProjectController extends Controller
         return response()->json([
             'status' => 'success',
             'data'   => ProjectStatusHistoryResource::collection($histories),
+        ]);
+    }
+
+    /**
+     * Gatekeeper SIT: pastikan seluruh task developer sudah selesai (Done)
+     * sebelum proyek boleh masuk tahap SIT. Task berstatus TAKE_DOWN diabaikan.
+     */
+    public function sitGate(int $id): JsonResponse
+    {
+        $project = Project::with('tasks.assignee')->findOrFail($id);
+
+        $tasks = $project->tasks;
+
+        // Semua task yang TIDAK berstatus done / take_down = blocker
+        $incomplete = $tasks->filter(function ($t) {
+            $status = $t->status instanceof \BackedEnum ? $t->status->value : $t->status;
+            return ! in_array($status, ['done', 'take_down']);
+        })->values();
+
+        $totalCount = $tasks->filter(function ($t) {
+            $status = $t->status instanceof \BackedEnum ? $t->status->value : $t->status;
+            return $status !== 'take_down';
+        })->count();
+
+        $doneCount = $tasks->filter(function ($t) {
+            $status = $t->status instanceof \BackedEnum ? $t->status->value : $t->status;
+            return $status === 'done';
+        })->count();
+
+        return response()->json([
+            'status' => 'success',
+            'data'   => [
+                'can_start_sit' => $incomplete->isEmpty(),
+                'blockers'      => $incomplete->map(fn($t) => [
+                    'id'    => $t->id,
+                    'title' => $t->title,
+                    'status' => $t->status instanceof \BackedEnum ? $t->status->value : $t->status,
+                    'assignee' => $t->assignee?->name,
+                ]),
+                'total_task'    => $totalCount,
+                'done_task'     => $doneCount,
+                'take_down_task'=> $tasks->filter(fn($t) => ($t->status instanceof \BackedEnum ? $t->status->value : $t->status) === 'take_down')->count(),
+            ],
         ]);
     }
 }

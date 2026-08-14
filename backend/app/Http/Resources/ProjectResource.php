@@ -62,6 +62,7 @@ class ProjectResource extends JsonResource
             'sit_uat_data' => $this->sit_uat_data,
             'qa_status' => $this->qa_status ?? 'NOT_SUBMITTED',
             'cyber_status' => $this->cyber_status ?? 'NOT_SUBMITTED',
+            'team_allocated_by_pm' => $this->team_allocated_by_pm ?? false,
             'latest_note' => $this->latestNote(),
 
 
@@ -93,6 +94,9 @@ class ProjectResource extends JsonResource
                         'deadline' => $t->due_date?->format('Y-m-d'),
                         'due_date' => $t->due_date?->format('Y-m-d'),
                         'priority' => $t->priority ?? 'Medium',
+                        'revision_note' => $t->revision_note,
+                        'revision_requested_at' => $t->revision_requested_at?->toIso8601String(),
+                        'revision_requested_by' => $t->revisionRequester?->name,
                         'created_at' => $t->created_at?->toIso8601String(),
                     ];
                 });

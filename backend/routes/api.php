@@ -56,8 +56,7 @@ Route::prefix('v1')->group(function () {
             Route::patch('/users/{id}', [UserController::class, 'update']);
             Route::delete('/users/{id}', [UserController::class, 'destroy']);
 
-            // ----- ACTIVITY LOG (Admin Only) -----
-            Route::get('/activity-logs', [ActivityLogController::class, 'index']);
+            // ----- ACTIVITY LOG (Admin Only — summary) -----
             Route::get('/activity-logs/summary', [ActivityLogController::class, 'summary']);
         });
 
@@ -65,6 +64,9 @@ Route::prefix('v1')->group(function () {
         Route::get('/roles', [RoleController::class, 'index']);
         Route::get('/divisions', [DivisionController::class, 'index']);
         Route::get('/users', [UserController::class, 'index']);
+
+        // Activity log — read untuk semua user terautentikasi (dipakai juga utk log proyek per PM)
+        Route::get('/activity-logs', [ActivityLogController::class, 'index']);
 
         // ----- PROJECT ROUTES -----
         Route::get('/projects', [ProjectController::class, 'index']);
@@ -76,6 +78,7 @@ Route::prefix('v1')->group(function () {
             ->middleware('role:super_admin,head_of_it,project_manager');
         Route::patch('/projects/{id}/status', [ProjectController::class, 'updateStatus']);
         Route::get('/projects/{id}/timeline', [ProjectController::class, 'timeline']);
+        Route::get('/projects/{id}/sit-gate', [ProjectController::class, 'sitGate']);
         Route::post('/projects/{id}/team', [ProjectController::class, 'allocateTeam']);
 
         // ----- TASK ROUTES -----
@@ -83,6 +86,7 @@ Route::prefix('v1')->group(function () {
         Route::post('/projects/{projectId}/tasks', [TaskController::class, 'store']);
         Route::patch('/tasks/{taskId}', [TaskController::class, 'update']);
         Route::delete('/tasks/{taskId}', [TaskController::class, 'destroy']);
+        Route::post('/tasks/{taskId}/request-revision', [TaskController::class, 'requestRevision']);
 
         // ----- WORKSPACE ROUTES -----
         Route::get('/workspace/{role}', [WorkspaceController::class, 'show']);

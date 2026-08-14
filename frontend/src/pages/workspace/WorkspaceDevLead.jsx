@@ -167,7 +167,7 @@ export default function WorkspaceDevLead() {
                 })));
                 // Developer candidates
                 setDeveloperCandidates(users.filter(u => (u.role_detail?.name || u.role || '') === 'developer').map(u => ({
-                    id: u.id, name: u.name, skill: u.division_detail?.name || 'Developer',
+                    id: u.id, name: u.name, skill: u.division_detail?.name || 'Developer', activeProjects: 0,
                 })));
             } catch {
                 setAnalysts([]);
@@ -188,6 +188,29 @@ export default function WorkspaceDevLead() {
             String(p.division || '').toLowerCase().includes(term)
         );
     };
+
+    // 🔢 Beban proyek aktif per developer (untuk membantu Lead Dev memilih tim secara adil)
+    const developerWorkloads = useMemo(() => {
+        const terminalStatuses = new Set(['LIVE_PRODUCTION', 'CANCELLED', 'REJECTED']);
+        return (developerCandidates || []).map(dev => {
+            const activeProjects = (projects || []).filter(p => {
+                if (terminalStatuses.has(p.status)) return false;
+                if (!Array.isArray(p.team)) return false;
+                return p.team.some(t => {
+                    if (!t) return false;
+                    const memberId = t.user_id ?? (typeof t === 'object' ? t.id : null);
+                    const memberName = typeof t === 'object' ? t.name : String(t);
+                    const nameMatch = memberName && dev.name && memberName.toLowerCase() === dev.name.toLowerCase();
+                    return (memberId != null && dev.id != null && Number(memberId) === Number(dev.id)) || nameMatch;
+                });
+            });
+            return {
+                ...dev,
+                activeProjects: activeProjects.length,
+                projectNames: activeProjects.map(p => p.name || p.title).filter(Boolean).slice(0, 3),
+            };
+        });
+    }, [developerCandidates, projects]);
 
     // 1. Proyek Masuk (Hanya proyek yang SUDAH diverifikasi Lead Perencanaan & resmi diserahkan ke Pengembangan)
     const incomingProjects = applySearch(projects.filter(p =>
@@ -822,7 +845,7 @@ export default function WorkspaceDevLead() {
                                                 />
                                             </div>
                                             <div className="space-y-1.5 max-h-40 overflow-y-auto">
-                                                {developerCandidates.filter(d => {
+                                                {developerWorkloads.filter(d => {
                                                     if (!developerSearch.trim()) return true;
                                                     const q = developerSearch.toLowerCase();
                                                     return d.name.toLowerCase().includes(q) || d.skill.toLowerCase().includes(q);
@@ -844,8 +867,21 @@ export default function WorkspaceDevLead() {
                                                             }}
                                                             className="text-[#00529C] focus:ring-[#00529C]"
                                                         />
-                                                        <span className="text-xs font-medium text-gray-800">{dev.name}</span>
-                                                        <span className="text-[10px] text-gray-400 ml-auto">{dev.skill}</span>
+                                                        <div className="flex-1 min-w-0">
+                                                            <span className="text-xs font-medium text-gray-800 block truncate">{dev.name}</span>
+                                                            {dev.activeProjects > 0 && dev.projectNames?.length > 0 && (
+                                                                <span className="text-[10px] text-gray-400 block truncate">Proyek: {dev.projectNames.join(', ')}</span>
+                                                            )}
+                                                        </div>
+                                                        <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold shrink-0 ${
+                                                            dev.activeProjects >= 3
+                                                                ? 'bg-red-100 text-red-700'
+                                                                : dev.activeProjects >= 1
+                                                                    ? 'bg-amber-100 text-amber-700'
+                                                                    : 'bg-emerald-100 text-emerald-700'
+                                                        }`} title={`${dev.activeProjects} proyek aktif`}>
+                                                            {dev.activeProjects} Proyek
+                                                        </span>
                                                     </label>
                                                 ))}
                                             </div>

@@ -1,4 +1,4 @@
-import { createContext, useState, useContext, useEffect, useCallback } from 'react';
+import { createContext, useState, useContext, useEffect, useCallback, useRef } from 'react';
 import { projectService, documentService } from '../services/api';
 import { useAuth } from './AuthContext';
 import { generateDocumentName } from '../utils/documentNaming';
@@ -54,7 +54,7 @@ export function ProjectProvider({ children }) {
     const [lastUpdated, setLastUpdated] = useState(null);
     const [meta, setMeta] = useState(null);
 
-    const loadProjects = useCallback(async (showSpinner = false) => {
+    const loadProjects = useCallback(async (showSpinner = false, silent = false) => {
         if (!isLoggedIn) return;
         if (showSpinner) setIsLoading(true);
         try {
@@ -77,7 +77,8 @@ export function ProjectProvider({ children }) {
             }
             setLastUpdated(new Date());
         } catch (err) {
-            if (err.status !== 401) {
+            // Mode silent (polling latar belakang): jangan spam toast error.
+            if (!silent && err.status !== 401) {
                 toast.error(`Gagal memuat proyek: ${err.message}`);
             }
         } finally {
@@ -90,6 +91,48 @@ export function ProjectProvider({ children }) {
             loadProjects(true);
         }
     }, [loadProjects, isLoggedIn]);
+
+    // ─── AUTO-SYNC DATA PROYEK (Opsi A) ─────────────────────────────
+    // Polling periodik + refresh saat tab aktif kembali agar perubahan
+    // status/tahapan dari user lain otomatis sinkron tanpa refresh manual.
+    const pollingRef = useRef(null);
+    const POLL_INTERVAL_MS = 30000; // 30 detik
+
+    // Silent refresh: tanpa spinner & tanpa toast error (fallback manual tetap ada).
+    const refreshDataSilent = useCallback(() => {
+        loadProjects(false, true);
+    }, [loadProjects]);
+
+    useEffect(() => {
+        if (!isLoggedIn) {
+            if (pollingRef.current) {
+                clearInterval(pollingRef.current);
+                pollingRef.current = null;
+            }
+            return;
+        }
+
+        // 1) Polling periodik di latar belakang
+        refreshDataSilent();
+        pollingRef.current = setInterval(refreshDataSilent, POLL_INTERVAL_MS);
+
+        // 2) Refresh segera saat tab kembali terlihat / window focus
+        const handleVisibility = () => {
+            if (document.visibilityState === 'visible') refreshDataSilent();
+        };
+        const handleFocus = () => refreshDataSilent();
+        document.addEventListener('visibilitychange', handleVisibility);
+        window.addEventListener('focus', handleFocus);
+
+        return () => {
+            if (pollingRef.current) {
+                clearInterval(pollingRef.current);
+                pollingRef.current = null;
+            }
+            document.removeEventListener('visibilitychange', handleVisibility);
+            window.removeEventListener('focus', handleFocus);
+        };
+    }, [isLoggedIn, refreshDataSilent]);
 
     const addProject = async (projectData) => {
         try {
@@ -176,7 +219,6 @@ export function ProjectProvider({ children }) {
     const getProjectsByStatus = (status) => projects.filter(p => p.status === status);
 
     const refreshData = () => loadProjects(true);
-
     return (
         <ProjectContext.Provider
             value={{
@@ -193,6 +235,7 @@ export function ProjectProvider({ children }) {
                 getProjectById,
                 getProjectsByStatus,
                 refreshData,
+                refreshDataSilent,
             }}
         >
             {children}

@@ -238,6 +238,27 @@ class ProjectWorkflowService
                 'notes' => $notes,
             ]);
 
+            // Catat juga ke activity_logs (audit trail umum, filterable per proyek)
+            \App\Models\ActivityLog::create([
+                'user_id'      => $user->id,
+                'action'       => 'update_project_status',
+                'action_label' => 'Mengubah Status Proyek',
+                'description'  => "Status proyek \"{$project->title}\" diubah dari {$currentStatus} menjadi {$targetStatus->value}." . ($notes ? " Catatan: {$notes}" : ''),
+                'subject_type' => \App\Models\Project::class,
+                'subject_id'   => $project->id,
+                'metadata'     => [
+                    'project_id'   => $project->id,
+                    'project_name' => $project->title ?? $project->name,
+                    'from_status'  => $currentStatus,
+                    'to_status'    => $targetStatus->value,
+                    'user_name'    => $user->name,
+                    'user_role'    => $user->role?->display_name ?? $user->role?->name,
+                ],
+                'ip_address'   => request()->ip(),
+                'status'       => 'success',
+                'created_at'   => now(),
+            ]);
+
             // Create notification for relevant roles
             $this->notifyRelevantRoles($project, $currentStatus, $targetStatus->value, $user, $notes);
 

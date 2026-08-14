@@ -19,6 +19,9 @@ class ProjectTask extends Model
         'status',
         'due_date',
         'priority',
+        'revision_note',
+        'revision_requested_at',
+        'revision_requested_by',
     ];
 
     protected function casts(): array
@@ -26,6 +29,7 @@ class ProjectTask extends Model
         return [
             'status' => TaskStatus::class,
             'due_date' => 'date',
+            'revision_requested_at' => 'datetime',
         ];
     }
 
@@ -37,5 +41,10 @@ class ProjectTask extends Model
     public function assignee(): BelongsTo
     {
         return $this->belongsTo(User::class, 'assignee_id');
+    }
+
+    public function revisionRequester(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'revision_requested_by');
     }
 }

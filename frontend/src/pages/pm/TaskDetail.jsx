@@ -1,4 +1,4 @@
-import { getParallelTestingBadge } from '../../constants/projectStatus';
+import { getParallelTestingBadge, PROJECT_STATUS_LABEL } from '../../constants/projectStatus';
 import RBBBadge from '../../components/RBBBadge';
 import ProjectTypeBadge from '../../components/ProjectTypeBadge';
 import DocumentViewerModal from '../../components/DocumentViewerModal';
@@ -8,11 +8,11 @@ import {
     getDocumentTypeInfo,
     formatFileSize,
 } from '../../utils/documentNaming';
-import { documentService, taskService } from '../../services/api';
+import { documentService, taskService, activityLogService } from '../../services/api';
 import ChatBox from '../../components/ChatBox';
 import SITUATDocumentModal from '../../components/SITUATDocumentModal';
 import SITUATWizard from '../../components/SITUATWizard';
-import { useState, useMemo, useEffect, useRef } from 'react';
+import { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import toast from 'react-hot-toast';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
@@ -350,14 +350,18 @@ export default function TaskDetail() {
     const mapTaskStatusToEnum = (status) => {
         const s = String(status || '').toLowerCase();
         if (s === 'selesai' || s === 'done') return 'done';
-        if (s === 'sedang dikerjakan' || s === 'in progress' || s === 'in_progress') return 'in_progress';
+        if (s === 'sedang dikerjakan' || s === 'in progress' || s === 'in_progress' || s === 'review' || s === 'code review') return 'in_progress';
+        if (s === 'hold') return 'hold';
+        if (s === 'take down' || s === 'take_down') return 'take_down';
         return 'todo';
     };
 
     const mapTaskStatusToLabel = (status) => {
         const s = String(status || '').toLowerCase();
         if (s === 'done' || s === 'selesai') return 'Selesai';
-        if (s === 'in_progress' || s === 'sedang dikerjakan') return 'Sedang Dikerjakan';
+        if (s === 'in_progress' || s === 'sedang dikerjakan' || s === 'review' || s === 'code review') return 'Sedang Dikerjakan';
+        if (s === 'hold') return 'Hold';
+        if (s === 'take_down' || s === 'take down') return 'Take Down';
         return 'Belum Mulai';
     };
 
@@ -483,8 +487,10 @@ export default function TaskDetail() {
     const getStatusBadge = (status) => {
         const configs = {
             Selesai: 'bg-emerald-100 text-emerald-700 border-emerald-200',
-            'Sedang Dikerjakan': 'bg-amber-100 text-amber-700 border-amber-200',
+            'Sedang Dikerjakan': 'bg-blue-100 text-blue-800 border-blue-200',
             'Belum Mulai': 'bg-gray-100 text-gray-600 border-gray-200',
+            'Hold': 'bg-amber-100 text-amber-800 border-amber-200',
+            'Take Down': 'bg-red-100 text-red-700 border-red-200',
         };
         return configs[status] || configs['Belum Mulai'];
     };
@@ -494,7 +500,11 @@ export default function TaskDetail() {
             case 'Selesai':
                 return <CheckCircle size={14} className="text-emerald-600" />;
             case 'Sedang Dikerjakan':
-                return <Clock size={14} className="text-amber-600" />;
+                return <Clock size={14} className="text-blue-600" />;
+            case 'Hold':
+                return <AlertCircle size={14} className="text-amber-600" />;
+            case 'Take Down':
+                return <AlertCircle size={14} className="text-red-600" />;
             default:
                 return <AlertCircle size={14} className="text-gray-400" />;
         }
@@ -505,6 +515,77 @@ export default function TaskDetail() {
         return st === 'selesai' || st === 'done' || t.done === true;
     }).length;
     const progress = tasks.length === 0 ? 0 : Math.round((completedTasks / tasks.length) * 100);
+
+    // 📜 Log Aktivitas Proyek — dari status_histories (transisi status) + activity_logs (task & proyek)
+    const [taskActivityLogs, setTaskActivityLogs] = useState([]);
+    const [activityLoading, setActivityLoading] = useState(false);
+
+    const fetchTaskActivityLogs = useCallback(async () => {
+        if (!project?.id) return;
+        setActivityLoading(true);
+        try {
+            const res = await activityLogService.getByProject(project.id, 200);
+            const logs = Array.isArray(res?.data) ? res.data : [];
+            setTaskActivityLogs(logs);
+        } catch {
+            // Abaikan error — status_histories tetap tampil
+        } finally {
+            setActivityLoading(false);
+        }
+    }, [project?.id]);
+
+    // Load saat project berubah & polling real-time (~15s) agar kegiatan baru langsung tercatat
+    useEffect(() => {
+        fetchTaskActivityLogs();
+        const interval = setInterval(fetchTaskActivityLogs, 15000);
+        return () => clearInterval(interval);
+    }, [fetchTaskActivityLogs]);
+
+    // Gabungkan status_histories + activity_logs, urutkan berdasarkan waktu terbaru
+    const activityItems = useMemo(() => {
+        const items = [];
+
+        // 1) Riwayat transisi status proyek
+        const histories = Array.isArray(project?.status_histories) ? project.status_histories : [];
+        histories.forEach((h, i) => {
+            items.push({
+                id: `hist-${h.id ?? i}`,
+                kind: 'status',
+                fromStatus: h.from_status ?? null,
+                toStatus: h.to_status ?? null,
+                actorName: (h.changed_by && typeof h.changed_by === 'object' ? (h.changed_by.name || '') : '') || 'Sistem',
+                description: null,
+                notes: h.notes || null,
+                createdAt: h.created_at || null,
+            });
+        });
+
+        // 2) Log aktivitas dari activity_logs (create/update task, status proyek, dsb.)
+        (taskActivityLogs || []).forEach((l, i) => {
+            items.push({
+                id: `log-${l.id ?? i}`,
+                kind: l.action?.includes('task') ? 'task' : 'project',
+                action: l.action || null,
+                actionLabel: l.actionLabel || l.action || 'Aktivitas',
+                description: l.description || null,
+                actorName: l.user || 'Sistem',
+                createdAt: l.timestamp || null,
+                fromStatus: l.metadata?.from_status ?? null,
+                toStatus: l.metadata?.to_status ?? null,
+            });
+        });
+
+        return items.sort((a, b) => {
+            const ta = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+            const tb = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+            return tb - ta;
+        });
+    }, [project?.status_histories, taskActivityLogs]);
+
+    const statusLabel = (st) => {
+        if (!st) return null;
+        return PROJECT_STATUS_LABEL[st] || st;
+    };
 
     return (
         <div className="flex-1 overflow-y-auto px-6 py-4 md:px-8 md:py-5 bg-[#f8f9fb]">
@@ -825,12 +906,103 @@ export default function TaskDetail() {
                         <DocumentSection project={project} user={user} />
                     )}
 
-                    {/* Activity Tab (placeholder) */}
+                    {/* Activity Tab — Log Aktivitas Proyek (status_histories + activity_logs) */}
                     {activeTab === 'activity' && (
-                        <div className="p-8 text-center text-gray-500">
-                            <Activity size={48} className="mx-auto text-gray-300 mb-4" />
-                            <p className="text-lg font-medium">Belum ada aktivitas</p>
-                            <p className="text-sm">Aktivitas akan muncul di sini seiring berjalannya proyek.</p>
+                        <div className="p-6">
+                            <div className="flex items-center justify-between mb-4 border-b border-gray-100 pb-3">
+                                <div>
+                                    <h3 className="text-base font-semibold text-gray-800 flex items-center gap-2">
+                                        <Activity size={18} className="text-[#00529C]" />
+                                        Log Aktivitas Proyek
+                                    </h3>
+                                    <p className="text-xs text-gray-500 mt-0.5 flex items-center gap-1.5">
+                                        <span className="inline-block w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                                        Riwayat lengkap dari awal pengajuan s/d sekarang (status &amp; task) — real-time.
+                                    </p>
+                                </div>
+                                <div className="flex items-center gap-2">
+                                    {activityLoading && (
+                                        <span className="text-[11px] text-gray-400">Menyinkronkan...</span>
+                                    )}
+                                    {activityItems.length > 0 && (
+                                        <span className="text-xs bg-blue-50 text-[#00529C] px-2.5 py-1 rounded-full font-bold">
+                                            {activityItems.length} Aktivitas
+                                        </span>
+                                    )}
+                                </div>
+                            </div>
+
+                            {activityItems.length === 0 ? (
+                                <div className="py-12 text-center text-gray-400">
+                                    <Activity size={48} className="mx-auto text-gray-300 mb-3" />
+                                    <p className="text-sm font-medium text-gray-500">Belum ada aktivitas tercatat</p>
+                                    <p className="text-xs mt-1">Log aktivitas akan terisi otomatis saat status proyek atau task berubah.</p>
+                                </div>
+                            ) : (
+                                <div className="relative pl-6">
+                                    {/* Garis vertikal timeline */}
+                                    <div className="absolute left-[9px] top-2 bottom-2 w-0.5 bg-gray-200" />
+                                    <div className="space-y-5">
+                                        {activityItems.map((act) => {
+                                            const isTask = act.kind === 'task';
+                                            const fromLbl = statusLabel(act.fromStatus);
+                                            const toLbl = statusLabel(act.toStatus);
+                                            const timeStr = act.createdAt
+                                                ? new Date(act.createdAt).toLocaleDateString('id-ID', {
+                                                      day: 'numeric', month: 'short', year: 'numeric',
+                                                      hour: '2-digit', minute: '2-digit',
+                                                  })
+                                                : '-';
+                                            return (
+                                                <div key={act.id} className="relative flex items-start gap-3">
+                                                    <span className={`absolute -left-6 top-1 w-[18px] h-[18px] rounded-full border-2 bg-white flex items-center justify-center ${
+                                                        isTask ? 'border-amber-400' : 'border-[#00529C]'
+                                                    }`}>
+                                                        <span className={`w-1.5 h-1.5 rounded-full ${isTask ? 'bg-amber-400' : 'bg-[#00529C]'}`} />
+                                                    </span>
+                                                    <div className="flex-1 bg-white border border-gray-200 rounded-xl p-3.5 shadow-xs hover:shadow-sm transition-shadow">
+                                                        <div className="flex items-center justify-between flex-wrap gap-2">
+                                                            <div className="flex items-center gap-2 flex-wrap text-sm">
+                                                                {/* Status change: from → to */}
+                                                                {act.kind === 'status' && fromLbl && (
+                                                                    <>
+                                                                        <span className="px-2 py-0.5 rounded-full text-[11px] font-bold bg-gray-100 text-gray-600">{fromLbl}</span>
+                                                                        <span className="text-gray-400">→</span>
+                                                                    </>
+                                                                )}
+                                                                {act.kind === 'status' && (
+                                                                    <span className="px-2 py-0.5 rounded-full text-[11px] font-bold bg-[#00529C]/10 text-[#00529C] border border-[#00529C]/20">
+                                                                        {toLbl || act.toStatus}
+                                                                    </span>
+                                                                )}
+                                                                {act.kind === 'task' && (
+                                                                    <span className="px-2 py-0.5 rounded-full text-[11px] font-bold bg-amber-50 text-amber-700 border border-amber-200">
+                                                                        {act.actionLabel}
+                                                                    </span>
+                                                                )}
+                                                            </div>
+                                                            <span className="text-[11px] text-gray-400">{timeStr}</span>
+                                                        </div>
+                                                        <div className="mt-2 text-xs text-gray-600 flex items-center gap-1.5">
+                                                            <User size={12} className="text-gray-400" />
+                                                            <span className="font-semibold text-gray-700">{act.actorName}</span>
+                                                        </div>
+                                                        {/* Deskripsi (untuk task log) / notes (untuk status) */}
+                                                        {act.kind === 'task' && act.description && (
+                                                            <p className="mt-1.5 text-xs text-gray-600 leading-relaxed">{act.description}</p>
+                                                        )}
+                                                        {act.kind === 'status' && act.notes && (
+                                                            <p className="mt-1.5 text-xs text-gray-500 italic leading-relaxed bg-gray-50 rounded-lg p-2 border border-gray-100">
+                                                                “{act.notes}”
+                                                            </p>
+                                                        )}
+                                                    </div>
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+                                </div>
+                            )}
                         </div>
                     )}
 
@@ -907,7 +1079,7 @@ export default function TaskDetail() {
                                                 const activeCount = tasks.filter(t => (t.assignee || '').toLowerCase().includes(mem.name.toLowerCase()) && t.status !== 'Selesai' && t.status !== 'done').length;
                                                 return (
                                                     <option key={mem.id ?? mem.name} value={mem.id ?? mem.name}>
-                                                        {mem.name} — {mem.role || 'Developer'} (Beban: {activeCount} Task Aktif)
+                                                        {mem.name} (Beban: {activeCount} Task Aktif)
                                                     </option>
                                                 );
                                             })}
@@ -1033,7 +1205,7 @@ export default function TaskDetail() {
                                                 const activeCount = tasks.filter(t => (t.assignee || '').toLowerCase().includes(mem.name.toLowerCase()) && t.status !== 'Selesai' && t.status !== 'done').length;
                                                 return (
                                                     <option key={mem.id ?? mem.name} value={mem.id ?? mem.name}>
-                                                        {mem.name} — {mem.role || 'Developer'} (Beban: {activeCount} Task Aktif)
+                                                        {mem.name} (Beban: {activeCount} Task Aktif)
                                                     </option>
                                                 );
                                             })}
@@ -1053,7 +1225,9 @@ export default function TaskDetail() {
                                         >
                                             <option value="Belum Mulai">Belum Mulai</option>
                                             <option value="Sedang Dikerjakan">Sedang Dikerjakan</option>
+                                            <option value="Hold">Hold</option>
                                             <option value="Selesai">Selesai</option>
+                                            <option value="Take Down">Take Down</option>
                                         </select>
                                     </div>
                                 </div>
@@ -1187,11 +1361,12 @@ export default function TaskDetail() {
 }
 
 /**
- * Komponen Dokumen Tab — fetch dari API, upload, lihat, hapus, download
+ * Komponen Dokumen Tab — pakai data dokumen yang sudah di-embed di project (instant),
+ * dengan fallback fetch API setelah upload untuk memastikan daftar terbaru.
  */
 function DocumentSection({ project, user }) {
     const [docs, setDocs] = useState([]);
-    const [loading, setLoading] = useState(true);
+    const [loading, setLoading] = useState(false);
     const [uploading, setUploading] = useState(false);
     const [selectedDocType, setSelectedDocType] = useState('BRD');
     const [searchQuery, setSearchQuery] = useState('');
@@ -1201,7 +1376,12 @@ function DocumentSection({ project, user }) {
     const ALLOWED_EXTS = ['.pdf', '.xls', '.xlsx', '.jpg', '.jpeg', '.png', '.zip'];
     const MAX_SIZE_MB = 5;
 
-    // Fetch documents from API
+    // Sumber utama: project.documents (sudah di-embed backend) — instant, tanpa request tambahan.
+    useEffect(() => {
+        setDocs(Array.isArray(project?.documents) ? project.documents : []);
+    }, [project?.id, project?.documents]);
+
+    // Refresh dari API (dipakai setelah upload agar daftar selalu terbaru)
     const fetchDocs = async () => {
         if (!project?.id) return;
         setLoading(true);
@@ -1211,14 +1391,11 @@ function DocumentSection({ project, user }) {
                 setDocs(res.data);
             }
         } catch {
+            // Abaikan error — data embedded tetap tersedia
         } finally {
             setLoading(false);
         }
     };
-
-    useEffect(() => {
-        fetchDocs();
-    }, [project?.id]);
 
     // Handle file upload
     const handleUpload = async (e) => {
@@ -1394,7 +1571,7 @@ function DocumentSection({ project, user }) {
                                     <span>{doc.document_type?.replace(/_/g, ' ')}</span>
                                 </div>
                                 <p className="text-[10px] text-gray-400 mt-1 flex items-center gap-1">
-                                    <User size={10} /> {doc.uploader?.name || 'Unknown'}
+                                    <User size={10} /> {doc.author || doc.uploader?.name || 'Unknown'}
                                     <span className="mx-1">•</span>
                                     {doc.created_at ? new Date(doc.created_at).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' }) : ''}
                                 </p>

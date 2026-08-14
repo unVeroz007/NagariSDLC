@@ -38,7 +38,7 @@ import toast from 'react-hot-toast';
 
 export default function PMWorkspace() {
     const { user } = useAuth();
-    const { projects, isLoading, refreshData, updateProject } = useProjects();
+    const { projects, isLoading } = useProjects();
     const { notifications, addNotification } = useNotifications();
     const navigate = useNavigate();
 
@@ -46,14 +46,6 @@ export default function PMWorkspace() {
     const [searchTerm, setSearchTerm] = useState('');
     const [selectedProject, setSelectedProject] = useState(null);
     const [selectedPMFilter, setSelectedPMFilter] = useState('ALL');
-
-
-
-    // Auto-refresh data
-    useEffect(() => {
-        const interval = setInterval(refreshData, 60000); // setiap 1 menit
-        return () => clearInterval(interval);
-    }, [refreshData]);
 
     // 📋 Ekstraksi 4 PM resmi (Budi Santoso, Dewi Lestari, Andi Wijaya, Citra Kirana)
     const pmList = useMemo(() => {
@@ -153,11 +145,12 @@ export default function PMWorkspace() {
         const total = allTasks.length;
         const done = allTasks.filter(t => {
             const st = String(t.status || '').toLowerCase();
-            return st === 'done' || st === 'selesai' || t.done === true;
+            return st === 'done' || st === 'selesai';
         }).length;
         const inProgress = allTasks.filter(t => {
             const st = String(t.status || '').toLowerCase();
-            return st === 'in progress' || st === 'in_progress' || st === 'to do' || st === 'todo' || st === 'belum mulai';
+            return st === 'in_progress' || st === 'sedang dikerjakan' || st === 'in progress'
+                || st === 'todo' || st === 'belum mulai' || st === 'hold' || st === 'take_down' || st === 'take down';
         }).length;
         const overdue = allTasks.filter(t => {
             if (!t.deadline) return false;
@@ -206,7 +199,7 @@ export default function PMWorkspace() {
         }
         const doneCount = project.tasks.filter(t => {
             const st = String(t.status || '').toLowerCase();
-            return st === 'selesai' || st === 'done' || t.done === true;
+            return st === 'selesai' || st === 'done';
         }).length;
         return Math.round((doneCount / project.tasks.length) * 100);
     };
@@ -258,8 +251,25 @@ export default function PMWorkspace() {
         return labels[status] || status;
     };
 
-    const formatDate = (dateStr) => {
-        if (!dateStr) return '-';
+    // Badge & label status task (Belum Mulai / Sedang Dikerjakan / Hold / Selesai / Take Down)
+    const getTaskStatusMeta = (status) => {
+        const s = String(status || '').toLowerCase();
+        if (s === 'done' || s === 'selesai') {
+            return { label: 'Selesai', cls: 'bg-emerald-100 text-emerald-700' };
+        }
+        if (s === 'in_progress' || s === 'sedang dikerjakan' || s === 'in progress') {
+            return { label: 'Sedang Dikerjakan', cls: 'bg-blue-100 text-blue-700' };
+        }
+        if (s === 'hold') {
+            return { label: 'Hold', cls: 'bg-amber-100 text-amber-700' };
+        }
+        if (s === 'take_down' || s === 'take down') {
+            return { label: 'Take Down', cls: 'bg-red-100 text-red-700' };
+        }
+        return { label: 'Belum Mulai', cls: 'bg-gray-100 text-gray-700' };
+    };
+
+    const formatDate = (dateStr) => {        if (!dateStr) return '-';
         const date = new Date(dateStr);
         return date.toLocaleDateString('id-ID', {
             day: '2-digit',
@@ -655,12 +665,14 @@ export default function PMWorkspace() {
                                                 <span className="text-gray-600">{task.assignee || 'Belum Dialokasi'}</span>
                                             </td>
                                             <td className="px-6 py-4">
-                                                <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium ${String(task.status || '').toLowerCase() === 'done' || String(task.status || '').toLowerCase() === 'selesai' || task.done === true
-                                                        ? 'bg-emerald-100 text-emerald-700'
-                                                        : 'bg-blue-100 text-blue-700'
-                                                    }`}>
-                                                    {String(task.status || '').toLowerCase() === 'done' || String(task.status || '').toLowerCase() === 'selesai' || task.done === true ? 'Selesai' : (task.status || 'Dalam Pengerjaan')}
-                                                </span>
+                                                {(() => {
+                                                    const meta = getTaskStatusMeta(task.status);
+                                                    return (
+                                                        <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium ${meta.cls}`}>
+                                                            {meta.label}
+                                                        </span>
+                                                    );
+                                                })()}
                                             </td>
                                             <td className="px-6 py-4">
                                                 <span className={`px-2 py-0.5 rounded text-[10px] font-semibold ${task.priority === 'High' ? 'bg-red-100 text-red-600' :

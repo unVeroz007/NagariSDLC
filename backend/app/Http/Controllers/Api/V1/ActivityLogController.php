@@ -27,6 +27,15 @@ class ActivityLogController extends Controller
             $query->where('action', $request->action);
         }
 
+        // Filter by project (metadata.project_id disimpan sebagai array di kolom metadata)
+        if ($request->filled('project_id')) {
+            $query->where(function ($q) use ($request) {
+                $q->whereJsonContains('metadata->project_id', (int) $request->project_id)
+                  ->orWhere('metadata->project_id', $request->project_id)
+                  ->orWhereRaw("json_extract(metadata, '$.project_id') = ?", [(int) $request->project_id]);
+            });
+        }
+
         // Filter by search term
         if ($request->filled('search')) {
             $term = $request->search;
