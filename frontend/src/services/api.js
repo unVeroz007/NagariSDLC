@@ -261,6 +261,14 @@ export const projectService = {
     getSitGate: async (id) => {
         return apiFetch(`${BASE_URL}/projects/${id}/sit-gate`);
     },
+
+    // Persetujuan SIT Tahap 3 oleh role (developer/analyst/development_lead)
+    submitSitApproval: async (id, note = '') => {
+        return apiFetch(`${BASE_URL}/projects/${id}/sit-approval`, {
+            method: 'POST',
+            body: JSON.stringify({ note }),
+        });
+    },
 };
 
 // ──────────────────────────────────────────────────────────
@@ -464,6 +472,11 @@ export const activityLogService = {
     // Log aktivitas untuk satu proyek (filter metadata.project_id)
     getByProject: async (projectId, perPage = 100) => {
         const params = new URLSearchParams({ project_id: projectId, per_page: perPage }).toString();
+        return apiFetch(`${BASE_URL}/activity-logs?${params}`);
+    },
+    // Log aktivitas untuk satu task (filter subject_type + subject_id)
+    getByTask: async (taskId, perPage = 50) => {
+        const params = new URLSearchParams({ task_id: taskId, per_page: perPage }).toString();
         return apiFetch(`${BASE_URL}/activity-logs?${params}`);
     },
     getSummary: async () => apiFetch(`${BASE_URL}/activity-logs/summary`),

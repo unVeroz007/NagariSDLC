@@ -36,6 +36,12 @@ class ActivityLogController extends Controller
             });
         }
 
+        // Filter by task (subject = ProjectTask dengan id tsb)
+        if ($request->filled('task_id')) {
+            $query->where('subject_type', \App\Models\ProjectTask::class)
+                  ->where('subject_id', (int) $request->task_id);
+        }
+
         // Filter by search term
         if ($request->filled('search')) {
             $term = $request->search;

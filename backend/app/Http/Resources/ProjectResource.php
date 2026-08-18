@@ -40,8 +40,11 @@ class ProjectResource extends JsonResource
             'project_type' => $this->project_type ?? 'baru',
             'status' => $this->status instanceof \BackedEnum ? $this->status->value : $this->status,
             'creator' => new UserResource($this->whenLoaded('creator')),
+            'creator_id' => $this->created_by,
             'pm' => new UserResource($this->whenLoaded('pm')),
+            'pm_id' => $this->pm_id,
             'analyst' => new UserResource($this->whenLoaded('analyst')),
+            'analyst_id' => $this->analyst_id,
             'division' => $this->division?->name ?? null,
             'division_detail' => $this->division ? [
                 'id'   => $this->division->id,

@@ -145,6 +145,40 @@ class ProjectCrudTest extends TestCase
         ]);
     }
 
+    public function test_update_project_saves_sit_uat_data_via_camel_case_key()
+    {
+        $project = Project::create([
+            'req_id' => Project::generateReqId(),
+            'title' => 'Proyek SIT UAT',
+            'created_by' => $this->admin->id,
+            'division_id' => $this->division->id,
+            'status' => ProjectStatus::IN_DEVELOPMENT->value,
+        ]);
+
+        $sitData = [
+            'activeSitStep' => 2,
+            'sit2_task_approvals' => [
+                10 => ['approved' => true, 'comment' => 'Lolos', 'attachments' => [['id' => 'a1', 'name' => 'bukti.png']]],
+            ],
+        ];
+
+        $response = $this->actingAs($this->admin)->patchJson("/api/v1/projects/{$project->id}", [
+            'sitUatData' => $sitData,
+        ]);
+
+        $response->assertStatus(200)
+            ->assertJsonPath('status', 'success');
+
+        $this->assertDatabaseHas('projects', [
+            'id' => $project->id,
+        ]);
+
+        $fresh = $project->fresh();
+        $this->assertEquals(2, $fresh->sit_uat_data['activeSitStep']);
+        $this->assertTrue($fresh->sit_uat_data['sit2_task_approvals'][10]['approved']);
+        $this->assertEquals('bukti.png', $fresh->sit_uat_data['sit2_task_approvals'][10]['attachments'][0]['name']);
+    }
+
     public function test_pm_sees_only_projects_they_manage_in_development()
     {
         $pmRole = Role::create(['name' => UserRole::PROJECT_MANAGER->value, 'display_name' => 'Project Manager']);
@@ -234,5 +268,84 @@ class ProjectCrudTest extends TestCase
         ]);
 
         $response->assertStatus(403);
+    }
+
+    public function test_analyst_sees_sit_project_they_are_assigned_to()
+    {
+        $analystRole = Role::create(['name' => UserRole::ANALYST->value, 'display_name' => 'System Analyst']);
+        $analyst = User::create([
+            'name' => 'Analis SIT',
+            'email' => 'analissit@nagari.co.id',
+            'password' => bcrypt('password123'),
+            'role_id' => $analystRole->id,
+            'division_id' => $this->division->id,
+            'is_active' => true,
+        ]);
+
+        $sitProject = Project::create([
+            'req_id' => Project::generateReqId(),
+            'title' => 'Proyek SIT Analyst',
+            'created_by' => $this->admin->id,
+            'division_id' => $this->division->id,
+            'status' => ProjectStatus::SIT_IN_PROGRESS->value,
+            'analyst_id' => $analyst->id,
+        ]);
+
+        $otherProject = Project::create([
+            'req_id' => Project::generateReqId(),
+            'title' => 'Proyek SIT Bukan Analyst',
+            'created_by' => $this->admin->id,
+            'division_id' => $this->division->id,
+            'status' => ProjectStatus::SIT_IN_PROGRESS->value,
+        ]);
+
+        $response = $this->actingAs($analyst)->getJson('/api/v1/projects');
+
+        $response->assertStatus(200)
+            ->assertJsonPath('status', 'success');
+
+        $titles = collect($response->json('data'))->pluck('title')->all();
+        $this->assertContains('Proyek SIT Analyst', $titles);
+        $this->assertNotContains('Proyek SIT Bukan Analyst', $titles);
+    }
+
+    public function test_developer_sees_sit_project_where_they_are_assignee()
+    {
+        $dev = $this->makeDeveloperForTest('Dev SIT', 'devsit@nagari.co.id');
+        $project = Project::create([
+            'req_id' => Project::generateReqId(),
+            'title' => 'Proyek SIT Dev',
+            'created_by' => $this->admin->id,
+            'division_id' => $this->division->id,
+            'status' => ProjectStatus::SIT_IN_PROGRESS->value,
+        ]);
+        $project->teamMembers()->create(['user_id' => $dev->id, 'role_in_project' => 'Backend']);
+        \App\Models\ProjectTask::create([
+            'project_id' => $project->id,
+            'title' => 'Task SIT Dev',
+            'assignee_id' => $dev->id,
+            'status' => 'done',
+        ]);
+
+        $response = $this->actingAs($dev)->getJson('/api/v1/projects');
+
+        $response->assertStatus(200)
+            ->assertJsonPath('status', 'success');
+
+        $titles = collect($response->json('data'))->pluck('title')->all();
+        $this->assertContains('Proyek SIT Dev', $titles);
+    }
+
+    protected function makeDeveloperForTest(string $name, string $email): User
+    {
+        $devRole = Role::create(['name' => UserRole::DEVELOPER->value, 'display_name' => 'Developer']);
+        return User::create([
+            'name' => $name,
+            'email' => $email,
+            'password' => bcrypt('password123'),
+            'role_id' => $devRole->id,
+            'division_id' => $this->division->id,
+            'is_active' => true,
+        ]);
     }
 }

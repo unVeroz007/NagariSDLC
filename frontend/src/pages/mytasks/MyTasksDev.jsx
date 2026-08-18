@@ -5,7 +5,7 @@ import { useNotifications } from '../../contexts/NotificationContext';
 import LoadingSpinner from '../../components/LoadingSpinner';
 import toast from 'react-hot-toast';
 import ChatBox from '../../components/ChatBox';
-import { taskService } from '../../services/api';
+import { taskService, projectService } from '../../services/api';
 import {
     Code,
     Search,
@@ -13,7 +13,10 @@ import {
     Kanban,
     Layers,
     MessageSquare,
-    AlertCircle
+    AlertCircle,
+    ShieldCheck,
+    CheckCircle2,
+    Eye
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 
@@ -163,6 +166,38 @@ export default function MyTasksDev() {
         }
     };
 
+    // ── Persetujuan SIT (Developer sebagai assignee) ──
+    const [sitApprovingId, setSitApprovingId] = useState(null);
+    const sitPendingProjects = useMemo(() => {
+        return (projects || []).filter(p => {
+            const st = String(p.status || '').toUpperCase();
+            if (st !== 'SIT_IN_PROGRESS') return false;
+            // Developer ini harus jadi assignee minimal 1 task
+            const isAssignee = Array.isArray(p.tasks) && p.tasks.some(t =>
+                (t.assignee_id ?? t.assignee_detail?.id) != null &&
+                Number(t.assignee_id ?? t.assignee_detail?.id) === Number(user?.id)
+            );
+            if (!isAssignee) return false;
+            const ap = p.sitUatData?.sit3_approvals || p.sit_uat_data?.sit3_approvals || {};
+            const devList = ap?.developer?.developers || [];
+            // Sembunyikan hanya jika user ini sudah approve
+            return !devList.some(d => Number(d.userId ?? d.approvedById) === Number(user?.id));
+        });
+    }, [projects, user]);
+
+    const handleSitApproval = async (projectId) => {
+        setSitApprovingId(projectId);
+        try {
+            await projectService.submitSitApproval(projectId, '');
+            toast.success('Persetujuan SIT Anda berhasil disimpan.');
+            await refreshData();
+        } catch (err) {
+            toast.error(`Gagal menyimpan persetujuan: ${err.message}`);
+        } finally {
+            setSitApprovingId(null);
+        }
+    };
+
     if (isLoading) {
         return <LoadingSpinner text="Memuat Tugas Developer Saya..." />;
     }
@@ -225,6 +260,62 @@ export default function MyTasksDev() {
                         ))}
                     </div>
                 </div>
+
+                {/* Panel Persetujuan SIT (Developer) */}
+                {sitPendingProjects.length > 0 && (
+                    <div className="bg-white rounded-2xl border-2 border-teal-200 shadow-sm overflow-hidden">
+                        <div className="px-4 py-3 bg-teal-50 border-b border-teal-100 flex items-center justify-between">
+                            <h3 className="font-bold text-teal-800 text-sm flex items-center gap-2">
+                                <ShieldCheck size={16} /> Persetujuan SIT — Menunggu Anda
+                            </h3>
+                            <span className="text-[10px] font-bold text-teal-600 bg-white px-2 py-0.5 rounded-full border border-teal-200">
+                                {sitPendingProjects.length} proyek
+                            </span>
+                        </div>
+                        <div className="p-3 space-y-2">
+                            <p className="text-[11px] text-gray-500">
+                                Tahap SIT telah selesai dilaksanakan. Berikan persetujuan Anda sebagai <strong>Developer</strong> agar SIT dapat dinilai lulus.
+                            </p>
+                            {sitPendingProjects.map(p => {
+                                const ap = p.sitUatData?.sit3_approvals || p.sit_uat_data?.sit3_approvals || {};
+                                const devList = ap?.developer?.developers || [];
+                                const required = ap?.developer?.required ?? 0;
+                                return (
+                                <div key={p.id} className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3 bg-gray-50 rounded-xl border border-gray-100">
+                                    <div className="min-w-0">
+                                        <p className="font-bold text-gray-800 text-xs truncate">{p.name}</p>
+                                        <p className="text-[10px] text-gray-400">{p.reqId || p.req_id || `REQ-${p.id}`}</p>
+                                        {required > 0 && (
+                                            <p className="text-[10px] text-teal-600 mt-0.5">
+                                                {devList.length} dari {required} developer telah menyetujui
+                                            </p>
+                                        )}
+                                    </div>
+                                    <div className="flex items-center gap-2 shrink-0">
+                                        <button
+                                            onClick={() => navigate(`/pm/tasks/${p.id}`)}
+                                            className="px-3.5 py-2 bg-blue-50 hover:bg-blue-100 border border-blue-200 text-blue-700 text-xs font-bold rounded-xl flex items-center gap-1.5 transition-all cursor-pointer"
+                                        >
+                                            <Eye size={13} /> Lihat Detail
+                                        </button>
+                                        <button
+                                            onClick={() => handleSitApproval(p.id)}
+                                            disabled={sitApprovingId === p.id}
+                                            className="px-3.5 py-2 bg-teal-600 hover:bg-teal-700 disabled:bg-gray-300 text-white text-xs font-bold rounded-xl flex items-center gap-2 transition-all cursor-pointer disabled:cursor-not-allowed"
+                                        >
+                                            {sitApprovingId === p.id ? (
+                                                <><span className="w-3 h-3 border-2 border-white/40 border-t-white rounded-full animate-spin" /> Menyimpan...</>
+                                            ) : (
+                                                <><CheckCircle2 size={14} /> Setujui SIT</>
+                                            )}
+                                        </button>
+                                    </div>
+                                </div>
+                                );
+                            })}
+                        </div>
+                    </div>
+                )}
 
                 {/* Task Table Card */}
                 <div className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">

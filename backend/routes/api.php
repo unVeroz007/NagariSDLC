@@ -79,6 +79,7 @@ Route::prefix('v1')->group(function () {
         Route::patch('/projects/{id}/status', [ProjectController::class, 'updateStatus']);
         Route::get('/projects/{id}/timeline', [ProjectController::class, 'timeline']);
         Route::get('/projects/{id}/sit-gate', [ProjectController::class, 'sitGate']);
+        Route::post('/projects/{id}/sit-approval', [ProjectController::class, 'sitApproval']);
         Route::post('/projects/{id}/team', [ProjectController::class, 'allocateTeam']);
 
         // ----- TASK ROUTES -----

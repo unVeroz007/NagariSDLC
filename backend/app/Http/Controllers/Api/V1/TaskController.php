@@ -113,9 +113,32 @@ class TaskController extends Controller
             $data['status'] = TaskStatus::from($data['status']);
         }
 
+        // Jika status diubah menjadi "Selesai", bersihkan tanda revisi (task sudah
+        // memenuhi arahan revisi). Dokumentasikan selesainya revisi ke activity log.
+        $wasUnderRevision = (bool) $task->revision_note;
+        $becomesDone = isset($data['status'])
+            && $data['status']->value === TaskStatus::DONE->value
+            && $oldStatus !== TaskStatus::DONE->value;
+        if ($becomesDone) {
+            $data['revision_note'] = null;
+            $data['revision_requested_at'] = null;
+            $data['revision_requested_by'] = null;
+        }
+
         $task->update($data);
 
         $newStatus = $task->status instanceof \BackedEnum ? $task->status->value : $task->status;
+
+        if ($becomesDone && $wasUnderRevision) {
+            $this->logTaskActivity(
+                'task_revision_completed',
+                'Revisi Task Selesai',
+                "Task \"{$task->title}\" telah diselesaikan setelah revisi dan siap diverifikasi pada proyek \"{$project->title}\".",
+                $project,
+                $task,
+                ['revision_note' => $request->revision_note]
+            );
+        }
 
         if ($newStatus !== $oldStatus) {
             $this->logTaskActivity(

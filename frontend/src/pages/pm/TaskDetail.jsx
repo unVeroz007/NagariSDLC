@@ -8,11 +8,11 @@ import {
     getDocumentTypeInfo,
     formatFileSize,
 } from '../../utils/documentNaming';
-import { documentService, taskService, activityLogService } from '../../services/api';
+import { documentService, taskService, activityLogService, projectService } from '../../services/api';
 import ChatBox from '../../components/ChatBox';
 import SITUATDocumentModal from '../../components/SITUATDocumentModal';
 import SITUATWizard from '../../components/SITUATWizard';
-import { useState, useMemo, useEffect, useRef, useCallback } from 'react';
+import { useState, useMemo, useEffect, useRef, useCallback, Fragment } from 'react';
 import toast from 'react-hot-toast';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
@@ -55,13 +55,19 @@ import {
     Lock,
     Send,
     FileCheck,
+    RotateCcw,
 } from 'lucide-react';
 
 export default function TaskDetail() {
     const { user } = useAuth();
-    const { projects, updateProject } = useProjects();
+    const { projects, updateProject, refreshDataSilent } = useProjects();
     const { id: projectId } = useParams();
     const navigate = useNavigate();
+
+    // Mode VIEWER: developer & analyst hanya bisa melihat (read-only).
+    // Kecuali developer tetap bisa update status task miliknya sendiri (di My Tasks).
+    const isViewerOnly = ['developer', 'analyst'].includes(user?.role);
+    const isDeveloperAssignee = user?.role === 'developer';
 
     // Reset posisi scroll browser ke paling atas (0, 0) saat laman dibuka
     useEffect(() => {
@@ -96,6 +102,28 @@ export default function TaskDetail() {
         // 2. Fallback default project
         return (projects && projects[0]) || null;
     }, [projectId, projects]);
+
+    // ── Data SIT/UAT: ambil selalu segar dari API saat project berubah,
+    //    agar bukti revisi dari tab SIT selalu tampil di Manajemen Task. ──
+    const [sitUatData, setSitUatData] = useState(null);
+    useEffect(() => {
+        let cancelled = false;
+        if (!project?.id) return undefined;
+        // Gunakan data context jika ada (instan), lalu selalu refresh dari API
+        const ctxData = project?.sitUatData || project?.sit_uat_data || null;
+        if (ctxData && Object.keys(ctxData).length > 0) {
+            setSitUatData(ctxData);
+        }
+        projectService.getById(project.id)
+            .then(res => {
+                if (cancelled) return;
+                const raw = res?.data || res;
+                const sd = raw?.sitUatData || raw?.sit_uat_data || null;
+                if (sd && Object.keys(sd).length > 0) setSitUatData(sd);
+            })
+            .catch(() => {});
+        return () => { cancelled = true; };
+    }, [project?.id, project?.sitUatData, project?.sit_uat_data]);
 
 
     // Daftar anggota tim proyek yang sah menjadi assignee task.
@@ -139,26 +167,6 @@ export default function TaskDetail() {
 
         return members;
     }, [project?.team, project?.pm, project?.analyst]);
-
-    if (!project) {
-        return (
-            <div className="flex-1 overflow-y-auto px-6 py-4 md:px-8 md:py-5 bg-[#f8f9fb] flex items-center justify-center">
-                <div className="text-center py-20 animate-scale-in">
-                    <div className="w-24 h-24 rounded-3xl bg-gray-100 flex items-center justify-center mx-auto mb-6">
-                        <Briefcase size={44} className="text-gray-400" />
-                    </div>
-                    <h2 className="text-2xl font-bold text-gray-800 mb-2">Proyek tidak ditemukan</h2>
-                    <p className="text-gray-500 mb-6">Proyek yang Anda cari tidak ada atau sudah dihapus.</p>
-                    <button
-                        onClick={() => navigate('/pm/workspace')}
-                        className="px-6 py-3 bg-[#00529C] text-white rounded-xl font-bold hover:bg-[#004080] transition-all shadow-md shadow-[#00529C]/20"
-                    >
-                        Kembali ke PM Workspace
-                    </button>
-                </div>
-            </div>
-        );
-    }
 
     const [activeTab, setActiveTab] = useState('tasks'); // tasks, sit_uat, documents, activity
     const { addNotification } = useNotifications();
@@ -229,6 +237,9 @@ export default function TaskDetail() {
         deadline: t?.due_date || t?.deadline || '',
         priority: t?.priority || 'Medium',
         status: mapTaskStatusToLabel(t?.status),
+        revisionNote: t?.revision_note || '',
+        revisionRequestedAt: t?.revision_requested_at || null,
+        revisionRequestedBy: t?.revision_requested_by || '',
     });
 
     // Resolusi nama assignee -> id anggota tim proyek (fallback: cari di tasks yg sudah ada)
@@ -271,6 +282,53 @@ export default function TaskDetail() {
         }
         return () => { cancelled = true; };
     }, [project?.id]);
+
+    // Sinkronkan otomatis dengan data task dari ProjectContext (hasil polling/refresh
+    // real-time). Setiap task yang sudah ada di-update status & catatan revisi agar
+    // perubahan dari tab lain (mis. revisi SIT) langsung terlihat tanpa refresh manual.
+    useEffect(() => {
+        const ctxTasks = Array.isArray(project?.tasks) ? project.tasks : [];
+        if (ctxTasks.length === 0) return;
+        setTasks(prev => {
+            const next = prev.map(t => {
+                const match = ctxTasks.find(ct => String(ct.id) === String(t.id));
+                if (!match) return t;
+                return {
+                    ...t,
+                    name: match.title || match.name || t.name,
+                    title: match.title || match.name || t.name,
+                    description: match.description ?? t.description,
+                    assignee: match.assignee_detail?.name || match.assignee?.name || match.assignee || t.assignee,
+                    assignee_id: match.assignee_id ?? match.assignee_detail?.id ?? t.assignee_id,
+                    deadline: match.due_date || match.deadline || t.deadline,
+                    priority: match.priority || t.priority,
+                    status: mapTaskStatusToLabel(match.status),
+                    revisionNote: match.revision_note || '',
+                    revisionRequestedAt: match.revision_requested_at || null,
+                    revisionRequestedBy: match.revision_requested_by || '',
+                };
+            });
+            // Tambahkan task baru yang ada di context tapi belum di state lokal
+            const existingIds = new Set(prev.map(t => String(t.id)));
+            const newTasks = ctxTasks
+                .filter(ct => !existingIds.has(String(ct.id)))
+                .map(ct => ({
+                    id: ct.id,
+                    name: ct.title || ct.name,
+                    title: ct.title || ct.name,
+                    description: ct.description || '',
+                    assignee: ct.assignee_detail?.name || ct.assignee?.name || ct.assignee || '',
+                    assignee_id: ct.assignee_id ?? ct.assignee_detail?.id ?? null,
+                    deadline: ct.due_date || ct.deadline || '',
+                    priority: ct.priority || 'Medium',
+                    status: mapTaskStatusToLabel(ct.status),
+                    revisionNote: ct.revision_note || '',
+                    revisionRequestedAt: ct.revision_requested_at || null,
+                    revisionRequestedBy: ct.revision_requested_by || '',
+                }));
+            return [...next, ...newTasks];
+        });
+    }, [project?.tasks, project?.id]);
     
     const [isAddTaskModalOpen, setIsAddTaskModalOpen] = useState(false);
     const [newTask, setNewTask] = useState({
@@ -284,6 +342,146 @@ export default function TaskDetail() {
     const [isEditTaskModalOpen, setIsEditTaskModalOpen] = useState(false);
     const [editingTask, setEditingTask] = useState(null);
     const [isSubmittingTask, setIsSubmittingTask] = useState(false); // guard double-submit (tambah/edit task)
+
+    // ── Komentar & Riwayat Task (dokumentasi tiap tahap, per-task) ──────────
+    const [expandedTaskId, setExpandedTaskId] = useState(null);
+    const [taskLogs, setTaskLogs] = useState({});      // taskId -> [activity logs]
+    const [taskLogsLoading, setTaskLogsLoading] = useState({}); // taskId -> bool
+
+    const loadTaskLogs = useCallback(async (taskId) => {
+        if (taskLogsLoading[taskId]) return;
+        setTaskLogsLoading(prev => ({ ...prev, [taskId]: true }));
+        try {
+            const res = await activityLogService.getByTask(taskId);
+            const list = Array.isArray(res?.data) ? res.data : [];
+            setTaskLogs(prev => ({ ...prev, [taskId]: list }));
+        } catch {
+            setTaskLogs(prev => ({ ...prev, [taskId]: [] }));
+        } finally {
+            setTaskLogsLoading(prev => ({ ...prev, [taskId]: false }));
+        }
+    }, [taskLogsLoading]);
+
+    const toggleTaskLog = (taskId) => {
+        setExpandedTaskId(prev => (prev === taskId ? null : taskId));
+        if (expandedTaskId !== taskId && !taskLogs[taskId]) {
+            loadTaskLogs(taskId);
+        }
+    };
+
+    const fmtShortDateTime = (iso) => {
+        if (!iso) return '-';
+        try {
+            return new Date(iso).toLocaleString('id-ID', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+        } catch {
+            return '-';
+        }
+    };
+
+    const getTaskActionMeta = (action) => {
+        const map = {
+            create_task: { label: 'Task Dibuat', cls: 'bg-blue-50 text-blue-700 border-blue-200' },
+            update_task_status: { label: 'Status Diubah', cls: 'bg-indigo-50 text-indigo-700 border-indigo-200' },
+            update_task: { label: 'Task Diperbarui', cls: 'bg-gray-50 text-gray-600 border-gray-200' },
+            delete_task: { label: 'Task Dihapus', cls: 'bg-red-50 text-red-600 border-red-200' },
+            request_task_revision: { label: 'Revisi Diminta', cls: 'bg-orange-50 text-orange-700 border-orange-200' },
+            task_revision_completed: { label: 'Revisi Selesai', cls: 'bg-emerald-50 text-emerald-700 border-emerald-200' },
+        };
+        return map[action] || { label: action, cls: 'bg-gray-50 text-gray-600 border-gray-200' };
+    };
+
+    // ── Bukti SIT per task (dari sitUatData.sit2_task_approvals) ────────────
+    const getTaskSitApproval = (taskId) => {
+        try {
+            // Sumber: state (dengan fallback fetch) → project context → raw API
+            const sitUat = sitUatData || project?.sitUatData || project?.sit_uat_data || {};
+            const approvals = sitUat?.sit2_task_approvals || {};
+            const key = String(taskId);
+            const found = approvals?.[key] ?? approvals?.[taskId] ?? null;
+            if (found) return found;
+            // Fallback: cari berdasarkan id attachment / taskid jika key tidak cocok
+            for (const [k, v] of Object.entries(approvals || {})) {
+                if (String(k) === key || (v && typeof v === 'object' && v.taskId !== undefined && String(v.taskId) === key)) {
+                    return v;
+                }
+            }
+            return null;
+        } catch {
+            return null;
+        }
+    };
+
+    const getTaskSitAttachments = (taskId) => {
+        const approval = getTaskSitApproval(taskId);
+        if (!approval) return [];
+        return Array.isArray(approval.attachments) ? approval.attachments : [];
+    };
+
+    const getTaskSitApprovedAt = (taskId) => {
+        const approval = getTaskSitApproval(taskId);
+        if (!approval) return null;
+        return approval.approvedAt || null;
+    };
+
+    // Download bukti SIT dengan auth header (hindari 401 / Route [login] not defined).
+    const downloadSitAttachment = async (doc) => {
+        try {
+            if (doc?.docId) {
+                const blob = await documentService.download(doc.docId);
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = doc.originalName || doc.name || 'bukti-sit';
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+            } else if (doc?.url?.startsWith('blob:')) {
+                const a = document.createElement('a');
+                a.href = doc.url;
+                a.download = doc.originalName || doc.name || 'bukti-sit';
+                a.click();
+            } else {
+                toast.info('Berkas belum tersedia untuk diunduh.');
+            }
+        } catch (err) {
+            toast.error(`Gagal mengunduh bukti: ${err.message}`);
+        }
+    };
+
+    // Buka pratinjau bukti SIT dengan auth header — tampilkan dalam modal in-app.
+    const [sitPreviewDoc, setSitPreviewDoc] = useState(null);
+    const viewSitAttachment = async (doc) => {
+        try {
+            if (doc?.docId) {
+                const loadingId = toast.loading('Membuka berkas...');
+                const blob = await documentService.download(doc.docId);
+                const url = URL.createObjectURL(blob);
+                toast.dismiss(loadingId);
+                setSitPreviewDoc({
+                    id: doc.docId,
+                    name: doc.originalName || doc.name || 'Bukti SIT',
+                    original_filename: doc.originalName || doc.name,
+                    url,
+                    type: (doc.type || 'FILE'),
+                    document_type: 'SIT_TASK_EVIDENCE',
+                });
+            } else if (doc?.url?.startsWith('blob:')) {
+                setSitPreviewDoc({
+                    id: doc.docId || null,
+                    name: doc.originalName || doc.name || 'Bukti SIT',
+                    original_filename: doc.originalName || doc.name,
+                    url: doc.url,
+                    type: (doc.type || 'FILE'),
+                    document_type: 'SIT_TASK_EVIDENCE',
+                });
+            } else {
+                toast.info('Berkas belum tersedia untuk dilihat.');
+            }
+        } catch (err) {
+            toast.error(`Gagal membuka bukti: ${err.message}`);
+        }
+    };
     
     // Modal Edit Proyek & Alokasi PM
     const [isEditProjectModalOpen, setIsEditProjectModalOpen] = useState(false);
@@ -402,6 +600,8 @@ export default function TaskDetail() {
             toast.success(`Task "${newTask.title}" berhasil ditambahkan!`);
             setIsAddTaskModalOpen(false);
             setNewTask({ title: '', assignee: '', deadline: '', priority: 'Medium', description: '' });
+            // Sinkronkan ProjectContext agar task baru tampil di semua laman
+            refreshDataSilent?.();
         } catch (err) {
             toast.dismiss(loadingToastId);
             toast.error(`Gagal menambah task: ${err.message}`);
@@ -445,6 +645,8 @@ export default function TaskDetail() {
             toast.dismiss(loadingToastId);
             toast.success(`Task "${editingTask.name}" berhasil diperbarui!`);
             setIsEditTaskModalOpen(false);
+            // Sinkronkan ProjectContext agar data task di semua laman ikut ter-update
+            refreshDataSilent?.();
         } catch (err) {
             toast.dismiss(loadingToastId);
             toast.error(`Gagal memperbarui task: ${err.message}`);
@@ -459,6 +661,8 @@ export default function TaskDetail() {
                 await taskService.delete(taskToDelete.id);
                 setTasks(prev => prev.filter(t => t.id !== taskToDelete.id));
                 toast.success(`Task "${taskToDelete.name}" berhasil dihapus!`);
+                // Sinkronkan ProjectContext agar task terhapus hilang di semua laman
+                refreshDataSilent?.();
             } catch (err) {
                 toast.error(`Gagal menghapus task: ${err.message}`);
             }
@@ -508,6 +712,17 @@ export default function TaskDetail() {
             default:
                 return <AlertCircle size={14} className="text-gray-400" />;
         }
+    };
+
+    const getStatusSelectClass = (status) => {
+        const configs = {
+            Selesai: 'border-emerald-300 bg-emerald-50 text-emerald-700',
+            'Sedang Dikerjakan': 'border-blue-300 bg-blue-50 text-blue-700',
+            'Belum Mulai': 'border-gray-300 bg-gray-50 text-gray-600',
+            'Hold': 'border-amber-300 bg-amber-50 text-amber-700',
+            'Take Down': 'border-red-300 bg-red-50 text-red-700',
+        };
+        return configs[status] || configs['Belum Mulai'];
     };
 
     const completedTasks = tasks.filter((t) => {
@@ -587,16 +802,36 @@ export default function TaskDetail() {
         return PROJECT_STATUS_LABEL[st] || st;
     };
 
+    if (!project) {
+        return (
+            <div className="flex-1 overflow-y-auto px-6 py-4 md:px-8 md:py-5 bg-[#f8f9fb] flex items-center justify-center">
+                <div className="text-center py-20 animate-scale-in">
+                    <div className="w-24 h-24 rounded-3xl bg-gray-100 flex items-center justify-center mx-auto mb-6">
+                        <Briefcase size={44} className="text-gray-400" />
+                    </div>
+                    <h2 className="text-2xl font-bold text-gray-800 mb-2">Proyek tidak ditemukan</h2>
+                    <p className="text-gray-500 mb-6">Proyek yang Anda cari tidak ada atau sudah dihapus.</p>
+                    <button
+                        onClick={() => navigate('/pm/workspace')}
+                        className="px-6 py-3 bg-[#00529C] text-white rounded-xl font-bold hover:bg-[#004080] transition-all shadow-md shadow-[#00529C]/20"
+                    >
+                        Kembali ke PM Workspace
+                    </button>
+                </div>
+            </div>
+        );
+    }
+
     return (
         <div className="flex-1 overflow-y-auto px-6 py-4 md:px-8 md:py-5 bg-[#f8f9fb]">
             <div className="max-w-7xl mx-auto w-full flex flex-col gap-6">
-                {/* Back Button */}
+                {/* Back Button — viewer (developer/analyst) kembali ke Daftar Proyek */}
                 <button
-                    onClick={() => navigate('/pm/tasks')}
+                    onClick={() => navigate(isViewerOnly ? '/projects' : '/pm/tasks')}
                     className="flex items-center gap-2 text-gray-500 hover:text-[#00529C] transition-colors text-sm mb-2"
                 >
                     <ChevronLeft size={18} />
-                    Kembali ke Daftar Proyek
+                    {isViewerOnly ? 'Kembali ke Daftar Proyek' : 'Kembali ke Daftar Proyek'}
                 </button>
 
                 {/* Project Header */}
@@ -795,28 +1030,65 @@ export default function TaskDetail() {
                                         <span className="hidden sm:inline">Filter</span>
                                     </button>
                                 </div>
-                                <button onClick={() => setIsAddTaskModalOpen(true)} className="px-4 py-2 rounded-lg bg-[#00529C] text-white hover:bg-[#004080] transition-colors text-sm font-semibold flex items-center gap-2 shadow-sm whitespace-nowrap">
-                                    <Plus size={16} />
-                                    Tambah Task
-                                </button>
+                                {!isViewerOnly && (
+                                    <button onClick={() => setIsAddTaskModalOpen(true)} className="px-4 py-2 rounded-lg bg-[#00529C] text-white hover:bg-[#004080] transition-colors text-sm font-semibold flex items-center gap-2 shadow-sm whitespace-nowrap">
+                                        <Plus size={16} />
+                                        Tambah Task
+                                    </button>
+                                )}
                             </div>
 
                             {/* Task Table */}
                             <div className="overflow-x-auto">
-                                <table className="w-full text-left border-collapse min-w-[800px]">
+                                <table className="w-full text-left border-collapse min-w-[900px]">
                                     <thead>
                                         <tr className="bg-gray-50 border-b border-gray-200 text-gray-500 text-xs font-semibold uppercase tracking-wider">
                                             <th className="py-3 px-4">Nama Task</th>
                                             <th className="py-3 px-4">Assignee</th>
                                             <th className="py-3 px-4">Deadline</th>
                                             <th className="py-3 px-4">Status</th>
+                                            <th className="py-3 px-4 text-center">Revisi</th>
                                             <th className="py-3 px-4 text-right">Aksi</th>
                                         </tr>
                                     </thead>
                                     <tbody className="divide-y divide-gray-100 text-sm">
-                                        {filteredTasks.map((task) => (
-                                            <tr key={task.id} className="hover:bg-gray-50/70 transition-colors group">
-                                                <td className="py-4 px-4 font-medium text-gray-800">{task.name}</td>
+                                        {filteredTasks.map((task) => {
+                                            const hasRevision = !!(task.revisionNote);
+                                            const isExpanded = expandedTaskId === task.id;
+                                            const logs = taskLogs[task.id] || [];
+                                            const logsLoading = taskLogsLoading[task.id];
+                                            const sitAttachments = getTaskSitAttachments(task.id);
+                                            const sitApprovedAt = getTaskSitApprovedAt(task.id);
+                                            const sitApproval = getTaskSitApproval(task.id);
+                                            const sitOk = sitApproval?.approved === true;
+                                            const sitComment = sitApproval?.comment || '';
+                                            return (
+                                                <Fragment key={task.id}>
+                                                <tr className="hover:bg-gray-50/70 transition-colors group">
+                                                <td className="py-4 px-4 font-medium text-gray-800">
+                                                    <div className="flex items-center gap-2">
+                                                        {task.name}
+                                                        {hasRevision && (
+                                                            <span title={`Revisi diminta oleh ${task.revisionRequestedBy || '-'} — ${task.revisionNote}`}
+                                                                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-orange-50 border border-orange-200 text-orange-700 cursor-help">
+                                                                <RotateCcw size={10} /> Revisi
+                                                            </span>
+                                                        )}
+                                                    </div>
+                                                    {hasRevision && (
+                                                        <p className="text-[11px] text-orange-600 mt-1 bg-orange-50 border border-orange-100 rounded-lg px-2 py-1">
+                                                            <span className="font-bold">{task.revisionRequestedBy || 'PM'}:</span> {task.revisionNote}
+                                                        </p>
+                                                    )}
+                                                    <div className="flex items-center gap-1.5 mt-1.5">
+                                                        <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold border ${sitOk ? 'bg-emerald-50 border-emerald-200 text-emerald-700' : 'bg-gray-50 border-gray-200 text-gray-400'}`}>
+                                                            <CheckCircle size={10} /> SIT {sitOk ? 'Disetujui' : 'Belum di-OK'}
+                                                        </span>
+                                                        <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold border ${sitAttachments.length > 0 ? 'bg-blue-50 border-blue-200 text-blue-700' : 'bg-gray-50 border-gray-200 text-gray-400'}`}>
+                                                            <Paperclip size={10} /> {sitAttachments.length} Bukti
+                                                        </span>
+                                                    </div>
+                                                </td>
                                                 <td className="py-4 px-4">
                                                     {task.assignee ? (
                                                         <div className="flex items-center gap-2">
@@ -847,26 +1119,203 @@ export default function TaskDetail() {
                                                         {task.status}
                                                     </span>
                                                 </td>
+                                                <td className="py-4 px-4 text-center">
+                                                    {hasRevision ? (
+                                                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-orange-100 text-orange-700 border border-orange-200">
+                                                            <RotateCcw size={10} /> Menunggu
+                                                        </span>
+                                                    ) : (
+                                                        <span className="text-[10px] text-gray-300">—</span>
+                                                    )}
+                                                </td>
                                                 <td className="py-4 px-4 text-right">
                                                     <div className="flex justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                                                        <button 
-                                                            onClick={() => { setEditingTask(task); setIsEditTaskModalOpen(true); }}
-                                                            className="text-gray-400 hover:text-amber-500 p-1.5 rounded-lg hover:bg-amber-50 transition-colors"
-                                                            title="Edit Task"
+                                                        <button
+                                                            onClick={() => toggleTaskLog(task.id)}
+                                                            className="text-gray-400 hover:text-blue-600 p-1.5 rounded-lg hover:bg-blue-50 transition-colors"
+                                                            title={isExpanded ? 'Tutup Komentar & Riwayat' : 'Buka Komentar & Riwayat'}
                                                         >
-                                                            <Edit size={18} />
+                                                            {isExpanded ? <ChevronRight size={18} /> : <MessageSquare size={18} />}
                                                         </button>
-                                                        <button 
-                                                            onClick={() => handleDeleteTask(task)}
-                                                            className="text-gray-400 hover:text-red-500 p-1.5 rounded-lg hover:bg-red-50 transition-colors"
-                                                            title="Hapus Task"
-                                                        >
-                                                            <Trash2 size={18} />
-                                                        </button>
+                                                        {!isViewerOnly && (
+                                                            <>
+                                                                <button 
+                                                                    onClick={() => { setEditingTask(task); setIsEditTaskModalOpen(true); }}
+                                                                    className="text-gray-400 hover:text-amber-500 p-1.5 rounded-lg hover:bg-amber-50 transition-colors"
+                                                                    title="Edit Task"
+                                                                >
+                                                                    <Edit size={18} />
+                                                                </button>
+                                                                <button 
+                                                                    onClick={() => handleDeleteTask(task)}
+                                                                    className="text-gray-400 hover:text-red-500 p-1.5 rounded-lg hover:bg-red-50 transition-colors"
+                                                                    title="Hapus Task"
+                                                                >
+                                                                    <Trash2 size={18} />
+                                                                </button>
+                                                            </>
+                                                        )}
                                                     </div>
                                                 </td>
                                             </tr>
-                                        ))}
+                                            {isExpanded && (
+                                                <tr className="bg-gray-50/50">
+                                                    <td colSpan={6} className="py-4 px-6">
+                                                        <div className="flex items-center justify-between mb-3">
+                                                            <div className="flex items-center gap-2">
+                                                                <MessageSquare size={15} className="text-[#00529C]" />
+                                                                <h5 className="font-bold text-sm text-gray-800">Komentar & Riwayat — {task.name}</h5>
+                                                            </div>
+                                                            <button onClick={() => toggleTaskLog(task.id)} className="text-gray-400 hover:text-gray-600 p-1 rounded-lg hover:bg-gray-100 transition-colors cursor-pointer" title="Tutup">
+                                                                <X size={16} />
+                                                            </button>
+                                                        </div>
+                                                        {hasRevision && (
+                                                            <div className="mb-3 p-3 bg-orange-50 border border-orange-200 rounded-xl text-xs">
+                                                                <p className="font-bold text-orange-800 flex items-center gap-1.5">
+                                                                    <RotateCcw size={13} /> Catatan Revisi Terakhir
+                                                                </p>
+                                                                <p className="text-orange-700 mt-1 leading-relaxed">{task.revisionNote}</p>
+                                                                <p className="text-[10px] text-orange-500 mt-1">
+                                                                    Oleh: {task.revisionRequestedBy || 'PM'} • {fmtShortDateTime(task.revisionRequestedAt)}
+                                                                </p>
+                                                                {/* Lampiran bukti yang menyertai permintaan revisi */}
+                                                                {sitAttachments.length > 0 && (
+                                                                    <div className="mt-2 pt-2 border-t border-orange-200">
+                                                                        <p className="font-bold text-orange-800 flex items-center gap-1.5 mb-1.5">
+                                                                            <Paperclip size={12} /> Bukti Permintaan Revisi ({sitAttachments.length})
+                                                                        </p>
+                                                                        <div className="space-y-1.5">
+                                                                            {sitAttachments.map(doc => (
+                                                                                <div key={doc.id} className="flex items-center gap-2 p-1.5 bg-white/70 rounded-lg border border-orange-200 hover:border-orange-400 transition-all group">
+                                                                                    <div className="w-7 h-7 bg-orange-100 text-orange-600 rounded-md flex items-center justify-center font-bold text-[8px] shrink-0">
+                                                                                        {doc.type || 'FILE'}
+                                                                                    </div>
+                                                                                    <div className="flex-1 min-w-0">
+                                                                                        <p className="text-[10px] font-semibold text-gray-700 truncate">{doc.originalName || doc.name}</p>
+                                                                                        <p className="text-[9px] text-gray-400">{doc.size}</p>
+                                                                                    </div>
+                                                                                    <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-all">
+                                                                                        {doc.url && (
+                                                                                            <>
+                                                                                                <button onClick={() => viewSitAttachment(doc)} title="Lihat"
+                                                                                                    className="p-1 text-gray-500 hover:text-blue-600 rounded hover:bg-blue-50 transition-colors cursor-pointer">
+                                                                                                    <Eye size={12} />
+                                                                                                </button>
+                                                                                                <button onClick={() => downloadSitAttachment(doc)} title="Unduh"
+                                                                                                    className="p-1 text-gray-500 hover:text-indigo-600 rounded hover:bg-indigo-50 transition-colors cursor-pointer">
+                                                                                                    <Download size={12} />
+                                                                                                </button>
+                                                                                            </>
+                                                                                        )}
+                                                                                    </div>
+                                                                                </div>
+                                                                            ))}
+                                                                        </div>
+                                                                    </div>
+                                                                )}
+                                                            </div>
+                                                        )}
+
+                                                        {/* ── Bukti SIT & Persetujuan (dokumentasi uji) ── */}
+                                                        <div className="mb-4">
+                                                            <div className="flex items-center gap-2 mb-2">
+                                                                <Paperclip size={13} className="text-[#00529C]" />
+                                                                <p className="text-[11px] font-bold text-gray-500 uppercase tracking-wider">Bukti SIT & Persetujuan</p>
+                                                            </div>
+                                                            <div className={`rounded-xl border p-3 text-xs ${sitOk ? 'bg-emerald-50/60 border-emerald-200' : 'bg-blue-50/60 border-blue-200'}`}>
+                                                                <div className="flex items-center justify-between flex-wrap gap-2">
+                                                                    <div className="flex items-center gap-2">
+                                                                        {sitOk
+                                                                            ? <CheckCircle size={15} className="text-emerald-600" />
+                                                                            : <AlertCircle size={15} className="text-blue-500" />}
+                                                                        <span className={`font-bold ${sitOk ? 'text-emerald-800' : 'text-blue-800'}`}>
+                                                                            {sitOk ? 'Task Disetujui Lolos SIT' : 'Belum Disetujui di SIT'}
+                                                                        </span>
+                                                                    </div>
+                                                                    {sitApprovedAt && (
+                                                                        <span className="text-[10px] text-gray-500">
+                                                                            Disetujui: {fmtShortDateTime(sitApprovedAt)} oleh {sitApproval?.approvedBy || 'PM'}
+                                                                        </span>
+                                                                    )}
+                                                                </div>
+                                                                {sitComment && (
+                                                                    <p className="mt-2 text-gray-700 bg-white/70 rounded-lg p-2 border border-gray-100">
+                                                                        <span className="font-bold text-gray-600">Komentar SIT:</span> {sitComment}
+                                                                    </p>
+                                                                )}
+                                                                {sitAttachments.length === 0 ? (
+                                                                    <p className="mt-2 text-gray-400 italic flex items-center gap-1.5">
+                                                                        <Paperclip size={12} /> Belum ada bukti dilampirkan untuk task ini di SIT.
+                                                                    </p>
+                                                                ) : (
+                                                                    <div className="mt-2 grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+                                                                        {sitAttachments.map(doc => (
+                                                                            <div key={doc.id} className="flex items-center gap-2 p-2 bg-white rounded-lg border border-gray-100 hover:border-blue-200 transition-all group">
+                                                                                <div className="w-7 h-7 bg-blue-100 text-blue-600 rounded-md flex items-center justify-center font-bold text-[8px] shrink-0">
+                                                                                    {doc.type || 'FILE'}
+                                                                                </div>
+                                                                                <div className="flex-1 min-w-0">
+                                                                                    <p className="text-[10px] font-semibold text-gray-700 truncate">{doc.originalName || doc.name}</p>
+                                                                                    <p className="text-[9px] text-gray-400">{doc.size}</p>
+                                                                                </div>
+                                                                                <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-all">
+                                                                                    {doc.url && (
+                                                                                        <>
+                                                                                            <button onClick={() => viewSitAttachment(doc)} title="Lihat"
+                                                                                                className="p-1 text-gray-500 hover:text-blue-600 rounded hover:bg-blue-50 transition-colors cursor-pointer">
+                                                                                                <Eye size={12} />
+                                                                                            </button>
+                                                                                            <button onClick={() => downloadSitAttachment(doc)} title="Unduh"
+                                                                                                className="p-1 text-gray-500 hover:text-indigo-600 rounded hover:bg-indigo-50 transition-colors cursor-pointer">
+                                                                                                <Download size={12} />
+                                                                                            </button>
+                                                                                        </>
+                                                                                    )}
+                                                                                </div>
+                                                                            </div>
+                                                                        ))}
+                                                                    </div>
+                                                                )}
+                                                            </div>
+                                                        </div>
+
+                                                        <div className="flex items-center justify-between mb-2">
+                                                            <p className="text-[11px] font-bold text-gray-500 uppercase tracking-wider">Riwayat Aktivitas Task</p>
+                                                            {logsLoading && <span className="text-[10px] text-gray-400">Memuat...</span>}
+                                                        </div>
+                                                        {logsLoading ? (
+                                                            <div className="py-6 text-center text-gray-400 text-xs">Memuat riwayat...</div>
+                                                        ) : logs.length === 0 ? (
+                                                            <div className="py-6 text-center text-gray-400 text-xs">
+                                                                Belum ada aktivitas tercatat untuk task ini.
+                                                            </div>
+                                                        ) : (
+                                                            <div className="space-y-2">
+                                                                {logs.map(log => {
+                                                                    const meta = getTaskActionMeta(log.action);
+                                                                    return (
+                                                                        <div key={log.id} className="flex items-start gap-3 p-2.5 bg-white rounded-xl border border-gray-100">
+                                                                            <span className={`shrink-0 px-2 py-0.5 rounded-full text-[9px] font-bold border ${meta.cls}`}>
+                                                                                {meta.label}
+                                                                            </span>
+                                                                            <div className="flex-1 min-w-0">
+                                                                                <p className="text-[11px] text-gray-700 leading-relaxed">{log.description}</p>
+                                                                                <p className="text-[10px] text-gray-400 mt-0.5">
+                                                                                    {log.user || 'System'} • {fmtShortDateTime(log.timestamp)}
+                                                                                </p>
+                                                                            </div>
+                                                                        </div>
+                                                                    );
+                                                                })}
+                                                            </div>
+                                                        )}
+                                                    </td>
+                                                </tr>
+                                            )}
+                                            </Fragment>
+                                            );
+                                        })}
                                     </tbody>
                                 </table>
                             </div>
@@ -895,8 +1344,10 @@ export default function TaskDetail() {
                         <SITUATWizard
                             project={project}
                             updateProject={updateProject}
+                            refreshProject={refreshDataSilent}
                             addNotification={addNotification}
                             navigate={navigate}
+                            isViewer={isViewerOnly}
                         />
                     )}
 
@@ -1164,74 +1615,180 @@ export default function TaskDetail() {
             {/* Modal Edit Task */}
             {isEditTaskModalOpen && editingTask && (
                 <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-fadeIn">
-                    <div className="bg-white rounded-xl shadow-xl max-w-lg w-full max-h-[90vh] overflow-hidden">
-                        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200 bg-gray-50/50">
-                            <h3 className="text-lg font-semibold text-gray-800">Edit Task</h3>
-                            <button
-                                onClick={() => setIsEditTaskModalOpen(false)}
-                                className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
-                            >
-                                <X size={20} />
-                            </button>
+                    <div className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full max-h-[92vh] overflow-hidden">
+                        {/* Header */}
+                        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200 bg-gradient-to-r from-[#00529C] to-[#003a73]">
+                            <div className="flex items-center gap-3">
+                                <div className="w-10 h-10 bg-white/10 rounded-xl flex items-center justify-center">
+                                    <Edit size={18} className="text-white" />
+                                </div>
+                                <div>
+                                    <h3 className="text-base font-bold text-white">Edit Task</h3>
+                                    <p className="text-[11px] text-white/70">Perbarui detail, alokasi & status task</p>
+                                </div>
+                            </div>
+                            <div className="flex items-center gap-2">
+                                <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold border bg-white ${getStatusBadge(editingTask.status)}`}>
+                                    {getStatusIcon(editingTask.status)}
+                                    {editingTask.status}
+                                </span>
+                                <button
+                                    onClick={() => setIsEditTaskModalOpen(false)}
+                                    className="p-2 text-white/70 hover:text-white hover:bg-white/10 rounded-lg transition-colors"
+                                >
+                                    <X size={20} />
+                                </button>
+                            </div>
                         </div>
 
-                        <div className="p-6 overflow-y-auto max-h-[calc(90vh-140px)]">
-                            <form onSubmit={handleEditTask} className="space-y-4">
+                        <div className="p-6 overflow-y-auto max-h-[calc(92vh-140px)]">
+                            {/* ── Panel Revisi (jika task sedang direvisi) ── */}
+                            {editingTask.revisionNote && (
+                                <div className="mb-5 p-4 bg-orange-50 border border-orange-200 rounded-xl flex items-start gap-3">
+                                    <div className="w-9 h-9 bg-orange-100 rounded-lg flex items-center justify-center shrink-0">
+                                        <RotateCcw size={16} className="text-orange-600" />
+                                    </div>
+                                    <div className="flex-1 min-w-0">
+                                        <p className="text-xs font-bold text-orange-800">Permintaan Revisi</p>
+                                        <p className="text-xs text-orange-700 mt-1 leading-relaxed">{editingTask.revisionNote}</p>
+                                        <p className="text-[10px] text-orange-500 mt-1">
+                                            Oleh: {editingTask.revisionRequestedBy || 'PM'} • {fmtShortDateTime(editingTask.revisionRequestedAt)}
+                                        </p>
+                                    </div>
+                                </div>
+                            )}
+
+                            <form onSubmit={handleEditTask} className="space-y-5">
+                                {/* ── 1. Informasi Task ── */}
                                 <div>
-                                    <label className="block text-sm font-semibold text-gray-700 mb-1">
-                                        Nama Task <span className="text-red-500">*</span>
-                                    </label>
-                                    <input
-                                        type="text"
-                                        value={editingTask.name}
-                                        onChange={(e) => setEditingTask({...editingTask, name: e.target.value})}
-                                        className="w-full px-4 py-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-[#00529C] focus:border-[#00529C] outline-none"
-                                        required
-                                    />
-                                </div>
-
-                                <div className="grid grid-cols-2 gap-4">
-                                    <div>
-                                        <label className="block text-sm font-semibold text-gray-700 mb-1">
-                                            Assignee
-                                        </label>
-                                        <select
-                                            value={editingTask.assignee || ''}
-                                            onChange={(e) => setEditingTask({...editingTask, assignee: e.target.value})}
-                                            className="w-full px-4 py-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-[#00529C] focus:border-[#00529C] outline-none bg-white"
-                                        >
-                                            <option value="">Pilih Anggota Tim...</option>
-                                            {teamMembers.map((mem) => {
-                                                const activeCount = tasks.filter(t => (t.assignee || '').toLowerCase().includes(mem.name.toLowerCase()) && t.status !== 'Selesai' && t.status !== 'done').length;
-                                                return (
-                                                    <option key={mem.id ?? mem.name} value={mem.id ?? mem.name}>
-                                                        {mem.name} (Beban: {activeCount} Task Aktif)
-                                                    </option>
-                                                );
-                                            })}
-                                            {teamMembers.length === 0 && (
-                                                <option value="" disabled>Belum ada tim teralokasi</option>
-                                            )}
-                                        </select>
+                                    <div className="flex items-center gap-2 mb-3">
+                                        <div className="w-6 h-6 bg-blue-50 rounded-lg flex items-center justify-center">
+                                            <FileText size={13} className="text-[#00529C]" />
+                                        </div>
+                                        <h4 className="text-xs font-bold text-gray-700 uppercase tracking-wider">Informasi Task</h4>
                                     </div>
-                                    <div>
-                                        <label className="block text-sm font-semibold text-gray-700 mb-1">
-                                            Status
-                                        </label>
-                                        <select
-                                            value={editingTask.status}
-                                            onChange={(e) => setEditingTask({...editingTask, status: e.target.value})}
-                                            className="w-full px-4 py-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-[#00529C] focus:border-[#00529C] outline-none"
-                                        >
-                                            <option value="Belum Mulai">Belum Mulai</option>
-                                            <option value="Sedang Dikerjakan">Sedang Dikerjakan</option>
-                                            <option value="Hold">Hold</option>
-                                            <option value="Selesai">Selesai</option>
-                                            <option value="Take Down">Take Down</option>
-                                        </select>
+                                    <div className="space-y-4">
+                                        <div>
+                                            <label className="block text-sm font-semibold text-gray-700 mb-1">
+                                                Nama Task <span className="text-red-500">*</span>
+                                            </label>
+                                            <input
+                                                type="text"
+                                                value={editingTask.name}
+                                                onChange={(e) => setEditingTask({...editingTask, name: e.target.value})}
+                                                className="w-full px-4 py-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-[#00529C] focus:border-[#00529C] outline-none"
+                                                placeholder="Contoh: Implementasi Modul Approval"
+                                                required
+                                            />
+                                        </div>
+                                        <div>
+                                            <label className="block text-sm font-semibold text-gray-700 mb-1">
+                                                Deskripsi Task
+                                            </label>
+                                            <textarea
+                                                rows={3}
+                                                value={editingTask.description || ''}
+                                                onChange={(e) => setEditingTask({...editingTask, description: e.target.value})}
+                                                className="w-full px-4 py-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-[#00529C] focus:border-[#00529C] outline-none resize-none"
+                                                placeholder="Jelaskan detail pekerjaan yang harus diselesaikan..."
+                                            />
+                                        </div>
                                     </div>
                                 </div>
 
+                                {/* ── 2. Detail Task ── */}
+                                <div>
+                                    <div className="flex items-center gap-2 mb-3">
+                                        <div className="w-6 h-6 bg-indigo-50 rounded-lg flex items-center justify-center">
+                                            <Calendar size={13} className="text-indigo-600" />
+                                        </div>
+                                        <h4 className="text-xs font-bold text-gray-700 uppercase tracking-wider">Detail Task</h4>
+                                    </div>
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                        <div>
+                                            <label className="block text-sm font-semibold text-gray-700 mb-1">
+                                                Prioritas
+                                            </label>
+                                            <select
+                                                value={editingTask.priority || 'Medium'}
+                                                onChange={(e) => setEditingTask({...editingTask, priority: e.target.value})}
+                                                className={`w-full px-4 py-2.5 border rounded-lg text-sm focus:ring-2 focus:ring-[#00529C] focus:border-[#00529C] outline-none ${editingTask.priority === 'High' ? 'border-red-300 bg-red-50 text-red-700 font-semibold' : editingTask.priority === 'Low' ? 'border-gray-300 bg-gray-50 text-gray-500' : 'border-amber-300 bg-amber-50 text-amber-700 font-semibold'}`}
+                                            >
+                                                <option value="High">🔴 High</option>
+                                                <option value="Medium">🟡 Medium</option>
+                                                <option value="Low">🟢 Low</option>
+                                            </select>
+                                        </div>
+                                        <div>
+                                            <label className="block text-sm font-semibold text-gray-700 mb-1">
+                                                Deadline
+                                            </label>
+                                            <input
+                                                type="date"
+                                                value={editingTask.deadline || ''}
+                                                onChange={(e) => setEditingTask({...editingTask, deadline: e.target.value})}
+                                                className="w-full px-4 py-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-[#00529C] focus:border-[#00529C] outline-none"
+                                            />
+                                        </div>
+                                    </div>
+                                </div>
+
+                                {/* ── 3. Alokasi & Status ── */}
+                                <div>
+                                    <div className="flex items-center gap-2 mb-3">
+                                        <div className="w-6 h-6 bg-emerald-50 rounded-lg flex items-center justify-center">
+                                            <User size={13} className="text-emerald-600" />
+                                        </div>
+                                        <h4 className="text-xs font-bold text-gray-700 uppercase tracking-wider">Alokasi & Status</h4>
+                                    </div>
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                        <div>
+                                            <label className="block text-sm font-semibold text-gray-700 mb-1">
+                                                Assignee
+                                            </label>
+                                            <select
+                                                value={editingTask.assignee || ''}
+                                                onChange={(e) => setEditingTask({...editingTask, assignee: e.target.value})}
+                                                className="w-full px-4 py-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-[#00529C] focus:border-[#00529C] outline-none bg-white"
+                                            >
+                                                <option value="">Pilih Anggota Tim...</option>
+                                                {teamMembers.map((mem) => {
+                                                    const activeCount = tasks.filter(t => (t.assignee || '').toLowerCase().includes(mem.name.toLowerCase()) && t.status !== 'Selesai' && t.status !== 'done').length;
+                                                    return (
+                                                        <option key={mem.id ?? mem.name} value={mem.id ?? mem.name}>
+                                                            {mem.name} (Beban: {activeCount} Task Aktif)
+                                                        </option>
+                                                    );
+                                                })}
+                                                {teamMembers.length === 0 && (
+                                                    <option value="" disabled>Belum ada tim teralokasi</option>
+                                                )}
+                                            </select>
+                                        </div>
+                                        <div>
+                                            <label className="block text-sm font-semibold text-gray-700 mb-1">
+                                                Status
+                                            </label>
+                                            <select
+                                                value={editingTask.status}
+                                                onChange={(e) => setEditingTask({...editingTask, status: e.target.value})}
+                                                className={`w-full px-4 py-2.5 border rounded-lg text-sm focus:ring-2 focus:ring-[#00529C] focus:border-[#00529C] outline-none font-semibold ${getStatusSelectClass(editingTask.status)}`}
+                                            >
+                                                <option value="Belum Mulai">Belum Mulai</option>
+                                                <option value="Sedang Dikerjakan">Sedang Dikerjakan</option>
+                                                <option value="Hold">Hold</option>
+                                                <option value="Selesai">Selesai</option>
+                                                <option value="Take Down">Take Down</option>
+                                            </select>
+                                        </div>
+                                    </div>
+                                    <p className="text-[11px] text-gray-400 mt-2 flex items-center gap-1.5">
+                                        <Info size={12} />
+                                        Status <strong>Selesai</strong> akan menandai revisi selesai & task siap diverifikasi di SIT.
+                                    </p>
+                                </div>
+
+                                {/* Footer */}
                                 <div className="flex justify-end gap-3 pt-4 border-t border-gray-200">
                                     <button
                                         type="button"
@@ -1244,7 +1801,7 @@ export default function TaskDetail() {
                                     <button
                                         type="submit"
                                         disabled={isSubmittingTask}
-                                        className="px-4 py-2 bg-[#00529C] text-white rounded-lg font-medium hover:bg-[#004080] transition-colors flex items-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed"
+                                        className="px-4 py-2 bg-[#00529C] text-white rounded-lg font-medium hover:bg-[#004080] transition-colors flex items-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed shadow-sm"
                                     >
                                         {isSubmittingTask ? (
                                             <>
@@ -1252,7 +1809,9 @@ export default function TaskDetail() {
                                                 Menyimpan...
                                             </>
                                         ) : (
-                                            'Simpan'
+                                            <>
+                                                <CheckCircle size={16} /> Simpan Perubahan
+                                            </>
                                         )}
                                     </button>
                                 </div>
@@ -1356,6 +1915,24 @@ export default function TaskDetail() {
                     </div>
                 </div>
             )}
+
+            {/* Modal Pratinjau Bukti SIT */}
+            {sitPreviewDoc && (
+                <DocumentViewerModal
+                    doc={{
+                        name: sitPreviewDoc.name || 'Bukti SIT',
+                        url: sitPreviewDoc.url,
+                        type: sitPreviewDoc.type || 'FILE',
+                        size: sitPreviewDoc.size,
+                        author: 'Tim SIT',
+                    }}
+                    project={project}
+                    onClose={() => {
+                        if (sitPreviewDoc.url?.startsWith('blob:')) URL.revokeObjectURL(sitPreviewDoc.url);
+                        setSitPreviewDoc(null);
+                    }}
+                />
+            )}
         </div>
     );
 }
@@ -1377,8 +1954,15 @@ function DocumentSection({ project, user }) {
     const MAX_SIZE_MB = 5;
 
     // Sumber utama: project.documents (sudah di-embed backend) — instant, tanpa request tambahan.
+    // Dokumen SIT/UAT (bukti task, hasil review, berita acara, dsb.) disembunyikan
+    // dari daftar umum — tampil di panel per-task / wizard SIT-UAT.
+    const HIDDEN_DOC_TYPES = ['SIT_TASK_EVIDENCE', 'SIT_SIGNOFF', 'UAT_PREP', 'UAT_EXEC', 'UAT_APPROVAL'];
+    const visibleDocs = (list) => Array.isArray(list)
+        ? list.filter(d => !HIDDEN_DOC_TYPES.includes((d.document_type || d.type || '').toUpperCase()))
+        : [];
+
     useEffect(() => {
-        setDocs(Array.isArray(project?.documents) ? project.documents : []);
+        setDocs(visibleDocs(project?.documents));
     }, [project?.id, project?.documents]);
 
     // Refresh dari API (dipakai setelah upload agar daftar selalu terbaru)
@@ -1388,7 +1972,7 @@ function DocumentSection({ project, user }) {
         try {
             const res = await documentService.getAll(project.id);
             if (res && res.data) {
-                setDocs(res.data);
+                setDocs(visibleDocs(res.data));
             }
         } catch {
             // Abaikan error — data embedded tetap tersedia

@@ -26,7 +26,8 @@ import {
     Eye,
     Download,
     FolderOpen,
-    Rocket
+    Rocket,
+    ShieldCheck
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { userService } from '../../services/api';
@@ -118,11 +119,37 @@ export default function WorkspaceDevLead() {
     const { user } = useAuth();
     const navigate = useNavigate();
     const { addNotification } = useNotifications();
-    const { projects, updateProject, isLoading } = useProjects();
+    const { projects, updateProject, isLoading, refreshDataSilent } = useProjects();
 
     const [activeTab, setActiveTab] = useState('incoming'); // 'incoming' | 'analyzing' | 'ready_pm' | 'in_development' | 'completed'
     const [selectedProject, setSelectedProject] = useState(null);
     const [searchTerm, setSearchTerm] = useState('');
+
+    // ── Persetujuan SIT (Development Lead) ──
+    // Tampilkan SEMUA proyek berstatus SIT (menunggu ATAU sudah approve)
+    // agar Dev Lead bisa melihat detail & status persetujuannya.
+    const [sitApprovingId, setSitApprovingId] = useState(null);
+    const sitProjects = (projects || []).filter(p => {
+        const st = String(p.status || '').toUpperCase();
+        return st === 'SIT_IN_PROGRESS' || st === 'SIT_REVISION';
+    });
+    const sitPendingProjects = sitProjects.filter(p => {
+        const ap = p.sitUatData?.sit3_approvals || p.sit_uat_data?.sit3_approvals || {};
+        return !(ap?.development_lead?.approved === true);
+    });
+
+    const handleSitApproval = async (projectId) => {
+        setSitApprovingId(projectId);
+        try {
+            await projectService.submitSitApproval(projectId, '');
+            toast.success('Persetujuan SIT Anda berhasil disimpan.');
+            refreshDataSilent?.();
+        } catch (err) {
+            toast.error(`Gagal menyimpan persetujuan: ${err.message}`);
+        } finally {
+            setSitApprovingId(null);
+        }
+    };
 
     // Modal Assign Analyst State
     const [isAnalystModalOpen, setIsAnalystModalOpen] = useState(false);
@@ -428,6 +455,69 @@ export default function WorkspaceDevLead() {
                     </div>
                 </div>
 
+                {/* Panel Persetujuan SIT (Development Lead) */}
+                {sitProjects.length > 0 && (
+                    <div className="bg-white rounded-2xl border-2 border-teal-200 shadow-sm overflow-hidden">
+                        <div className="px-4 py-3 bg-teal-50 border-b border-teal-100 flex items-center justify-between">
+                            <h3 className="font-bold text-teal-800 text-sm flex items-center gap-2">
+                                <ShieldCheck size={16} /> Persetujuan SIT
+                            </h3>
+                            <span className="text-[10px] font-bold text-teal-600 bg-white px-2 py-0.5 rounded-full border border-teal-200">
+                                {sitPendingProjects.length} menunggu • {sitProjects.length} total
+                            </span>
+                        </div>
+                        <div className="p-3 space-y-2">
+                            <p className="text-[11px] text-gray-500">
+                                Proyek yang sedang menjalani pengujian SIT. Buka <strong>detail</strong> untuk melihat hasil pengujian, lalu berikan persetujuan Anda sebagai <strong>Development Lead</strong> agar SIT dapat dinilai lulus.
+                            </p>
+                            {sitProjects.map(p => {
+                                const ap = p.sitUatData?.sit3_approvals || p.sit_uat_data?.sit3_approvals || {};
+                                const approved = ap?.development_lead?.approved === true;
+                                return (
+                                    <div key={p.id} className={`flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3 rounded-xl border ${approved ? 'bg-emerald-50 border-emerald-200' : 'bg-gray-50 border-gray-100'}`}>
+                                        <div className="min-w-0">
+                                            <div className="flex items-center gap-2 flex-wrap">
+                                                <p className="font-bold text-gray-800 text-xs truncate">{p.name}</p>
+                                                {approved ? (
+                                                    <span className="px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 text-[9px] font-bold border border-emerald-200 flex items-center gap-1">
+                                                        <CheckCircle2 size={9} /> Anda telah setujui
+                                                    </span>
+                                                ) : (
+                                                    <span className="px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 text-[9px] font-bold border border-amber-200">
+                                                        Menunggu persetujuan Anda
+                                                    </span>
+                                                )}
+                                            </div>
+                                            <p className="text-[10px] text-gray-400">{p.reqId || p.req_id || `REQ-${p.id}`}</p>
+                                        </div>
+                                        <div className="flex items-center gap-2 shrink-0">
+                                            <button
+                                                onClick={() => navigate(`/pm/tasks/${p.id}`)}
+                                                className="px-3.5 py-2 bg-blue-50 hover:bg-blue-100 border border-blue-200 text-blue-700 text-xs font-bold rounded-xl flex items-center gap-1.5 transition-all cursor-pointer"
+                                            >
+                                                <Eye size={13} /> Lihat Detail
+                                            </button>
+                                            {!approved && (
+                                                <button
+                                                    onClick={() => handleSitApproval(p.id)}
+                                                    disabled={sitApprovingId === p.id}
+                                                    className="px-3.5 py-2 bg-teal-600 hover:bg-teal-700 disabled:bg-gray-300 text-white text-xs font-bold rounded-xl flex items-center gap-2 transition-all cursor-pointer disabled:cursor-not-allowed"
+                                                >
+                                                    {sitApprovingId === p.id ? (
+                                                        <><span className="w-3 h-3 border-2 border-white/40 border-t-white rounded-full animate-spin" /> Menyimpan...</>
+                                                    ) : (
+                                                        <><CheckCircle2 size={14} /> Setujui SIT</>
+                                                    )}
+                                                </button>
+                                            )}
+                                        </div>
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    </div>
+                )}
+
                 {/* Tab Navigation (5 Tabs) */}
                 <div className="flex overflow-x-auto border-b border-gray-200 bg-white rounded-2xl p-1.5 shadow-sm gap-1">
                     <button
@@ -437,7 +527,7 @@ export default function WorkspaceDevLead() {
                                 ? 'bg-[#1a365d] text-white shadow-md'
                                 : 'text-gray-600 hover:text-gray-900 hover:bg-gray-50'
                         }`}
-                    >
+                        >
                         <Inbox size={16} />
                         <span>Tab 1: Proyek Masuk</span>
                         <span className={`ml-1 text-[11px] px-2 py-0.5 rounded-full ${

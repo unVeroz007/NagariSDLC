@@ -35,7 +35,7 @@ class ProjectController extends Controller
         $user = $request->user();
         $roleName = $user->role?->name;
 
-        $query = Project::with(['creator', 'pm', 'analyst', 'division', 'documents', 'teamMembers.user', 'statusHistories.changedBy', 'tasks.assignee']);
+        $query = Project::with(['creator', 'pm', 'analyst', 'division', 'documents', 'teamMembers.user', 'statusHistories.changedBy', 'tasks.assignee', 'tasks.revisionRequester']);
 
         // ─── ROLE-BASED DATA ISOLATION ───
         // Super Admin, Head of IT, Lead Group: bisa lihat SEMUA proyek
@@ -49,6 +49,7 @@ class ProjectController extends Controller
                 // Analyst: melihat proyek di fase analisis (agar saling tahu siapa pegang proyek mana)
                 // Dev Analyst (= PM): melihat proyek fase analisis (konteks kerja analis)
                 // + proyek yang DIA kelola sebagai PM (pm_id = dia) di SEMUA tahap
+                // + proyek SIT yang butuh persetujuannya (analyst_id = dia, status SIT)
                 $query->where(function ($q) use ($user, $roleName) {
                     $q->whereIn('status', [
                         ProjectStatus::PENDING->value,
@@ -61,6 +62,14 @@ class ProjectController extends Controller
                     if ($roleName === 'dev_analyst') {
                         $q->orWhere('pm_id', $user->id);
                     }
+                    // Analyst dapat melihat & menyetujui SIT untuk proyek yang dia tangani
+                    $q->orWhere(function ($sq) use ($user) {
+                        $sq->where('analyst_id', $user->id)
+                           ->whereIn('status', [
+                               ProjectStatus::SIT_IN_PROGRESS->value,
+                               ProjectStatus::SIT_REVISION->value,
+                           ]);
+                    });
                 });
 
             } elseif ($roleName === 'development_lead') {
@@ -74,7 +83,18 @@ class ProjectController extends Controller
 
             } elseif ($roleName === 'developer') {
                 // Developer hanya lihat proyek di mana dia anggota tim
-                $query->whereHas('teamMembers', fn($q) => $q->where('user_id', $user->id));
+                // + proyek SIT yang menunggu persetujuannya (dia assignee task, status SIT)
+                $query->where(function ($q) use ($user) {
+                    $q->whereHas('teamMembers', fn($qq) => $qq->where('user_id', $user->id))
+                      ->orWhere(function ($sq) use ($user) {
+                          $sq->whereIn('status', [
+                              ProjectStatus::SIT_IN_PROGRESS->value,
+                              ProjectStatus::SIT_REVISION->value,
+                          ])->whereHas('tasks', function ($tq) use ($user) {
+                              $tq->where('assignee_id', $user->id);
+                          });
+                      });
+                });
 
             } elseif (in_array($roleName, ['qa_lead', 'qa_tester'])) {
                 // QA: proyek di fase QA atau sudah pernah masuk QA
@@ -178,7 +198,7 @@ class ProjectController extends Controller
 
     public function show(int $id): JsonResponse
     {
-        $project = Project::with(['creator', 'pm', 'analyst', 'division', 'statusHistories.changedBy', 'teamMembers.user', 'tasks.assignee'])
+        $project = Project::with(['creator', 'pm', 'analyst', 'division', 'statusHistories.changedBy', 'teamMembers.user', 'tasks.assignee', 'tasks.revisionRequester'])
             ->findOrFail($id);
 
         return response()->json([
@@ -207,6 +227,7 @@ class ProjectController extends Controller
             'staging_url'            => ['sometimes', 'nullable', 'string'],
             'uat_notes'              => ['sometimes', 'nullable', 'string'],
             'sit_uat_data'           => ['sometimes', 'nullable'],
+            'sitUatData'             => ['sometimes', 'nullable'],
             'analyst_result'         => ['sometimes', 'nullable'],
             'dev_analyst_result'    => ['sometimes', 'nullable'],            'qa_status'              => ['sometimes', 'nullable', 'string'],
             'cyber_status'           => ['sometimes', 'nullable', 'string'],
@@ -243,7 +264,7 @@ class ProjectController extends Controller
             'current_stage_deadline' => $request->current_stage_deadline ?? $request->input('deadline'),
             'staging_url'            => $request->staging_url,
             'uat_notes'              => $request->uat_notes,
-            'sit_uat_data'           => $request->sit_uat_data,
+            'sit_uat_data'           => $request->filled('sit_uat_data') ? $request->sit_uat_data : ($request->sitUatData ?? null),
             'analyst_result'         => $request->input('analystResult') ?? $request->input('analyst_result'),
             'dev_analyst_result'    => $request->input('devAnalystResult') ?? $request->input('dev_analyst_result'),
             'qa_status'              => $request->qa_status,
@@ -475,6 +496,168 @@ class ProjectController extends Controller
                 'take_down_task'=> $tasks->filter(fn($t) => ($t->status instanceof \BackedEnum ? $t->status->value : $t->status) === 'take_down')->count(),
             ],
         ]);
+    }
+
+    /**
+     * Persetujuan SIT (Tahap 3) oleh role: developer (semua assignee),
+     * PM / Analyst Pengembangan (dev_analyst / project_manager), dan development_lead.
+     * Approval developer disimpan per-user di sit_uat_data.sit3_approvals.developer.developers[].
+     * PM & development_lead masing-masing 1 slot.
+     */
+    public function sitApproval(Request $request, int $id): JsonResponse
+    {
+        $project = Project::with(['teamMembers', 'tasks.assignee'])->findOrFail($id);
+        $user = $request->user();
+        $roleName = $user->role?->name;
+
+        // Role approval yang diizinkan.
+        // PM (dev_analyst / project_manager) = Analyst Pengembangan.
+        $roleKey = match ($roleName) {
+            'developer' => 'developer',
+            'dev_analyst', 'project_manager' => 'pm',
+            'development_lead' => 'development_lead',
+            default     => null,
+        };
+
+        if (! $roleKey) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Role Anda tidak diizinkan memberikan persetujuan SIT.',
+            ], 403);
+        }
+
+        // Validasi status proyek harus SIT_IN_PROGRESS
+        $status = $project->status instanceof \BackedEnum ? $project->status->value : $project->status;
+        if (! in_array($status, ['SIT_IN_PROGRESS', 'SIT_REVISION'])) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Persetujuan SIT hanya dapat dilakukan saat proyek berstatus SIT.',
+            ], 422);
+        }
+
+        // Daftar semua developer (assignee task unik) yang harus approve
+        $requiredDeveloperIds = $project->tasks
+            ->pluck('assignee_id')
+            ->filter(fn($id) => $id !== null)
+            ->unique()
+            ->values()
+            ->map(fn($id) => (int) $id)
+            ->all();
+
+        // Validasi keanggotaan:
+        // - developer harus menjadi assignee task pada proyek
+        // - PM (Analyst Pengembangan) harus pm_id proyek
+        // - development_lead harus development_lead (role)
+        if ($roleKey === 'developer') {
+            $isAssignee = in_array((int) $user->id, $requiredDeveloperIds, true);
+            if (! $isAssignee) {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'Anda bukan developer yang mengerjakan task pada proyek ini.',
+                ], 403);
+            }
+        }
+        if ($roleKey === 'pm') {
+            if ((int) $project->pm_id !== (int) $user->id) {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'Anda bukan Project Manager / Analyst Pengembangan pada proyek ini.',
+                ], 403);
+            }
+        }
+
+        $request->validate([
+            'note' => ['nullable', 'string', 'max:2000'],
+        ]);
+
+        $approvals = (array) ($project->sit_uat_data['sit3_approvals'] ?? []);
+
+        if ($roleKey === 'developer') {
+            // Inisialisasi slot developer
+            $devApproval = (array) ($approvals['developer'] ?? []);
+            $devList = (array) ($devApproval['developers'] ?? []);
+            $userId = (int) $user->id;
+            $alreadyApproved = collect($devList)->contains(fn($d) => (int) ($d['userId'] ?? $d['approvedById'] ?? 0) === $userId);
+            if (! $alreadyApproved) {
+                $devList[] = [
+                    'userId' => $userId,
+                    'name'   => $user->name,
+                    'at'     => now()->toIso8601String(),
+                    'note'   => $request->note ?? null,
+                ];
+            }
+            $approvals['developer'] = [
+                'required'       => count($requiredDeveloperIds),
+                'approvedCount'  => count($devList),
+                'developers'     => $devList,
+            ];
+        } else {
+            $approvals[$roleKey] = [
+                'approved'  => true,
+                'approvedBy'=> $user->name,
+                'approvedById' => $user->id,
+                'at'        => now()->toIso8601String(),
+                'note'      => $request->note ?? null,
+            ];
+        }
+
+        $sitData = (array) $project->sit_uat_data;
+        $sitData['sit3_approvals'] = $approvals;
+        $project->update(['sit_uat_data' => $sitData]);
+
+        // Catat aktivitas
+        \App\Models\ActivityLog::create([
+            'user_id' => $user->id,
+            'action'  => 'sit_approval',
+            'action_label' => 'Persetujuan SIT',
+            'description' => "{$user->name} ({$roleName}) menyetujui SIT pada proyek \"{$project->title}\".",
+            'subject_type' => Project::class,
+            'subject_id' => $project->id,
+            'metadata' => [
+                'project_id' => $project->id,
+                'project_name' => $project->title,
+                'user_role' => $roleName,
+                'approval_role' => $roleKey,
+            ],
+        ]);
+
+        return response()->json([
+            'status' => 'success',
+            'message' => "Persetujuan SIT dari {$roleName} berhasil disimpan.",
+            'data' => new ProjectResource($project->fresh(['tasks.assignee', 'tasks.revisionRequester', 'teamMembers.user'])),
+        ]);
+    }
+
+    /**
+     * Hitung status kelengkapan approval SIT (dipakai frontend & dokumen).
+     * developer: semua assignee unik; analyst & development_lead: 1 slot.
+     */
+    public static function sitApprovalStatus(array $approvals, $project): array
+    {
+        $requiredDevCount = $project->tasks
+            ->pluck('assignee_id')
+            ->filter(fn($id) => $id !== null)
+            ->unique()
+            ->count();
+
+        $devApproval = (array) ($approvals['developer'] ?? []);
+        $devApproved = (int) ($devApproval['approvedCount'] ?? count((array) ($devApproval['developers'] ?? [])));
+
+        return [
+            'developer' => [
+                'required'       => $requiredDevCount,
+                'approved'       => $requiredDevCount > 0 && $devApproved >= $requiredDevCount,
+                'approvedCount'  => $devApproved,
+            ],
+            'pm' => [
+                'required' => 1,
+                'approved' => ($approvals['pm']['approved'] ?? false) === true,
+            ],
+            'development_lead' => [
+                'required' => 1,
+                'approved' => ($approvals['development_lead']['approved'] ?? false) === true,
+            ],
+        ];
     }
 }
 

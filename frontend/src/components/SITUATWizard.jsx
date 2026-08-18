@@ -1,46 +1,56 @@
 ﻿// src/components/SITUATWizard.jsx
-// â”€â”€â”€ Wizard Multi-Step SIT & UAT Internal untuk Proyek Bank Nagari â”€â”€â”€â”€â”€â”€â”€â”€â”€
-import { useState, useRef, useEffect, useCallback } from 'react';
+// Wizard Multi-Step SIT & UAT Internal untuk Proyek Bank Nagari (Versi Refactored)
+//
+// Business logic yang diterapkan:
+//  1) Gatekeeper SIT: proyek hanya boleh masuk SIT jika SEMUA task developer berstatus
+//     "Selesai/Done". Task berstatus "TAKE DOWN" DIABAIKAN (tidak dihitung syarat/progress).
+//  2) Alur revisi task terintegrasi: PM dapat mengembalikan task ke developer (status →
+//     in_progress) lengkap dengan catatan/arahan revisi, tersimpan & tampil di board developer.
+//  3) Tab "Eksekusi Pengujian" menampilkan tabel seluruh task developer, tiap baris punya
+//     checkbox OK, kolom komentar/temuan, dan tombol Kembalikan/Revisi.
+//  4) Lanjut ke "Review & Sign-Off" / UAT HANYA jika SEMUA task dicentang OK.
+import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
+import { useAuth } from '../contexts/AuthContext';
 import toast from 'react-hot-toast';
-import { projectService, taskService } from '../services/api';
-import SITTaskExecution from './SITTaskExecution';
 import {
     ShieldCheck, Server, CheckSquare, Lock, CheckCircle2,
     Upload, X, FileText, ArrowRight, ArrowLeft, AlertTriangle,
     RotateCcw, Send, Paperclip, Info, ChevronRight, Clock,
     Eye, Download, Printer, Building2, ClipboardList, Bug,
-    UserCheck, FileCheck, BookOpen
+    UserCheck, FileCheck, BookOpen, Users, Trash2
 } from 'lucide-react';
-import { generateDocumentName, DOCUMENT_TYPES, formatFileSize } from '../utils/documentNaming';
+import { generateDocumentName, getDocumentTypeInfo, formatFileSize } from '../utils/documentNaming';
+import { taskService, projectService, documentService } from '../services/api';
+import SITTaskExecution from './SITTaskExecution';
+import DocumentViewerModal from './DocumentViewerModal';
 
-
-// â”€â”€â”€ Helper: safely render object or string field â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── Helper: safely render object or string field ────────────────────────────
 const sf = (val, fb = '-') => {
     if (!val) return fb;
     if (typeof val === 'object') return String(val.name || val.label || val.initial || fb);
     return String(val);
 };
 
-// â”€â”€â”€ Helper: format timestamp â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── Helper: format timestamp ────────────────────────────────────────────────
 const fmtDate = (iso) => {
     if (!iso) return '-';
     return new Date(iso).toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' });
 };
 
-// â”€â”€â”€ Constants â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── Constants ───────────────────────────────────────────────────────────────
 const SIT_STATUSES = ['IN_DEVELOPMENT', 'SIT_IN_PROGRESS', 'SIT_REVISION', 'RETURN_TO_DEV'];
 const UAT_STATUSES = ['SIT_PASSED', 'UAT_IN_PROGRESS', 'UAT_REVISION_SIT', 'UAT_REVISION_DEV'];
 const DONE_STATUSES = ['DEV_COMPLETED'];
 
-// ðŸ”“ MODE PEMERIKSAAN/UNLOCK: bila true, seluruh tahapan SIT & UAT dapat dibuka
+// 🔓 MODE PEMERIKSAAN/UNLOCK: bila true, seluruh tahapan SIT & UAT dapat dibuka
 // dan diedit tanpa terkunci status proyek (untuk keperluan cek/testing/development).
 // Set false untuk kembali ke alur terkunci normal.
 const UNLOCK_ALL_STAGES = true;
 
-// â”€â”€â”€ Sub-step definitions â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── Sub-step definitions ────────────────────────────────────────────────────
 const SIT_STEPS = [
-    { id: 1, title: 'Persiapan SIT', icon: <BookOpen size={15} />, desc: 'Test Plan & Environment', color: 'blue' },
-    { id: 2, title: 'Eksekusi Pengujian', icon: <Bug size={15} />, desc: 'Test Cases & Defect Log', color: 'indigo' },
+    { id: 1, title: 'Persiapan SIT', icon: <BookOpen size={15} />, desc: 'Environment & Skenario', color: 'blue' },
+    { id: 2, title: 'Eksekusi Pengujian', icon: <Bug size={15} />, desc: 'Persetujuan Task & Defect Log', color: 'indigo' },
     { id: 3, title: 'Review & Sign-Off', icon: <FileCheck size={15} />, desc: 'Verifikasi & Keputusan', color: 'teal' },
 ];
 const UAT_STEPS = [
@@ -49,7 +59,7 @@ const UAT_STEPS = [
     { id: 3, title: 'Persetujuan Final', icon: <CheckCircle2 size={15} />, desc: 'Sign-off & Terbitkan BAST', color: 'emerald' },
 ];
 
-// â”€â”€â”€ File Upload Helper â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── File Upload Helper ─────────────────────────────────────────────────────
 function useFileUpload(category) {
     const inputRef = useRef(null);
     const createEntries = (files) => files.map(file => ({
@@ -64,8 +74,11 @@ function useFileUpload(category) {
     return { inputRef, createEntries };
 }
 
-// â”€â”€â”€ DocList â€” small list of uploaded files â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-function DocList({ docs, onRemove, readOnly = false }) {
+// ─── DocList ────────────────────────────────────────────────────────────────
+// Menampilkan daftar dokumen dengan:
+//  - dropdown PILIHAN TIPE FILE (di-masking sesuai format XXX/GPTD/TIPE/...)
+//  - tombol Lihat / Unduh / Hapus
+function DocList({ docs, onRemove, onView, onDownload, onTypeChange, docTypeOptions, readOnly = false }) {
     if (!docs?.length) return (
         <div className="mt-2 py-4 border-2 border-dashed border-gray-200 rounded-xl text-center text-gray-400 text-xs">
             <FileText size={20} className="mx-auto mb-1 text-gray-300" />
@@ -73,28 +86,61 @@ function DocList({ docs, onRemove, readOnly = false }) {
         </div>
     );
     return (
-        <div className="mt-2 space-y-1.5">
+        <div className="mt-2 space-y-2">
             {docs.map((doc, i) => (
-                <div key={doc.id || i} className="flex items-center gap-2 p-2.5 bg-gray-50 rounded-xl border border-gray-100 hover:border-blue-200 transition-all group">
-                    <div className="w-8 h-8 bg-blue-100 text-blue-600 rounded-lg flex items-center justify-center font-bold text-[9px] shrink-0">
-                        {doc.type || 'DOC'}
+                <div key={doc.id || i} className={`p-2.5 bg-gray-50 rounded-xl border transition-all ${doc.color ? `border-transparent` : 'border-gray-100'} hover:border-blue-200 group`}>
+                    <div className="flex items-center gap-2">
+                        <div className={`w-8 h-8 rounded-lg flex items-center justify-center font-bold text-[9px] shrink-0 ${doc.color || 'bg-blue-100 text-blue-600'}`}>
+                            {doc.type || 'DOC'}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                            <p className="text-xs font-semibold text-gray-800 truncate">{doc.originalName}</p>
+                            <p className="text-[10px] text-gray-400 truncate font-mono">
+                                <span className="text-amber-700">→ {doc.maskedName || doc.name}</span>
+                            </p>
+                        </div>
+                        <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-all">
+                            {doc.url && (
+                                <>
+                                    <button onClick={() => onView?.(doc)} title="Lihat"
+                                        className="p-1.5 text-gray-500 hover:text-blue-600 rounded-lg hover:bg-blue-50 transition-colors cursor-pointer">
+                                        <Eye size={14} />
+                                    </button>
+                                    <button onClick={() => onDownload?.(doc)} title="Unduh"
+                                        className="p-1.5 text-gray-500 hover:text-indigo-600 rounded-lg hover:bg-indigo-50 transition-colors cursor-pointer">
+                                        <Download size={14} />
+                                    </button>
+                                </>
+                            )}
+                            {!readOnly && (
+                                <button onClick={() => onRemove?.(i)} title="Hapus"
+                                    className="p-1.5 text-gray-500 hover:text-red-600 rounded-lg hover:bg-red-50 transition-colors cursor-pointer">
+                                    <Trash2 size={14} />
+                                </button>
+                            )}
+                        </div>
                     </div>
-                    <div className="flex-1 min-w-0">
-                        <p className="text-xs font-semibold text-gray-800 truncate">{doc.name}</p>
-                        <p className="text-[10px] text-gray-400">{doc.size} â€¢ {fmtDate(doc.uploadedAt)}</p>
+                    <div className="mt-2 flex items-center gap-2">
+                        <label className="text-[10px] font-bold text-gray-400 uppercase shrink-0">Tipe:</label>
+                        <select
+                            value={doc.doc_type || 'LAINNYA'}
+                            onChange={(e) => onTypeChange?.(i, e.target.value)}
+                            disabled={readOnly}
+                            className="px-2 py-1 bg-white border border-gray-300 rounded-lg text-[10px] font-bold text-gray-700 focus:ring-2 focus:ring-[#00529C] outline-none cursor-pointer disabled:bg-gray-100"
+                        >
+                            {(docTypeOptions || []).map(([code, label]) => (
+                                <option key={code} value={code}>{label}</option>
+                            ))}
+                        </select>
+                        {doc.isUploading && <span className="text-[10px] text-gray-400 flex items-center gap-1"><span className="w-3 h-3 border-2 border-gray-300 border-t-gray-500 rounded-full animate-spin" /> Mengunggah...</span>}
                     </div>
-                    {!readOnly && (
-                        <button onClick={() => onRemove(i)} className="text-red-400 hover:text-red-600 p-1 rounded-lg hover:bg-red-50 opacity-0 group-hover:opacity-100 transition-all cursor-pointer shrink-0">
-                            <X size={13} />
-                        </button>
-                    )}
                 </div>
             ))}
         </div>
     );
 }
 
-// â”€â”€â”€ RevisionBanner â€” shown when a revision was requested â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── RevisionBanner ─────────────────────────────────────────────────────────
 function RevisionBanner({ revisions, type }) {
     const filtered = (revisions || []).filter(r => r.type === type);
     if (!filtered.length) return null;
@@ -111,7 +157,7 @@ function RevisionBanner({ revisions, type }) {
     );
 }
 
-// â”€â”€â”€ StepTab â€” sub-step tab button â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── StepTab ────────────────────────────────────────────────────────────────
 function StepTab({ step, isActive, isCompleted, onClick }) {
     return (
         <button
@@ -121,10 +167,10 @@ function StepTab({ step, isActive, isCompleted, onClick }) {
                 : isCompleted
                     ? 'border-transparent text-emerald-600 hover:text-gray-700'
                     : 'border-transparent text-gray-400 hover:text-gray-600'
-            }`}
+                }`}
         >
             <span className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-black shrink-0 ${isActive ? 'bg-[#003a73] text-white' : isCompleted ? 'bg-emerald-500 text-white' : 'bg-gray-200 text-gray-500'}`}>
-                {isCompleted ? 'âœ“' : step.id}
+                {isCompleted ? '✓' : step.id}
             </span>
             <span className="hidden sm:inline">{step.title}</span>
             <span className="sm:hidden">{step.id}</span>
@@ -132,31 +178,84 @@ function StepTab({ step, isActive, isCompleted, onClick }) {
     );
 }
 
-// â”€â”€â”€ MAIN COMPONENT â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-export default function SITUATWizard({ project, updateProject, addNotification, navigate }) {
+// ─── MAIN COMPONENT ─────────────────────────────────────────────────────────
+export default function SITUATWizard({ project, updateProject, addNotification, navigate, refreshProject, isViewer = false }) {
     const status = project?.status || 'IN_DEVELOPMENT';
     const sitUatData = project?.sitUatData || {};
+    const { user } = useAuth();
 
-    // â”€â”€ State â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // Role user saat ini → apakah dia pemegang hak approval SIT.
+    // PM (dev_analyst / project_manager) = Analyst Pengembangan.
+    const currentRoleKey = ['developer', 'development_lead'].includes(user?.role)
+        ? user.role
+        : (['dev_analyst', 'project_manager'].includes(user?.role) ? 'pm' : null);
+    // Approval SIT dari role (disimpan di sitUatData.sit3_approvals)
+    const sit3Approvals = sitUatData.sit3_approvals || {};
+
+    // Jumlah developer (assignee task unik) yang harus approve
+    const requiredDeveloperCount = useMemo(() => {
+        if (!Array.isArray(project?.tasks)) return 0;
+        return new Set(
+            project.tasks
+                .map(t => t.assignee_id ?? t.assignee_detail?.id)
+                .filter(id => id != null)
+                .map(id => Number(id))
+        ).size;
+    }, [project?.tasks]);
+
+    // Jumlah developer yang sudah approve
+    const approvedDeveloperCount = useMemo(() => {
+        const devList = sit3Approvals?.developer?.developers || [];
+        return devList.length;
+    }, [sit3Approvals?.developer?.developers]);
+
+    // Semua approval lengkap: semua developer + PM (Analyst Pengembangan) + development_lead
+    const devApproved = requiredDeveloperCount > 0 && approvedDeveloperCount >= requiredDeveloperCount;
+    const allSitApproved = devApproved
+        && sit3Approvals?.pm?.approved === true
+        && sit3Approvals?.development_lead?.approved === true;
+
+    // ── State ─────────────────────────────────────────────────────────────
     const [activeSitStep, setActiveSitStep] = useState(sitUatData.activeSitStep || 1);
     const [activeUatStep, setActiveUatStep] = useState(sitUatData.activeUatStep || 1);
 
     // SIT Step 1 data
     const [sit1, setSit1] = useState({
         stagingUrl: sitUatData.sit1_stagingUrl || '',
-        testEnv: sitUatData.sit1_testEnv || '',
-        scenarioCount: sitUatData.sit1_scenarioCount || '',
-        prepNotes: sitUatData.sit1_prepNotes || '',
-        docs: sitUatData.sit1_docs || [],
     });
-    // SIT Step 2 data
-    const [sit2, setSit2] = useState({
-        totalCases: sitUatData.sit2_totalCases || '',
-        passedCases: sitUatData.sit2_passedCases || '',
-        defects: sitUatData.sit2_defects || '',
-        execNotes: sitUatData.sit2_execNotes || '',
-        docs: sitUatData.sit2_docs || [],
-    });
+    // ── Normalisasi approvals: selalu object keyed by taskId (hindari array/index) ──
+    // Data lama bisa tersimpan sebagai array (index 0,1,...) akibat bug lama.
+    const normalizeApprovals = (raw) => {
+        if (!raw) return {};
+        if (Array.isArray(raw)) {
+            // Array → coba map index ke task id dari project.tasks (urut)
+            const taskIds = (Array.isArray(project?.tasks) ? project.tasks : []).map(t => t.id);
+            const out = {};
+            raw.forEach((v, i) => {
+                if (v && typeof v === 'object') {
+                    const key = taskIds[i] !== undefined ? String(taskIds[i]) : String(i);
+                    out[key] = v;
+                }
+            });
+            return out;
+        }
+        if (typeof raw === 'object') {
+            const out = {};
+            for (const [k, v] of Object.entries(raw)) {
+                // Hanya ambil key yang bernilai object approval (bukan metadata lain)
+                if (v && typeof v === 'object' && ('approved' in v || 'comment' in v || 'attachments' in v || 'approvedAt' in v)) {
+                    out[String(k)] = v;
+                }
+            }
+            return out;
+        }
+        return {};
+    };
+
+    // SIT Step 2 data (derived otomatis dari task; tanpa input manual)
+    const [sit2Approvals, setSit2Approvals] = useState(() => normalizeApprovals(sitUatData.sit2_task_approvals));
+    const [taskRevisions, setTaskRevisions] = useState({}); // taskId -> notes baru (untuk modal revisi task)
+    const [showTaskRevisionModal, setShowTaskRevisionModal] = useState(null); // task object
     // SIT Step 3 data
     const [sit3, setSit3] = useState({
         reviewNotes: sitUatData.sit3_reviewNotes || '',
@@ -185,137 +284,393 @@ export default function SITUATWizard({ project, updateProject, addNotification, 
         docs: sitUatData.uat3_docs || [],
     });
 
-    // Revision & modal state
+    // Revision & modal state (SIT/UAT level)
     const [showRevisionModal, setShowRevisionModal] = useState(false);
     const [revisionType, setRevisionType] = useState(null); // 'SIT_TO_DEV' | 'UAT_TO_SIT' | 'UAT_TO_DEV'
     const [revisionNotes, setRevisionNotes] = useState('');
     const [submitting, setSubmitting] = useState(false);
-    // Estado persetujuan task untuk tahap Eksekusi SIT (taskId -> true | {approved,note})
-    const [sit2Approvals, setSit2Approvals] = useState(sitUatData.sit2_task_approvals || {});
-    // Sinkronkan kembali saat project berubah
-    useEffect(() => {
-        setSit2Approvals(sitUatData.sit2_task_approvals || {});
-    }, [project?.id]);
 
+    // Pratinjau dokumen (modal) & status upload
+    const [previewDoc, setPreviewDoc] = useState(null);
+    const [uploadingCategory, setUploadingCategory] = useState(null);
 
-    // Revision history
+    // Revision history (SIT/UAT level)
     const revisions = sitUatData.revisions || [];
 
-    // â”€â”€ File upload refs â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    const sit1FileRef = useRef(null);
-    const sit2FileRef = useRef(null);
+    // ── File upload refs ───────────────────────────────────────────────────
     const sit3FileRef = useRef(null);
     const uat1FileRef = useRef(null);
     const uat2FileRef = useRef(null);
     const uat3FileRef = useRef(null);
 
-    const mkDocs = (files, cat) => Array.from(files).map(f => {
-        // Map category codes to DOCUMENT_TYPES for auto-naming
-        const catToDocType = {
-            'SIT_PREP': DOCUMENT_TYPES.SIT_PLAN.code,
-            'SIT_EXEC': DOCUMENT_TYPES.SIT_RESULT.code,
-            'SIT_SIGNOFF': DOCUMENT_TYPES.SIT_SIGNOFF.code,
-            'UAT_PREP': DOCUMENT_TYPES.UAT_PLAN.code,
-            'UAT_EXEC': DOCUMENT_TYPES.UAT_RESULT.code,
-            'UAT_APPROVAL': DOCUMENT_TYPES.UAT_SIGNOFF.code,
-        };
-        const docTypeCode = catToDocType[cat] || cat;
-        const ext = f.name.split('.').pop() || '';
-        const autoName = generateDocumentName(
-            project?.req_id || project?.id,
-            docTypeCode,
-            project?.title || project?.name
-        ) + '.' + ext;
-        return {
-            id: `${cat}_${Date.now()}_${Math.random().toString(36).slice(2)}`,
-            name: autoName,
-            originalName: f.name,
-            size: formatFileSize(f.size),
-            type: f.name.split('.').pop().toUpperCase(),
-            url: URL.createObjectURL(f),
-            uploadedAt: new Date().toISOString(),
-            category: cat,
-        };
-    });
+    // ── Upload dokumen SIT/UAT dengan MASKING nama & PILIHAN tipe file ──
+    // File ditambahkan sebagai draft (tipe bisa dipilih), nama di-masking sesuai
+    // format XXX/GPTD/TIPE/DD-BulanYYYY_NamaProyek. Upload ke server terjadi
+    // saat tipe dipilih / saat step disimpan.
+    const getDefaultDocType = (cat) => ({
+        'SIT_SIGNOFF': 'SIT_SIGNOFF',
+        'UAT_PREP': 'UAT_PLAN',
+        'UAT_EXEC': 'UAT_RESULT',
+        'UAT_APPROVAL': 'UAT_SIGNOFF',
+    }[cat] || 'LAINNYA');
+
+    const docTypeOptions = (cat) => {
+        const base = Object.entries({
+            BRD: 'BRD', MEMO: 'Memo', LAMPIRAN: 'Lampiran', LAINNYA: 'Lainnya',
+            FSD: 'FSD', ARSITEKTUR: 'Arsitektur', SIT_PLAN: 'Test Plan SIT',
+            SIT_RESULT: 'Hasil SIT', SIT_SIGNOFF: 'Berita Acara SIT',
+            UAT_PLAN: 'Skenario UAT', UAT_RESULT: 'Hasil UAT', UAT_SIGNOFF: 'Berita Acara UAT',
+            QA_REPORT: 'Laporan QA', QA_SIGNOFF: 'QA Sign-Off',
+            CYBER_REPORT: 'Laporan Siber', CYBER_SIGNOFF: 'Cyber Sign-Off',
+            RELEASE_PLAN: 'Rencana Rilis', SPREADSHEET: 'Spreadsheet',
+            GAMBAR: 'Gambar/Screenshot', ARSIP: 'Arsip ZIP',
+        });
+        return base;
+    };
+
+    const maskedDocName = (docType) => generateDocumentName(
+        project?.req_id || project?.id,
+        docType,
+        project?.title || project?.name
+    );
+
+    const addDraftDocs = (setter, files, cat) => {
+        const defaultType = getDefaultDocType(cat);
+        const drafts = Array.from(files).map(f => {
+            const typeInfo = getDocumentTypeInfo(defaultType);
+            const masked = maskedDocName(defaultType);
+            const ext = (f.name.split('.').pop() || 'file').toLowerCase();
+            return {
+                id: `${cat}_${Date.now()}_${Math.random().toString(36).slice(2)}`,
+                docId: null,
+                name: masked + '.' + ext,
+                originalName: f.name,
+                maskedName: masked + '.' + ext,
+                size: formatFileSize(f.size),
+                type: ext.toUpperCase(),
+                url: URL.createObjectURL(f),
+                rawFile: f,
+                uploadedAt: new Date().toISOString(),
+                category: cat,
+                doc_type: defaultType,
+                color: typeInfo.color,
+                isUploading: false,
+            };
+        });
+        setter(prev => ({ ...prev, docs: [...(prev.docs || []), ...drafts] }));
+        toast.success(`${drafts.length} berkas ditambahkan. Pilih tipe lalu tersimpan otomatis.`);
+    };
+
+    const changeDocType = async (setter, idx, newDocType) => {
+        let target = null;
+        setter(prev => {
+            const list = prev.docs || [];
+            target = list[idx] || null;
+            const info = getDocumentTypeInfo(newDocType);
+            const ext = target?.name?.split('.').pop() || 'file';
+            const newName = maskedDocName(newDocType) + '.' + ext;
+            const updated = list.map((d, i) => i === idx ? { ...d, doc_type: newDocType, color: info.color, name: newName, maskedName: newName } : d);
+            return { ...prev, docs: updated };
+        });
+        // Upload ulang ke server jika sudah pernah (nama berubah)
+        if (target?.docId) {
+            try { await documentService.delete(target.docId); } catch { /* ignore */ }
+            await uploadDocToServer(setter, idx, newDocType);
+        }
+    };
+
+    const uploadDocToServer = async (setter, idx, docType) => {
+        let target = null;
+        setter(prev => {
+            const list = prev.docs || [];
+            target = list[idx] || null;
+            return { ...prev, docs: list.map((d, i) => i === idx ? { ...d, isUploading: true } : d) };
+        });
+        if (!target?.rawFile || !project?.id) return;
+        try {
+            const res = await documentService.upload(target.rawFile, {
+                project_id: project.id,
+                document_type: docType || target.doc_type || 'LAINNYA',
+                original_filename: target.originalName,
+            });
+            const doc = res?.data || {};
+            const ext = (target.originalName.split('.').pop() || 'file').toLowerCase();
+            const masked = generateDocumentName(project?.req_id || project?.id, docType || target.doc_type || 'LAINNYA', project?.title || project?.name);
+            setter(prev => {
+                const list = prev.docs || [];
+                return { ...prev, docs: list.map((d, i) => i === idx ? {
+                    ...d,
+                    docId: doc.id || null,
+                    name: masked + '.' + ext,
+                    maskedName: masked + '.' + ext,
+                    url: doc.id ? `${import.meta.env.VITE_API_URL}/documents/${doc.id}/download` : d.url,
+                    isUploading: false,
+                } : d) };
+            });
+            toast.success('Berkas diunggah ke server.');
+        } catch (err) {
+            setter(prev => {
+                const list = prev.docs || [];
+                return { ...prev, docs: list.map((d, i) => i === idx ? { ...d, isUploading: false } : d) };
+            });
+            toast.error(`Gagal mengunggah: ${err.message}`);
+        }
+    };
+
+    // Upload semua draft yang belum di-upload (dipakai saat simpan step / tombol selesai)
+    const uploadAllDrafts = async (setter, docs) => {
+        const drafts = (docs || []).map((d, i) => ({ d, i })).filter(x => !x.d.docId && x.d.rawFile);
+        for (const { d, i } of drafts) {
+            await uploadDocToServer(setter, i, d.doc_type);
+        }
+    };
 
     const onUpload = (e, setter, key, cat) => {
-        const docs = mkDocs(e.target.files, cat);
-        if (!docs.length) return;
-        setter(prev => ({ ...prev, docs: [...(prev.docs || []), ...docs] }));
-        toast.success(`${docs.length} berkas dilampirkan.`);
+        const files = Array.from(e.target.files || []);
+        if (!files.length) return;
+        addDraftDocs(setter, files, cat);
+        if (e.target) e.target.value = '';
     };
 
-    const onRemoveDoc = (setter, idx) => {
-        setter(prev => ({ ...prev, docs: prev.docs.filter((_, i) => i !== idx) }));
+    const onRemoveDoc = async (setter, idx) => {
+        let removed = null;
+        setter(prev => {
+            const list = prev.docs || [];
+            removed = list[idx] || null;
+            return { ...prev, docs: list.filter((_, i) => i !== idx) };
+        });
+        if (removed?.docId) {
+            try { await documentService.delete(removed.docId); } catch { /* ignore */ }
+        }
+        toast('Berkas dihapus.', { icon: '🗑️' });
     };
 
-    // â”€â”€ Persist helper â€” saves current form state to project â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    const viewDoc = async (doc) => {
+        try {
+            if (doc?.docId) {
+                const loadingId = toast.loading('Membuka berkas...');
+                const blob = await documentService.download(doc.docId);
+                const url = URL.createObjectURL(blob);
+                toast.dismiss(loadingId);
+                setPreviewDoc({ ...doc, blobUrl: url });
+            } else if (doc?.url?.startsWith('blob:')) {
+                setPreviewDoc({ ...doc, blobUrl: doc.url });
+            } else {
+                toast.info('Berkas belum tersedia untuk dilihat.');
+            }
+        } catch (err) {
+            toast.error(`Gagal membuka berkas: ${err.message}`);
+        }
+    };
+
+    const downloadDoc = async (doc) => {
+        try {
+            if (doc?.docId) {
+                const blob = await documentService.download(doc.docId);
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = doc.maskedName || doc.name || 'berkas';
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+            } else if (doc?.url?.startsWith('blob:')) {
+                const a = document.createElement('a');
+                a.href = doc.url;
+                a.download = doc.maskedName || doc.name || 'berkas';
+                a.click();
+            } else {
+                toast.info('Berkas belum tersedia untuk diunduh.');
+            }
+        } catch (err) {
+            toast.error(`Gagal mengunduh berkas: ${err.message}`);
+        }
+    };
+
+    // ── Status helpers ─────────────────────────────────────────────────────
+    const stUpper = String(status || '').toUpperCase();
+
+    const isDev = ['IN_DEVELOPMENT', 'DEVELOPMENT', 'DEV_IN_PROGRESS', 'IN_SPRINT', 'READY_FOR_DEVELOPMENT'].includes(stUpper) || UNLOCK_ALL_STAGES;
+    const sitActive = isDev || ['SIT_IN_PROGRESS', 'SIT_REVISION', 'UAT_REVISION_DEV', 'RETURN_TO_DEV'].includes(stUpper) || UNLOCK_ALL_STAGES;
+    const sitDone = ['SIT_PASSED', 'UAT_IN_PROGRESS', 'UAT_REVISION_SIT', 'UAT_PASSED', 'DEV_COMPLETED'].includes(stUpper) && !UNLOCK_ALL_STAGES;
+    const uatUnlocked = ['SIT_PASSED', 'UAT_IN_PROGRESS', 'UAT_REVISION_SIT', 'UAT_PASSED', 'DEV_COMPLETED'].includes(stUpper) || UNLOCK_ALL_STAGES;
+    const uatActive = ['SIT_PASSED', 'UAT_IN_PROGRESS', 'UAT_REVISION_SIT'].includes(stUpper) || UNLOCK_ALL_STAGES;
+    const uatDone = ['UAT_PASSED', 'DEV_COMPLETED'].includes(stUpper) && !UNLOCK_ALL_STAGES;
+    const isComplete = stUpper === 'DEV_COMPLETED' && !UNLOCK_ALL_STAGES;
+
+    // ── Gate helper: status task developer ────────────────────────────────
+    // Task TAKE DOWN diabaikan; syarat masuk SIT = semua task tersisa berstatus done.
+    const taskGate = useCallback(() => {
+        const taskList = Array.isArray(project?.tasks) ? project.tasks : [];
+        const eligible = taskList.filter(t => String(t.status || '').toLowerCase() !== 'take_down');
+        const doneTasks = eligible.filter(t => String(t.status || '').toLowerCase() === 'done');
+        const incompleteTasks = eligible.filter(t => String(t.status || '').toLowerCase() !== 'done');
+        return {
+            total: eligible.length,
+            done: doneTasks.length,
+            incomplete: incompleteTasks.map(t => ({ id: t.id, title: t.title || t.name || 'Task', status: t.status })),
+            canStart: eligible.length > 0 && incompleteTasks.length === 0,
+        };
+    }, [project?.tasks]);
+
+    // ── Derived stats dari task approvals (untuk ringkasan & dokumen) ─────
+    const eligibleTaskIds = useMemo(() => {
+        if (!Array.isArray(project?.tasks)) return [];
+        return project.tasks
+            .filter(t => String(t.status || '').toLowerCase() !== 'take_down')
+            .map(t => t.id);
+    }, [project?.tasks]);
+
+    const approvedTaskCount = eligibleTaskIds.filter(id => {
+        const a = sit2Approvals?.[id];
+        return typeof a === 'object' ? a.approved === true : a === true;
+    }).length;
+
+    const defectTaskCount = eligibleTaskIds.filter(id => {
+        const a = sit2Approvals?.[id];
+        const comment = typeof a === 'object' ? (a.comment || '') : '';
+        return comment.trim().length > 0;
+    }).length;
+
+    // ── Completion check per step ──────────────────────────────────────────
+    const sit1Done = sitDone || (status === 'SIT_IN_PROGRESS' && activeSitStep > 1);
+    const sit2Done = sitDone || (status === 'SIT_IN_PROGRESS' && activeSitStep > 2);
+    const sit3Done = sitDone;
+    const uat1Done = uatDone || (status === 'UAT_IN_PROGRESS' && activeUatStep > 1);
+    const uat2Done = uatDone || (status === 'UAT_IN_PROGRESS' && activeUatStep > 2);
+    const uat3Done = uatDone;
+
+    // ── Persist helper ─────────────────────────────────────────────────────
+    // Bersihkan docs dari field yang tidak bisa diserialize (rawFile, blob url)
+    const sanitizeDocs = (docs) => (docs || []).map(({ rawFile, isUploading, ...rest }) => rest);
+
     const buildSitUatData = (overrides = {}) => ({
         activeSitStep, activeUatStep,
-        sit1_stagingUrl: sit1.stagingUrl, sit1_testEnv: sit1.testEnv,
-        sit1_scenarioCount: sit1.scenarioCount, sit1_prepNotes: sit1.prepNotes,
-        sit1_docs: sit1.docs,
-        sit2_totalCases: sit2.totalCases, sit2_passedCases: sit2.passedCases,
-        sit2_defects: sit2.defects, sit2_execNotes: sit2.execNotes,
-        sit2_docs: sit2.docs,
+        sit1_stagingUrl: sit1.stagingUrl,
+        sit2_totalCases: taskGate().done,
+        sit2_passedCases: approvedTaskCount,
+        sit2_defects: defectTaskCount,
         sit2_task_approvals: sit2Approvals,
-        sit3_reviewNotes: sit3.reviewNotes, sit3_docs: sit3.docs,
+        sit3_reviewNotes: sit3.reviewNotes, sit3_docs: sanitizeDocs(sit3.docs),
         uat1_scenarioList: uat1.scenarioList, uat1_preparedBy: uat1.preparedBy,
-        uat1_prepNotes: uat1.prepNotes, uat1_docs: uat1.docs,
+        uat1_prepNotes: uat1.prepNotes, uat1_docs: sanitizeDocs(uat1.docs),
         uat2_executedCount: uat2.executedCount, uat2_passedCount: uat2.passedCount,
         uat2_findings: uat2.findings, uat2_execNotes: uat2.execNotes,
-        uat2_docs: uat2.docs,
+        uat2_docs: sanitizeDocs(uat2.docs),
         uat3_approvalNotes: uat3.approvalNotes, uat3_approvedBy: uat3.approvedBy,
-        uat3_docs: uat3.docs,
+        uat3_docs: sanitizeDocs(uat3.docs),
         revisions,
         ...overrides,
     });
 
-    // â”€â”€ Action handlers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // Simpan sitUatData ke backend secara SILENT (tanpa toast & tanpa reload).
+    // Dipakai agar perubahan approval/lampiran/komentar langsung tersimpan ke DB
+    // sehingga dokumentasi tetap ada saat pindah tab / refresh.
+    const persistQueueRef = useRef(Promise.resolve());
+    const persistSitUatData = (overrides = {}) => {
+        if (!project?.id) return Promise.resolve();
+        // Serialisasi: jalankan berurutan agar tidak saling menimpa (race condition)
+        const run = persistQueueRef.current.then(async () => {
+            try {
+                await projectService.update(project.id, {
+                    sitUatData: buildSitUatData(overrides),
+                });
+            } catch {
+                // silent — jangan spam error di sini
+            }
+        });
+        persistQueueRef.current = run;
+        return run;
+    };
+
+    // Perubahan approval/komentar/lampiran task langsung disimpan ke backend
+    // agar dokumentasi (bukti revisi, catatan, persetujuan) tetap ada di semua laman.
+    const handleApprovalsChange = (next) => {
+        const normalized = normalizeApprovals(next);
+        setSit2Approvals(normalized);
+        persistSitUatData({ sit2_task_approvals: normalized });
+    };
+
+    // Sinkronkan approvals saat project berubah (refresh/polling)
+    useEffect(() => {
+        setSit2Approvals(normalizeApprovals(sitUatData.sit2_task_approvals));
+    }, [project?.id]);
+
+    // ── Handler: START SIT (gatekeeper) ────────────────────────────────────
     const handleStartSIT = () => {
-        // Gatekeeper SIT: semua task (kecuali TAKE_DOWN) harus berstatus Selesai/Done
-        const taskList = Array.isArray(project?.tasks) ? project.tasks : [];
-        const eligible = taskList.filter(t => String(t.status || '').toLowerCase() !== 'take_down');
-        const incomplete = eligible.filter(t => String(t.status || '').toLowerCase() !== 'done');
-        if (eligible.length === 0) {
+        const gate = taskGate();
+        if (gate.total === 0) {
             toast.error('Belum ada task developer di proyek ini. Buat & selesaikan task terlebih dahulu sebelum memulai SIT.');
             return;
         }
-        if (incomplete.length > 0) {
-            const list = incomplete.map(t => t.title || t.name || 'Task').join(', ');
-            toast.error(`Tidak dapat memulai SIT: masih ada ${incomplete.length} task belum selesai (${list}). Semua task harus berstatus Selesai, kecuali Take Down.`);
+        if (!gate.canStart) {
+            const names = gate.incomplete.map(t => t.title).join(', ');
+            toast.error(`Tidak dapat memulai SIT: masih ada ${gate.incomplete.length} task belum selesai (${names}). Semua task harus berstatus Selesai, kecuali Take Down.`);
             return;
         }
         updateProject(project.id, { status: 'SIT_IN_PROGRESS', sitUatData: buildSitUatData({ activeSitStep: 1 }) });
         toast.success(`Pengujian SIT dimulai untuk proyek "${project.name}".`);
     };
-const handleSaveSITStep = (step) => {
-        // Validasi: lanjut dari Eksekusi (step 2) ke Review (step 3) HANYA jika semua task disetujui
+
+    const handleSaveSITStep = async (step) => {
+        // Validasi: dari Eksekusi (step 2) -> Review (step 3) hanya jika SEMUA task disetujui OK
         if (step === 2) {
-            const taskList = Array.isArray(project?.tasks) ? project.tasks : [];
-            const eligible = taskList.filter(t => String(t.status || '').toLowerCase() !== 'take_down');
-            const approvedIds = eligible.filter(t => sit2Approvals?.[t.id] === true).map(t => t.id);
-            const allApproved = eligible.length > 0 && approvedIds.length === eligible.length;
-            if (!allApproved) {
-                toast.error(`Lanjut ke Review & Sign-Off memerlukan SEMUA ${eligible.length} task disetujui (OK). Saat ini ${approvedIds.length} disetujui.`);
+            const eligibleIds = Array.isArray(project?.tasks)
+                ? project.tasks.filter(t => String(t.status || '').toLowerCase() !== 'take_down').map(t => t.id)
+                : [];
+            const approvedIds = eligibleIds.filter(id => {
+                const a = sit2Approvals?.[id];
+                return typeof a === 'object' ? a.approved === true : a === true;
+            }).length;
+            if (eligibleIds.length === 0 || approvedIds !== eligibleIds.length) {
+                toast.error(`Lanjut ke Review & Sign-Off memerlukan SEMUA ${eligibleIds.length} task disetujui (OK). Saat ini ${approvedIds} disetujui.`);
                 return;
             }
         }
+        // Upload draft dokumen yang belum di-upload (agar docId tersimpan di sitUatData)
+        setSubmitting(true);
+        await uploadAllDrafts(setSit3, sit3.docs);
         const nextStep = step + 1;
         setActiveSitStep(nextStep);
         updateProject(project.id, { status: 'SIT_IN_PROGRESS', sitUatData: buildSitUatData({ activeSitStep: nextStep }) });
         toast.success(`SIT Tahap ${step} tersimpan. Lanjut ke Tahap ${nextStep}.`);
+        setSubmitting(false);
     };
-const handleSITPass = () => {
+
+    const handleSITPass = async () => {
         setSubmitting(true);
+        await uploadAllDrafts(setSit3, sit3.docs);
         updateProject(project.id, {
             status: 'SIT_PASSED',
             sitPassedAt: new Date().toISOString(),
             sitUatData: buildSitUatData({ activeSitStep: 3, activeUatStep: 1 }),
         });
         addNotification?.('SIT Lulus!', `Proyek "${project.name}" lulus SIT. UAT Internal dapat dimulai.`, 'success', '/pm/workspace');
-        toast.success(`ðŸŽ‰ SIT Lulus! Proyek siap melanjutkan ke UAT Internal.`);
+        toast.success(`🎉 SIT Lulus! Proyek siap melanjutkan ke UAT Internal.`);
         setSubmitting(false);
+    };
+
+    // ── Handler: Persetujuan SIT per role (Developer/Analis/Development Lead) ──
+    const [sitApprovalNote, setSitApprovalNote] = useState('');
+    const [sitApprovalSubmitting, setSitApprovalSubmitting] = useState(false);
+    const handleSubmitSitApproval = async () => {
+        if (!currentRoleKey || !project?.id) return;
+        if (sit3Approvals?.[currentRoleKey]?.approved) {
+            toast.info('Anda sudah memberikan persetujuan SIT.');
+            return;
+        }
+        setSitApprovalSubmitting(true);
+        try {
+            await projectService.submitSitApproval(project.id, sitApprovalNote.trim());
+            toast.success('Persetujuan SIT Anda berhasil disimpan.');
+            setSitApprovalNote('');
+            refreshProject?.();
+        } catch (err) {
+            toast.error(`Gagal menyimpan persetujuan: ${err.message}`);
+        } finally {
+            setSitApprovalSubmitting(false);
+        }
     };
 
     const handleSITRevision = () => {
@@ -328,7 +683,7 @@ const handleSITPass = () => {
             sitUatData: buildSitUatData({ revisions: newRevisions, activeSitStep: 1 }),
         });
         addNotification?.('Revisi SIT Diminta', `Proyek "${project.name}" dikembalikan ke Development karena SIT gagal.`, 'warning', '/pm/workspace');
-        toast.error(`â†©ï¸ Revisi diminta. Proyek kembali ke Development.`);
+        toast.error(`↩️ Revisi diminta. Proyek kembali ke Development.`);
         setRevisionNotes('');
         setShowRevisionModal(false);
         setSubmitting(false);
@@ -339,22 +694,27 @@ const handleSITPass = () => {
         toast.success(`Pengujian UAT Internal dimulai untuk proyek "${project.name}".`);
     };
 
-    const handleSaveUATStep = (step) => {
+    const handleSaveUATStep = async (step) => {
         const nextStep = step + 1;
+        setSubmitting(true);
+        if (step === 1) await uploadAllDrafts(setUat1, uat1.docs);
+        if (step === 2) await uploadAllDrafts(setUat2, uat2.docs);
         setActiveUatStep(nextStep);
         updateProject(project.id, { status: 'UAT_IN_PROGRESS', sitUatData: buildSitUatData({ activeUatStep: nextStep }) });
-        toast.success(`âœ… UAT Tahap ${step} tersimpan. Lanjut ke Tahap ${nextStep}.`);
+        toast.success(`UAT Tahap ${step} tersimpan. Lanjut ke Tahap ${nextStep}.`);
+        setSubmitting(false);
     };
 
-    const handleUATPass = () => {
+    const handleUATPass = async () => {
         setSubmitting(true);
+        await uploadAllDrafts(setUat3, uat3.docs);
         updateProject(project.id, {
             status: 'DEV_COMPLETED',
             uatPassedAt: new Date().toISOString(),
             sitUatData: buildSitUatData({ activeUatStep: 3 }),
         });
-        addNotification?.('âœ… BAST Diterbitkan â€” DEV COMPLETED!', `Proyek "${project.name}" lulus SIT & UAT Internal. Siap QA & Siber.`, 'success', '/pm/workspace');
-        toast.success(`ðŸŽ‰ BAST Diterbitkan! Proyek resmi berstatus DEV_COMPLETED.`);
+        addNotification?.('BAST Diterbitkan — DEV COMPLETED!', `Proyek "${project.name}" lulus SIT & UAT Internal. Siap QA & Siber.`, 'success', '/pm/workspace');
+        toast.success(`🎉 BAST Diterbitkan! Proyek resmi berstatus DEV_COMPLETED.`);
         setSubmitting(false);
     };
 
@@ -369,39 +729,58 @@ const handleSITPass = () => {
             status: newStatus,
             sitUatData: buildSitUatData({ revisions: newRevisions, activeUatStep: 1, activeSitStep: nextActiveSit }),
         });
-        addNotification?.('Revisi UAT Diminta', `Proyek "${project.name}" dikembalikan ${revisionType === 'UAT_TO_SIT' ? 'ke SIT' : 'ke Development'}.`, 'warning', '/pm/workspace');
-        toast.error(`â†©ï¸ Revisi diminta. Proyek kembali ke ${revisionType === 'UAT_TO_SIT' ? 'SIT' : 'Development'}.`);
+        addNotification?.(
+            revisionType === 'UAT_TO_SIT' ? 'UAT Dikembalikan ke SIT' : 'UAT Dikembalikan ke Development',
+            `Proyek "${project.name}" mengalami ${revisionType === 'UAT_TO_SIT' ? 'revisi minor (ulang SIT)' : 'revisi mayor (kembali ke dev)'}.`,
+            'warning',
+            '/pm/workspace'
+        );
+        toast.warning(`Revisi ${revisionType === 'UAT_TO_SIT' ? 'minor (ulang SIT)' : 'mayor (kembali ke dev)'} diproses.`);
         setRevisionNotes('');
         setShowRevisionModal(false);
         setSubmitting(false);
     };
 
-    // â”€â”€ Status helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    const stUpper = String(status || '').toUpperCase();
+    // ── Handler: Kembalikan Task ke Developer (alur revisi task terintegrasi) ──
+    const handleReturnTaskRevision = async () => {
+        if (!showTaskRevisionModal) return;
+        const note = (taskRevisions[showTaskRevisionModal.id] || '').trim();
+        if (!note) {
+            toast.error('Catatan arahan revisi wajib diisi!');
+            return;
+        }
+        setSubmitting(true);
+        try {
+            await taskService.requestRevision(showTaskRevisionModal.id, note);
+            // Tandai jejak revisi pada approval task (dihapus dari daftar OK)
+            const next = { ...(normalizeApprovals(sit2Approvals) || {}) };
+            const prev = next[String(showTaskRevisionModal.id)];
+            next[String(showTaskRevisionModal.id)] = {
+                ...(typeof prev === 'object' && prev !== null ? prev : { approved: false, comment: '', attachments: [] }),
+                approved: false, approvedAt: null,
+                revisedAt: new Date().toISOString(),
+                revisedBy: sf(project?.pm, 'PM'),
+            };
+            setSit2Approvals(next);
+            // Simpan ke backend agar jejak revisi + lampiran bukti tersimpan permanen
+            await persistSitUatData({ sit2_task_approvals: next });
+            toast.success(`Task "${showTaskRevisionModal.title}" dikembalikan ke developer untuk revisi.`);
+            setShowTaskRevisionModal(null);
+            setTaskRevisions(prev => { const c = { ...prev }; delete c[showTaskRevisionModal.id]; return c; });
+            // Sinkronkan data proyek agar tab Manajemen Task / board developer langsung ter-update
+            refreshProject?.();
+        } catch (err) {
+            toast.error(`Gagal mengirim revisi task: ${err.message}`);
+        } finally {
+            setSubmitting(false);
+        }
+    };
 
-    // ðŸ”“ Mode unlock: semua tahapan bisa diakses & diedit tanpa terkunci status proyek
-    const isDev = ['IN_DEVELOPMENT', 'DEVELOPMENT', 'DEV_IN_PROGRESS', 'IN_SPRINT', 'READY_FOR_DEVELOPMENT'].includes(stUpper) || UNLOCK_ALL_STAGES;
-    const sitActive = isDev || ['SIT_IN_PROGRESS', 'SIT_REVISION', 'UAT_REVISION_DEV', 'RETURN_TO_DEV'].includes(stUpper) || UNLOCK_ALL_STAGES;
-    const sitDone = ['SIT_PASSED', 'UAT_IN_PROGRESS', 'UAT_REVISION_SIT', 'UAT_PASSED', 'DEV_COMPLETED'].includes(stUpper) && !UNLOCK_ALL_STAGES;
-    const uatUnlocked = ['SIT_PASSED', 'UAT_IN_PROGRESS', 'UAT_REVISION_SIT', 'UAT_PASSED', 'DEV_COMPLETED'].includes(stUpper) || UNLOCK_ALL_STAGES;
-    const uatActive = ['SIT_PASSED', 'UAT_IN_PROGRESS', 'UAT_REVISION_SIT'].includes(stUpper) || UNLOCK_ALL_STAGES;
-    const uatDone = ['UAT_PASSED', 'DEV_COMPLETED'].includes(stUpper) && !UNLOCK_ALL_STAGES;
-    const isComplete = stUpper === 'DEV_COMPLETED' && !UNLOCK_ALL_STAGES;
-
-
-    // â”€â”€ Completion check per step â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    const sit1Done = sitDone || (status === 'SIT_IN_PROGRESS' && activeSitStep > 1);
-    const sit2Done = sitDone || (status === 'SIT_IN_PROGRESS' && activeSitStep > 2);
-    const sit3Done = sitDone;
-    const uat1Done = uatDone || (status === 'UAT_IN_PROGRESS' && activeUatStep > 1);
-    const uat2Done = uatDone || (status === 'UAT_IN_PROGRESS' && activeUatStep > 2);
-    const uat3Done = uatDone;
-
-    // â”€â”€ Render â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // ── Render ─────────────────────────────────────────────────────────────
     return (
         <div className="p-5 space-y-5">
 
-            {/* â”€â”€â”€ Master Phase Stepper â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
+            {/* ─── Master Phase Stepper ─────────────────────────────────── */}
             <div className="bg-gradient-to-r from-[#003a73] to-[#00529C] rounded-2xl p-5 text-white">
                 <div className="flex items-center justify-between mb-4">
                     <div className="flex items-center gap-3">
@@ -410,11 +789,10 @@ const handleSITPass = () => {
                         </div>
                         <div>
                             <h3 className="font-bold text-base">Verifikasi SIT &amp; UAT Internal</h3>
-                            <p className="text-blue-200 text-xs">{sf(project?.id)} â€¢ {sf(project?.name)}</p>
+                            <p className="text-blue-200 text-xs">{sf(project?.id)} • {sf(project?.name)}</p>
                         </div>
                     </div>
                 </div>
-
 
                 {/* Phase progress bar */}
                 <div className="flex items-center gap-1 overflow-x-auto pb-1">
@@ -439,45 +817,41 @@ const handleSITPass = () => {
                 </div>
             </div>
 
-            {/* â”€â”€â”€ REVISION ALERTS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
-            
-            {/* Status Kelayakan Mulai SIT (Gatekeeper) */}
+            {/* ─── GATE KEEPER SIT: Status Task Developer ───────────────── */}
             <div className="bg-white rounded-2xl border border-gray-200 p-4 shadow-sm">
                 <div className="flex items-center gap-2 mb-2">
                     <ShieldCheck size={16} className="text-sky-600" />
-                    <h4 className="font-bold text-sm text-gray-800">Syarat Masuk SIT (Gate)</h4>
+                    <h4 className="font-bold text-sm text-gray-800">Syarat Masuk SIT (Gate) — Task Developer</h4>
                 </div>
                 {(() => {
-                    const taskList = Array.isArray(project?.tasks) ? project.tasks : [];
-                    const eligible = taskList.filter(t => String(t.status || '').toLowerCase() !== 'take_down');
-                    const doneTasks = eligible.filter(t => String(t.status || '').toLowerCase() === 'done');
-                    const incomplete = eligible.length - doneTasks.length;
-                    const canStart = eligible.length > 0 && incomplete === 0;
+                    const gate = taskGate();
                     return (
                         <div className="space-y-2">
                             <div className="flex items-center gap-2 text-xs">
-                                <span className="font-semibold text-gray-700">Progress Task Developer:</span>
-                                <span className="font-bold text-sky-700">{doneTasks.length}/{eligible.length} Selesai</span>
-                                {incomplete > 0 && (
-                                    <span className="text-red-600 font-semibold">({incomplete} belum selesai)</span>
+                                <span className="font-semibold text-gray-700">Progress Task:</span>
+                                <span className="font-bold text-sky-700">{gate.done}/{gate.total} Selesai</span>
+                                {gate.incomplete.length > 0 && (
+                                    <span className="text-red-600 font-semibold">({gate.incomplete.length} belum selesai)</span>
                                 )}
                             </div>
                             <div className="w-full h-2 bg-gray-100 rounded-full overflow-hidden">
-                                <div className={`h-full rounded-full transition-all ${canStart ? 'bg-emerald-500' : 'bg-amber-500'}`}
-                                    style={{ width: `${eligible.length ? Math.round((doneTasks.length / eligible.length) * 100) : 0}%` }} />
+                                <div className={`h-full rounded-full transition-all ${gate.canStart ? 'bg-emerald-500' : 'bg-amber-500'}`}
+                                    style={{ width: `${gate.total ? Math.round((gate.done / gate.total) * 100) : 0}%` }} />
                             </div>
-                            <p className="text-xs">
-                                {eligible.length === 0
+                            <p className={`text-xs ${gate.canStart ? 'text-emerald-700' : 'text-amber-700'}`}>
+                                {gate.total === 0
                                     ? 'Belum ada task developer. Buat & selesaikan task sebelum memulai SIT.'
-                                    : canStart
+                                    : gate.canStart
                                         ? 'Semua task telah selesai. SIT siap dimulai.'
-                                        : 'Masih ada task belum selesai. Selesaikan seluruh task (kecuali Take Down) untuk membuka SIT.'}
+                                        : 'Masih ada task belum selesai. Selesaikan seluruh task (kecuali "Take Down") sebelum memulai SIT.'}
                             </p>
                         </div>
                     );
                 })()}
             </div>
-{status === 'SIT_REVISION' && (
+
+            {/* ─── REVISION ALERTS (tingkat proyek) ─────────────────────── */}
+            {status === 'SIT_REVISION' && (
                 <div className="p-4 bg-orange-50 border border-orange-300 rounded-2xl flex items-start gap-3">
                     <RotateCcw size={18} className="text-orange-600 shrink-0 mt-0.5" />
                     <div>
@@ -505,9 +879,7 @@ const handleSITPass = () => {
                 </div>
             )}
 
-            {/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-                                   SIT PANEL
-                â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */}
+            {/* ═══ SIT PANEL ═══ */}
             <div className={`bg-white rounded-2xl border-2 shadow-sm overflow-hidden transition-all ${sitDone ? 'border-teal-200' : sitActive ? 'border-sky-300' : 'border-gray-200'}`}>
                 {/* SIT Panel Header */}
                 <div className={`px-5 py-4 flex items-center justify-between ${sitDone ? 'bg-teal-50' : sitActive ? 'bg-sky-50' : 'bg-gray-50'} border-b`}>
@@ -523,9 +895,9 @@ const handleSITPass = () => {
                         </div>
                     </div>
                     <div className="flex items-center gap-2">
-                        {sitDone && <span className="px-3 py-1 bg-teal-100 text-teal-700 text-xs font-bold rounded-full border border-teal-300">âœ… LULUS</span>}
-                        {status === 'SIT_IN_PROGRESS' && <span className="px-3 py-1 bg-sky-100 text-sky-700 text-xs font-bold rounded-full border border-sky-300 animate-pulse">ðŸ”„ BERLANGSUNG</span>}
-                        {['SIT_REVISION', 'UAT_REVISION_DEV'].includes(status) && <span className="px-3 py-1 bg-orange-100 text-orange-700 text-xs font-bold rounded-full border border-orange-300">â†©ï¸ REVISI</span>}
+                        {sitDone && <span className="px-3 py-1 bg-teal-100 text-teal-700 text-xs font-bold rounded-full border border-teal-300">✅ LULUS</span>}
+                        {status === 'SIT_IN_PROGRESS' && <span className="px-3 py-1 bg-sky-100 text-sky-700 text-xs font-bold rounded-full border border-sky-300 animate-pulse">🔄 BERLANGSUNG</span>}
+                        {['SIT_REVISION', 'UAT_REVISION_DEV'].includes(status) && <span className="px-3 py-1 bg-orange-100 text-orange-700 text-xs font-bold rounded-full border border-orange-300">↩️ REVISI</span>}
                     </div>
                 </div>
 
@@ -552,7 +924,6 @@ const handleSITPass = () => {
 
                 {/* SIT Active or Done */}
                 {(stUpper === 'SIT_IN_PROGRESS' || sitDone || UNLOCK_ALL_STAGES) && (
-
                     <div>
                         {/* Sub-step tabs */}
                         <div className="flex border-b border-gray-100 bg-gray-50/50 px-3 overflow-x-auto">
@@ -567,56 +938,72 @@ const handleSITPass = () => {
                             ))}
                         </div>
 
-                        {/* â”€â”€ SIT Step 1: Persiapan â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
+                        {/* ── SIT Step 1: Persiapan ──────────────────────── */}
                         {activeSitStep === 1 && (
                             <div className="p-5 space-y-4">
-                                <div className="flex items-center gap-2 mb-3">
+                                <div className="flex items-center gap-2 mb-1">
                                     <BookOpen size={16} className="text-blue-600" />
-                                    <h5 className="font-bold text-sm text-gray-800">Tahap 1: Persiapan &amp; Test Plan SIT</h5>
-                                    {sit1Done && <span className="ml-auto text-[10px] font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">Selesai âœ“</span>}
+                                    <h5 className="font-bold text-sm text-gray-800">Tahap 1: Persiapan SIT</h5>
+                                    {sit1Done && <span className="ml-auto text-[10px] font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">Selesai ✓</span>}
                                 </div>
-                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                                    <div>
-                                        <label className="block text-xs font-bold text-gray-600 uppercase tracking-wider mb-1.5">URL Environment Staging / Testing *</label>
-                                        <input type="text" value={sit1.stagingUrl} onChange={e => setSit1(p => ({...p, stagingUrl: e.target.value}))}
+                                <p className="text-xs text-gray-500 mb-3">
+                                    Lengkapi environment yang akan diuji. Jumlah skenario otomatis mengikuti task yang sudah Selesai.
+                                </p>
+
+                                {/* Kartu utama: URL Staging + jumlah skenario */}
+                                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                                    <div className="sm:col-span-2 bg-white border border-gray-200 rounded-2xl p-4">
+                                        <div className="flex items-center gap-2.5 mb-3">
+                                            <div className="w-9 h-9 bg-sky-100 rounded-xl flex items-center justify-center">
+                                                <Server size={18} className="text-sky-600" />
+                                            </div>
+                                            <div>
+                                                <p className="text-xs font-bold text-gray-800">URL Environment Staging / Testing</p>
+                                                <p className="text-[10px] text-gray-400">Alamat aplikasi yang siap diuji integrasi</p>
+                                            </div>
+                                        </div>
+                                        <input type="text" value={sit1.stagingUrl} onChange={e => setSit1(p => ({ ...p, stagingUrl: e.target.value }))}
                                             placeholder={import.meta.env.VITE_STAGING_URL || "https://staging.banknagari.co.id"} disabled={sitDone}
-                                            className="w-full px-3 py-2.5 border border-gray-200 rounded-xl text-xs font-mono focus:outline-none focus:border-sky-500 bg-gray-50 disabled:bg-gray-100" />
+                                            className="w-full px-3.5 py-2.5 border border-gray-200 rounded-xl text-xs font-mono focus:outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-100 bg-gray-50 disabled:bg-gray-100" />
                                     </div>
-                                    <div>
-                                        <label className="block text-xs font-bold text-gray-600 uppercase tracking-wider mb-1.5">Versi / Environment yang Diuji *</label>
-                                        <input type="text" value={sit1.testEnv} onChange={e => setSit1(p => ({...p, testEnv: e.target.value}))}
-                                            placeholder="Contoh: v1.2.3-staging / PostgreSQL 14" disabled={sitDone}
-                                            className="w-full px-3 py-2.5 border border-gray-200 rounded-xl text-xs focus:outline-none focus:border-sky-500 bg-gray-50 disabled:bg-gray-100" />
-                                    </div>
-                                    <div>
-                                        <label className="block text-xs font-bold text-gray-600 uppercase tracking-wider mb-1.5">Jumlah Skenario Uji SIT</label>
-                                        <input type="number" value={sit1.scenarioCount} onChange={e => setSit1(p => ({...p, scenarioCount: e.target.value}))}
-                                            placeholder="Contoh: 45" disabled={sitDone}
-                                            className="w-full px-3 py-2.5 border border-gray-200 rounded-xl text-xs focus:outline-none focus:border-sky-500 bg-gray-50 disabled:bg-gray-100" />
-                                    </div>
-                                    <div>
-                                        <label className="block text-xs font-bold text-gray-600 uppercase tracking-wider mb-1.5">Catatan Persiapan</label>
-                                        <input type="text" value={sit1.prepNotes} onChange={e => setSit1(p => ({...p, prepNotes: e.target.value}))}
-                                            placeholder="Keterangan tambahan..." disabled={sitDone}
-                                            className="w-full px-3 py-2.5 border border-gray-200 rounded-xl text-xs focus:outline-none focus:border-sky-500 bg-gray-50 disabled:bg-gray-100" />
+                                    <div className="bg-gradient-to-br from-sky-50 to-blue-50 border border-sky-200 rounded-2xl p-4 flex flex-col justify-center">
+                                        <div className="flex items-center gap-2.5">
+                                            <div className="w-9 h-9 bg-white rounded-xl flex items-center justify-center border border-sky-200">
+                                                <CheckSquare size={18} className="text-sky-600" />
+                                            </div>
+                                            <p className="text-xs font-bold text-sky-800">Jumlah Skenario Uji SIT</p>
+                                        </div>
+                                        <div className="flex items-end gap-2 mt-3">
+                                            <span className="font-black text-4xl text-sky-700 leading-none">{taskGate().done}</span>
+                                            <span className="text-[10px] text-sky-600 font-semibold mb-1">task selesai</span>
+                                        </div>
+                                        <div className="mt-2 h-1.5 bg-sky-100 rounded-full overflow-hidden">
+                                            <div className="h-full bg-sky-500 rounded-full transition-all duration-500" style={{ width: `${taskGate().total > 0 ? Math.min(100, Math.round((taskGate().done / taskGate().total) * 100)) : 0}%` }} />
+                                        </div>
+                                        <p className="text-[10px] text-sky-600/80 mt-1.5">
+                                            {taskGate().total > 0
+                                                ? `${taskGate().done} dari ${taskGate().total} task selesai`
+                                                : 'Belum ada task developer'}
+                                        </p>
                                     </div>
                                 </div>
-                                <div>
-                                    <div className="flex items-center justify-between mb-1.5">
-                                        <label className="text-xs font-bold text-gray-600 uppercase tracking-wider">Dokumen: Test Plan SIT</label>
-                                        {!sitDone && (
-                                            <label className="px-3 py-1.5 bg-sky-600 hover:bg-sky-700 text-white rounded-xl text-xs font-bold cursor-pointer flex items-center gap-1.5 transition-colors">
-                                                <Upload size={12} /> Upload
-                                                <input type="file" ref={sit1FileRef} multiple accept=".pdf,.xls,.xlsx,.jpg,.jpeg,.png,.zip" onChange={e => onUpload(e, setSit1, 'docs', 'SIT_PREP')} className="hidden" />
-                                            </label>
-                                        )}
-                                    </div>
-                                    <DocList docs={sit1.docs} onRemove={i => onRemoveDoc(setSit1, i)} readOnly={sitDone} />
+
+                                {/* Info & kesiapan */}
+                                <div className={`rounded-xl border p-3 text-xs flex items-center gap-2.5 ${taskGate().canStart ? 'bg-emerald-50 border-emerald-200 text-emerald-800' : 'bg-amber-50 border-amber-200 text-amber-800'}`}>
+                                    {taskGate().canStart
+                                        ? <CheckCircle2 size={15} className="text-emerald-600 shrink-0" />
+                                        : <AlertTriangle size={15} className="text-amber-500 shrink-0" />}
+                                    <span className="font-semibold">
+                                        {taskGate().canStart
+                                            ? 'Semua task sudah Selesai — SIT siap dilaksanakan.'
+                                            : `Masih ada ${taskGate().incomplete.length} task belum selesai. Selesai-kan semua task agar skenario tercatat otomatis.`}
+                                    </span>
                                 </div>
-                                {!sitDone && status === 'SIT_IN_PROGRESS' && activeSitStep === 1 && (
+
+                                {!sitDone && (status === 'SIT_IN_PROGRESS' || UNLOCK_ALL_STAGES) && activeSitStep === 1 && (
                                     <div className="flex justify-end pt-2">
-                                        <button onClick={() => handleSaveSITStep(1)} disabled={!sit1.stagingUrl || !sit1.testEnv}
-                                            className="px-5 py-2.5 bg-sky-600 hover:bg-sky-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-white text-xs font-bold rounded-xl flex items-center gap-2 transition-all cursor-pointer">
+                                        <button onClick={() => handleSaveSITStep(1)} disabled={!sit1.stagingUrl}
+                                            className="px-5 py-2.5 bg-sky-600 hover:bg-sky-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-white text-xs font-bold rounded-xl flex items-center gap-2 transition-all cursor-pointer shadow-sm">
                                             Simpan &amp; Lanjut Eksekusi <ArrowRight size={14} />
                                         </button>
                                     </div>
@@ -624,77 +1011,72 @@ const handleSITPass = () => {
                             </div>
                         )}
 
-                        {/* â”€â”€ SIT Step 2: Eksekusi â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
+                        {/* ── SIT Step 2: Eksekusi ───────────────────────── */}
                         {activeSitStep === 2 && (
                             <div className="p-5 space-y-4">
                                 <div className="flex items-center gap-2 mb-3">
                                     <Bug size={16} className="text-indigo-600" />
-                                    <h5 className="font-bold text-sm text-gray-800">Tahap 2: Eksekusi Test Cases &amp; Defect Log</h5>
-                                    {sit2Done && <span className="ml-auto text-[10px] font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">Selesai âœ“</span>}
+                                    <h5 className="font-bold text-sm text-gray-800">Tahap 2: Eksekusi &amp; Persetujuan Task SIT</h5>
+                                    {sit2Done && <span className="ml-auto text-[10px] font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">Selesai ✓</span>}
                                 </div>
-                                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                                    <div>
-                                        <label className="block text-xs font-bold text-gray-600 uppercase tracking-wider mb-1.5">Total Test Cases *</label>
-                                        <input type="number" value={sit2.totalCases} onChange={e => setSit2(p => ({...p, totalCases: e.target.value}))}
-                                            placeholder="Contoh: 45" disabled={sitDone}
-                                            className="w-full px-3 py-2.5 border border-gray-200 rounded-xl text-xs focus:outline-none focus:border-indigo-500 bg-gray-50 disabled:bg-gray-100" />
+
+                                {/* Ringkasan statistik otomatis */}
+                                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                                    <div className="bg-white border border-gray-200 rounded-xl p-3">
+                                        <p className="text-[9px] font-bold text-gray-400 uppercase tracking-wider">Total Task (Skenario)</p>
+                                        <p className="font-black text-xl text-slate-800 mt-1">{taskGate().total}</p>
+                                        <p className="text-[10px] text-gray-400">semua task non Take Down</p>
                                     </div>
-                                    <div>
-                                        <label className="block text-xs font-bold text-gray-600 uppercase tracking-wider mb-1.5">Test Cases Lulus *</label>
-                                        <input type="number" value={sit2.passedCases} onChange={e => setSit2(p => ({...p, passedCases: e.target.value}))}
-                                            placeholder="Contoh: 43" disabled={sitDone}
-                                            className="w-full px-3 py-2.5 border border-gray-200 rounded-xl text-xs focus:outline-none focus:border-indigo-500 bg-gray-50 disabled:bg-gray-100" />
+                                    <div className="bg-white border border-gray-200 rounded-xl p-3">
+                                        <p className="text-[9px] font-bold text-gray-400 uppercase tracking-wider">Task Selesai</p>
+                                        <p className="font-black text-xl text-sky-600 mt-1">{taskGate().done}</p>
+                                        <p className="text-[10px] text-gray-400">dari total task</p>
                                     </div>
-                                    <div>
-                                        <label className="block text-xs font-bold text-gray-600 uppercase tracking-wider mb-1.5">Jumlah Defect Ditemukan</label>
-                                        <input type="number" value={sit2.defects} onChange={e => setSit2(p => ({...p, defects: e.target.value}))}
-                                            placeholder="Contoh: 2" disabled={sitDone}
-                                            className="w-full px-3 py-2.5 border border-gray-200 rounded-xl text-xs focus:outline-none focus:border-indigo-500 bg-gray-50 disabled:bg-gray-100" />
+                                    <div className="bg-white border border-gray-200 rounded-xl p-3">
+                                        <p className="text-[9px] font-bold text-gray-400 uppercase tracking-wider">Task Disetujui (OK)</p>
+                                        <p className="font-black text-xl text-emerald-600 mt-1">{approvedTaskCount} <span className="text-sm text-gray-400">/ {taskGate().total}</span></p>
+                                        <p className="text-[10px] text-gray-400">lolos SIT</p>
+                                    </div>
+                                    <div className="bg-white border border-gray-200 rounded-xl p-3">
+                                        <p className="text-[9px] font-bold text-gray-400 uppercase tracking-wider">Task dengan Temuan</p>
+                                        <p className="font-black text-xl text-orange-500 mt-1">{defectTaskCount}</p>
+                                        <p className="text-[10px] text-gray-400">komentar/temuan terisi</p>
                                     </div>
                                 </div>
-                                {sit2.totalCases && sit2.passedCases && (
-                                    <div className="bg-indigo-50 border border-indigo-200 rounded-xl p-3 flex items-center gap-3 text-xs">
-                                        <Info size={14} className="text-indigo-500 shrink-0" />
-                                        <span className="text-indigo-800 font-semibold">
-                                            Pass Rate: {Math.round((Number(sit2.passedCases) / Number(sit2.totalCases)) * 100)}%
-                                            {Math.round((Number(sit2.passedCases) / Number(sit2.totalCases)) * 100) >= 90
-                                                ? ' âœ… Memenuhi Threshold (â‰¥90%)' : ' âš ï¸ Di bawah threshold â€” pertimbangkan revisi'}
+
+                                {/* Pass rate otomatis */}
+                                {taskGate().total > 0 && (
+                                    <div className={`rounded-xl p-3 flex items-center gap-3 text-xs ${approvedTaskCount === taskGate().total ? 'bg-emerald-50 border border-emerald-200 text-emerald-800' : 'bg-indigo-50 border border-indigo-200 text-indigo-800'}`}>
+                                        <Info size={14} className="shrink-0" />
+                                        <span className="font-semibold">
+                                            Pass Rate Task: {taskGate().total > 0 ? Math.round((approvedTaskCount / taskGate().total) * 100) : 0}%
+                                            {approvedTaskCount === taskGate().total
+                                                ? ' ✓ Semua task disetujui — siap lanjut ke Review & Sign-Off.'
+                                                : ' ⚠ Masih ada task belum disetujui (OK). Lanjut hanya jika SEMUA task dicentang OK.'}
                                         </span>
                                     </div>
                                 )}
-                                <div>
-                                    <label className="block text-xs font-bold text-gray-600 uppercase tracking-wider mb-1.5">Ringkasan Hasil Eksekusi &amp; Temuan</label>
-                                    <textarea rows={3} value={sit2.execNotes} onChange={e => setSit2(p => ({...p, execNotes: e.target.value}))}
-                                        placeholder="Ringkasan hasil testing: apa yang berhasil, apa yang gagal, tindak lanjut defect..." disabled={sitDone}
-                                        className="w-full px-3 py-2.5 border border-gray-200 rounded-xl text-xs focus:outline-none focus:border-indigo-500 bg-gray-50 resize-none disabled:bg-gray-100" />
-                                </div>
-                                <div>
-                                    <div className="flex items-center justify-between mb-1.5">
-                                        <label className="text-xs font-bold text-gray-600 uppercase tracking-wider">Dokumen: Hasil Test Cases &amp; Screenshot Bukti</label>
-                                        {!sitDone && (
-                                            <label className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold cursor-pointer flex items-center gap-1.5 transition-colors">
-                                                <Upload size={12} /> Upload
-                                                <input type="file" ref={sit2FileRef} multiple accept=".pdf,.xls,.xlsx,.jpg,.jpeg,.png,.zip" onChange={e => onUpload(e, setSit2, 'docs', 'SIT_EXEC')} className="hidden" />
-                                            </label>
-                                        )}
-                                    </div>
-                                    <DocList docs={sit2.docs} onRemove={i => onRemoveDoc(setSit2, i)} readOnly={sitDone} />
-                                </div>
-                                
-                                {/* Tabel Persetujuan Task untuk Eksekusi SIT */}
+
+                                {/* TABLE PERSETUJUAN TASK DEVELOPER (Syarat Lanjut SIT) */}
                                 <div className="pt-2 border-t border-gray-100">
                                     <div className="flex items-center gap-2 mb-2">
                                         <CheckCircle2 size={15} className="text-indigo-600" />
                                         <h5 className="font-bold text-sm text-gray-800">Persetujuan Task Developer (Syarat Lanjut SIT)</h5>
                                     </div>
                                     <p className="text-[11px] text-gray-500 mb-2">
-                                        Centang <strong>OK</strong> pada setiap task yang sudah lolos &amp; disetujui tim. Lanjut ke Review &amp; Sign-Off hanya jika SEMUA task disetujui.
+                                        Centang <strong>OK</strong> pada setiap task yang sudah lolos &amp; disetujui tim. Lampirkan <strong>bukti</strong> (screenshot/file) per task melalui kolom <strong>Lampiran Bukti</strong>. Gunakan <strong>Revisi</strong> untuk mengembalikan task ke developer. Lanjut ke Review &amp; Sign-Off hanya jika SEMUA task disetujui.
                                     </p>
-                                    <SITTaskExecution project={project} approvals={sit2Approvals} onApprovalsChange={setSit2Approvals} />
+                                    <SITTaskExecution
+                                        project={project}
+                                        approvals={sit2Approvals}
+                                        onApprovalsChange={handleApprovalsChange}
+                                        onRequestRevision={setShowTaskRevisionModal}
+                                    />
                                 </div>
-{!sitDone && status === 'SIT_IN_PROGRESS' && activeSitStep === 2 && (
+
+                                {!sitDone && (status === 'SIT_IN_PROGRESS' || UNLOCK_ALL_STAGES) && activeSitStep === 2 && (
                                     <div className="flex justify-end pt-2">
-                                        <button onClick={() => handleSaveSITStep(2)} disabled={!sit2.totalCases || !sit2.passedCases}
+                                        <button onClick={() => handleSaveSITStep(2)} disabled={taskGate().total === 0 || approvedTaskCount !== taskGate().total}
                                             className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-white text-xs font-bold rounded-xl flex items-center gap-2 transition-all cursor-pointer">
                                             Simpan &amp; Lanjut Review <ArrowRight size={14} />
                                         </button>
@@ -703,71 +1085,222 @@ const handleSITPass = () => {
                             </div>
                         )}
 
-                        {/* â”€â”€ SIT Step 3: Sign-off â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
+                        {/* ── SIT Step 3: Sign-off ───────────────────────── */}
                         {activeSitStep === 3 && (
                             <div className="p-5 space-y-4">
-                                <div className="flex items-center gap-2 mb-3">
+                                <div className="flex items-center gap-2 mb-1">
                                     <FileCheck size={16} className="text-teal-600" />
                                     <h5 className="font-bold text-sm text-gray-800">Tahap 3: Review Akhir &amp; Keputusan SIT</h5>
-                                    {sit3Done && <span className="ml-auto text-[10px] font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">Selesai âœ“</span>}
+                                    {sit3Done && <span className="ml-auto text-[10px] font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">Selesai ✓</span>}
                                 </div>
-                                {/* Summary card */}
-                                <div className="bg-slate-50 rounded-xl border border-slate-200 p-4 text-xs space-y-2">
-                                    <p className="font-bold text-slate-700 uppercase tracking-wider text-[10px] mb-2">Ringkasan Hasil SIT</p>
-                                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                                <p className="text-xs text-gray-500 mb-2">
+                                    Ringkasan hasil pengujian otomatis dari data SIT. SIT dinyatakan lulus hanya setelah persetujuan dari <strong>Developer</strong>, <strong>PM / Analyst Pengembangan</strong>, dan <strong>Development Lead</strong> lengkap.
+                                </p>
+
+                                {/* ── Ringkasan Hasil SIT (otomatis per bagian) ── */}
+                                <div className="bg-slate-50 rounded-2xl border border-slate-200 p-4 text-xs space-y-3">
+                                    <p className="font-bold text-slate-700 uppercase tracking-wider text-[10px]">Ringkasan Hasil SIT</p>
+                                    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
                                         {[
-                                            { label: 'Staging URL', val: sit1.stagingUrl || '-' },
-                                            { label: 'Environment', val: sit1.testEnv || '-' },
-                                            { label: 'Total Test Cases', val: sit2.totalCases || '-' },
-                                            { label: 'Lulus / Defect', val: `${sit2.passedCases || '-'} / ${sit2.defects || '0'}` },
+                                            { label: 'Environment', val: sit1.stagingUrl || '-', icon: <Server size={13} className="text-sky-500" /> },
+                                            { label: 'Skenario Uji', val: `${taskGate().done}`, icon: <CheckSquare size={13} className="text-sky-500" /> },
+                                            { label: 'Task Disetujui', val: `${approvedTaskCount} / ${taskGate().total}`, icon: <UserCheck size={13} className="text-emerald-500" /> },
+                                            { label: 'Task dengan Temuan', val: `${defectTaskCount}`, icon: <AlertTriangle size={13} className="text-orange-500" /> },
+                                            { label: 'Persetujuan', val: allSitApproved ? '3/3 ✓' : `${(devApproved ? 1 : 0) + (sit3Approvals?.pm?.approved ? 1 : 0) + (sit3Approvals?.development_lead?.approved ? 1 : 0)}/3`, icon: <ShieldCheck size={13} className="text-teal-500" /> },
                                         ].map(s => (
-                                            <div key={s.label} className="bg-white rounded-lg p-2.5 border border-slate-200">
-                                                <p className="text-slate-500 text-[9px] font-bold uppercase">{s.label}</p>
-                                                <p className="font-bold text-slate-800 text-xs mt-0.5 truncate">{s.val}</p>
+                                            <div key={s.label} className="bg-white rounded-xl p-2.5 border border-slate-200">
+                                                <div className="flex items-center gap-1.5 text-slate-500">
+                                                    {s.icon}
+                                                    <p className="text-[9px] font-bold uppercase">{s.label}</p>
+                                                </div>
+                                                <p className="font-bold text-slate-800 text-xs mt-1 break-all">{s.val}</p>
                                             </div>
                                         ))}
                                     </div>
                                 </div>
+
+                                {/* ── Persetujuan Multi-Role ── */}
+                                <div className="bg-white border border-gray-200 rounded-2xl p-4">
+                                    <div className="flex items-center gap-2 mb-3">
+                                        <ShieldCheck size={15} className="text-teal-600" />
+                                        <h6 className="font-bold text-sm text-gray-800">Persetujuan SIT</h6>
+                                        <span className="ml-auto text-[10px] font-bold text-gray-500">
+                                            {approvedDeveloperCount}/{requiredDeveloperCount} Dev • {sit3Approvals?.pm?.approved ? '✓' : '•'} PM • {sit3Approvals?.development_lead?.approved ? '✓' : '•'} Lead
+                                        </span>
+                                    </div>
+                                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                                        {[
+                                            { key: 'developer', label: 'Developer', desc: requiredDeveloperCount > 0 ? `Semua ${requiredDeveloperCount} pengembang harus menyetujui` : 'Pengembang yang mengerjakan task', color: 'blue', icon: <UserCheck size={16} className="text-blue-500" /> },
+                                            { key: 'pm', label: 'PM / Analyst Pengembangan', desc: 'Project Manager proyek', color: 'amber', icon: <Users size={16} className="text-amber-500" /> },
+                                            { key: 'development_lead', label: 'Development Lead', desc: 'Pimpinan pengembangan', color: 'emerald', icon: <ShieldCheck size={16} className="text-emerald-500" /> },
+                                        ].map(r => {
+                                            const isDev = r.key === 'developer';
+                                            const ap = sit3Approvals?.[r.key];
+                                            let approved = false;
+                                            let detail = null;
+                                            if (isDev) {
+                                                approved = devApproved;
+                                                const devList = ap?.developers || [];
+                                                detail = devApproved
+                                                    ? `✓ ${approvedDeveloperCount}/${requiredDeveloperCount} developer menyetujui`
+                                                    : devList.length > 0
+                                                        ? `${devList.length}/${requiredDeveloperCount} developer menyetujui`
+                                                        : 'Belum ada developer menyetujui';
+                                            } else {
+                                                approved = ap?.approved === true;
+                                                detail = approved
+                                                    ? `✓ ${ap.approvedBy} • ${fmtDate(ap.at)}`
+                                                    : 'Belum memberikan persetujuan';
+                                            }
+                                            const colorMap = { blue: 'blue', amber: 'amber', emerald: 'emerald' }[r.color];
+                                            return (
+                                                <div key={r.key} className={`rounded-xl border p-3 transition-all ${approved ? 'bg-emerald-50 border-emerald-200' : 'bg-gray-50 border-gray-200'}`}>
+                                                    <div className="flex items-center justify-between">
+                                                        <div className={`w-9 h-9 rounded-xl flex items-center justify-center ${approved ? 'bg-emerald-100' : `bg-${colorMap}-100`}`}>
+                                                            {r.icon}
+                                                        </div>
+                                                        {approved ? (
+                                                            <span className="px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 text-[9px] font-bold border border-emerald-200 flex items-center gap-1">
+                                                                <CheckCircle2 size={9} /> Disetujui
+                                                            </span>
+                                                        ) : (
+                                                            <span className="px-2 py-0.5 rounded-full bg-gray-200 text-gray-500 text-[9px] font-bold">Menunggu</span>
+                                                        )}
+                                                    </div>
+                                                    <p className="font-bold text-gray-800 text-xs mt-2">{r.label}</p>
+                                                    <p className="text-[10px] text-gray-400">{r.desc}</p>
+                                                    <p className={`text-[10px] mt-1.5 ${approved ? 'text-emerald-700' : 'text-gray-400'}`}>{detail}</p>
+                                                    {isDev && (ap?.developers || []).length > 0 && (
+                                                        <div className="mt-1.5 flex flex-wrap gap-1">
+                                                            {(ap.developers || []).map(d => (
+                                                                <span key={d.userId ?? d.name} className="px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700 text-[9px] font-semibold border border-emerald-200">
+                                                                    {d.name}
+                                                                </span>
+                                                            ))}
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+
+                                    {/* Form approval untuk role saat ini */}
+                                    {currentRoleKey === 'developer' && !devApproved && !sitDone && (
+                                        <div className="mt-3 p-3 bg-teal-50 border border-teal-200 rounded-xl">
+                                            <p className="text-[11px] font-bold text-teal-800 mb-2 flex items-center gap-1.5">
+                                                <UserCheck size={13} /> Anda (sebagai Developer) dapat menyetujui SIT
+                                            </p>
+                                            <textarea
+                                                rows={2}
+                                                value={sitApprovalNote}
+                                                onChange={e => setSitApprovalNote(e.target.value)}
+                                                placeholder="Catatan persetujuan (opsional)..."
+                                                className="w-full px-3 py-2 border border-gray-200 rounded-xl text-xs focus:outline-none focus:border-teal-500 bg-white resize-none"
+                                            />
+                                            <button
+                                                onClick={handleSubmitSitApproval}
+                                                disabled={sitApprovalSubmitting}
+                                                className="mt-2 px-4 py-2 bg-teal-600 hover:bg-teal-700 disabled:bg-gray-300 text-white text-xs font-bold rounded-xl flex items-center gap-2 transition-all cursor-pointer disabled:cursor-not-allowed"
+                                            >
+                                                {sitApprovalSubmitting ? (
+                                                    <><span className="w-3 h-3 border-2 border-white/40 border-t-white rounded-full animate-spin" /> Menyimpan...</>
+                                                ) : (
+                                                    <><CheckCircle2 size={13} /> Setujui SIT</>
+                                                )}
+                                            </button>
+                                        </div>
+                                    )}
+                                    {currentRoleKey === 'developer' && devApproved && (
+                                        <p className="text-[10px] text-emerald-600 mt-2 flex items-center gap-1">
+                                            <CheckCircle2 size={11} /> Anda telah menyetujui SIT pada proyek ini.
+                                        </p>
+                                    )}
+                                    {currentRoleKey && currentRoleKey !== 'developer' && !sit3Approvals?.[currentRoleKey]?.approved && !sitDone && (
+                                        <div className="mt-3 p-3 bg-teal-50 border border-teal-200 rounded-xl">
+                                            <p className="text-[11px] font-bold text-teal-800 mb-2 flex items-center gap-1.5">
+                                                <UserCheck size={13} /> Anda (sebagai {currentRoleKey === 'development_lead' ? 'Development Lead' : 'PM / Analyst Pengembangan'}) dapat menyetujui SIT
+                                            </p>
+                                            <textarea
+                                                rows={2}
+                                                value={sitApprovalNote}
+                                                onChange={e => setSitApprovalNote(e.target.value)}
+                                                placeholder="Catatan persetujuan (opsional)..."
+                                                className="w-full px-3 py-2 border border-gray-200 rounded-xl text-xs focus:outline-none focus:border-teal-500 bg-white resize-none"
+                                            />
+                                            <button
+                                                onClick={handleSubmitSitApproval}
+                                                disabled={sitApprovalSubmitting}
+                                                className="mt-2 px-4 py-2 bg-teal-600 hover:bg-teal-700 disabled:bg-gray-300 text-white text-xs font-bold rounded-xl flex items-center gap-2 transition-all cursor-pointer disabled:cursor-not-allowed"
+                                            >
+                                                {sitApprovalSubmitting ? (
+                                                    <><span className="w-3 h-3 border-2 border-white/40 border-t-white rounded-full animate-spin" /> Menyimpan...</>
+                                                ) : (
+                                                    <><CheckCircle2 size={13} /> Setujui SIT</>
+                                                )}
+                                            </button>
+                                        </div>
+                                    )}
+                                    {currentRoleKey && currentRoleKey !== 'developer' && sit3Approvals?.[currentRoleKey]?.approved && (
+                                        <p className="text-[10px] text-emerald-600 mt-2 flex items-center gap-1">
+                                            <CheckCircle2 size={11} /> Anda telah menyetujui SIT pada proyek ini.
+                                        </p>
+                                    )}
+                                </div>
+
+                                {/* Catatan Review Akhir (PM) */}
                                 <div>
-                                    <label className="block text-xs font-bold text-gray-600 uppercase tracking-wider mb-1.5">Catatan Review Akhir &amp; Rekomendasi Dev Lead *</label>
-                                    <textarea rows={3} value={sit3.reviewNotes} onChange={e => setSit3(p => ({...p, reviewNotes: e.target.value}))}
-                                        placeholder="Tuliskan kesimpulan review SIT, apakah semua defect sudah ditangani, rekomendasi ke depan..." disabled={sitDone}
+                                    <label className="block text-xs font-bold text-gray-600 uppercase tracking-wider mb-1.5">Catatan Review Akhir / Keputusan</label>
+                                    <textarea rows={3} value={sit3.reviewNotes} onChange={e => setSit3(p => ({ ...p, reviewNotes: e.target.value }))}
+                                        placeholder="Pernyataan keputusan: sistem telah diuji terintegrasi dan dinyatakan memenuhi kriteria SIT..." disabled={sitDone}
                                         className="w-full px-3 py-2.5 border border-gray-200 rounded-xl text-xs focus:outline-none focus:border-teal-500 bg-gray-50 resize-none disabled:bg-gray-100" />
                                 </div>
+
+                                {/* Dokumen Hasil Review */}
                                 <div>
                                     <div className="flex items-center justify-between mb-1.5">
-                                        <label className="text-xs font-bold text-gray-600 uppercase tracking-wider">Dokumen: Laporan &amp; Rekomendasi SIT Final</label>
+                                        <label className="text-xs font-bold text-gray-600 uppercase tracking-wider">Dokumen: Hasil Review / Berita Acara SIT</label>
                                         {!sitDone && (
-                                            <label className="px-3 py-1.5 bg-teal-600 hover:bg-teal-700 text-white rounded-xl text-xs font-bold cursor-pointer flex items-center gap-1.5 transition-colors">
-                                                <Upload size={12} /> Upload
+                                            <label className={`px-3 py-1.5 bg-teal-600 hover:bg-teal-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 transition-colors ${uploadingCategory === 'SIT_SIGNOFF' ? 'opacity-60 cursor-wait' : 'cursor-pointer'}`}>
+                                                {uploadingCategory === 'SIT_SIGNOFF' ? (
+                                                    <><span className="w-3 h-3 border-2 border-white/40 border-t-white rounded-full animate-spin" /> Mengunggah...</>
+                                                ) : (
+                                                    <><Upload size={12} /> Upload</>
+                                                )}
                                                 <input type="file" ref={sit3FileRef} multiple accept=".pdf,.xls,.xlsx,.jpg,.jpeg,.png,.zip" onChange={e => onUpload(e, setSit3, 'docs', 'SIT_SIGNOFF')} className="hidden" />
                                             </label>
                                         )}
                                     </div>
-                                    <DocList docs={sit3.docs} onRemove={i => onRemoveDoc(setSit3, i)} readOnly={sitDone} />
+                                    <DocList docs={sit3.docs} onRemove={i => onRemoveDoc(setSit3, i)} onView={viewDoc} onDownload={downloadDoc} onTypeChange={(i, t) => changeDocType(setSit3, i, t)} docTypeOptions={docTypeOptions('SIT_SIGNOFF')} readOnly={sitDone} />
                                 </div>
-                                {/* Action buttons */}
-                                {!sitDone && (status === 'SIT_IN_PROGRESS' || UNLOCK_ALL_STAGES) && activeSitStep === 3 && (
+
+                                {/* Action buttons (hanya non-viewer) */}
+                                {!sitDone && !isViewer && (status === 'SIT_IN_PROGRESS' || UNLOCK_ALL_STAGES) && activeSitStep === 3 && (
                                     <div className="flex flex-col sm:flex-row gap-3 justify-between pt-2 border-t border-gray-100">
                                         <button
                                             onClick={() => { setRevisionType('SIT_TO_DEV'); setShowRevisionModal(true); }}
                                             className="px-5 py-2.5 bg-orange-50 hover:bg-orange-100 border border-orange-300 text-orange-700 text-xs font-bold rounded-xl flex items-center gap-2 transition-all cursor-pointer"
                                         >
-                                            <RotateCcw size={14} /> SIT Perlu Revisi â€” Kembalikan ke Dev
+                                            <RotateCcw size={14} /> SIT Perlu Revisi — Kembalikan ke Dev
                                         </button>
                                         <button
                                             onClick={handleSITPass}
-                                            disabled={submitting || !sit3.reviewNotes}
-                                            className="px-6 py-2.5 bg-teal-600 hover:bg-teal-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-white text-xs font-bold rounded-xl flex items-center gap-2 transition-all shadow-sm cursor-pointer active:scale-95"
+                                            disabled={submitting || !sit3.reviewNotes || !allSitApproved}
+                                            title={allSitApproved ? '' : 'Semua persetujuan (Developer, PM / Analyst Pengembangan, Development Lead) harus lengkap terlebih dahulu'}
+                                            className={`px-6 py-2.5 text-white text-xs font-bold rounded-xl flex items-center gap-2 transition-all shadow-sm active:scale-95 ${allSitApproved && sit3.reviewNotes ? 'bg-teal-600 hover:bg-teal-700 cursor-pointer' : 'bg-gray-300 cursor-not-allowed'}`}
                                         >
-                                            <CheckCircle2 size={14} /> SIT Lulus â€” Lanjut ke UAT Internal
+                                            <CheckCircle2 size={14} /> SIT Lulus — Lanjut ke UAT Internal
                                         </button>
                                     </div>
+                                )}
+                                {!allSitApproved && !sitDone && !isViewer && (
+                                    <p className="text-[10px] text-gray-400 text-right">
+                                        Tombol "SIT Lulus" aktif setelah Developer, PM / Analyst Pengembangan, dan Development Lead menyetujui.
+                                    </p>
                                 )}
                                 {sitDone && (
                                     <div className="flex items-center gap-2 p-3 bg-teal-50 border border-teal-200 rounded-xl text-xs text-teal-800">
                                         <CheckCircle2 size={16} className="text-teal-600 shrink-0" />
-                                        <span className="font-semibold">SIT telah diverifikasi dan dinyatakan LULUS. UAT Internal dapat dimulai.</span>
+                                        <span className="font-semibold">SIT dinyatakan LULUS. Lanjutkan ke fase UAT Internal.</span>
                                     </div>
                                 )}
                             </div>
@@ -776,9 +1309,7 @@ const handleSITPass = () => {
                 )}
             </div>
 
-            {/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-                                   UAT PANEL
-                â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */}
+            {/* ═══ UAT PANEL ═══ */}
             <div className={`bg-white rounded-2xl border-2 shadow-sm overflow-hidden transition-all ${uatDone ? 'border-emerald-200' : uatActive ? 'border-amber-300' : uatUnlocked ? 'border-amber-200' : 'border-gray-200 opacity-60'}`}>
                 {/* UAT Panel Header */}
                 <div className={`px-5 py-4 flex items-center justify-between border-b ${uatDone ? 'bg-emerald-50' : uatActive ? 'bg-amber-50' : uatUnlocked ? 'bg-amber-50/50' : 'bg-gray-50'}`}>
@@ -794,10 +1325,10 @@ const handleSITPass = () => {
                         </div>
                     </div>
                     <div className="flex items-center gap-2">
-                        {uatDone && <span className="px-3 py-1 bg-emerald-100 text-emerald-700 text-xs font-bold rounded-full border border-emerald-300">âœ… LULUS</span>}
-                        {uatActive && status !== 'SIT_PASSED' && <span className="px-3 py-1 bg-amber-100 text-amber-700 text-xs font-bold rounded-full border border-amber-300 animate-pulse">ðŸ”„ BERLANGSUNG</span>}
-                        {!uatUnlocked && <span className="px-3 py-1 bg-gray-100 text-gray-500 text-xs font-bold rounded-full border border-gray-200">ðŸ”’ Tunggu SIT Lulus</span>}
-                        {['UAT_REVISION_SIT', 'UAT_REVISION_DEV'].includes(status) && <span className="px-3 py-1 bg-orange-100 text-orange-700 text-xs font-bold rounded-full border border-orange-300">â†©ï¸ REVISI</span>}
+                        {uatDone && <span className="px-3 py-1 bg-emerald-100 text-emerald-700 text-xs font-bold rounded-full border border-emerald-300">✅ LULUS</span>}
+                        {uatActive && status !== 'SIT_PASSED' && <span className="px-3 py-1 bg-amber-100 text-amber-700 text-xs font-bold rounded-full border border-amber-300 animate-pulse">🔄 BERLANGSUNG</span>}
+                        {!uatUnlocked && <span className="px-3 py-1 bg-gray-100 text-gray-500 text-xs font-bold rounded-full border border-gray-200">🔒 Tunggu SIT Lulus</span>}
+                        {['UAT_REVISION_SIT', 'UAT_REVISION_DEV'].includes(status) && <span className="px-3 py-1 bg-orange-100 text-orange-700 text-xs font-bold rounded-full border border-orange-300">↩️ REVISI</span>}
                     </div>
                 </div>
 
@@ -852,30 +1383,30 @@ const handleSITPass = () => {
                             ))}
                         </div>
 
-                        {/* â”€â”€ UAT Step 1: Skenario â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
+                        {/* ── UAT Step 1: Skenario ─────────────────────── */}
                         {activeUatStep === 1 && (
                             <div className="p-5 space-y-4">
                                 <div className="flex items-center gap-2 mb-3">
                                     <ClipboardList size={16} className="text-amber-600" />
                                     <h5 className="font-bold text-sm text-gray-800">Tahap 1: Persiapan Skenario UAT</h5>
-                                    {uat1Done && <span className="ml-auto text-[10px] font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">Selesai âœ“</span>}
+                                    {uat1Done && <span className="ml-auto text-[10px] font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">Selesai ✓</span>}
                                 </div>
                                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                                     <div className="sm:col-span-2">
                                         <label className="block text-xs font-bold text-gray-600 uppercase tracking-wider mb-1.5">Daftar Skenario UAT Bisnis *</label>
-                                        <textarea rows={3} value={uat1.scenarioList} onChange={e => setUat1(p => ({...p, scenarioList: e.target.value}))}
-                                            placeholder="1. Login dan autentikasi pengguna&#10;2. Proses transaksi transfer&#10;3. ..." disabled={uatDone}
+                                        <textarea rows={3} value={uat1.scenarioList} onChange={e => setUat1(p => ({ ...p, scenarioList: e.target.value }))}
+                                            placeholder={"1. Login dan autentikasi pengguna\n2. Proses transaksi transfer\n3. ..."} disabled={uatDone}
                                             className="w-full px-3 py-2.5 border border-gray-200 rounded-xl text-xs focus:outline-none focus:border-amber-500 bg-gray-50 resize-none disabled:bg-gray-100" />
                                     </div>
                                     <div>
                                         <label className="block text-xs font-bold text-gray-600 uppercase tracking-wider mb-1.5">Disiapkan Oleh (PM / User) *</label>
-                                        <input type="text" value={uat1.preparedBy} onChange={e => setUat1(p => ({...p, preparedBy: e.target.value}))}
+                                        <input type="text" value={uat1.preparedBy} onChange={e => setUat1(p => ({ ...p, preparedBy: e.target.value }))}
                                             placeholder="Nama PM / Perwakilan Divisi" disabled={uatDone}
                                             className="w-full px-3 py-2.5 border border-gray-200 rounded-xl text-xs focus:outline-none focus:border-amber-500 bg-gray-50 disabled:bg-gray-100" />
                                     </div>
                                     <div>
                                         <label className="block text-xs font-bold text-gray-600 uppercase tracking-wider mb-1.5">Catatan Persiapan UAT</label>
-                                        <input type="text" value={uat1.prepNotes} onChange={e => setUat1(p => ({...p, prepNotes: e.target.value}))}
+                                        <input type="text" value={uat1.prepNotes} onChange={e => setUat1(p => ({ ...p, prepNotes: e.target.value }))}
                                             placeholder="Keterangan tambahan..." disabled={uatDone}
                                             className="w-full px-3 py-2.5 border border-gray-200 rounded-xl text-xs focus:outline-none focus:border-amber-500 bg-gray-50 disabled:bg-gray-100" />
                                     </div>
@@ -890,7 +1421,7 @@ const handleSITPass = () => {
                                             </label>
                                         )}
                                     </div>
-                                    <DocList docs={uat1.docs} onRemove={i => onRemoveDoc(setUat1, i)} readOnly={uatDone} />
+                                    <DocList docs={uat1.docs} onRemove={i => onRemoveDoc(setUat1, i)} onView={viewDoc} onDownload={downloadDoc} onTypeChange={(i, t) => changeDocType(setUat1, i, t)} docTypeOptions={docTypeOptions('UAT_PREP')} readOnly={uatDone} />
                                 </div>
                                 {!uatDone && (status === 'UAT_IN_PROGRESS' || UNLOCK_ALL_STAGES) && activeUatStep === 1 && (
                                     <div className="flex justify-end pt-2">
@@ -903,37 +1434,37 @@ const handleSITPass = () => {
                             </div>
                         )}
 
-                        {/* â”€â”€ UAT Step 2: Eksekusi â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
+                        {/* ── UAT Step 2: Eksekusi ─────────────────────── */}
                         {activeUatStep === 2 && (
                             <div className="p-5 space-y-4">
                                 <div className="flex items-center gap-2 mb-3">
                                     <UserCheck size={16} className="text-orange-600" />
                                     <h5 className="font-bold text-sm text-gray-800">Tahap 2: Eksekusi UAT Internal &amp; Temuan</h5>
-                                    {uat2Done && <span className="ml-auto text-[10px] font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">Selesai âœ“</span>}
+                                    {uat2Done && <span className="ml-auto text-[10px] font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">Selesai ✓</span>}
                                 </div>
                                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                                     <div>
                                         <label className="block text-xs font-bold text-gray-600 uppercase tracking-wider mb-1.5">Skenario Dieksekusi *</label>
-                                        <input type="number" value={uat2.executedCount} onChange={e => setUat2(p => ({...p, executedCount: e.target.value}))}
+                                        <input type="number" value={uat2.executedCount} onChange={e => setUat2(p => ({ ...p, executedCount: e.target.value }))}
                                             placeholder="Contoh: 20" disabled={uatDone}
                                             className="w-full px-3 py-2.5 border border-gray-200 rounded-xl text-xs focus:outline-none focus:border-orange-500 bg-gray-50 disabled:bg-gray-100" />
                                     </div>
                                     <div>
                                         <label className="block text-xs font-bold text-gray-600 uppercase tracking-wider mb-1.5">Skenario Diterima *</label>
-                                        <input type="number" value={uat2.passedCount} onChange={e => setUat2(p => ({...p, passedCount: e.target.value}))}
+                                        <input type="number" value={uat2.passedCount} onChange={e => setUat2(p => ({ ...p, passedCount: e.target.value }))}
                                             placeholder="Contoh: 19" disabled={uatDone}
                                             className="w-full px-3 py-2.5 border border-gray-200 rounded-xl text-xs focus:outline-none focus:border-orange-500 bg-gray-50 disabled:bg-gray-100" />
                                     </div>
                                     <div>
                                         <label className="block text-xs font-bold text-gray-600 uppercase tracking-wider mb-1.5">Temuan / CR</label>
-                                        <input type="number" value={uat2.findings} onChange={e => setUat2(p => ({...p, findings: e.target.value}))}
+                                        <input type="number" value={uat2.findings} onChange={e => setUat2(p => ({ ...p, findings: e.target.value }))}
                                             placeholder="Contoh: 1" disabled={uatDone}
                                             className="w-full px-3 py-2.5 border border-gray-200 rounded-xl text-xs focus:outline-none focus:border-orange-500 bg-gray-50 disabled:bg-gray-100" />
                                     </div>
                                 </div>
                                 <div>
                                     <label className="block text-xs font-bold text-gray-600 uppercase tracking-wider mb-1.5">Catatan Hasil UAT &amp; Temuan Detail</label>
-                                    <textarea rows={3} value={uat2.execNotes} onChange={e => setUat2(p => ({...p, execNotes: e.target.value}))}
+                                    <textarea rows={3} value={uat2.execNotes} onChange={e => setUat2(p => ({ ...p, execNotes: e.target.value }))}
                                         placeholder="Catatan hasil pengujian, temuan bug/CR, status perbaikan..." disabled={uatDone}
                                         className="w-full px-3 py-2.5 border border-gray-200 rounded-xl text-xs focus:outline-none focus:border-orange-500 bg-gray-50 resize-none disabled:bg-gray-100" />
                                 </div>
@@ -947,7 +1478,7 @@ const handleSITPass = () => {
                                             </label>
                                         )}
                                     </div>
-                                    <DocList docs={uat2.docs} onRemove={i => onRemoveDoc(setUat2, i)} readOnly={uatDone} />
+                                    <DocList docs={uat2.docs} onRemove={i => onRemoveDoc(setUat2, i)} onView={viewDoc} onDownload={downloadDoc} onTypeChange={(i, t) => changeDocType(setUat2, i, t)} docTypeOptions={docTypeOptions('UAT_EXEC')} readOnly={uatDone} />
                                 </div>
                                 {!uatDone && (status === 'UAT_IN_PROGRESS' || UNLOCK_ALL_STAGES) && activeUatStep === 2 && (
                                     <div className="flex justify-end pt-2">
@@ -960,13 +1491,13 @@ const handleSITPass = () => {
                             </div>
                         )}
 
-                        {/* â”€â”€ UAT Step 3: Persetujuan Final â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
+                        {/* ── UAT Step 3: Persetujuan Final ─────────────── */}
                         {activeUatStep === 3 && (
                             <div className="p-5 space-y-4">
                                 <div className="flex items-center gap-2 mb-3">
                                     <CheckCircle2 size={16} className="text-emerald-600" />
                                     <h5 className="font-bold text-sm text-gray-800">Tahap 3: Persetujuan Final &amp; Penerbitan BAST</h5>
-                                    {uat3Done && <span className="ml-auto text-[10px] font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">Selesai âœ“</span>}
+                                    {uat3Done && <span className="ml-auto text-[10px] font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">Selesai ✓</span>}
                                 </div>
                                 {/* UAT Summary */}
                                 <div className="bg-slate-50 rounded-xl border border-slate-200 p-4 text-xs space-y-2">
@@ -988,13 +1519,13 @@ const handleSITPass = () => {
                                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                                     <div className="sm:col-span-2">
                                         <label className="block text-xs font-bold text-gray-600 uppercase tracking-wider mb-1.5">Catatan Persetujuan Final *</label>
-                                        <textarea rows={2} value={uat3.approvalNotes} onChange={e => setUat3(p => ({...p, approvalNotes: e.target.value}))}
+                                        <textarea rows={2} value={uat3.approvalNotes} onChange={e => setUat3(p => ({ ...p, approvalNotes: e.target.value }))}
                                             placeholder="Pernyataan persetujuan: semua skenario bisnis telah diverifikasi dan dinyatakan memenuhi kebutuhan FSD..." disabled={uatDone}
                                             className="w-full px-3 py-2.5 border border-gray-200 rounded-xl text-xs focus:outline-none focus:border-emerald-500 bg-gray-50 resize-none disabled:bg-gray-100" />
                                     </div>
                                     <div>
                                         <label className="block text-xs font-bold text-gray-600 uppercase tracking-wider mb-1.5">Disetujui Oleh (PM + Perwakilan Divisi) *</label>
-                                        <input type="text" value={uat3.approvedBy} onChange={e => setUat3(p => ({...p, approvedBy: e.target.value}))}
+                                        <input type="text" value={uat3.approvedBy} onChange={e => setUat3(p => ({ ...p, approvedBy: e.target.value }))}
                                             placeholder="Nama PM, Nama Perwakilan Divisi" disabled={uatDone}
                                             className="w-full px-3 py-2.5 border border-gray-200 rounded-xl text-xs focus:outline-none focus:border-emerald-500 bg-gray-50 disabled:bg-gray-100" />
                                     </div>
@@ -1009,7 +1540,7 @@ const handleSITPass = () => {
                                             </label>
                                         )}
                                     </div>
-                                    <DocList docs={uat3.docs} onRemove={i => onRemoveDoc(setUat3, i)} readOnly={uatDone} />
+                                    <DocList docs={uat3.docs} onRemove={i => onRemoveDoc(setUat3, i)} onView={viewDoc} onDownload={downloadDoc} onTypeChange={(i, t) => changeDocType(setUat3, i, t)} docTypeOptions={docTypeOptions('UAT_APPROVAL')} readOnly={uatDone} />
                                 </div>
                                 {/* Action buttons */}
                                 {!uatDone && (status === 'UAT_IN_PROGRESS' || UNLOCK_ALL_STAGES) && activeUatStep === 3 && (
@@ -1019,13 +1550,13 @@ const handleSITPass = () => {
                                                 onClick={() => { setRevisionType('UAT_TO_SIT'); setShowRevisionModal(true); }}
                                                 className="flex-1 px-4 py-2.5 bg-orange-50 hover:bg-orange-100 border border-orange-300 text-orange-700 text-xs font-bold rounded-xl flex items-center justify-center gap-2 transition-all cursor-pointer"
                                             >
-                                                <RotateCcw size={13} /> Revisi Minor â€” Ulang SIT
+                                                <RotateCcw size={13} /> Revisi Minor — Ulang SIT
                                             </button>
                                             <button
                                                 onClick={() => { setRevisionType('UAT_TO_DEV'); setShowRevisionModal(true); }}
                                                 className="flex-1 px-4 py-2.5 bg-red-50 hover:bg-red-100 border border-red-300 text-red-700 text-xs font-bold rounded-xl flex items-center justify-center gap-2 transition-all cursor-pointer"
                                             >
-                                                <AlertTriangle size={13} /> Revisi Mayor â€” Kembali ke Dev
+                                                <AlertTriangle size={13} /> Revisi Mayor — Kembali ke Dev
                                             </button>
                                         </div>
                                         <button
@@ -1033,7 +1564,7 @@ const handleSITPass = () => {
                                             disabled={submitting || !uat3.approvalNotes || !uat3.approvedBy}
                                             className="w-full px-6 py-3 bg-emerald-600 hover:bg-emerald-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-white text-sm font-bold rounded-xl flex items-center justify-center gap-2 transition-all shadow-md cursor-pointer active:scale-95"
                                         >
-                                            <Send size={16} /> UAT Lulus â€” Tetapkan DEV_COMPLETED &amp; Lanjut ke QA / Siber
+                                            <Send size={16} /> UAT Lulus — Tetapkan DEV_COMPLETED &amp; Lanjut ke QA / Siber
                                         </button>
                                     </div>
                                 )}
@@ -1049,9 +1580,7 @@ const handleSITPass = () => {
                 )}
             </div>
 
-            {/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-                              COMPLETION CARD
-                â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */}
+            {/* ─── COMPLETION CARD ─── */}
             {isComplete && (
                 <div className="bg-gradient-to-r from-emerald-600 to-teal-600 rounded-2xl p-6 text-white">
                     <div className="flex items-start gap-4">
@@ -1059,7 +1588,7 @@ const handleSITPass = () => {
                             <Lock size={24} className="text-white" />
                         </div>
                         <div className="flex-1">
-                            <h4 className="font-bold text-lg">ðŸŽ‰ Pengujian SIT &amp; UAT Internal Selesai â€” DEV COMPLETED!</h4>
+                            <h4 className="font-bold text-lg">🎉 Pengujian SIT &amp; UAT Internal Selesai — DEV COMPLETED!</h4>
                             <p className="text-emerald-100 text-xs mt-1 leading-relaxed">
                                 Proyek <strong>{sf(project?.name)}</strong> telah lulus seluruh pengujian SIT &amp; UAT Internal.
                                 Source code dibekukan (<em>code freeze</em>). Silakan ajukan proyek ke pengujian independen QA &amp; Pentest Siber.
@@ -1083,8 +1612,7 @@ const handleSITPass = () => {
                 </div>
             )}
 
-
-            {/* â”€â”€â”€ Audit Trail Revisi â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
+            {/* ─── Audit Trail Revisi ─── */}
             {revisions.length > 0 && (
                 <div className="bg-white rounded-2xl border border-gray-200 p-5 shadow-sm">
                     <h4 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-3 flex items-center gap-2">
@@ -1096,8 +1624,8 @@ const handleSITPass = () => {
                                 <RotateCcw size={13} className="text-orange-500 shrink-0 mt-0.5" />
                                 <div>
                                     <p className="font-bold text-orange-900">
-                                        {rev.type === 'SIT_TO_DEV' ? 'SIT â†’ Revisi ke Dev' : rev.type === 'UAT_TO_SIT' ? 'UAT â†’ Ulang SIT' : 'UAT â†’ Revisi ke Dev'}
-                                        <span className="ml-2 font-normal text-orange-600">â€¢ {fmtDate(rev.at)}</span>
+                                        {rev.type === 'SIT_TO_DEV' ? 'SIT → Revisi ke Dev' : rev.type === 'UAT_TO_SIT' ? 'UAT → Ulang SIT' : 'UAT → Revisi ke Dev'}
+                                        <span className="ml-2 font-normal text-orange-600">• {fmtDate(rev.at)}</span>
                                     </p>
                                     <p className="text-orange-800 mt-0.5">{rev.notes}</p>
                                     <p className="text-orange-500 mt-0.5">Oleh: {rev.by}</p>
@@ -1108,7 +1636,7 @@ const handleSITPass = () => {
                 </div>
             )}
 
-            {/* â”€â”€â”€ Revision Modal â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
+            {/* ─── MODAL: Revision tingkat SIT/UAT ─── */}
             {showRevisionModal && (
                 <div className="fixed inset-0 z-[99998] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
                     <div className="bg-white rounded-2xl shadow-2xl max-w-lg w-full p-6 border border-gray-100">
@@ -1118,9 +1646,9 @@ const handleSITPass = () => {
                             </div>
                             <div>
                                 <h3 className="font-bold text-gray-800 text-base">
-                                    {revisionType === 'SIT_TO_DEV' && 'Konfirmasi Revisi SIT â†’ Development'}
-                                    {revisionType === 'UAT_TO_SIT' && 'Konfirmasi Revisi UAT â†’ Ulang SIT'}
-                                    {revisionType === 'UAT_TO_DEV' && 'Konfirmasi Revisi UAT â†’ Development (Mayor)'}
+                                    {revisionType === 'SIT_TO_DEV' && 'Konfirmasi Revisi SIT → Development'}
+                                    {revisionType === 'UAT_TO_SIT' && 'Konfirmasi Revisi UAT → Ulang SIT'}
+                                    {revisionType === 'UAT_TO_DEV' && 'Konfirmasi Revisi UAT → Development (Mayor)'}
                                 </h3>
                                 <p className="text-xs text-gray-500 mt-0.5">
                                     {revisionType === 'SIT_TO_DEV' && 'Proyek akan dikembalikan ke tim Development.'}
@@ -1159,9 +1687,68 @@ const handleSITPass = () => {
                     </div>
                 </div>
             )}
+
+            {/* ─── MODAL: Kembalikan Task ke Developer ─── */}
+            {showTaskRevisionModal && (
+                <div className="fixed inset-0 z-[99999] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+                    <div className="bg-white rounded-2xl shadow-2xl max-w-lg w-full p-6 border border-gray-100">
+                        <div className="flex items-center gap-3 mb-4">
+                            <div className="w-10 h-10 bg-orange-100 rounded-xl flex items-center justify-center">
+                                <RotateCcw size={20} className="text-orange-600" />
+                            </div>
+                            <div>
+                                <h3 className="font-bold text-gray-800 text-base">Kembalikan Task ke Developer</h3>
+                                <p className="text-xs text-gray-500 mt-0.5">Task <strong>"{showTaskRevisionModal.title}"</strong> akan diubah ke <strong>Sedang Dikerjakan (In Progress)</strong> dan arahan revisi dikirim ke developer terkait.</p>
+                            </div>
+                        </div>
+                        <div className="mb-4">
+                            <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1.5">
+                                Catatan Arahan Revisi untuk Developer <span className="text-red-500">*</span>
+                            </label>
+                            <textarea
+                                rows={4}
+                                value={taskRevisions[showTaskRevisionModal.id] || ''}
+                                onChange={e => setTaskRevisions(prev => ({ ...prev, [showTaskRevisionModal.id]: e.target.value }))}
+                                placeholder="Jelaskan apa yang tidak sesuai, apa yang perlu diperbaiki, dan kriteria yang harus dipenuhi sebelum kembali ke SIT..."
+                                className="w-full px-3 py-2.5 border border-gray-300 rounded-xl text-sm focus:outline-none focus:border-orange-500 resize-none"
+                                autoFocus
+                            />
+                            {!(taskRevisions[showTaskRevisionModal.id] || '').trim() && <p className="text-xs text-red-500 mt-1">Catatan revisi wajib diisi.</p>}
+                        </div>
+                        <div className="flex gap-3 justify-end">
+                            <button onClick={() => setShowTaskRevisionModal(null)} disabled={submitting}
+                                className="px-4 py-2 border border-gray-300 text-gray-700 rounded-xl font-bold text-xs hover:bg-gray-50 transition-colors cursor-pointer disabled:opacity-50">
+                                Batal
+                            </button>
+                            <button
+                                onClick={handleReturnTaskRevision}
+                                disabled={!(taskRevisions[showTaskRevisionModal.id] || '').trim() || submitting}
+                                className="px-5 py-2 bg-orange-600 hover:bg-orange-700 disabled:bg-gray-300 text-white rounded-xl font-bold text-xs transition-colors cursor-pointer disabled:cursor-not-allowed"
+                            >
+                                {submitting ? 'Mengirim...' : 'Kirim ke Developer'}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* ── Modal Pratinjau Dokumen SIT/UAT ── */}
+            {previewDoc && (
+                <DocumentViewerModal
+                    doc={{
+                        name: previewDoc.originalName || previewDoc.name || 'Dokumen',
+                        url: previewDoc.blobUrl || previewDoc.url,
+                        type: previewDoc.type || 'FILE',
+                        size: previewDoc.size,
+                        author: 'Tim SDLC',
+                    }}
+                    project={project}
+                    onClose={() => {
+                        if (previewDoc.blobUrl?.startsWith('blob:')) URL.revokeObjectURL(previewDoc.blobUrl);
+                        setPreviewDoc(null);
+                    }}
+                />
+            )}
         </div>
     );
 }
-
-
-

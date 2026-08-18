@@ -25,9 +25,11 @@ import {
     X,
     MessageSquare,
     UserCheck,
+    ShieldCheck,
+    CheckCircle2,
 } from 'lucide-react';
 import { useProjects, saveFileToStore, getProjectRealDocuments } from '../../contexts/ProjectContext';
-import { documentService } from '../../services/api';
+import { documentService, projectService } from '../../services/api';
 import LoadingSpinner from '../../components/LoadingSpinner';
 import EmptyState from '../../components/EmptyState';
 import DocumentViewerModal from '../../components/DocumentViewerModal';
@@ -36,11 +38,18 @@ import { generateDocumentName, DOCUMENT_TYPES, formatFileSize, getDocExtLabel, g
 
 export default function WorkspaceAnalyst() {
     const { user } = useAuth();
-    const { projects, updateProject, isLoading } = useProjects();
+    const { projects, updateProject, isLoading, refreshDataSilent } = useProjects();
     const navigate = useNavigate();
     const { addNotification } = useNotifications();
 
     const [previewDoc, setPreviewDoc] = useState(null);
+
+    // ── Monitor Persetujuan SIT (read-only untuk System Analyst perencanaan) ──
+    // Approval SIT dilakukan oleh Developer, PM (Analyst Pengembangan), & Development Lead.
+    const sitProjects = (projects || []).filter(p => {
+        const st = String(p.status || '').toUpperCase();
+        return st === 'SIT_IN_PROGRESS' || st === 'SIT_REVISION';
+    });
 
     const [selectedAnalystFilter, setSelectedAnalystFilter] = useState(() => {
         if (user?.role === 'super_admin' || user?.role === 'lead_group') return 'ALL';
@@ -359,6 +368,69 @@ export default function WorkspaceAnalyst() {
                     Review kelayakan dokumen inisiasi (BRD) dan buat keputusan teknis sistem.
                 </p>
             </div>
+
+            {/* Panel Persetujuan SIT (System Analyst) */}
+            {sitProjects.length > 0 && (
+                <div className="bg-white rounded-2xl border-2 border-teal-200 shadow-sm overflow-hidden mb-6">
+                    <div className="px-4 py-3 bg-teal-50 border-b border-teal-100 flex items-center justify-between">
+                        <h3 className="font-bold text-teal-800 text-sm flex items-center gap-2">
+                            <ShieldCheck size={16} /> Status Persetujuan SIT
+                        </h3>
+                        <span className="text-[10px] font-bold text-teal-600 bg-white px-2 py-0.5 rounded-full border border-teal-200">
+                            {sitProjects.length} proyek
+                        </span>
+                    </div>
+                    <div className="p-3 space-y-2">
+                        <p className="text-[11px] text-gray-500">
+                            Pantau kelengkapan persetujuan SIT dari <strong>Developer</strong>, <strong>PM / Analyst Pengembangan</strong>, dan <strong>Development Lead</strong>.
+                        </p>
+                        {sitProjects.map(p => {
+                            const ap = p.sitUatData?.sit3_approvals || p.sit_uat_data?.sit3_approvals || {};
+                            const devList = ap?.developer?.developers || [];
+                            const requiredDev = ap?.developer?.required ?? 0;
+                            const devDone = requiredDev > 0 && devList.length >= requiredDev;
+                            const pmDone = ap?.pm?.approved === true;
+                            const leadDone = ap?.development_lead?.approved === true;
+                            return (
+                                <div key={p.id} className="p-3 bg-gray-50 rounded-xl border border-gray-100">
+                                    <div className="flex items-center justify-between flex-wrap gap-2">
+                                        <div className="min-w-0">
+                                            <p className="font-bold text-gray-800 text-xs truncate">{p.name}</p>
+                                            <p className="text-[10px] text-gray-400">{p.reqId || p.req_id || `REQ-${p.id}`}</p>
+                                        </div>
+                                        <button
+                                            onClick={() => navigate(`/pm/tasks/${p.id}`)}
+                                            className="px-3.5 py-2 bg-blue-50 hover:bg-blue-100 border border-blue-200 text-blue-700 text-xs font-bold rounded-xl flex items-center gap-1.5 transition-all cursor-pointer"
+                                        >
+                                            <Eye size={13} /> Lihat Detail
+                                        </button>
+                                    </div>
+                                    <div className="grid grid-cols-3 gap-2 mt-2">
+                                        <div className={`p-2 rounded-lg border text-center ${devDone ? 'bg-emerald-50 border-emerald-200' : 'bg-white border-gray-200'}`}>
+                                            <p className="text-[9px] font-bold text-gray-500 uppercase">Developer</p>
+                                            <p className={`text-[10px] font-bold mt-0.5 ${devDone ? 'text-emerald-700' : 'text-amber-700'}`}>
+                                                {devList.length}/{requiredDev} {devDone ? '✓' : ''}
+                                            </p>
+                                        </div>
+                                        <div className={`p-2 rounded-lg border text-center ${pmDone ? 'bg-emerald-50 border-emerald-200' : 'bg-white border-gray-200'}`}>
+                                            <p className="text-[9px] font-bold text-gray-500 uppercase">PM / Analis Dev</p>
+                                            <p className={`text-[10px] font-bold mt-0.5 ${pmDone ? 'text-emerald-700' : 'text-amber-700'}`}>
+                                                {pmDone ? '✓ Disetujui' : 'Menunggu'}
+                                            </p>
+                                        </div>
+                                        <div className={`p-2 rounded-lg border text-center ${leadDone ? 'bg-emerald-50 border-emerald-200' : 'bg-white border-gray-200'}`}>
+                                            <p className="text-[9px] font-bold text-gray-500 uppercase">Dev Lead</p>
+                                            <p className={`text-[10px] font-bold mt-0.5 ${leadDone ? 'text-emerald-700' : 'text-amber-700'}`}>
+                                                {leadDone ? '✓ Disetujui' : 'Menunggu'}
+                                            </p>
+                                        </div>
+                                    </div>
+                                </div>
+                            );
+                        })}
+                    </div>
+                </div>
+            )}
 
             {/* Top Filter Control Bar */}
             <div className="bg-white border border-gray-200 rounded-2xl p-4 mb-6 shadow-2xs flex flex-col sm:flex-row items-center justify-between gap-4">

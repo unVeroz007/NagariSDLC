@@ -71,6 +71,8 @@ export function ProjectProvider({ children }) {
                     targetDate: p.targetDate || p.target_date || 'TBD',
                     submittedAt: p.submittedAt || p.created_at || new Date().toISOString(),
                     division: typeof p.division === 'string' ? p.division : (p.division?.name || p.division_detail?.name || null),
+                    // Normalisasi key snake_case → camelCase (ProjectResource mengekspos sit_uat_data)
+                    sitUatData: p.sitUatData || p.sit_uat_data || {},
                 }));
                 setProjects(normalized);
                 setMeta(res.meta || null);

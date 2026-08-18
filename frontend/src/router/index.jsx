@@ -72,6 +72,8 @@ const ADMIN_ROLES = ['super_admin'];
 const BUSINESS_ROLES = ['super_admin', 'head_of_it', 'business_user'];
 // Role yang boleh mengelola dokumen (upload/hapus)
 const DOC_MANAGEMENT_ROLES = ['super_admin', 'head_of_it', 'lead_group', 'project_manager', 'dev_analyst', 'development_lead'];
+// Role yang boleh membuka detail proyek (TaskDetail): PM + viewer (developer/analyst read-only)
+const TASK_DETAIL_ROLES = ['super_admin', 'dev_analyst', 'project_manager', 'development_lead', 'developer', 'analyst'];
 
 const router = createBrowserRouter([
     // ─────────────────────────────────────────────
@@ -268,7 +270,7 @@ const router = createBrowserRouter([
             {
                 path: '/pm/tasks/:id',
                 element: (
-                    <ProtectedRoute allowedRoles={PM_ROLES}>
+                    <ProtectedRoute allowedRoles={TASK_DETAIL_ROLES}>
                         <TaskDetail />
                     </ProtectedRoute>
                 ),

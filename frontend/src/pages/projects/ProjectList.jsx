@@ -39,7 +39,8 @@ export default function ProjectList() {
     // Role yang boleh menginisiasi proyek baru
     const canCreateProject = ['super_admin', 'head_of_it', 'business_user'].includes(user?.role);
     // Role yang boleh membuka detail proyek via tracker/track
-    const canViewDetail = ['super_admin', 'head_of_it', 'lead_group', 'project_manager', 'dev_analyst', 'development_lead', 'business_user'].includes(user?.role);
+    // Developer & analyst diizinkan sebagai VIEWER (read-only)
+    const canViewDetail = ['super_admin', 'head_of_it', 'lead_group', 'project_manager', 'dev_analyst', 'development_lead', 'business_user', 'developer', 'analyst'].includes(user?.role);
 
     const stats = getProjectStats(projects);
 
@@ -225,10 +226,12 @@ export default function ProjectList() {
                                     currentProjects.map((project) => {
                                         const isPmOrAdmin = ['project_manager', 'super_admin', 'dev_analyst', 'development_lead', 'head_of_it'].includes(user?.role);
                                         const isBusinessUser = user?.role === 'business_user';
-                                        const targetPath = isPmOrAdmin ? '/pm/tracker' : (isBusinessUser ? '/track' : null);
+                                        const isViewer = ['developer', 'analyst'].includes(user?.role);
+                                        // PM/Admin → tracker; Business → track; Developer/Analyst → TaskDetail (read-only viewer)
+                                        const targetPath = isPmOrAdmin ? '/pm/tracker' : (isBusinessUser ? '/track' : (isViewer ? `/pm/tasks/${project.id}` : null));
                                         const handleNavigate = () => {
                                             if (targetPath) {
-                                                navigate(`${targetPath}?projectId=${project.id}`, { state: { projectId: project.id } });
+                                                navigate(targetPath, { state: { projectId: project.id } });
                                             }
                                         };
 
