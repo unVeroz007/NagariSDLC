@@ -1,208 +1,92 @@
 // src/contexts/ChatContext.jsx
-import { createContext, useState, useContext, useEffect } from 'react';
+// Chat per proyek — terhubung ke backend (ChatController) agar pesan tersimpan
+// permanen & sinkron lintas user/laman. Menyediakan cache in-memory per proyek
+// + polling ringan saat tab aktif agar pesan baru dari user lain muncul.
+import { createContext, useState, useContext, useEffect, useCallback, useRef } from 'react';
 import { useAuth } from './AuthContext';
-import { useNotifications } from './NotificationContext';
-import toast from 'react-hot-toast';
+import { chatService } from '../services/api';
 
 const ChatContext = createContext();
 
-const STORAGE_CHAT_KEY = 'nagari_sdlc_chats';
-const STORAGE_UNREAD_KEY = 'nagari_sdlc_chat_unread';
-
-const initialMessages = {
-    'PRJ-2023-001': [
-        {
-            id: 1,
-            userId: 'pm-1',
-            name: 'Budi Santoso',
-            avatar: 'BS',
-            message: 'Tolong pastikan dokumentasi FSD dan SIT Report sudah lengkap untuk tim QA.',
-            timestamp: new Date(Date.now() - 3600000 * 5).toISOString(),
-            type: 'text',
-        },
-        {
-            id: 2,
-            userId: 'system',
-            name: 'Sistem SDLC',
-            avatar: 'SY',
-            message: 'Dokumen FSD_Aplikasi_LOS_v2.1.pdf telah diunggah oleh System Analyst.',
-            timestamp: new Date(Date.now() - 3600000 * 3).toISOString(),
-            type: 'system',
-        },
-        {
-            id: 3,
-            userId: 'dev-1',
-            name: 'Dimas Anggara',
-            avatar: 'DA',
-            message: 'Siap Pak PM, modul kalkulasi suku bunga sedang di-test skenario edge case-nya.',
-            timestamp: new Date(Date.now() - 3600000 * 1).toISOString(),
-            type: 'text',
-        },
-    ],
-    'PRJ-2026-099': [
-        {
-            id: 101,
-            userId: 'analyst-1',
-            name: 'Citra Kirana',
-            avatar: 'CK',
-            message: 'Spesifikasi API Gateway untuk pelaporan OJK sudah final di Swagger.',
-            timestamp: new Date(Date.now() - 3600000 * 2).toISOString(),
-            type: 'text',
-        },
-        {
-            id: 102,
-            userId: 'dev-1',
-            name: 'Dimas Anggara',
-            avatar: 'DA',
-            message: 'Baik Mbak Citra, koneksi microservices sedang kami hubungkan ke staging.',
-            timestamp: new Date(Date.now() - 1800000).toISOString(),
-            type: 'text',
-        },
-    ],
-    'PRJ-2026-100': [
-        {
-            id: 201,
-            userId: 'pm-1',
-            name: 'Budi Santoso',
-            avatar: 'BS',
-            message: 'Eka, tolong selesaikan UI form inventaris minggu ini ya.',
-            timestamp: new Date(Date.now() - 7200000).toISOString(),
-            type: 'text',
-        },
-        {
-            id: 202,
-            userId: 'dev-2',
-            name: 'Eka Putri',
-            avatar: 'EP',
-            message: 'Siap Pak, komponen React dan integrasi SSO sudah 80% selesai.',
-            timestamp: new Date(Date.now() - 3600000).toISOString(),
-            type: 'text',
-        },
-    ],
-};
-
 export function ChatProvider({ children }) {
-    const { user } = useAuth();
-    const { addNotification } = useNotifications();
+    const { user, isLoggedIn } = useAuth();
 
-    const [messagesMap, setMessagesMap] = useState(() => {
-        const saved = localStorage.getItem(STORAGE_CHAT_KEY);
-        if (saved) {
-            try { return JSON.parse(saved); } catch { }
+    // Cache pesan per proyek: { [projectId]: Message[] }
+    const [messagesMap, setMessagesMap] = useState({});
+    // Status loading per proyek: { [projectId]: bool }
+    const [loadingMap, setLoadingMap] = useState({});
+    // Inisialisasi chat per proyek agar tidak fetch ulang berulang
+    const fetchedRef = useRef(new Set());
+
+    // ── Load pesan dari backend ──
+    const loadMessages = useCallback(async (projectId, { force = false } = {}) => {
+        if (!projectId) return;
+        if (fetchedRef.current.has(String(projectId)) && !force) return;
+
+        setLoadingMap(prev => ({ ...prev, [String(projectId)]: true }));
+        try {
+            const res = await chatService.getByProject(projectId);
+            const list = Array.isArray(res?.data) ? res.data : [];
+            setMessagesMap(prev => ({ ...prev, [String(projectId)]: list }));
+            fetchedRef.current.add(String(projectId));
+        } catch {
+            // Abaikan — biarkan cache / empty state
+        } finally {
+            setLoadingMap(prev => ({ ...prev, [String(projectId)]: false }));
         }
-        return initialMessages;
-    });
+    }, []);
 
-    const [unreadMap, setUnreadMap] = useState(() => {
-        const saved = localStorage.getItem(STORAGE_UNREAD_KEY);
-        if (saved) {
-            try { return JSON.parse(saved); } catch { }
-        }
-        return {};
-    });
-
-    // Save to localStorage
-    useEffect(() => {
-        localStorage.setItem(STORAGE_CHAT_KEY, JSON.stringify(messagesMap));
-    }, [messagesMap]);
-
-    useEffect(() => {
-        localStorage.setItem(STORAGE_UNREAD_KEY, JSON.stringify(unreadMap));
-    }, [unreadMap]);
-
-    // Ambil pesan proyek
+    // ── Get messages (hanya baca cache — PURE, tidak trigger fetch) ──
     const getMessages = (projectId) => {
-        return messagesMap[projectId] || [];
+        return messagesMap[String(projectId)] || [];
     };
 
-    // Ambil jumlah unread
-    const getUnreadCount = (projectId) => {
-        return unreadMap[projectId] || 0;
-    };
+    const getUnreadCount = () => 0;
 
-    // Tandai sudah dibaca
-    const markAsRead = (projectId) => {
-        if (unreadMap[projectId] && unreadMap[projectId] > 0) {
-            setUnreadMap(prev => ({
-                ...prev,
-                [projectId]: 0,
-            }));
-        }
-    };
+    const markAsRead = () => {};
 
-    // Kirim pesan baru
-    const sendMessage = (projectId, text, projectName = 'Proyek SDLC', type = 'text') => {
-        if (!text.trim()) return;
-
-        const senderName = user?.name || 'Pengguna';
-        const senderInitials = senderName
-            .split(' ')
-            .map(n => n[0])
-            .join('')
-            .toUpperCase()
-            .substring(0, 2) || 'U';
-
-        const newMessage = {
-            id: Date.now(),
-            userId: user?.id || `user-${Date.now()}`,
-            name: senderName,
-            avatar: senderInitials,
-            message: text,
-            timestamp: new Date().toISOString(),
-            type: type,
-        };
-
-        // Update messages state
-        setMessagesMap(prev => {
-            const currentList = prev[projectId] || [];
-            return {
-                ...prev,
-                [projectId]: [...currentList, newMessage],
-            };
-        });
-
-        // Trigger Notification ke NotificationContext jika bukan system message
-        if (type !== 'system') {
-            const truncatedMsg = text.length > 40 ? text.substring(0, 40) + '...' : text;
-            addNotification(
-                `Pesan Chat Baru (${projectId})`,
-                `${senderName} di ${projectName}: "${truncatedMsg}"`,
-                'info',
-                `/pm/workspace`
-            );
-
-            // Increment unread count for other team members
-            setUnreadMap(prev => ({
-                ...prev,
-                [projectId]: (prev[projectId] || 0) + 1,
-            }));
-        }
-
-        // Auto-reply system jika mengandung "help" atau "bantuan"
-        const lowerText = text.toLowerCase();
-        if (lowerText.includes('help') || lowerText.includes('bantuan')) {
-            setTimeout(() => {
-                const replyMsg = {
-                    id: Date.now() + 1,
-                    userId: 'system-assistant',
-                    name: 'Asisten Otomatis Bank Nagari',
-                    avatar: 'SY',
-                    message: 'Halo! Saya Asisten Otomatis SDLC. Untuk bantuan teknis atau otorisasi peran, silakan hubungi PM proyek atau kirim tiket ke IT Support (Ext. 404).',
-                    timestamp: new Date().toISOString(),
-                    type: 'system',
-                };
+    // ── Kirim pesan ──
+    const sendMessage = async (projectId, text, _projectName = 'Proyek SDLC', type = 'text') => {
+        if (!text.trim() || !projectId) return;
+        try {
+            const res = await chatService.send(projectId, text.trim(), type);
+            if (res?.data) {
                 setMessagesMap(prev => ({
                     ...prev,
-                    [projectId]: [...(prev[projectId] || []), replyMsg],
+                    [String(projectId)]: [...(prev[String(projectId)] || []), res.data],
                 }));
-            }, 1800);
+            } else {
+                // Fallback: refresh dari server agar konsisten
+                await loadMessages(projectId, { force: true });
+            }
+        } catch {
+            // Biarkan — toast di UI
         }
     };
 
-    // Helper kirim pesan sistem (misal saat upload FSD / rilis)
-    const sendSystemMessage = (projectId, text) => {
-        sendMessage(projectId, text, 'Proyek SDLC', 'system');
-    };
+    const sendSystemMessage = (projectId, text) => sendMessage(projectId, text, 'Proyek SDLC', 'system');
+
+    // ── Polling ringan saat tab aktif (10 detik) agar pesan user lain muncul ──
+    useEffect(() => {
+        if (!isLoggedIn) return;
+        const poll = () => {
+            if (document.visibilityState !== 'visible') return;
+            // Refresh semua proyek yang sudah di-load
+            fetchedRef.current.forEach(pid => {
+                loadMessages(pid, { force: true });
+            });
+        };
+        const timer = setInterval(poll, 10000);
+        return () => clearInterval(timer);
+    }, [isLoggedIn, loadMessages]);
+
+    // Reset cache saat logout
+    useEffect(() => {
+        if (!isLoggedIn) {
+            fetchedRef.current = new Set();
+            setMessagesMap({});
+        }
+    }, [isLoggedIn]);
 
     return (
         <ChatContext.Provider
@@ -212,8 +96,10 @@ export function ChatProvider({ children }) {
                 sendSystemMessage,
                 markAsRead,
                 getUnreadCount,
+                loadMessages,
+                loadingMap,
                 messagesMap,
-                unreadMap,
+                unreadMap: {},
             }}
         >
             {children}

@@ -17,6 +17,7 @@ class Project extends Model
         'req_id',
         'title',
         'description',
+        'contact_phone',
         'type',
         'project_type',
         'status',

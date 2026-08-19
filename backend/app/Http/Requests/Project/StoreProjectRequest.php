@@ -26,6 +26,7 @@ class StoreProjectRequest extends FormRequest
             'title'       => ['nullable', 'string', 'max:255'],
             'name'        => ['nullable', 'string', 'max:255'],
             'description' => ['nullable', 'string'],
+            'contact_phone' => ['nullable', 'string', 'max:30'],
             // FE bisa kirim 'division_id' (int) ATAU 'division' (string)
             'division_id' => ['nullable', 'exists:divisions,id'],
             'division'    => ['nullable', 'string'],

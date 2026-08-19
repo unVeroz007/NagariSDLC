@@ -126,12 +126,14 @@ export default function WorkspaceDevLead() {
     const [searchTerm, setSearchTerm] = useState('');
 
     // ── Persetujuan SIT (Development Lead) ──
-    // Tampilkan SEMUA proyek berstatus SIT (menunggu ATAU sudah approve)
-    // agar Dev Lead bisa melihat detail & status persetujuannya.
+    // Hanya muncul setelah Eksekusi SIT (Tahap 2) selesai (activeSitStep >= 3),
+    // menampilkan status menunggu ATAU sudah approve.
     const [sitApprovingId, setSitApprovingId] = useState(null);
     const sitProjects = (projects || []).filter(p => {
         const st = String(p.status || '').toUpperCase();
-        return st === 'SIT_IN_PROGRESS' || st === 'SIT_REVISION';
+        if (st !== 'SIT_IN_PROGRESS' && st !== 'SIT_REVISION') return false;
+        const sitUat = p.sitUatData || p.sit_uat_data || {};
+        return Number(sitUat.activeSitStep || 1) >= 3;
     });
     const sitPendingProjects = sitProjects.filter(p => {
         const ap = p.sitUatData?.sit3_approvals || p.sit_uat_data?.sit3_approvals || {};

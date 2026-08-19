@@ -32,7 +32,6 @@ import {
     AlertCircle,
     Info,
     Edit,
-    Share,
     FileText,
     FolderOpen,
     Activity,
@@ -49,6 +48,7 @@ import {
     X,
     ShieldCheck,
     Server,
+    Phone,
     CheckSquare,
     Download,
     Upload,
@@ -123,10 +123,10 @@ export default function TaskDetail() {
             })
             .catch(() => {});
         fetchSitData();
-        // Polling ringan agar data SIT/UAT selalu sinkron dengan tab SIT & approval
+        // Polling ringan agar data SIT/UAT sinkron — cukup jarang & hanya saat tab aktif
         const sitPollTimer = setInterval(() => {
             if (document.visibilityState === 'visible') fetchSitData();
-        }, 10000);
+        }, 20000);
         return () => {
             cancelled = true;
             clearInterval(sitPollTimer);
@@ -563,13 +563,6 @@ export default function TaskDetail() {
         setIsEditProjectModalOpen(false);
     };
 
-    const [isProjectChatOpen, setIsProjectChatOpen] = useState(false);
-    const [newChatMessage, setNewChatMessage] = useState('');
-    const [chatMessages, setChatMessages] = useState([
-        { id: 1, sender: 'Budi Santoso', time: '10:00', text: 'Tolong pastikan dokumentasi sudah lengkap.' },
-        { id: 2, sender: 'Anda', time: '10:05', text: 'Baik, sedang saya siapkan.' },
-    ]);
-
     const mapTaskStatusToEnum = (status) => {
         const s = String(status || '').toLowerCase();
         if (s === 'selesai' || s === 'done') return 'done';
@@ -694,21 +687,6 @@ export default function TaskDetail() {
         }
     };
 
-    const handleSendMessage = (e) => {
-        e.preventDefault();
-        if(!newChatMessage.trim()) return;
-
-        const newMessage = {
-            id: chatMessages.length + 1,
-            sender: 'Anda',
-            time: new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }),
-            text: newChatMessage
-        };
-
-        setChatMessages([...chatMessages, newMessage]);
-        setNewChatMessage('');
-    };
-
     const filteredTasks = tasks.filter((task) =>
         task.name.toLowerCase().includes(searchTask.toLowerCase())
     );
@@ -750,11 +728,17 @@ export default function TaskDetail() {
         return configs[status] || configs['Belum Mulai'];
     };
 
-    const completedTasks = tasks.filter((t) => {
+    // Progress dihitung dari task NON-TAKE-DOWN (konsisten dengan gate SIT/UAT).
+    // Task berstatus "Take Down" tidak dihitung sebagai tugas yang harus diselesaikan.
+    const progressEligibleTasks = tasks.filter(t => {
+        const st = String(t.status || '').toLowerCase();
+        return st !== 'take_down' && st !== 'take down';
+    });
+    const completedTasks = progressEligibleTasks.filter((t) => {
         const st = String(t.status || '').toLowerCase();
         return st === 'selesai' || st === 'done' || t.done === true;
     }).length;
-    const progress = tasks.length === 0 ? 0 : Math.round((completedTasks / tasks.length) * 100);
+    const progress = progressEligibleTasks.length === 0 ? 0 : Math.round((completedTasks / progressEligibleTasks.length) * 100);
 
     // 📜 Log Aktivitas Proyek — dari status_histories (transisi status) + activity_logs (task & proyek)
     const [taskActivityLogs, setTaskActivityLogs] = useState([]);
@@ -883,13 +867,15 @@ export default function TaskDetail() {
                                 <AlertCircle size={14} />
                                 {project.priority}
                             </span>
+                            {project.contactPhone && (
+                                <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold border bg-green-50 border-green-200 text-green-700">
+                                    <Phone size={14} />
+                                    {project.contactPhone}
+                                </span>
+                            )}
                         </div>
                     </div>
                     <div className="flex gap-3">
-                        <button className="px-4 py-2 rounded-lg border border-gray-200 bg-white text-gray-700 hover:bg-gray-50 transition-colors text-sm font-semibold flex items-center gap-2 shadow-sm">
-                            <Share size={16} />
-                            Bagikan
-                        </button>
                         {(user?.role === 'super_admin' || user?.role === 'head_of_it' || user?.role === 'development_lead') && (
                             <button 
                                 onClick={handleOpenEditProjectModal}
@@ -914,7 +900,7 @@ export default function TaskDetail() {
                             </div>
                             <div className="text-right">
                                 <span className="text-2xl font-bold text-[#00529C] block">{progress}%</span>
-                                <span className="text-xs text-gray-500">{completedTasks} dari {tasks.length} Task Selesai</span>
+                                <span className="text-xs text-gray-500">{completedTasks} dari {progressEligibleTasks.length} Task Selesai</span>
                             </div>
                         </div>
                         <div className="w-full h-4 bg-gray-100 rounded-full overflow-hidden">

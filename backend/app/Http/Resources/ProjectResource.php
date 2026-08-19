@@ -36,6 +36,7 @@ class ProjectResource extends JsonResource
             'req_id' => $this->req_id,
             'title' => $this->title,
             'description' => $this->description,
+            'contact_phone' => $this->contact_phone,
             'type' => $this->type ?? 'RBB',
             'project_type' => $this->project_type ?? 'baru',
             'status' => $this->status instanceof \BackedEnum ? $this->status->value : $this->status,

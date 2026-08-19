@@ -109,9 +109,12 @@ export default function WorkspaceDevAnalyst() {
     const { addNotification } = useNotifications();
 
     // ── Persetujuan SIT (PM / Analyst Pengembangan) ──
+    // Hanya muncul setelah Eksekusi SIT (Tahap 2) selesai (activeSitStep >= 3).
     const sitProjects = (projects || []).filter(p => {
         const st = String(p.status || '').toUpperCase();
-        return st === 'SIT_IN_PROGRESS' || st === 'SIT_REVISION';
+        if (st !== 'SIT_IN_PROGRESS' && st !== 'SIT_REVISION') return false;
+        const sitUat = p.sitUatData || p.sit_uat_data || {};
+        return Number(sitUat.activeSitStep || 1) >= 3;
     });
     const [sitApprovingId, setSitApprovingId] = useState(null);
     const handleSitApproval = async (projectId) => {

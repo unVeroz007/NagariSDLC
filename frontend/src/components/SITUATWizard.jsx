@@ -17,7 +17,7 @@ import {
     Upload, X, FileText, ArrowRight, ArrowLeft, AlertTriangle,
     RotateCcw, Send, Paperclip, Info, ChevronRight, Clock,
     Eye, Download, Printer, Building2, ClipboardList, Bug,
-    UserCheck, FileCheck, BookOpen, Users, Trash2, Plus
+    UserCheck, FileCheck, BookOpen, Users, Trash2, Plus, Check, Edit
 } from 'lucide-react';
 import { generateDocumentName, getDocumentTypeInfo, formatFileSize } from '../utils/documentNaming';
 import { taskService, projectService, documentService } from '../services/api';
@@ -703,35 +703,82 @@ export default function SITUATWizard({ project, updateProject, addNotification, 
         setSubmitting(false);
     };
 
+    // ── Auto-fill peserta, unit & tanggal pelaksanaan UAT (Tab 1) ──
+    // Peserta otomatis: pemohon (business user), PM/Analyst Pengembangan, developer.
+    // Unit otomatis dari divisi pemohon; tanggal default = hari ini.
+    const buildUatParticipants = useCallback(() => {
+        const participants = [];
+        const addP = (name, role, unit = '', phone = '') => {
+            if (name && !participants.some(p => p.name === name)) participants.push({ name, role, unit, phone });
+        };
+        addP(sf(project?.creator, ''), 'Pemohon (Business User)', sf(project?.creator?.division_detail || project?.creator?.division, ''), sf(project?.contact_phone || project?.contactPhone, ''));
+        addP(sf(project?.pm, ''), 'PM / Analyst Pengembangan', 'Divisi Pengembangan TI');
+        addP(sf(project?.analyst, ''), 'System Analyst', 'Divisi Pengembangan TI');
+        (Array.isArray(project?.tasks) ? project.tasks : []).forEach(t => {
+            addP(t.assignee_detail?.name || t.assignee, 'Developer', 'Divisi Pengembangan TI');
+        });
+        return participants;
+    }, [project]);
+
+    useEffect(() => {
+        if (activeUatStep !== 1) return;
+        setUat1(prev => {
+            const updates = {};
+            // Isi peserta hanya jika masih kosong
+            if (!prev.participants || prev.participants.length === 0) {
+                updates.participants = buildUatParticipants();
+            }
+            // Unit / Divisi Peminta otomatis dari business user (pemohon)
+            if (!prev.unit) {
+                updates.unit = sf(project?.creator?.division_detail || project?.creator?.division || project?.division, '');
+            }
+            // Disiapkan Oleh otomatis dari PM / Analyst Pengembangan
+            if (!prev.preparedBy) {
+                updates.preparedBy = sf(project?.pm, '');
+            }
+            // Tanggal pelaksanaan default hari ini (jika kosong)
+            if (!prev.startDate) {
+                updates.startDate = new Date().toISOString().slice(0, 10);
+            }
+            if (Object.keys(updates).length === 0) return prev;
+            return { ...prev, ...updates };
+        });
+    }, [activeUatStep, project?.id, buildUatParticipants]);
+
     const handleStartUAT = () => {
         // Auto-fill peserta UAT dari proyek: pemohon (creator), PM, analyst, developer
-        const participants = [];
-        const addP = (name, role) => {
-            if (name && !participants.some(p => p.name === name)) participants.push({ name, role, unit: '' });
-        };
-        addP(sf(project?.creator, ''), 'Pemohon');
-        addP(sf(project?.pm, ''), 'PM / Analyst Pengembangan');
-        addP(sf(project?.analyst, ''), 'System Analyst');
-        (Array.isArray(project?.tasks) ? project.tasks : []).forEach(t => {
-            addP(t.assignee_detail?.name || t.assignee, 'Developer');
+        const participants = (uat1.participants || []).length > 0 ? uat1.participants : buildUatParticipants();
+        setUat1(prev => ({ ...prev, participants }));
+        updateProject(project.id, {
+            status: 'UAT_IN_PROGRESS',
+            sitUatData: buildSitUatData({ activeUatStep: 1, uat1_participants: participants }),
         });
-        setUat1(prev => ({ ...prev, participants: prev.participants.length > 0 ? prev.participants : participants }));
-        updateProject(project.id, { status: 'UAT_IN_PROGRESS', sitUatData: buildSitUatData({ activeUatStep: 1 }) });
         toast.success(`Pengujian UAT Internal dimulai untuk proyek "${project.name}".`);
     };
 
     // ── Handler peserta UAT ──
+    const [editingUatIdx, setEditingUatIdx] = useState(null); // idx peserta yang sedang diedit (inline)
     const handleAddUatParticipant = () => {
-        setUat1(prev => ({ ...prev, participants: [...prev.participants, { name: '', role: '', unit: '' }] }));
+        const participants = [...(uat1.participants || []), { name: '', role: '', unit: '', phone: '' }];
+        setUat1(prev => ({ ...prev, participants }));
+        setEditingUatIdx(participants.length - 1);
+        persistSitUatData({ uat1_participants: participants });
     };
     const handleRemoveUatParticipant = (idx) => {
-        setUat1(prev => ({ ...prev, participants: prev.participants.filter((_, i) => i !== idx) }));
+        const participants = (uat1.participants || []).filter((_, i) => i !== idx);
+        setUat1(prev => ({ ...prev, participants }));
+        persistSitUatData({ uat1_participants: participants });
+        if (editingUatIdx === idx) setEditingUatIdx(null);
     };
     const handleUatParticipantChange = (idx, field, val) => {
-        setUat1(prev => ({
-            ...prev,
-            participants: prev.participants.map((p, i) => i === idx ? { ...p, [field]: val } : p),
-        }));
+        const participants = (uat1.participants || []).map((p, i) => i === idx ? { ...p, [field]: val } : p);
+        setUat1(prev => ({ ...prev, participants }));
+        // Tidak langsung persist per ketikan (boros) — persist saat klik "Selesai"
+    };
+    const handleUatParticipantDone = () => {
+        if (editingUatIdx === null) return;
+        persistSitUatData({ uat1_participants: uat1.participants });
+        setEditingUatIdx(null);
     };
 
     // Skenario UAT otomatis dari task (nama task sebagai daftar skenario)
@@ -743,6 +790,12 @@ export default function SITUATWizard({ project, updateProject, addNotification, 
     const handleSaveUATStep = async (step) => {
         const nextStep = step + 1;
         setSubmitting(true);
+        // Tahap 1 memerlukan minimal 1 dokumen undangan UAT
+        if (step === 1 && (!uat1.docs || uat1.docs.length === 0)) {
+            setSubmitting(false);
+            toast.error('Unggah minimal 1 dokumen undangan UAT sebelum lanjut ke Eksekusi.');
+            return;
+        }
         if (step === 1) await uploadAllDrafts(setUat1, uat1.docs);
         if (step === 2) await uploadAllDrafts(setUat2, uat2.docs);
         setActiveUatStep(nextStep);
@@ -1398,20 +1451,14 @@ export default function SITUATWizard({ project, updateProject, addNotification, 
                                     <DocList docs={sit3.docs} onRemove={i => onRemoveDoc(setSit3, i)} onView={viewDoc} onDownload={downloadDoc} onTypeChange={(i, t) => changeDocType(setSit3, i, t)} docTypeOptions={docTypeOptions('SIT_SIGNOFF')} readOnly={sitDone} />
                                 </div>
 
-                                {/* Action buttons (hanya non-viewer) */}
+                                {/* Action buttons (hanya non-viewer) — revisi dilakukan di Tahap 2 */}
                                 {!sitDone && !isViewer && (status === 'SIT_IN_PROGRESS' || UNLOCK_ALL_STAGES) && activeSitStep === 3 && (
-                                    <div className="flex flex-col sm:flex-row gap-3 justify-between pt-2 border-t border-gray-100">
-                                        <button
-                                            onClick={() => { setRevisionType('SIT_TO_DEV'); setShowRevisionModal(true); }}
-                                            className="px-5 py-2.5 bg-orange-50 hover:bg-orange-100 border border-orange-300 text-orange-700 text-xs font-bold rounded-xl flex items-center gap-2 transition-all cursor-pointer"
-                                        >
-                                            <RotateCcw size={14} /> SIT Perlu Revisi — Kembalikan ke Dev
-                                        </button>
+                                    <div className="flex flex-col gap-3 pt-2 border-t border-gray-100">
                                         <button
                                             onClick={handleSITPass}
                                             disabled={submitting || !sit3.reviewNotes || !allSitApproved}
                                             title={allSitApproved ? '' : 'Semua persetujuan (Developer, PM / Analyst Pengembangan, Development Lead) harus lengkap terlebih dahulu'}
-                                            className={`px-6 py-2.5 text-white text-xs font-bold rounded-xl flex items-center gap-2 transition-all shadow-sm active:scale-95 ${allSitApproved && sit3.reviewNotes ? 'bg-teal-600 hover:bg-teal-700 cursor-pointer' : 'bg-gray-300 cursor-not-allowed'}`}
+                                            className={`w-full px-6 py-3 text-white text-sm font-bold rounded-xl flex items-center justify-center gap-2 transition-all shadow-sm active:scale-95 ${allSitApproved && sit3.reviewNotes ? 'bg-teal-600 hover:bg-teal-700 cursor-pointer' : 'bg-gray-300 cursor-not-allowed'}`}
                                         >
                                             <CheckCircle2 size={14} /> SIT Lulus — Lanjut ke UAT Internal
                                         </button>
@@ -1555,13 +1602,14 @@ export default function SITUATWizard({ project, updateProject, addNotification, 
                                         className="w-full px-3 py-2.5 border border-gray-200 rounded-xl text-xs focus:outline-none focus:border-amber-500 bg-gray-50 resize-none disabled:bg-gray-100" />
                                 </div>
 
-                                {/* Informasi proyek & unit */}
+                                {/* Informasi proyek: unit peminta, tanggal, disiapkan oleh */}
                                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                                     <div>
                                         <label className="block text-xs font-bold text-gray-600 uppercase tracking-wider mb-1.5">Unit / Divisi Peminta *</label>
                                         <input type="text" value={uat1.unit} onChange={e => setUat1(p => ({ ...p, unit: e.target.value }))}
-                                            placeholder={project?.division || 'Contoh: Divisi Operasional'} disabled={uatDone}
+                                            placeholder="Otomatis dari business user pemohon" disabled={uatDone}
                                             className="w-full px-3 py-2.5 border border-gray-200 rounded-xl text-xs focus:outline-none focus:border-amber-500 bg-gray-50 disabled:bg-gray-100" />
+                                        <p className="text-[10px] text-gray-400 mt-1">Otomatis dari divisi pemohon (business user).</p>
                                     </div>
                                     <div>
                                         <label className="block text-xs font-bold text-gray-600 uppercase tracking-wider mb-1.5">Tanggal Pelaksanaan *</label>
@@ -1569,18 +1617,12 @@ export default function SITUATWizard({ project, updateProject, addNotification, 
                                             className="w-full px-3 py-2.5 border border-gray-200 rounded-xl text-xs focus:outline-none focus:border-amber-500 bg-gray-50 disabled:bg-gray-100" />
                                     </div>
                                     <div>
-                                        <label className="block text-xs font-bold text-gray-600 uppercase tracking-wider mb-1.5">Sampai Tanggal *</label>
-                                        <input type="date" value={uat1.endDate} onChange={e => setUat1(p => ({ ...p, endDate: e.target.value }))} disabled={uatDone}
+                                        <label className="block text-xs font-bold text-gray-600 uppercase tracking-wider mb-1.5">Disiapkan Oleh (PM / Analis Pengembangan) *</label>
+                                        <input type="text" value={uat1.preparedBy} onChange={e => setUat1(p => ({ ...p, preparedBy: e.target.value }))}
+                                            placeholder="Otomatis dari PM / Analyst Pengembangan" disabled={uatDone}
                                             className="w-full px-3 py-2.5 border border-gray-200 rounded-xl text-xs focus:outline-none focus:border-amber-500 bg-gray-50 disabled:bg-gray-100" />
+                                        <p className="text-[10px] text-gray-400 mt-1">Otomatis dari PM / Analyst Pengembangan proyek.</p>
                                     </div>
-                                </div>
-
-                                {/* Disiapkan oleh */}
-                                <div>
-                                    <label className="block text-xs font-bold text-gray-600 uppercase tracking-wider mb-1.5">Disiapkan Oleh (PM / Analis Pengembangan) *</label>
-                                    <input type="text" value={uat1.preparedBy} onChange={e => setUat1(p => ({ ...p, preparedBy: e.target.value }))}
-                                        placeholder="Nama PM / Perwakilan Divisi" disabled={uatDone}
-                                        className="w-full px-3 py-2.5 border border-gray-200 rounded-xl text-xs focus:outline-none focus:border-amber-500 bg-gray-50 disabled:bg-gray-100" />
                                 </div>
 
                                 {/* Peserta yang terlibat */}
@@ -1594,30 +1636,114 @@ export default function SITUATWizard({ project, updateProject, addNotification, 
                                         )}
                                     </div>
                                     <p className="text-[11px] text-gray-500 mb-3">
-                                        Otomatis terisi dari pemohon, PM, analis, dan developer proyek. Tambahkan pihak lain bila diperlukan.
+                                        Otomatis terisi dari pemohon (business user), PM/Analyst Pengembangan, analis, dan developer proyek. Tambahkan pihak lain bila diperlukan.
                                     </p>
                                     {uat1.participants.length === 0 ? (
-                                        <p className="text-[11px] text-gray-400 italic">Belum ada peserta. Mulai UAT untuk mengisi otomatis.</p>
+                                        <p className="text-[11px] text-gray-400 italic">Peserta akan terisi otomatis dari pihak yang terlibat dalam proyek.</p>
                                     ) : (
-                                        <div className="space-y-2">
-                                            {uat1.participants.map((p, idx) => (
-                                                <div key={idx} className="grid grid-cols-1 sm:grid-cols-[1fr_1fr_1fr_auto] gap-2 items-center">
-                                                    <input type="text" value={p.name} onChange={e => handleUatParticipantChange(idx, 'name', e.target.value)}
-                                                        placeholder="Nama peserta" disabled={uatDone}
-                                                        className="px-3 py-2 border border-gray-200 rounded-lg text-xs focus:outline-none focus:border-amber-500 bg-gray-50 disabled:bg-gray-100" />
-                                                    <input type="text" value={p.role} onChange={e => handleUatParticipantChange(idx, 'role', e.target.value)}
-                                                        placeholder="Peran (Pemohon/PM/Developer/dll)" disabled={uatDone}
-                                                        className="px-3 py-2 border border-gray-200 rounded-lg text-xs focus:outline-none focus:border-amber-500 bg-gray-50 disabled:bg-gray-100" />
-                                                    <input type="text" value={p.unit} onChange={e => handleUatParticipantChange(idx, 'unit', e.target.value)}
-                                                        placeholder="Unit / Divisi" disabled={uatDone}
-                                                        className="px-3 py-2 border border-gray-200 rounded-lg text-xs focus:outline-none focus:border-amber-500 bg-gray-50 disabled:bg-gray-100" />
-                                                    {!uatDone && (
-                                                        <button onClick={() => handleRemoveUatParticipant(idx)} className="p-2 text-gray-400 hover:text-red-500 rounded-lg hover:bg-red-50 transition-colors cursor-pointer">
-                                                            <Trash2 size={14} />
-                                                        </button>
-                                                    )}
-                                                </div>
-                                            ))}
+                                        <div className="border border-gray-200 rounded-xl overflow-hidden">
+                                            <table className="table-auto w-full text-left text-xs">
+                                                <thead>
+                                                    <tr className="bg-gray-100/80 border-b border-gray-200 text-gray-600 text-[11px] font-bold uppercase tracking-wider">
+                                                        <th className="py-2.5 px-4 text-left">Nama Peserta</th>
+                                                        <th className="py-2.5 px-4 text-left">Peran</th>
+                                                        <th className="py-2.5 px-4 text-left">Divisi</th>
+                                                        <th className="py-2.5 px-4 text-left">Kontak</th>
+                                                        <th className="py-2.5 px-4 text-center w-24">Aksi</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody className="divide-y divide-gray-100">
+                                                    {uat1.participants.map((p, idx) => {
+                                                        const isEditing = editingUatIdx === idx;
+                                                        const editable = !uatDone;
+                                                        return (
+                                                            <tr key={idx} className={`hover:bg-amber-50/40 transition-colors ${isEditing ? 'bg-amber-50/60' : ''}`}>
+                                                                {/* Nama */}
+                                                                <td className="py-2.5 px-4 text-gray-800 font-medium">
+                                                                    {isEditing ? (
+                                                                        <input
+                                                                            type="text"
+                                                                            value={p.name}
+                                                                            onChange={e => handleUatParticipantChange(idx, 'name', e.target.value)}
+                                                                            placeholder="Nama peserta"
+                                                                            className="w-full px-2.5 py-1.5 border border-amber-300 rounded-lg text-xs focus:outline-none focus:border-amber-500 bg-white"
+                                                                        />
+                                                                    ) : (p.name || <span className="text-gray-400 italic">-</span>)}
+                                                                </td>
+                                                                {/* Peran */}
+                                                                <td className="py-2.5 px-4 text-gray-600">
+                                                                    {isEditing ? (
+                                                                        <input
+                                                                            type="text"
+                                                                            value={p.role}
+                                                                            onChange={e => handleUatParticipantChange(idx, 'role', e.target.value)}
+                                                                            placeholder="Peran"
+                                                                            className="w-full px-2.5 py-1.5 border border-amber-300 rounded-lg text-xs focus:outline-none focus:border-amber-500 bg-white"
+                                                                        />
+                                                                    ) : (p.role || <span className="text-gray-400 italic">-</span>)}
+                                                                </td>
+                                                                {/* Divisi */}
+                                                                <td className="py-2.5 px-4 text-gray-600">
+                                                                    {isEditing ? (
+                                                                        <input
+                                                                            type="text"
+                                                                            value={p.unit}
+                                                                            onChange={e => handleUatParticipantChange(idx, 'unit', e.target.value)}
+                                                                            placeholder="Divisi"
+                                                                            className="w-full px-2.5 py-1.5 border border-amber-300 rounded-lg text-xs focus:outline-none focus:border-amber-500 bg-white"
+                                                                        />
+                                                                    ) : (p.unit || <span className="text-gray-400 italic">-</span>)}
+                                                                </td>
+                                                                {/* Kontak */}
+                                                                <td className="py-2.5 px-4 text-gray-600">
+                                                                    {isEditing ? (
+                                                                        <input
+                                                                            type="text"
+                                                                            value={p.phone || ''}
+                                                                            onChange={e => handleUatParticipantChange(idx, 'phone', e.target.value)}
+                                                                            placeholder="Nomor telpon"
+                                                                            className="w-full px-2.5 py-1.5 border border-amber-300 rounded-lg text-xs focus:outline-none focus:border-amber-500 bg-white"
+                                                                        />
+                                                                    ) : (p.phone || <span className="text-gray-400 italic">-</span>)}
+                                                                </td>
+                                                                {/* Aksi */}
+                                                                <td className="py-2.5 px-4 text-center">
+                                                                    <div className="flex items-center justify-center gap-1">
+                                                                        {editable && (
+                                                                            isEditing ? (
+                                                                                <button
+                                                                                    onClick={handleUatParticipantDone}
+                                                                                    className="p-1.5 text-emerald-600 hover:bg-emerald-50 rounded-lg transition-colors cursor-pointer"
+                                                                                    title="Selesai & simpan"
+                                                                                >
+                                                                                    <Check size={15} />
+                                                                                </button>
+                                                                            ) : (
+                                                                                <button
+                                                                                    onClick={() => setEditingUatIdx(idx)}
+                                                                                    className="p-1.5 text-gray-400 hover:text-amber-600 hover:bg-amber-50 rounded-lg transition-colors cursor-pointer"
+                                                                                    title="Edit peserta"
+                                                                                >
+                                                                                    <Edit size={15} />
+                                                                                </button>
+                                                                            )
+                                                                        )}
+                                                                        {editable && (
+                                                                            <button
+                                                                                onClick={() => handleRemoveUatParticipant(idx)}
+                                                                                className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors cursor-pointer"
+                                                                                title="Hapus peserta"
+                                                                            >
+                                                                                <Trash2 size={15} />
+                                                                            </button>
+                                                                        )}
+                                                                    </div>
+                                                                </td>
+                                                            </tr>
+                                                        );
+                                                    })}
+                                                </tbody>
+                                            </table>
                                         </div>
                                     )}
                                 </div>
@@ -1630,22 +1756,32 @@ export default function SITUATWizard({ project, updateProject, addNotification, 
                                         className="w-full px-3 py-2.5 border border-gray-200 rounded-xl text-xs focus:outline-none focus:border-amber-500 bg-gray-50 disabled:bg-gray-100" />
                                 </div>
 
-                                {/* Dokumen */}
-                                <div>
+                                {/* Dokumen Undangan UAT */}
+                                <div className="bg-white border border-gray-200 rounded-2xl p-4">
                                     <div className="flex items-center justify-between mb-1.5">
-                                        <label className="text-xs font-bold text-gray-600 uppercase tracking-wider">Dokumen: Skenario UAT / Use Case Matrix</label>
+                                        <div>
+                                            <label className="text-xs font-bold text-gray-700 uppercase tracking-wider">Dokumen Undangan UAT</label>
+                                            <p className="text-[11px] text-gray-400 mt-0.5">
+                                                Unggah undangan resmi yang ditujukan kepada seluruh pihak yang berkepentingan (pemohon, PM, developer, analis, dll).
+                                            </p>
+                                        </div>
                                         {!uatDone && (
-                                            <label className="px-3 py-1.5 bg-amber-500 hover:bg-amber-600 text-white rounded-xl text-xs font-bold cursor-pointer flex items-center gap-1.5 transition-colors">
-                                                <Upload size={12} /> Upload
+                                            <label className={`px-3 py-1.5 bg-amber-500 hover:bg-amber-600 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 transition-colors ${uploadingCategory === 'UAT_PREP' ? 'opacity-60 cursor-wait' : 'cursor-pointer'}`}>
+                                                {uploadingCategory === 'UAT_PREP' ? (
+                                                    <><span className="w-3 h-3 border-2 border-white/40 border-t-white rounded-full animate-spin" /> Mengunggah...</>
+                                                ) : (
+                                                    <><Upload size={12} /> Upload</>
+                                                )}
                                                 <input type="file" ref={uat1FileRef} multiple accept=".pdf,.xls,.xlsx,.jpg,.jpeg,.png,.zip" onChange={e => onUpload(e, setUat1, 'docs', 'UAT_PREP')} className="hidden" />
                                             </label>
                                         )}
                                     </div>
                                     <DocList docs={uat1.docs} onRemove={i => onRemoveDoc(setUat1, i)} onView={viewDoc} onDownload={downloadDoc} onTypeChange={(i, t) => changeDocType(setUat1, i, t)} docTypeOptions={docTypeOptions('UAT_PREP')} readOnly={uatDone} />
                                 </div>
+
                                 {!uatDone && (status === 'UAT_IN_PROGRESS' || UNLOCK_ALL_STAGES) && activeUatStep === 1 && (
                                     <div className="flex justify-end pt-2">
-                                        <button onClick={() => handleSaveUATStep(1)} disabled={!uat1.unit || !uat1.startDate || !uat1.endDate || !uat1.preparedBy}
+                                        <button onClick={() => handleSaveUATStep(1)} disabled={!uat1.unit || !uat1.startDate || !uat1.preparedBy}
                                             className="px-5 py-2.5 bg-amber-500 hover:bg-amber-600 disabled:bg-gray-300 disabled:cursor-not-allowed text-white text-xs font-bold rounded-xl flex items-center gap-2 transition-all cursor-pointer">
                                             Simpan &amp; Lanjut Eksekusi UAT <ArrowRight size={14} />
                                         </button>

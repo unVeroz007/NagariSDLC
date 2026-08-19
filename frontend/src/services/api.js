@@ -506,6 +506,21 @@ export const activityLogService = {
     getSummary: async () => apiFetch(`${BASE_URL}/activity-logs/summary`),
 };
 
+// ──────────────────────────────────────────
+// CHAT SERVICE (per proyek)
+// ──────────────────────────────────────────
+export const chatService = {
+    getByProject: async (projectId) => {
+        return apiFetch(`${BASE_URL}/projects/${projectId}/chat`);
+    },
+    send: async (projectId, message, type = 'text') => {
+        return apiFetch(`${BASE_URL}/projects/${projectId}/chat`, {
+            method: 'POST',
+            body: JSON.stringify({ message, type }),
+        });
+    },
+};
+
 export const workspaceService = {
     getByRole: async (role) => apiFetch(`${BASE_URL}/workspace/${role}`),
 };

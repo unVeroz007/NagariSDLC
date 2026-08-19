@@ -71,6 +71,7 @@ export function ProjectProvider({ children }) {
                     targetDate: p.targetDate || p.target_date || 'TBD',
                     submittedAt: p.submittedAt || p.created_at || new Date().toISOString(),
                     division: typeof p.division === 'string' ? p.division : (p.division?.name || p.division_detail?.name || null),
+                    contactPhone: p.contactPhone || p.contact_phone || '',
                     // Normalisasi key snake_case → camelCase (ProjectResource mengekspos sit_uat_data)
                     sitUatData: p.sitUatData || p.sit_uat_data || {},
                 }));
@@ -141,6 +142,7 @@ export function ProjectProvider({ children }) {
             const res = await projectService.create({
                 title: projectData.name || projectData.title,
                 description: projectData.description || '',
+                contact_phone: projectData.contact_phone || projectData.contactPhone || null,
                 division: projectData.division,
                 division_id: projectData.division_id,
                 target_date: projectData.targetDate || null,

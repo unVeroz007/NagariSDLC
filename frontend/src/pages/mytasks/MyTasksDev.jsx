@@ -187,11 +187,17 @@ export default function MyTasksDev() {
     };
 
     // ── Persetujuan SIT (Developer sebagai assignee) ──
+    // Hanya muncul setelah Eksekusi SIT (Tahap 2) selesai: semua task dicentang OK
+    // dan PM menekan "Simpan & Lanjut Review" (activeSitStep >= 3).
     const [sitApprovingId, setSitApprovingId] = useState(null);
     const sitPendingProjects = useMemo(() => {
         return (projects || []).filter(p => {
             const st = String(p.status || '').toUpperCase();
             if (st !== 'SIT_IN_PROGRESS') return false;
+            // Gate: Tahap 2 (Eksekusi) harus sudah tuntas sebelum persetujuan muncul
+            const sitUat = p.sitUatData || p.sit_uat_data || {};
+            const activeSitStep = Number(sitUat.activeSitStep || 1);
+            if (activeSitStep < 3) return false;
             // Developer ini harus jadi assignee minimal 1 task
             const isAssignee = Array.isArray(p.tasks) && p.tasks.some(t =>
                 (t.assignee_id ?? t.assignee_detail?.id) != null &&

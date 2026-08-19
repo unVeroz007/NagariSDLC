@@ -20,6 +20,7 @@ import {
     UserX,
     ArrowUpRight,
     Building2,
+    Phone,
 } from 'lucide-react';
 import { getProjectStats } from '../../data/mockData';
 import { PROJECT_STATUS_LABEL, PROJECT_STATUS_COLOR } from '../../constants/projectStatus';
@@ -215,6 +216,7 @@ export default function ProjectList() {
                                     <th className="pl-5 pr-4 py-3.5">ID Proyek</th>
                                     <th className="px-4 py-3.5">Nama Proyek</th>
                                     <th className="px-3 py-3.5">Divisi Peminta</th>
+                                    <th className="px-3 py-3.5">Kontak</th>
                                     <th className="px-3 py-3.5">Project Manager</th>
                                     <th className="px-3 py-3.5">Fase / Status</th>
                                     <th className="px-3 py-3.5">Target Selesai</th>
@@ -255,6 +257,16 @@ export default function ProjectList() {
                                                         <Building2 size={13} className="text-slate-400 shrink-0" />
                                                         <span className="truncate">{project.division}</span>
                                                     </div>
+                                                </td>
+                                                <td className="px-3 py-4">
+                                                    {project.contactPhone ? (
+                                                        <span className="inline-flex items-center gap-1.5 text-xs font-medium text-green-700">
+                                                            <Phone size={13} className="text-green-500 shrink-0" />
+                                                            {project.contactPhone}
+                                                        </span>
+                                                    ) : (
+                                                        <span className="text-xs text-gray-300">—</span>
+                                                    )}
                                                 </td>
                                                 <td className="px-3 py-4">
                                                     {project.pm ? (

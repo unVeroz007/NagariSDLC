@@ -181,6 +181,7 @@ class ProjectController extends Controller
             'req_id'       => Project::generateReqId(),
             'title'        => $title,
             'description'  => $request->description,
+            'contact_phone'=> $request->contact_phone,
             'type'         => $request->type === 'Non-RBB' ? 'NON_RBB' : ($request->type ?? 'RBB'),
             'project_type' => $request->project_type ?? 'baru',
             'division_id'  => $divisionId,
@@ -218,6 +219,7 @@ class ProjectController extends Controller
         $request->validate([
             'title'                  => ['sometimes', 'string', 'max:255'],
             'description'            => ['sometimes', 'nullable', 'string'],
+            'contact_phone'          => ['sometimes', 'nullable', 'string', 'max:30'],
             'type'                   => ['sometimes', 'nullable', 'string', 'in:RBB,NON_RBB,Non-RBB'],
             'pm_id'                  => ['sometimes', 'nullable', 'exists:users,id'],
             'analyst_id'             => ['sometimes', 'nullable', 'exists:users,id'],
@@ -255,6 +257,7 @@ class ProjectController extends Controller
         $updateData = array_filter([
             'title'                  => $request->title,
             'description'            => $request->description,
+            'contact_phone'          => $request->contact_phone,
             'type'                   => $typeValue,
             'project_type'           => $request->project_type,
             'pm_id'                  => $request->pm_id,

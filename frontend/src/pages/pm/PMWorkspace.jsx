@@ -191,17 +191,25 @@ export default function PMWorkspace() {
         }
     }, [myProjects, selectedProject]);
 
-    // 📊 Progress proyek (untuk ditampilkan di card & tabel)
+    // 📊 Progress proyek — task Take Down tidak dihitung (konsisten dgn gate SIT/UAT)
     const getProjectProgress = (project) => {
-        if (!project || !Array.isArray(project.tasks) || project.tasks.length === 0) {
+        if (!project || !Array.isArray(project.tasks)) {
             if (project?.status === 'LIVE_PRODUCTION' || project?.status === 'UAT_PASSED') return 100;
             return 0;
         }
-        const doneCount = project.tasks.filter(t => {
+        const eligible = project.tasks.filter(t => {
+            const st = String(t.status || '').toLowerCase();
+            return st !== 'take_down' && st !== 'take down';
+        });
+        if (eligible.length === 0) {
+            if (project?.status === 'LIVE_PRODUCTION' || project?.status === 'UAT_PASSED') return 100;
+            return 0;
+        }
+        const doneCount = eligible.filter(t => {
             const st = String(t.status || '').toLowerCase();
             return st === 'selesai' || st === 'done';
         }).length;
-        return Math.round((doneCount / project.tasks.length) * 100);
+        return Math.round((doneCount / eligible.length) * 100);
     };
 
     // 🎨 Warna status

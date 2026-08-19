@@ -94,6 +94,49 @@ class ProjectCrudTest extends TestCase
             ->assertJsonPath('status', 'success');
     }
 
+    public function test_create_project_saves_contact_phone()
+    {
+        $response = $this->actingAs($this->admin)->postJson('/api/v1/projects', [
+            'title' => 'Proyek Kontak',
+            'description' => 'Deskripsi',
+            'contact_phone' => '081234567890',
+            'division_id' => $this->division->id,
+        ]);
+
+        $response->assertStatus(201)
+            ->assertJsonPath('status', 'success')
+            ->assertJsonPath('data.contact_phone', '081234567890');
+
+        $this->assertDatabaseHas('projects', [
+            'title' => 'Proyek Kontak',
+            'contact_phone' => '081234567890',
+        ]);
+    }
+
+    public function test_update_project_saves_contact_phone()
+    {
+        $project = Project::create([
+            'req_id' => Project::generateReqId(),
+            'title' => 'Proyek Kontak Update',
+            'created_by' => $this->admin->id,
+            'division_id' => $this->division->id,
+            'status' => ProjectStatus::PENDING->value,
+        ]);
+
+        $response = $this->actingAs($this->admin)->patchJson("/api/v1/projects/{$project->id}", [
+            'contact_phone' => '082211223344',
+        ]);
+
+        $response->assertStatus(200)
+            ->assertJsonPath('status', 'success')
+            ->assertJsonPath('data.contact_phone', '082211223344');
+
+        $this->assertDatabaseHas('projects', [
+            'id' => $project->id,
+            'contact_phone' => '082211223344',
+        ]);
+    }
+
     public function test_update_project_saves_deadline()
     {
         $project = Project::create([

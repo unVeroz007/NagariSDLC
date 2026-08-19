@@ -15,6 +15,7 @@ import {
     User,
     ChevronRight,
     Clock,
+    Phone,
     AlertCircle,
     Check,
     Eye,
@@ -90,6 +91,7 @@ export default function Track() {
             statusRaw: p.status || 'PENDING',
             submittedDate: p.created_at ? new Date(p.created_at).toLocaleDateString('id-ID') : 'Terbaru',
             targetDate: p.targetDate || p.target_date || 'TBD',
+            contactPhone: p.contactPhone || p.contact_phone || '',
             pm: typeof p.pm === 'object' ? (p.pm?.name || 'Belum Dialokasi') : (p.pm || 'Belum Dialokasi'),
             pmAvatar: (p.pm?.name || 'BD').substring(0, 2).toUpperCase(),
             description: p.description || 'Pengajuan proyek baru.',
@@ -345,6 +347,13 @@ export default function Track() {
                                     <p className="font-semibold text-gray-800 flex items-center">
                                         <Rocket size={16} className="mr-1.5 text-gray-400" />
                                         {activeSelected?.targetDate}
+                                    </p>
+                                </div>
+                                <div>
+                                    <p className="text-xs text-gray-500 mb-1">Nomor Telepon Kontak</p>
+                                    <p className="font-semibold text-gray-800 flex items-center">
+                                        <Phone size={16} className="mr-1.5 text-green-600" />
+                                        {activeSelected?.contactPhone || '—'}
                                     </p>
                                 </div>
                                 <div>

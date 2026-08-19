@@ -87,6 +87,7 @@ export default function ProjectNew() {
         project_type: 'baru', // Tipe Proyek: baru / perbaikan / update
         targetDate: '',
         description: '',
+        contactPhone: '',
     });
 
     useEffect(() => {
@@ -137,6 +138,7 @@ export default function ProjectNew() {
             project_type: 'baru',
             targetDate: '',
             description: '',
+            contactPhone: '',
         });
         setUploadedFiles([]);
         window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -296,6 +298,11 @@ export default function ProjectNew() {
             showError('Target tanggal selesai wajib diisi!');
             return;
         }
+        if (!formData.contactPhone || !formData.contactPhone.trim()) {
+            toast.error('Nomor telepon kontak wajib diisi!');
+            showError('Nomor telepon kontak wajib diisi!');
+            return;
+        }
 
         isSubmittingRef.current = true;
         setIsSubmitting(true);
@@ -306,6 +313,7 @@ export default function ProjectNew() {
             const newProject = {
                 name: formData.projectName,
                 description: formData.description || 'Pengajuan proyek baru oleh ' + (user?.name || 'PIC'),
+                contact_phone: formData.contactPhone || '',
                 division: userDivision,
                 priority: formData.priority,
                 targetDate: formData.targetDate || 'TBD',
@@ -344,6 +352,7 @@ export default function ProjectNew() {
                 project_type: 'baru',
                 targetDate: '',
                 description: '',
+                contactPhone: '',
             });
             setUploadedFiles([]);
             setIsSubmitting(false);
@@ -653,6 +662,20 @@ export default function ProjectNew() {
                                         </label>
                                     ))}
                                 </div>
+                            </div>
+                            <div className="space-y-2">
+                                <label className="text-sm font-semibold text-gray-600">
+                                    Nomor Telepon Kontak <span className="text-red-500">*</span>
+                                </label>
+                                <input
+                                    name="contactPhone"
+                                    value={formData.contactPhone}
+                                    onChange={handleChange}
+                                    className="w-full px-4 py-3 bg-white border border-gray-200 rounded-lg focus:ring-2 focus:ring-[#00529C] focus:border-[#00529C] transition-all text-sm"
+                                    placeholder="Contoh: 0812-3456-7890"
+                                    type="tel"
+                                />
+                                <p className="text-[11px] text-gray-400">Nomor yang dapat dihubungi untuk keperluan UAT &amp; koordinasi proyek.</p>
                             </div>
                             <div className="space-y-2">
                                 <label className="text-sm font-semibold text-gray-600">

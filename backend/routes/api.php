@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\Api\V1\ActivityLogController;
 use App\Http\Controllers\Api\V1\AuthController;
+use App\Http\Controllers\Api\V1\ChatController;
 use App\Http\Controllers\Api\V1\CyberRequestController;
 use App\Http\Controllers\Api\V1\DashboardController;
 use App\Http\Controllers\Api\V1\DivisionController;
@@ -124,5 +125,9 @@ Route::prefix('v1')->group(function () {
         Route::get('/notifications', [NotificationController::class, 'index']);
         Route::patch('/notifications/{id}/read', [NotificationController::class, 'markRead']);
         Route::patch('/notifications/read-all', [NotificationController::class, 'markAllRead']);
+
+        // ----- CHAT (per proyek) -----
+        Route::get('/projects/{projectId}/chat', [ChatController::class, 'index']);
+        Route::post('/projects/{projectId}/chat', [ChatController::class, 'store']);
     });
 });

@@ -22,11 +22,18 @@ export default function ChatBox({
     isFloating = false,
 }) {
     const { user } = useAuth();
-    const { getMessages, sendMessage, markAsRead, getUnreadCount } = useChat();
+    const { getMessages, sendMessage, markAsRead, getUnreadCount, loadMessages } = useChat();
 
     const [inputText, setInputText] = useState('');
     const [isCollapsed, setIsCollapsed] = useState(isFloating);
     const chatContainerRef = useRef(null);
+
+    // Load pesan proyek saat komponen tampil (fetch sekali via cache guard di context)
+    useEffect(() => {
+        if (projectId) {
+            loadMessages(projectId);
+        }
+    }, [projectId, loadMessages]);
 
     const messages = getMessages(projectId);
     const unreadCount = getUnreadCount(projectId);
@@ -202,13 +209,13 @@ export default function ChatBox({
                                                 key={msg.id}
                                                 className={`flex items-start gap-2.5 ${isOwn ? 'flex-row-reverse' : 'flex-row'}`}
                                             >
-                                                {/* Avatar */}
+                                                {/* Avatar (inisial dari nama) */}
                                                 <div
                                                     className={`w-7 h-7 rounded-full flex items-center justify-center text-[10px] font-extrabold text-white shrink-0 shadow-sm ${
                                                         isOwn ? 'bg-[#1a365d]' : 'bg-gray-600'
                                                     }`}
                                                 >
-                                                    {msg.avatar}
+                                                    {(msg.avatar || (msg.name || '?').split(' ').map(n => n[0]).join('').toUpperCase().substring(0, 2))}
                                                 </div>
 
                                                 {/* Bubble Content */}
