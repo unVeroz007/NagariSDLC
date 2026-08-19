@@ -534,4 +534,80 @@ class TaskAssignmentTest extends TestCase
         $fresh = $project->fresh();
         $this->assertCount(2, $fresh->sit_uat_data['sit3_approvals']['developer']['developers']);
     }
+
+    public function test_uat_approval_by_business_user()
+    {
+        $bizRole = Role::create(['name' => UserRole::BUSINESS_USER->value, 'display_name' => 'Business User']);
+        $biz = User::create([
+            'name' => 'Pemohon UAT',
+            'email' => 'pemohon@nagari.co.id',
+            'password' => bcrypt('password123'),
+            'role_id' => $bizRole->id,
+            'division_id' => $this->division->id,
+            'is_active' => true,
+        ]);
+
+        $project = $this->makeProject();
+        $project->update([
+            'status' => ProjectStatus::UAT_IN_PROGRESS->value,
+            'created_by' => $biz->id,
+        ]);
+
+        $response = $this->actingAs($biz)->postJson("/api/v1/projects/{$project->id}/uat-approval", [
+            'note' => 'UAT disetujui oleh pemohon.',
+        ]);
+
+        $response->assertStatus(200)
+            ->assertJsonPath('status', 'success');
+
+        $fresh = $project->fresh();
+        $this->assertTrue($fresh->sit_uat_data['uat3_approvals']['business_user']['approved']);
+        $this->assertDatabaseHas('activity_logs', [
+            'action' => 'uat_approval',
+            'subject_id' => $project->id,
+        ]);
+    }
+
+    public function test_uat_change_request_major_returns_to_development()
+    {
+        $bizRole = Role::create(['name' => UserRole::BUSINESS_USER->value, 'display_name' => 'Business User']);
+        $biz = User::create([
+            'name' => 'Pemohon UAT',
+            'email' => 'pemohon2@nagari.co.id',
+            'password' => bcrypt('password123'),
+            'role_id' => $bizRole->id,
+            'division_id' => $this->division->id,
+            'is_active' => true,
+        ]);
+
+        $project = $this->makeProject();
+        $project->update([
+            'status' => ProjectStatus::UAT_IN_PROGRESS->value,
+            'created_by' => $biz->id,
+        ]);
+
+        // Pemohon mengajukan change request mayor
+        $this->actingAs($biz)->postJson("/api/v1/projects/{$project->id}/uat-change-request", [
+            'type' => 'mayor',
+            'title' => 'Perubahan alur utama',
+            'detail' => 'Perlu perubahan besar pada logika transaksi.',
+        ])->assertStatus(200);
+
+        $fresh = $project->fresh();
+        $crs = $fresh->sit_uat_data['uat_change_requests'];
+        $this->assertCount(1, $crs);
+        $this->assertEquals('mayor', $crs[0]['type']);
+        $this->assertEquals('pending', $crs[0]['status']);
+
+        // Admin menyetujui → kembali ke UAT_REVISION_DEV (kembali ke development)
+        $this->actingAs($this->admin)->postJson("/api/v1/projects/{$project->id}/uat-change-request/decision", [
+            'cr_id' => $crs[0]['id'],
+            'decision' => 'approved',
+            'note' => 'Disetujui.',
+        ])->assertStatus(200);
+
+        $fresh = $project->fresh();
+        $this->assertEquals(ProjectStatus::UAT_REVISION_DEV->value, $fresh->status instanceof \BackedEnum ? $fresh->status->value : $fresh->status);
+        $this->assertEquals('approved', $fresh->sit_uat_data['uat_change_requests'][0]['status']);
+    }
 }

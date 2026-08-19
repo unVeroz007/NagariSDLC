@@ -5,7 +5,7 @@ import { useNotifications } from '../../contexts/NotificationContext';
 import LoadingSpinner from '../../components/LoadingSpinner';
 import toast from 'react-hot-toast';
 import ChatBox from '../../components/ChatBox';
-import { taskService, projectService } from '../../services/api';
+import { taskService, projectService, documentService } from '../../services/api';
 import {
     Code,
     Search,
@@ -16,7 +16,10 @@ import {
     AlertCircle,
     ShieldCheck,
     CheckCircle2,
-    Eye
+    Eye,
+    Paperclip,
+    Download,
+    X
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 
@@ -89,6 +92,23 @@ export default function MyTasksDev() {
                     revisionNote: t.revision_note || '',
                     revisionRequestedBy: t.revision_requested_by || '',
                     revisionRequestedAt: t.revision_requested_at || null,
+                    // Bukti lampiran SIT (yang perlu diperiksa saat revisi)
+                    sitAttachments: (() => {
+                        try {
+                            const approvals = p.sitUatData?.sit2_task_approvals || p.sit_uat_data?.sit2_task_approvals || {};
+                            let entry = null;
+                            // Backend bisa kirim "task_10" (prefix) atau "10"
+                            if (Array.isArray(approvals)) {
+                                const idx = (p.tasks || []).findIndex(pt => Number(pt.id) === Number(t.id));
+                                entry = idx >= 0 ? approvals[idx] : null;
+                            } else {
+                                entry = approvals[`task_${t.id}`] ?? approvals[t.id] ?? approvals[String(t.id)] ?? null;
+                            }
+                            return entry?.attachments || [];
+                        } catch {
+                            return [];
+                        }
+                    })(),
                 });
             });
         });
@@ -195,6 +215,52 @@ export default function MyTasksDev() {
             toast.error(`Gagal menyimpan persetujuan: ${err.message}`);
         } finally {
             setSitApprovingId(null);
+        }
+    };
+
+    // ── Lihat / Unduh bukti lampiran SIT (untuk task yang direvisi) ──
+    const [previewSitDoc, setPreviewSitDoc] = useState(null);
+    const [sitDocLoading, setSitDocLoading] = useState(false);
+    const viewSitAttachment = async (doc) => {
+        try {
+            if (doc?.docId) {
+                setSitDocLoading(true);
+                const loadingId = toast.loading('Membuka berkas...');
+                const blob = await documentService.download(doc.docId);
+                const url = URL.createObjectURL(blob);
+                toast.dismiss(loadingId);
+                setSitDocLoading(false);
+                setPreviewSitDoc({ doc, blobUrl: url });
+            } else if (doc?.url?.startsWith('blob:')) {
+                setPreviewSitDoc({ doc, blobUrl: doc.url });
+            } else {
+                toast.info('Berkas belum tersedia untuk dilihat.');
+            }
+        } catch (err) {
+            setSitDocLoading(false);
+            toast.error(`Gagal membuka berkas: ${err.message}`);
+        }
+    };
+    const downloadSitAttachment = async (doc) => {
+        try {
+            if (doc?.docId) {
+                const blob = await documentService.download(doc.docId);
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = doc.originalName || doc.name || 'bukti-sit';
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+            } else if (doc?.url?.startsWith('blob:')) {
+                const a = document.createElement('a');
+                a.href = doc.url;
+                a.download = doc.originalName || doc.name || 'bukti-sit';
+                a.click();
+            }
+        } catch (err) {
+            toast.error(`Gagal mengunduh bukti: ${err.message}`);
         }
     };
 
@@ -372,6 +438,33 @@ export default function MyTasksDev() {
                                                         {task.revisionRequestedBy && (
                                                             <p className="text-[10px] text-orange-600 mt-1">Oleh: {task.revisionRequestedBy}</p>
                                                         )}
+                                                        {/* Bukti lampiran SIT yang perlu diperbaiki */}
+                                                        {task.sitAttachments && task.sitAttachments.length > 0 && (
+                                                            <div className="mt-2 pt-2 border-t border-orange-200">
+                                                                <p className="text-[10px] font-bold text-orange-700 mb-1 flex items-center gap-1">
+                                                                    <Paperclip size={10} /> Bukti dari SIT ({task.sitAttachments.length})
+                                                                </p>
+                                                                <div className="space-y-1">
+                                                                    {task.sitAttachments.map(doc => (
+                                                                        <div key={doc.id} className="flex items-center gap-1.5 bg-white/70 rounded-lg px-2 py-1 border border-orange-100">
+                                                                            <span className="text-[10px] font-semibold text-gray-700 truncate flex-1">{doc.originalName || doc.name}</span>
+                                                                            {doc.url && (
+                                                                                <>
+                                                                                    <button onClick={() => viewSitAttachment(doc)} title="Lihat"
+                                                                                        className="p-1 text-gray-500 hover:text-blue-600 rounded hover:bg-blue-50 transition-colors cursor-pointer">
+                                                                                        <Eye size={11} />
+                                                                                    </button>
+                                                                                    <button onClick={() => downloadSitAttachment(doc)} title="Unduh"
+                                                                                        className="p-1 text-gray-500 hover:text-indigo-600 rounded hover:bg-indigo-50 transition-colors cursor-pointer">
+                                                                                        <Download size={11} />
+                                                                                    </button>
+                                                                                </>
+                                                                            )}
+                                                                        </div>
+                                                                    ))}
+                                                                </div>
+                                                            </div>
+                                                        )}
                                                     </div>
                                                 )}
                                             </td>
@@ -436,6 +529,38 @@ export default function MyTasksDev() {
                     )}
                 </div>
             </div>
+
+            {/* Modal Pratinjau Bukti SIT */}
+            {previewSitDoc && (
+                <div className="fixed inset-0 z-[99997] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+                    <div className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl max-h-[90vh] flex flex-col overflow-hidden">
+                        <div className="flex items-center justify-between px-5 py-3.5 border-b border-gray-200 bg-gray-50/70">
+                            <div className="flex items-center gap-2.5 min-w-0">
+                                <div className="w-8 h-8 bg-orange-100 text-orange-600 rounded-lg flex items-center justify-center font-bold text-[9px] shrink-0">
+                                    {(previewSitDoc.doc?.type || 'FILE')}
+                                </div>
+                                <div className="min-w-0">
+                                    <p className="text-xs font-bold text-gray-800 truncate">{previewSitDoc.doc?.originalName || previewSitDoc.doc?.name}</p>
+                                    <p className="text-[10px] text-gray-400">{previewSitDoc.doc?.size}</p>
+                                </div>
+                            </div>
+                            <button onClick={() => setPreviewSitDoc(null)} className="p-2 text-gray-400 hover:text-gray-700 hover:bg-gray-100 rounded-lg transition-colors cursor-pointer">
+                                <X size={18} />
+                            </button>
+                        </div>
+                        <div className="flex-1 overflow-auto bg-gray-100 p-4">
+                            {previewSitDoc.blobUrl && (
+                                <iframe src={previewSitDoc.blobUrl} title="Pratinjau Bukti SIT" className="w-full h-[60vh] rounded-xl bg-white border border-gray-200" />
+                            )}
+                        </div>
+                        <div className="flex justify-end gap-2 px-5 py-3 border-t border-gray-200 bg-gray-50/70">
+                            <button onClick={() => downloadSitAttachment(previewSitDoc.doc)} className="px-4 py-2 bg-[#1a365d] hover:bg-[#0f2342] text-white rounded-xl text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer">
+                                <Download size={13} /> Unduh Berkas
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 }

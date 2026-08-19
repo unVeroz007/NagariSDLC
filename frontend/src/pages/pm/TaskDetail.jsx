@@ -109,20 +109,28 @@ export default function TaskDetail() {
     useEffect(() => {
         let cancelled = false;
         if (!project?.id) return undefined;
-        // Gunakan data context jika ada (instan), lalu selalu refresh dari API
+        // Selalu ambil dari context (auto-refresh 30s) agar tidak pernah kosong/stale
         const ctxData = project?.sitUatData || project?.sit_uat_data || null;
-        if (ctxData && Object.keys(ctxData).length > 0) {
+        if (ctxData) {
             setSitUatData(ctxData);
         }
-        projectService.getById(project.id)
+        const fetchSitData = () => projectService.getById(project.id)
             .then(res => {
                 if (cancelled) return;
                 const raw = res?.data || res;
                 const sd = raw?.sitUatData || raw?.sit_uat_data || null;
-                if (sd && Object.keys(sd).length > 0) setSitUatData(sd);
+                if (sd) setSitUatData(sd);
             })
             .catch(() => {});
-        return () => { cancelled = true; };
+        fetchSitData();
+        // Polling ringan agar data SIT/UAT selalu sinkron dengan tab SIT & approval
+        const sitPollTimer = setInterval(() => {
+            if (document.visibilityState === 'visible') fetchSitData();
+        }, 10000);
+        return () => {
+            cancelled = true;
+            clearInterval(sitPollTimer);
+        };
     }, [project?.id, project?.sitUatData, project?.sit_uat_data]);
 
 
@@ -391,21 +399,38 @@ export default function TaskDetail() {
     };
 
     // ── Bukti SIT per task (dari sitUatData.sit2_task_approvals) ────────────
-    const getTaskSitApproval = (taskId) => {
-        try {
-            // Sumber: state (dengan fallback fetch) → project context → raw API
-            const sitUat = sitUatData || project?.sitUatData || project?.sit_uat_data || {};
-            const approvals = sitUat?.sit2_task_approvals || {};
-            const key = String(taskId);
-            const found = approvals?.[key] ?? approvals?.[taskId] ?? null;
-            if (found) return found;
-            // Fallback: cari berdasarkan id attachment / taskid jika key tidak cocok
-            for (const [k, v] of Object.entries(approvals || {})) {
-                if (String(k) === key || (v && typeof v === 'object' && v.taskId !== undefined && String(v.taskId) === key)) {
-                    return v;
+    // Normalisasi: backend kadang mengembalikan object {taskId: approval} ATAU
+    // array [approval, ...] (akibat PHP integer-key). Di sini di-map ke object
+    // keyed by task id menggunakan urutan project.tasks.
+    const getTaskApprovalMap = useMemo(() => {
+        const ctxSit = project?.sitUatData || project?.sit_uat_data || null;
+        const sitUat = (ctxSit && Object.keys(ctxSit).length > 0 ? ctxSit : sitUatData) || ctxSit || sitUatData || {};
+        const raw = sitUat?.sit2_task_approvals || {};
+        const taskIds = Array.isArray(project?.tasks) ? project.tasks.map(t => t.id) : [];
+        const map = {};
+        if (Array.isArray(raw)) {
+            raw.forEach((v, i) => {
+                if (v && typeof v === 'object') {
+                    const key = taskIds[i] !== undefined ? String(taskIds[i]) : String(i);
+                    map[key] = v;
+                }
+            });
+        } else if (raw && typeof raw === 'object') {
+            for (const [k, v] of Object.entries(raw)) {
+                if (v && typeof v === 'object') {
+                    // Backend bisa kirim "task_10" (prefix) atau "10"
+                    const cleanKey = String(k).replace(/^task_/, '');
+                    map[cleanKey] = v;
                 }
             }
-            return null;
+        }
+        return map;
+    }, [project?.tasks, project?.sitUatData, project?.sit_uat_data, sitUatData]);
+
+    const getTaskSitApproval = (taskId) => {
+        try {
+            const key = String(taskId);
+            return getTaskApprovalMap[key] || null;
         } catch {
             return null;
         }
@@ -1081,12 +1106,25 @@ export default function TaskDetail() {
                                                         </p>
                                                     )}
                                                     <div className="flex items-center gap-1.5 mt-1.5">
-                                                        <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold border ${sitOk ? 'bg-emerald-50 border-emerald-200 text-emerald-700' : 'bg-gray-50 border-gray-200 text-gray-400'}`}>
-                                                            <CheckCircle size={10} /> SIT {sitOk ? 'Disetujui' : 'Belum di-OK'}
-                                                        </span>
-                                                        <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold border ${sitAttachments.length > 0 ? 'bg-blue-50 border-blue-200 text-blue-700' : 'bg-gray-50 border-gray-200 text-gray-400'}`}>
-                                                            <Paperclip size={10} /> {sitAttachments.length} Bukti
-                                                        </span>
+                                                        {hasRevision ? (
+                                                            <>
+                                                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-orange-50 border border-orange-200 text-orange-700">
+                                                                    <RotateCcw size={10} /> Dalam Revisi
+                                                                </span>
+                                                                <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold border ${sitAttachments.length > 0 ? 'bg-blue-50 border-blue-200 text-blue-700' : 'bg-gray-50 border-gray-200 text-gray-400'}`}>
+                                                                    <Paperclip size={10} /> {sitAttachments.length} Bukti
+                                                                </span>
+                                                            </>
+                                                        ) : (
+                                                            <>
+                                                                <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold border ${sitOk ? 'bg-emerald-50 border-emerald-200 text-emerald-700' : 'bg-gray-50 border-gray-200 text-gray-400'}`}>
+                                                                    <CheckCircle size={10} /> SIT {sitOk ? 'Disetujui' : 'Belum di-OK'}
+                                                                </span>
+                                                                <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold border ${sitAttachments.length > 0 ? 'bg-blue-50 border-blue-200 text-blue-700' : 'bg-gray-50 border-gray-200 text-gray-400'}`}>
+                                                                    <Paperclip size={10} /> {sitAttachments.length} Bukti
+                                                                </span>
+                                                            </>
+                                                        )}
                                                     </div>
                                                 </td>
                                                 <td className="py-4 px-4">
@@ -1230,7 +1268,7 @@ export default function TaskDetail() {
                                                                             ? <CheckCircle size={15} className="text-emerald-600" />
                                                                             : <AlertCircle size={15} className="text-blue-500" />}
                                                                         <span className={`font-bold ${sitOk ? 'text-emerald-800' : 'text-blue-800'}`}>
-                                                                            {sitOk ? 'Task Disetujui Lolos SIT' : 'Belum Disetujui di SIT'}
+                                                                            {sitOk ? 'Task Disetujui Lolos SIT' : (hasRevision ? 'Dalam Revisi' : 'Belum Disetujui di SIT')}
                                                                         </span>
                                                                     </div>
                                                                     {sitApprovedAt && (
@@ -1244,7 +1282,12 @@ export default function TaskDetail() {
                                                                         <span className="font-bold text-gray-600">Komentar SIT:</span> {sitComment}
                                                                     </p>
                                                                 )}
-                                                                {sitAttachments.length === 0 ? (
+                                                                {hasRevision ? (
+                                                                    // Sedang revisi: bukti ditampilkan di bagian Revisi di atas, bukan di sini.
+                                                                    <p className="mt-2 text-gray-400 italic flex items-center gap-1.5">
+                                                                        <RotateCcw size={12} /> Task sedang dalam revisi. Bukti & catatan revisi tampil pada bagian <strong>Revisi</strong> di atas. Bukti SIT akan tampil di sini setelah task disetujui.
+                                                                    </p>
+                                                                ) : sitAttachments.length === 0 ? (
                                                                     <p className="mt-2 text-gray-400 italic flex items-center gap-1.5">
                                                                         <Paperclip size={12} /> Belum ada bukti dilampirkan untuk task ini di SIT.
                                                                     </p>

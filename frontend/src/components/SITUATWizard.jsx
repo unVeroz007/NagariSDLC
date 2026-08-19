@@ -17,7 +17,7 @@ import {
     Upload, X, FileText, ArrowRight, ArrowLeft, AlertTriangle,
     RotateCcw, Send, Paperclip, Info, ChevronRight, Clock,
     Eye, Download, Printer, Building2, ClipboardList, Bug,
-    UserCheck, FileCheck, BookOpen, Users, Trash2
+    UserCheck, FileCheck, BookOpen, Users, Trash2, Plus
 } from 'lucide-react';
 import { generateDocumentName, getDocumentTypeInfo, formatFileSize } from '../utils/documentNaming';
 import { taskService, projectService, documentService } from '../services/api';
@@ -224,7 +224,8 @@ export default function SITUATWizard({ project, updateProject, addNotification, 
         stagingUrl: sitUatData.sit1_stagingUrl || '',
     });
     // ── Normalisasi approvals: selalu object keyed by taskId (hindari array/index) ──
-    // Data lama bisa tersimpan sebagai array (index 0,1,...) akibat bug lama.
+    // Data lama bisa tersimpan sebagai array (index 0,1,...) akibat bug lama;
+    // backend kini mengirim prefix "task_" untuk memastikan object JSON.
     const normalizeApprovals = (raw) => {
         if (!raw) return {};
         if (Array.isArray(raw)) {
@@ -242,9 +243,10 @@ export default function SITUATWizard({ project, updateProject, addNotification, 
         if (typeof raw === 'object') {
             const out = {};
             for (const [k, v] of Object.entries(raw)) {
-                // Hanya ambil key yang bernilai object approval (bukan metadata lain)
+                // Backend bisa kirim "task_10" (prefix) atau "10"
+                const cleanKey = String(k).replace(/^task_/, '');
                 if (v && typeof v === 'object' && ('approved' in v || 'comment' in v || 'attachments' in v || 'approvedAt' in v)) {
-                    out[String(k)] = v;
+                    out[cleanKey] = v;
                 }
             }
             return out;
@@ -262,11 +264,18 @@ export default function SITUATWizard({ project, updateProject, addNotification, 
         docs: sitUatData.sit3_docs || [],
     });
 
-    // UAT Step 1 data
+    // UAT Step 1 data — Persiapan Skenario UAT
     const [uat1, setUat1] = useState({
-        scenarioList: sitUatData.uat1_scenarioList || '',
-        preparedBy: sitUatData.uat1_preparedBy || '',
-        prepNotes: sitUatData.uat1_prepNotes || '',
+        scenarioList: sitUatData.uat1_scenarioList || '',        // daftar skenario (derived dari task, editable)
+        preparedBy: sitUatData.uat1_preparedBy || '',            // disiapkan oleh (PM)
+        prepNotes: sitUatData.uat1_prepNotes || '',              // catatan persiapan
+        // Peserta yang terlibat dalam UAT
+        participants: sitUatData.uat1_participants || [],        // [{name, role, unit}]
+        // Jadwal pelaksanaan UAT
+        startDate: sitUatData.uat1_startDate || '',
+        endDate: sitUatData.uat1_endDate || '',
+        // Unit / divisi peminta
+        unit: sitUatData.uat1_unit || '',
         docs: sitUatData.uat1_docs || [],
     });
     // UAT Step 2 data
@@ -555,6 +564,9 @@ export default function SITUATWizard({ project, updateProject, addNotification, 
         sit3_reviewNotes: sit3.reviewNotes, sit3_docs: sanitizeDocs(sit3.docs),
         uat1_scenarioList: uat1.scenarioList, uat1_preparedBy: uat1.preparedBy,
         uat1_prepNotes: uat1.prepNotes, uat1_docs: sanitizeDocs(uat1.docs),
+        uat1_participants: uat1.participants,
+        uat1_startDate: uat1.startDate, uat1_endDate: uat1.endDate,
+        uat1_unit: uat1.unit,
         uat2_executedCount: uat2.executedCount, uat2_passedCount: uat2.passedCount,
         uat2_findings: uat2.findings, uat2_execNotes: uat2.execNotes,
         uat2_docs: sanitizeDocs(uat2.docs),
@@ -586,10 +598,12 @@ export default function SITUATWizard({ project, updateProject, addNotification, 
 
     // Perubahan approval/komentar/lampiran task langsung disimpan ke backend
     // agar dokumentasi (bukti revisi, catatan, persetujuan) tetap ada di semua laman.
-    const handleApprovalsChange = (next) => {
+    const handleApprovalsChange = async (next) => {
         const normalized = normalizeApprovals(next);
         setSit2Approvals(normalized);
-        persistSitUatData({ sit2_task_approvals: normalized });
+        await persistSitUatData({ sit2_task_approvals: normalized });
+        // Refresh context agar badge status/bukti di Manajemen Task langsung sinkron
+        refreshProject?.();
     };
 
     // Sinkronkan approvals saat project berubah (refresh/polling)
@@ -690,9 +704,41 @@ export default function SITUATWizard({ project, updateProject, addNotification, 
     };
 
     const handleStartUAT = () => {
+        // Auto-fill peserta UAT dari proyek: pemohon (creator), PM, analyst, developer
+        const participants = [];
+        const addP = (name, role) => {
+            if (name && !participants.some(p => p.name === name)) participants.push({ name, role, unit: '' });
+        };
+        addP(sf(project?.creator, ''), 'Pemohon');
+        addP(sf(project?.pm, ''), 'PM / Analyst Pengembangan');
+        addP(sf(project?.analyst, ''), 'System Analyst');
+        (Array.isArray(project?.tasks) ? project.tasks : []).forEach(t => {
+            addP(t.assignee_detail?.name || t.assignee, 'Developer');
+        });
+        setUat1(prev => ({ ...prev, participants: prev.participants.length > 0 ? prev.participants : participants }));
         updateProject(project.id, { status: 'UAT_IN_PROGRESS', sitUatData: buildSitUatData({ activeUatStep: 1 }) });
         toast.success(`Pengujian UAT Internal dimulai untuk proyek "${project.name}".`);
     };
+
+    // ── Handler peserta UAT ──
+    const handleAddUatParticipant = () => {
+        setUat1(prev => ({ ...prev, participants: [...prev.participants, { name: '', role: '', unit: '' }] }));
+    };
+    const handleRemoveUatParticipant = (idx) => {
+        setUat1(prev => ({ ...prev, participants: prev.participants.filter((_, i) => i !== idx) }));
+    };
+    const handleUatParticipantChange = (idx, field, val) => {
+        setUat1(prev => ({
+            ...prev,
+            participants: prev.participants.map((p, i) => i === idx ? { ...p, [field]: val } : p),
+        }));
+    };
+
+    // Skenario UAT otomatis dari task (nama task sebagai daftar skenario)
+    const uatScenarioTasks = useMemo(() => {
+        if (!Array.isArray(project?.tasks)) return [];
+        return project.tasks.filter(t => String(t.status || '').toLowerCase() !== 'take_down');
+    }, [project?.tasks]);
 
     const handleSaveUATStep = async (step) => {
         const nextStep = step + 1;
@@ -716,6 +762,85 @@ export default function SITUATWizard({ project, updateProject, addNotification, 
         addNotification?.('BAST Diterbitkan — DEV COMPLETED!', `Proyek "${project.name}" lulus SIT & UAT Internal. Siap QA & Siber.`, 'success', '/pm/workspace');
         toast.success(`🎉 BAST Diterbitkan! Proyek resmi berstatus DEV_COMPLETED.`);
         setSubmitting(false);
+    };
+
+    // ── Persetujuan UAT multi-role: business_user (pemohon), pm, development_lead ──
+    // Role user saat ini untuk approval UAT
+    const uatCurrentRoleKey = ['development_lead'].includes(user?.role)
+        ? 'development_lead'
+        : (['dev_analyst', 'project_manager'].includes(user?.role) ? 'pm' : (user?.role === 'business_user' ? 'business_user' : null));
+    const uat3Approvals = sitUatData.uat3_approvals || {};
+    const allUatApproved = ['business_user', 'pm', 'development_lead'].every(
+        rk => uat3Approvals?.[rk]?.approved === true
+    );
+
+    const [uatApprovalNote, setUatApprovalNote] = useState('');
+    const [uatApprovalSubmitting, setUatApprovalSubmitting] = useState(false);
+    const handleSubmitUatApproval = async () => {
+        if (!uatCurrentRoleKey || !project?.id) return;
+        if (uat3Approvals?.[uatCurrentRoleKey]?.approved) {
+            toast.info('Anda sudah memberikan persetujuan UAT.');
+            return;
+        }
+        setUatApprovalSubmitting(true);
+        try {
+            await projectService.submitUatApproval(project.id, uatApprovalNote.trim());
+            toast.success('Persetujuan UAT Anda berhasil disimpan.');
+            setUatApprovalNote('');
+            refreshProject?.();
+        } catch (err) {
+            toast.error(`Gagal menyimpan persetujuan: ${err.message}`);
+        } finally {
+            setUatApprovalSubmitting(false);
+        }
+    };
+
+    // ── Change Request UAT (diajukan business_user) ──
+    const uatChangeRequests = sitUatData.uat_change_requests || [];
+    const [showCrModal, setShowCrModal] = useState(false);
+    const [crForm, setCrForm] = useState({ type: 'minor', title: '', detail: '', category: '' });
+    const [crSubmitting, setCrSubmitting] = useState(false);
+    const handleSubmitChangeRequest = async () => {
+        if (!crForm.title.trim() || !crForm.detail.trim()) {
+            toast.error('Judul dan detail change request wajib diisi!');
+            return;
+        }
+        setCrSubmitting(true);
+        try {
+            await projectService.submitUatChangeRequest(project.id, {
+                type: crForm.type,
+                title: crForm.title.trim(),
+                detail: crForm.detail.trim(),
+                category: crForm.category,
+            });
+            toast.success('Change request UAT berhasil diajukan.');
+            setShowCrModal(false);
+            setCrForm({ type: 'minor', title: '', detail: '', category: '' });
+            refreshProject?.();
+        } catch (err) {
+            toast.error(`Gagal mengajukan change request: ${err.message}`);
+        } finally {
+            setCrSubmitting(false);
+        }
+    };
+
+    // Putuskan change request (oleh PM/Dev Lead/admin)
+    const [crDecisionSubmitting, setCrDecisionSubmitting] = useState(null);
+    const handleDecideChangeRequest = async (cr, decision) => {
+        setCrDecisionSubmitting(cr.id);
+        try {
+            const note = window.prompt(
+                `Catatan ${decision === 'approved' ? 'persetujuan' : 'penolakan'} change request "${cr.title}" (opsional):`,
+                ''
+            );
+            await projectService.decideUatChangeRequest(project.id, { cr_id: cr.id, decision, note: note || '' });
+            toast.success(`Change request ${decision === 'approved' ? 'disetujui' : 'ditolak'}.`);
+            refreshProject?.();
+        } catch (err) {
+            toast.error(`Gagal memproses change request: ${err.message}`);
+        } finally {
+            setCrDecisionSubmitting(null);
+        }
     };
 
     const handleUATRevision = () => {
@@ -1386,31 +1511,126 @@ export default function SITUATWizard({ project, updateProject, addNotification, 
                         {/* ── UAT Step 1: Skenario ─────────────────────── */}
                         {activeUatStep === 1 && (
                             <div className="p-5 space-y-4">
-                                <div className="flex items-center gap-2 mb-3">
+                                <div className="flex items-center gap-2 mb-1">
                                     <ClipboardList size={16} className="text-amber-600" />
                                     <h5 className="font-bold text-sm text-gray-800">Tahap 1: Persiapan Skenario UAT</h5>
                                     {uat1Done && <span className="ml-auto text-[10px] font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">Selesai ✓</span>}
                                 </div>
-                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                                    <div className="sm:col-span-2">
-                                        <label className="block text-xs font-bold text-gray-600 uppercase tracking-wider mb-1.5">Daftar Skenario UAT Bisnis *</label>
-                                        <textarea rows={3} value={uat1.scenarioList} onChange={e => setUat1(p => ({ ...p, scenarioList: e.target.value }))}
-                                            placeholder={"1. Login dan autentikasi pengguna\n2. Proses transaksi transfer\n3. ..."} disabled={uatDone}
-                                            className="w-full px-3 py-2.5 border border-gray-200 rounded-xl text-xs focus:outline-none focus:border-amber-500 bg-gray-50 resize-none disabled:bg-gray-100" />
+                                <p className="text-xs text-gray-500 mb-2">
+                                    Skenario UAT otomatis mengikuti task yang telah dikerjakan. Lengkapi peserta yang terlibat &amp; jadwal pelaksanaan.
+                                </p>
+
+                                {/* Ringkasan skenario otomatis */}
+                                <div className="bg-gradient-to-br from-amber-50 to-orange-50 border border-amber-200 rounded-2xl p-4 flex items-center gap-4">
+                                    <div className="w-11 h-11 bg-white rounded-xl flex items-center justify-center border border-amber-200">
+                                        <ClipboardList size={20} className="text-amber-600" />
                                     </div>
                                     <div>
-                                        <label className="block text-xs font-bold text-gray-600 uppercase tracking-wider mb-1.5">Disiapkan Oleh (PM / User) *</label>
-                                        <input type="text" value={uat1.preparedBy} onChange={e => setUat1(p => ({ ...p, preparedBy: e.target.value }))}
-                                            placeholder="Nama PM / Perwakilan Divisi" disabled={uatDone}
+                                        <p className="text-xs font-bold text-amber-800">Jumlah Skenario UAT</p>
+                                        <div className="flex items-end gap-2 mt-1">
+                                            <span className="font-black text-3xl text-amber-700 leading-none">{uatScenarioTasks.length}</span>
+                                            <span className="text-[10px] text-amber-600 font-semibold mb-1">skenario dari task</span>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                {/* Daftar skenario (otomatis dari task, bisa diedit) */}
+                                <div className="bg-white border border-gray-200 rounded-2xl p-4">
+                                    <div className="flex items-center justify-between mb-2">
+                                        <label className="text-xs font-bold text-gray-700 uppercase tracking-wider">Daftar Skenario UAT Bisnis</label>
+                                        <span className="text-[10px] text-gray-400">{uatScenarioTasks.length} task terdeteksi</span>
+                                    </div>
+                                    {uatScenarioTasks.length > 0 && (
+                                        <div className="mb-3 rounded-xl bg-gray-50 border border-gray-100 p-2 max-h-32 overflow-y-auto space-y-1">
+                                            {uatScenarioTasks.map((t, i) => (
+                                                <div key={t.id} className="flex items-center gap-2 text-[11px] text-gray-600">
+                                                    <span className="w-5 h-5 bg-amber-100 text-amber-700 rounded-md flex items-center justify-center font-bold text-[9px] shrink-0">{i + 1}</span>
+                                                    <span className="truncate">{t.title || t.name}</span>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    )}
+                                    <textarea rows={3} value={uat1.scenarioList} onChange={e => setUat1(p => ({ ...p, scenarioList: e.target.value }))}
+                                        placeholder={uatScenarioTasks.length > 0 ? 'Skenario otomatis dari task di atas. Anda dapat menyesuaikan atau menambahkan detail.' : 'Daftar skenario UAT bisnis...'} disabled={uatDone}
+                                        className="w-full px-3 py-2.5 border border-gray-200 rounded-xl text-xs focus:outline-none focus:border-amber-500 bg-gray-50 resize-none disabled:bg-gray-100" />
+                                </div>
+
+                                {/* Informasi proyek & unit */}
+                                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                                    <div>
+                                        <label className="block text-xs font-bold text-gray-600 uppercase tracking-wider mb-1.5">Unit / Divisi Peminta *</label>
+                                        <input type="text" value={uat1.unit} onChange={e => setUat1(p => ({ ...p, unit: e.target.value }))}
+                                            placeholder={project?.division || 'Contoh: Divisi Operasional'} disabled={uatDone}
                                             className="w-full px-3 py-2.5 border border-gray-200 rounded-xl text-xs focus:outline-none focus:border-amber-500 bg-gray-50 disabled:bg-gray-100" />
                                     </div>
                                     <div>
-                                        <label className="block text-xs font-bold text-gray-600 uppercase tracking-wider mb-1.5">Catatan Persiapan UAT</label>
-                                        <input type="text" value={uat1.prepNotes} onChange={e => setUat1(p => ({ ...p, prepNotes: e.target.value }))}
-                                            placeholder="Keterangan tambahan..." disabled={uatDone}
+                                        <label className="block text-xs font-bold text-gray-600 uppercase tracking-wider mb-1.5">Tanggal Pelaksanaan *</label>
+                                        <input type="date" value={uat1.startDate} onChange={e => setUat1(p => ({ ...p, startDate: e.target.value }))} disabled={uatDone}
+                                            className="w-full px-3 py-2.5 border border-gray-200 rounded-xl text-xs focus:outline-none focus:border-amber-500 bg-gray-50 disabled:bg-gray-100" />
+                                    </div>
+                                    <div>
+                                        <label className="block text-xs font-bold text-gray-600 uppercase tracking-wider mb-1.5">Sampai Tanggal *</label>
+                                        <input type="date" value={uat1.endDate} onChange={e => setUat1(p => ({ ...p, endDate: e.target.value }))} disabled={uatDone}
                                             className="w-full px-3 py-2.5 border border-gray-200 rounded-xl text-xs focus:outline-none focus:border-amber-500 bg-gray-50 disabled:bg-gray-100" />
                                     </div>
                                 </div>
+
+                                {/* Disiapkan oleh */}
+                                <div>
+                                    <label className="block text-xs font-bold text-gray-600 uppercase tracking-wider mb-1.5">Disiapkan Oleh (PM / Analis Pengembangan) *</label>
+                                    <input type="text" value={uat1.preparedBy} onChange={e => setUat1(p => ({ ...p, preparedBy: e.target.value }))}
+                                        placeholder="Nama PM / Perwakilan Divisi" disabled={uatDone}
+                                        className="w-full px-3 py-2.5 border border-gray-200 rounded-xl text-xs focus:outline-none focus:border-amber-500 bg-gray-50 disabled:bg-gray-100" />
+                                </div>
+
+                                {/* Peserta yang terlibat */}
+                                <div className="bg-white border border-gray-200 rounded-2xl p-4">
+                                    <div className="flex items-center justify-between mb-2">
+                                        <label className="text-xs font-bold text-gray-700 uppercase tracking-wider">Peserta yang Terlibat</label>
+                                        {!uatDone && (
+                                            <button onClick={handleAddUatParticipant} className="px-3 py-1.5 bg-amber-500 hover:bg-amber-600 text-white rounded-lg text-[10px] font-bold flex items-center gap-1 transition-colors cursor-pointer">
+                                                <Plus size={12} /> Tambah Peserta
+                                            </button>
+                                        )}
+                                    </div>
+                                    <p className="text-[11px] text-gray-500 mb-3">
+                                        Otomatis terisi dari pemohon, PM, analis, dan developer proyek. Tambahkan pihak lain bila diperlukan.
+                                    </p>
+                                    {uat1.participants.length === 0 ? (
+                                        <p className="text-[11px] text-gray-400 italic">Belum ada peserta. Mulai UAT untuk mengisi otomatis.</p>
+                                    ) : (
+                                        <div className="space-y-2">
+                                            {uat1.participants.map((p, idx) => (
+                                                <div key={idx} className="grid grid-cols-1 sm:grid-cols-[1fr_1fr_1fr_auto] gap-2 items-center">
+                                                    <input type="text" value={p.name} onChange={e => handleUatParticipantChange(idx, 'name', e.target.value)}
+                                                        placeholder="Nama peserta" disabled={uatDone}
+                                                        className="px-3 py-2 border border-gray-200 rounded-lg text-xs focus:outline-none focus:border-amber-500 bg-gray-50 disabled:bg-gray-100" />
+                                                    <input type="text" value={p.role} onChange={e => handleUatParticipantChange(idx, 'role', e.target.value)}
+                                                        placeholder="Peran (Pemohon/PM/Developer/dll)" disabled={uatDone}
+                                                        className="px-3 py-2 border border-gray-200 rounded-lg text-xs focus:outline-none focus:border-amber-500 bg-gray-50 disabled:bg-gray-100" />
+                                                    <input type="text" value={p.unit} onChange={e => handleUatParticipantChange(idx, 'unit', e.target.value)}
+                                                        placeholder="Unit / Divisi" disabled={uatDone}
+                                                        className="px-3 py-2 border border-gray-200 rounded-lg text-xs focus:outline-none focus:border-amber-500 bg-gray-50 disabled:bg-gray-100" />
+                                                    {!uatDone && (
+                                                        <button onClick={() => handleRemoveUatParticipant(idx)} className="p-2 text-gray-400 hover:text-red-500 rounded-lg hover:bg-red-50 transition-colors cursor-pointer">
+                                                            <Trash2 size={14} />
+                                                        </button>
+                                                    )}
+                                                </div>
+                                            ))}
+                                        </div>
+                                    )}
+                                </div>
+
+                                {/* Catatan persiapan */}
+                                <div>
+                                    <label className="block text-xs font-bold text-gray-600 uppercase tracking-wider mb-1.5">Catatan Persiapan UAT</label>
+                                    <input type="text" value={uat1.prepNotes} onChange={e => setUat1(p => ({ ...p, prepNotes: e.target.value }))}
+                                        placeholder="Keterangan tambahan..." disabled={uatDone}
+                                        className="w-full px-3 py-2.5 border border-gray-200 rounded-xl text-xs focus:outline-none focus:border-amber-500 bg-gray-50 disabled:bg-gray-100" />
+                                </div>
+
+                                {/* Dokumen */}
                                 <div>
                                     <div className="flex items-center justify-between mb-1.5">
                                         <label className="text-xs font-bold text-gray-600 uppercase tracking-wider">Dokumen: Skenario UAT / Use Case Matrix</label>
@@ -1425,7 +1645,7 @@ export default function SITUATWizard({ project, updateProject, addNotification, 
                                 </div>
                                 {!uatDone && (status === 'UAT_IN_PROGRESS' || UNLOCK_ALL_STAGES) && activeUatStep === 1 && (
                                     <div className="flex justify-end pt-2">
-                                        <button onClick={() => handleSaveUATStep(1)} disabled={!uat1.scenarioList || !uat1.preparedBy}
+                                        <button onClick={() => handleSaveUATStep(1)} disabled={!uat1.unit || !uat1.startDate || !uat1.endDate || !uat1.preparedBy}
                                             className="px-5 py-2.5 bg-amber-500 hover:bg-amber-600 disabled:bg-gray-300 disabled:cursor-not-allowed text-white text-xs font-bold rounded-xl flex items-center gap-2 transition-all cursor-pointer">
                                             Simpan &amp; Lanjut Eksekusi UAT <ArrowRight size={14} />
                                         </button>
@@ -1504,10 +1724,10 @@ export default function SITUATWizard({ project, updateProject, addNotification, 
                                     <p className="font-bold text-slate-700 uppercase tracking-wider text-[10px] mb-2">Ringkasan Hasil UAT</p>
                                     <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                                         {[
-                                            { label: 'Disiapkan Oleh', val: uat1.preparedBy || '-' },
-                                            { label: 'Skenario Dieksekusi', val: uat2.executedCount || '-' },
+                                            { label: 'Unit Peminta', val: uat1.unit || project?.division || '-' },
+                                            { label: 'Skenario UAT', val: `${uatScenarioTasks.length}` },
+                                            { label: 'Dieksekusi', val: uat2.executedCount || '-' },
                                             { label: 'Diterima', val: uat2.passedCount || '-' },
-                                            { label: 'Temuan', val: uat2.findings || '0' },
                                         ].map(s => (
                                             <div key={s.label} className="bg-white rounded-lg p-2.5 border border-slate-200">
                                                 <p className="text-slate-500 text-[9px] font-bold uppercase">{s.label}</p>
@@ -1516,15 +1736,159 @@ export default function SITUATWizard({ project, updateProject, addNotification, 
                                         ))}
                                     </div>
                                 </div>
+
+                                {/* ── Persetujuan Multi-Role UAT ── */}
+                                <div className="bg-white border border-gray-200 rounded-2xl p-4">
+                                    <div className="flex items-center gap-2 mb-3">
+                                        <ShieldCheck size={15} className="text-emerald-600" />
+                                        <h6 className="font-bold text-sm text-gray-800">Persetujuan UAT</h6>
+                                        <span className="ml-auto text-[10px] font-bold text-gray-500">
+                                            {['business_user', 'pm', 'development_lead'].filter(rk => uat3Approvals?.[rk]?.approved).length} / 3 disetujui
+                                        </span>
+                                    </div>
+                                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                                        {[
+                                            { key: 'business_user', label: 'Pemohon (Business User)', desc: 'Perwakilan unit peminta', color: 'amber', icon: <Users size={16} className="text-amber-500" /> },
+                                            { key: 'pm', label: 'PM / Analyst Pengembangan', desc: 'Project Manager proyek', color: 'indigo', icon: <UserCheck size={16} className="text-indigo-500" /> },
+                                            { key: 'development_lead', label: 'Development Lead', desc: 'Pimpinan pengembangan', color: 'emerald', icon: <ShieldCheck size={16} className="text-emerald-500" /> },
+                                        ].map(r => {
+                                            const ap = uat3Approvals?.[r.key];
+                                            const approved = ap?.approved === true;
+                                            const colorMap = { amber: 'amber', indigo: 'indigo', emerald: 'emerald' }[r.color];
+                                            return (
+                                                <div key={r.key} className={`rounded-xl border p-3 transition-all ${approved ? 'bg-emerald-50 border-emerald-200' : 'bg-gray-50 border-gray-200'}`}>
+                                                    <div className="flex items-center justify-between">
+                                                        <div className={`w-9 h-9 rounded-xl flex items-center justify-center ${approved ? 'bg-emerald-100' : `bg-${colorMap}-100`}`}>
+                                                            {r.icon}
+                                                        </div>
+                                                        {approved ? (
+                                                            <span className="px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 text-[9px] font-bold border border-emerald-200 flex items-center gap-1">
+                                                                <CheckCircle2 size={9} /> Disetujui
+                                                            </span>
+                                                        ) : (
+                                                            <span className="px-2 py-0.5 rounded-full bg-gray-200 text-gray-500 text-[9px] font-bold">Menunggu</span>
+                                                        )}
+                                                    </div>
+                                                    <p className="font-bold text-gray-800 text-xs mt-2">{r.label}</p>
+                                                    <p className="text-[10px] text-gray-400">{r.desc}</p>
+                                                    {approved ? (
+                                                        <p className="text-[10px] text-emerald-700 mt-1.5">
+                                                            ✓ {ap.approvedBy} • {fmtDate(ap.at)}
+                                                        </p>
+                                                    ) : (
+                                                        <p className="text-[10px] text-gray-300 mt-1.5">Belum memberikan persetujuan</p>
+                                                    )}
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+
+                                    {/* Form approval untuk role saat ini */}
+                                    {uatCurrentRoleKey && !uat3Approvals?.[uatCurrentRoleKey]?.approved && !uatDone && (
+                                        <div className="mt-3 p-3 bg-emerald-50 border border-emerald-200 rounded-xl">
+                                            <p className="text-[11px] font-bold text-emerald-800 mb-2 flex items-center gap-1.5">
+                                                <UserCheck size={13} /> Anda (sebagai {uatCurrentRoleKey === 'development_lead' ? 'Development Lead' : uatCurrentRoleKey === 'pm' ? 'PM / Analyst Pengembangan' : 'Pemohon (Business User)'}) dapat menyetujui UAT
+                                            </p>
+                                            <textarea
+                                                rows={2}
+                                                value={uatApprovalNote}
+                                                onChange={e => setUatApprovalNote(e.target.value)}
+                                                placeholder="Catatan persetujuan (opsional)..."
+                                                className="w-full px-3 py-2 border border-gray-200 rounded-xl text-xs focus:outline-none focus:border-emerald-500 bg-white resize-none"
+                                            />
+                                            <button
+                                                onClick={handleSubmitUatApproval}
+                                                disabled={uatApprovalSubmitting}
+                                                className="mt-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:bg-gray-300 text-white text-xs font-bold rounded-xl flex items-center gap-2 transition-all cursor-pointer disabled:cursor-not-allowed"
+                                            >
+                                                {uatApprovalSubmitting ? (
+                                                    <><span className="w-3 h-3 border-2 border-white/40 border-t-white rounded-full animate-spin" /> Menyimpan...</>
+                                                ) : (
+                                                    <><CheckCircle2 size={13} /> Setujui UAT</>
+                                                )}
+                                            </button>
+                                        </div>
+                                    )}
+                                    {uatCurrentRoleKey && uat3Approvals?.[uatCurrentRoleKey]?.approved && (
+                                        <p className="text-[10px] text-emerald-600 mt-2 flex items-center gap-1">
+                                            <CheckCircle2 size={11} /> Anda telah menyetujui UAT pada proyek ini.
+                                        </p>
+                                    )}
+                                </div>
+
+                                {/* ── Change Request UAT ── */}
+                                <div className="bg-white border border-gray-200 rounded-2xl p-4">
+                                    <div className="flex items-center justify-between mb-2">
+                                        <div className="flex items-center gap-2">
+                                            <RotateCcw size={14} className="text-orange-500" />
+                                            <h6 className="font-bold text-sm text-gray-800">Change Request UAT</h6>
+                                        </div>
+                                        {user?.role === 'business_user' && !uatDone && (
+                                            <button onClick={() => setShowCrModal(true)} className="px-3 py-1.5 bg-orange-500 hover:bg-orange-600 text-white rounded-lg text-[10px] font-bold flex items-center gap-1 transition-colors cursor-pointer">
+                                                <Plus size={12} /> Ajukan Change Request
+                                            </button>
+                                        )}
+                                    </div>
+                                    <p className="text-[11px] text-gray-500 mb-2">
+                                        Pemohon dapat mengajukan pembaruan, permintaan tambahan, atau perbaikan (minor/mayor). Mayor akan kembali ke development, minor mengulang SIT.
+                                    </p>
+                                    {uatChangeRequests.length === 0 ? (
+                                        <p className="text-[11px] text-gray-400 italic">Belum ada change request diajukan.</p>
+                                    ) : (
+                                        <div className="space-y-2">
+                                            {uatChangeRequests.map(cr => {
+                                                const stColor = cr.status === 'approved' ? 'bg-emerald-100 text-emerald-700 border-emerald-200' : cr.status === 'rejected' ? 'bg-red-100 text-red-700 border-red-200' : 'bg-amber-100 text-amber-700 border-amber-200';
+                                                const stLabel = cr.status === 'approved' ? 'Disetujui' : cr.status === 'rejected' ? 'Ditolak' : 'Menunggu';
+                                                return (
+                                                    <div key={cr.id} className="p-3 bg-gray-50 rounded-xl border border-gray-100">
+                                                        <div className="flex items-center justify-between flex-wrap gap-2">
+                                                            <div className="flex items-center gap-2">
+                                                                <span className={`px-2 py-0.5 rounded-full text-[9px] font-bold border ${cr.type === 'mayor' ? 'bg-red-50 text-red-700 border-red-200' : 'bg-orange-50 text-orange-700 border-orange-200'}`}>
+                                                                    {cr.type === 'mayor' ? 'Mayor' : 'Minor'}
+                                                                </span>
+                                                                <span className="font-bold text-gray-800 text-xs">{cr.title}</span>
+                                                            </div>
+                                                            <span className={`px-2 py-0.5 rounded-full text-[9px] font-bold border ${stColor}`}>{stLabel}</span>
+                                                        </div>
+                                                        <p className="text-[11px] text-gray-600 mt-1.5 leading-relaxed">{cr.detail}</p>
+                                                        <p className="text-[10px] text-gray-400 mt-1">
+                                                            Diajukan oleh: {cr.submittedBy} • {fmtDate(cr.at)}
+                                                            {cr.status !== 'pending' && cr.decisionBy && ` • Keputusan: ${cr.decisionBy}`}
+                                                        </p>
+                                                        {cr.status === 'pending' && user?.role !== 'business_user' && !uatDone && (
+                                                            <div className="flex gap-2 mt-2">
+                                                                <button
+                                                                    onClick={() => handleDecideChangeRequest(cr, 'approved')}
+                                                                    disabled={crDecisionSubmitting === cr.id}
+                                                                    className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 disabled:bg-gray-300 text-white rounded-lg text-[10px] font-bold transition-colors cursor-pointer"
+                                                                >
+                                                                    Setujui (perbaiki)
+                                                                </button>
+                                                                <button
+                                                                    onClick={() => handleDecideChangeRequest(cr, 'rejected')}
+                                                                    disabled={crDecisionSubmitting === cr.id}
+                                                                    className="px-3 py-1.5 bg-red-100 hover:bg-red-200 border border-red-300 text-red-700 rounded-lg text-[10px] font-bold transition-colors cursor-pointer"
+                                                                >
+                                                                    Tolak
+                                                                </button>
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                );
+                                            })}
+                                        </div>
+                                    )}
+                                </div>
+
                                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                                     <div className="sm:col-span-2">
-                                        <label className="block text-xs font-bold text-gray-600 uppercase tracking-wider mb-1.5">Catatan Persetujuan Final *</label>
+                                        <label className="block text-xs font-bold text-gray-600 uppercase tracking-wider mb-1.5">Catatan Persetujuan Final</label>
                                         <textarea rows={2} value={uat3.approvalNotes} onChange={e => setUat3(p => ({ ...p, approvalNotes: e.target.value }))}
                                             placeholder="Pernyataan persetujuan: semua skenario bisnis telah diverifikasi dan dinyatakan memenuhi kebutuhan FSD..." disabled={uatDone}
                                             className="w-full px-3 py-2.5 border border-gray-200 rounded-xl text-xs focus:outline-none focus:border-emerald-500 bg-gray-50 resize-none disabled:bg-gray-100" />
                                     </div>
                                     <div>
-                                        <label className="block text-xs font-bold text-gray-600 uppercase tracking-wider mb-1.5">Disetujui Oleh (PM + Perwakilan Divisi) *</label>
+                                        <label className="block text-xs font-bold text-gray-600 uppercase tracking-wider mb-1.5">Disetujui Oleh</label>
                                         <input type="text" value={uat3.approvedBy} onChange={e => setUat3(p => ({ ...p, approvedBy: e.target.value }))}
                                             placeholder="Nama PM, Nama Perwakilan Divisi" disabled={uatDone}
                                             className="w-full px-3 py-2.5 border border-gray-200 rounded-xl text-xs focus:outline-none focus:border-emerald-500 bg-gray-50 disabled:bg-gray-100" />
@@ -1561,11 +1925,17 @@ export default function SITUATWizard({ project, updateProject, addNotification, 
                                         </div>
                                         <button
                                             onClick={handleUATPass}
-                                            disabled={submitting || !uat3.approvalNotes || !uat3.approvedBy}
-                                            className="w-full px-6 py-3 bg-emerald-600 hover:bg-emerald-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-white text-sm font-bold rounded-xl flex items-center justify-center gap-2 transition-all shadow-md cursor-pointer active:scale-95"
+                                            disabled={submitting || !allUatApproved}
+                                            title={allUatApproved ? '' : 'Semua persetujuan (Pemohon, PM, Development Lead) harus lengkap terlebih dahulu'}
+                                            className={`w-full px-6 py-3 text-white text-sm font-bold rounded-xl flex items-center justify-center gap-2 transition-all shadow-md active:scale-95 ${allUatApproved ? 'bg-emerald-600 hover:bg-emerald-700 cursor-pointer' : 'bg-gray-300 cursor-not-allowed'}`}
                                         >
                                             <Send size={16} /> UAT Lulus — Tetapkan DEV_COMPLETED &amp; Lanjut ke QA / Siber
                                         </button>
+                                        {!allUatApproved && (
+                                            <p className="text-[10px] text-gray-400 text-center">
+                                                Tombol "UAT Lulus" aktif setelah Pemohon, PM, dan Development Lead menyetujui.
+                                            </p>
+                                        )}
                                     </div>
                                 )}
                                 {uatDone && (
@@ -1748,6 +2118,68 @@ export default function SITUATWizard({ project, updateProject, addNotification, 
                         setPreviewDoc(null);
                     }}
                 />
+            )}
+
+            {/* ─── MODAL: Ajukan Change Request UAT ─── */}
+            {showCrModal && (
+                <div className="fixed inset-0 z-[99999] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+                    <div className="bg-white rounded-2xl shadow-2xl max-w-lg w-full p-6 border border-gray-100">
+                        <div className="flex items-center gap-3 mb-4">
+                            <div className="w-10 h-10 bg-orange-100 rounded-xl flex items-center justify-center">
+                                <RotateCcw size={20} className="text-orange-600" />
+                            </div>
+                            <div>
+                                <h3 className="font-bold text-gray-800 text-base">Ajukan Change Request UAT</h3>
+                                <p className="text-xs text-gray-500 mt-0.5">
+                                    Ajukan pembaruan, permintaan tambahan, atau perbaikan atas hasil UAT.
+                                </p>
+                            </div>
+                        </div>
+                        <div className="space-y-4">
+                            <div>
+                                <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1.5">Tipe Perubahan *</label>
+                                <div className="grid grid-cols-2 gap-2">
+                                    <button onClick={() => setCrForm(p => ({ ...p, type: 'minor' }))}
+                                        className={`px-4 py-2.5 rounded-xl border text-xs font-bold transition-all cursor-pointer ${crForm.type === 'minor' ? 'bg-orange-500 border-orange-600 text-white' : 'bg-gray-50 border-gray-200 text-gray-600 hover:bg-orange-50'}`}>
+                                        Minor — Ulang SIT
+                                    </button>
+                                    <button onClick={() => setCrForm(p => ({ ...p, type: 'mayor' }))}
+                                        className={`px-4 py-2.5 rounded-xl border text-xs font-bold transition-all cursor-pointer ${crForm.type === 'mayor' ? 'bg-red-500 border-red-600 text-white' : 'bg-gray-50 border-gray-200 text-gray-600 hover:bg-red-50'}`}>
+                                        Mayor — Kembali ke Dev
+                                    </button>
+                                </div>
+                            </div>
+                            <div>
+                                <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1.5">Judul Change Request *</label>
+                                <input type="text" value={crForm.title} onChange={e => setCrForm(p => ({ ...p, title: e.target.value }))}
+                                    placeholder="Contoh: Perubahan format laporan ekspor" className="w-full px-3 py-2.5 border border-gray-300 rounded-xl text-xs focus:outline-none focus:border-orange-500" />
+                            </div>
+                            <div>
+                                <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1.5">Detail Perubahan *</label>
+                                <textarea rows={4} value={crForm.detail} onChange={e => setCrForm(p => ({ ...p, detail: e.target.value }))}
+                                    placeholder="Jelaskan secara detail apa yang ingin diubah/ditambahkan/diperbaiki..." className="w-full px-3 py-2.5 border border-gray-300 rounded-xl text-xs focus:outline-none focus:border-orange-500 resize-none" />
+                            </div>
+                            <div>
+                                <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1.5">Kategori (opsional)</label>
+                                <input type="text" value={crForm.category} onChange={e => setCrForm(p => ({ ...p, category: e.target.value }))}
+                                    placeholder="Contoh: Fungsionalitas, UI/UX, Data" className="w-full px-3 py-2.5 border border-gray-300 rounded-xl text-xs focus:outline-none focus:border-orange-500" />
+                            </div>
+                        </div>
+                        <div className="flex gap-3 justify-end mt-4">
+                            <button onClick={() => setShowCrModal(false)} disabled={crSubmitting}
+                                className="px-4 py-2 border border-gray-300 text-gray-700 rounded-xl font-bold text-xs hover:bg-gray-50 transition-colors cursor-pointer disabled:opacity-50">
+                                Batal
+                            </button>
+                            <button
+                                onClick={handleSubmitChangeRequest}
+                                disabled={!crForm.title.trim() || !crForm.detail.trim() || crSubmitting}
+                                className="px-5 py-2 bg-orange-600 hover:bg-orange-700 disabled:bg-gray-300 text-white rounded-xl font-bold text-xs transition-colors cursor-pointer disabled:cursor-not-allowed"
+                            >
+                                {crSubmitting ? 'Mengirim...' : 'Ajukan Change Request'}
+                            </button>
+                        </div>
+                    </div>
+                </div>
             )}
         </div>
     );

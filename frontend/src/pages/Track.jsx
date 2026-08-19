@@ -21,7 +21,8 @@ import {
     RotateCcw,
     Download,
 } from 'lucide-react';
-import { documentService } from '../services/api';
+import { documentService, projectService } from '../services/api';
+import toast from 'react-hot-toast';
 import DocumentViewerModal from '../components/DocumentViewerModal';
 import { getProjectRealDocuments } from '../contexts/ProjectContext';
 import { getDocExtLabel, getDocIconStyle } from '../utils/documentNaming';
@@ -31,12 +32,54 @@ const statusOptions = ['Semua Status', 'Sedang Berjalan', 'Selesai', 'Ditolak'];
 
 export default function Track() {
     const { user } = useAuth();
-    const { projects } = useProjects();
+    const { projects, refreshDataSilent } = useProjects();
     const location = useLocation();
     const [searchParams] = useSearchParams();
     const [previewDoc, setPreviewDoc] = useState(null);
     const detailPanelRef = useRef(null);
     const navigate = useNavigate();
+
+    // ── Persetujuan UAT & Change Request (business user) ──
+    const [uatApproving, setUatApproving] = useState(false);
+    const [crModalOpen, setCrModalOpen] = useState(false);
+    const [crForm, setCrForm] = useState({ type: 'minor', title: '', detail: '', category: '' });
+    const [crSubmitting, setCrSubmitting] = useState(false);
+
+    const handleUatApprove = async (projectId) => {
+        setUatApproving(true);
+        try {
+            await projectService.submitUatApproval(projectId, '');
+            toast.success('Persetujuan UAT Anda berhasil disimpan.');
+            refreshDataSilent?.();
+        } catch (err) {
+            toast.error(`Gagal menyimpan persetujuan: ${err.message}`);
+        } finally {
+            setUatApproving(false);
+        }
+    };
+
+    const handleCrSubmit = async (projectId) => {
+        if (!crForm.title.trim() || !crForm.detail.trim()) {
+            toast.error('Judul dan detail change request wajib diisi!');
+            return;
+        }
+        setCrSubmitting(true);
+        try {
+            await projectService.submitUatChangeRequest(projectId, {
+                type: crForm.type,
+                title: crForm.title.trim(),
+                detail: crForm.detail.trim(),
+                category: crForm.category,
+            });
+            toast.success('Change request UAT berhasil diajukan.');
+            setCrModalOpen(false);
+            setCrForm({ type: 'minor', title: '', detail: '', category: '' });
+        } catch (err) {
+            toast.error(`Gagal mengajukan change request: ${err.message}`);
+        } finally {
+            setCrSubmitting(false);
+        }
+    };
 
     const mappedTrackingProjects = useMemo(() => {
         return (projects || []).map(p => ({
@@ -473,6 +516,187 @@ export default function Track() {
                                     ))}
                                 </div>
                             </div>
+
+                            {/* ── Dokumen Proyek (semua tahap) ── */}
+                            <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-200 mt-6">
+                                <h2 className="text-lg font-semibold text-gray-800 mb-4 flex items-center">
+                                    <FileText size={20} className="mr-2 text-[#00529C]" />
+                                    Dokumen Proyek
+                                </h2>
+                                {(() => {
+                                    const realDocs = getProjectRealDocuments(activeProjectObj);
+                                    if (realDocs.length === 0) {
+                                        return <p className="text-xs text-gray-400 italic">Belum ada dokumen terlampir.</p>;
+                                    }
+                                    return (
+                                        <div className="space-y-2">
+                                            {realDocs.map((doc, idx) => (
+                                                <div key={idx} className="flex items-center justify-between p-3 bg-gray-50 rounded-xl border border-gray-100 text-xs">
+                                                    <div className="flex items-center gap-2.5 min-w-0">
+                                                        <div className={`w-8 h-8 rounded flex items-center justify-center shrink-0 font-bold text-[9px] ${getDocIconStyle(doc.name || '')}`}>
+                                                            {getDocExtLabel(doc.name || '')}
+                                                        </div>
+                                                        <div className="min-w-0">
+                                                            <p className="font-medium text-gray-700 truncate">{doc.name}</p>
+                                                            <p className="text-[10px] text-gray-400">{doc.size} • {doc.author}</p>
+                                                        </div>
+                                                    </div>
+                                                    <div className="flex items-center gap-1 shrink-0 ml-2">
+                                                        {doc.id && (
+                                                            <>
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() => setPreviewDoc(doc)}
+                                                                    className="px-2.5 py-1 bg-blue-100 hover:bg-blue-200 text-blue-700 rounded-lg text-[10px] font-bold transition-colors flex items-center gap-1 cursor-pointer"
+                                                                >
+                                                                    <Eye size={12} /> Lihat
+                                                                </button>
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={async () => {
+                                                                        if (!doc.id) return;
+                                                                        try {
+                                                                            const blob = await documentService.download(doc.id);
+                                                                            const url = URL.createObjectURL(blob);
+                                                                            const a = document.createElement('a');
+                                                                            a.href = url;
+                                                                            a.download = doc.name || 'dokumen.pdf';
+                                                                            document.body.appendChild(a);
+                                                                            a.click();
+                                                                            document.body.removeChild(a);
+                                                                            URL.revokeObjectURL(url);
+                                                                        } catch {
+                                                                            alert('Gagal mengunduh dokumen.');
+                                                                        }
+                                                                    }}
+                                                                    className="px-2.5 py-1 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg text-[10px] font-bold transition-colors flex items-center gap-1 cursor-pointer"
+                                                                >
+                                                                    <Download size={12} /> Unduh
+                                                                </button>
+                                                            </>
+                                                        )}
+                                                    </div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    );
+                                })()}
+                            </div>
+
+                            {/* ── Status Pengujian (SIT/UAT) & Change Request ── */}
+                            {(() => {
+                                const sd = activeProjectObj?.sitUatData || activeProjectObj?.sit_uat_data || {};
+                                const stRaw = activeSelected?.statusRaw;
+                                const isUat = ['UAT_IN_PROGRESS', 'UAT_REVISION_SIT', 'UAT_REVISION_DEV', 'DEV_COMPLETED'].includes(stRaw);
+                                const isSit = ['SIT_IN_PROGRESS', 'SIT_REVISION'].includes(stRaw);
+                                const uatAppr = sd.uat3_approvals || {};
+                                const crs = sd.uat_change_requests || [];
+                                const sitAppr = sd.sit3_approvals || {};
+                                if (!isSit && !isUat) return null;
+                                return (
+                                    <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-200 mt-6">
+                                        <h2 className="text-lg font-semibold text-gray-800 mb-4 flex items-center">
+                                            <Shield size={20} className="mr-2 text-[#00529C]" />
+                                            Status Pengujian
+                                        </h2>
+
+                                        {/* UAT */}
+                                        {isUat && (
+                                            <div className="space-y-4">
+                                                <div className="rounded-xl border border-amber-200 bg-amber-50 p-4">
+                                                    <p className="text-xs font-bold text-amber-800 mb-2">Persetujuan UAT</p>
+                                                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                                                        {[
+                                                            { key: 'business_user', label: 'Pemohon' },
+                                                            { key: 'pm', label: 'PM' },
+                                                            { key: 'development_lead', label: 'Dev Lead' },
+                                                        ].map(r => (
+                                                            <div key={r.key} className={`p-2.5 rounded-lg border text-center ${uatAppr?.[r.key]?.approved ? 'bg-emerald-50 border-emerald-200' : 'bg-white border-gray-200'}`}>
+                                                                <p className="text-[9px] font-bold text-gray-500 uppercase">{r.label}</p>
+                                                                <p className={`text-[11px] font-bold mt-0.5 ${uatAppr?.[r.key]?.approved ? 'text-emerald-700' : 'text-gray-400'}`}>
+                                                                    {uatAppr?.[r.key]?.approved ? '✓ Disetujui' : 'Menunggu'}
+                                                                </p>
+                                                            </div>
+                                                        ))}
+                                                    </div>
+                                                    {user?.role === 'business_user' && !uatAppr?.business_user?.approved && (
+                                                        <button
+                                                            onClick={() => handleUatApprove(activeSelected?.rawId)}
+                                                            disabled={uatApproving}
+                                                            className="mt-3 w-full px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 disabled:bg-gray-300 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition-colors cursor-pointer"
+                                                        >
+                                                            {uatApproving ? (
+                                                                <><span className="w-3 h-3 border-2 border-white/40 border-t-white rounded-full animate-spin" /> Menyimpan...</>
+                                                            ) : (
+                                                                <><CheckCircle size={14} /> Setujui UAT Sebagai Pemohon</>
+                                                            )}
+                                                        </button>
+                                                    )}
+                                                    {user?.role === 'business_user' && uatAppr?.business_user?.approved && (
+                                                        <p className="mt-3 text-[11px] text-emerald-600 font-bold flex items-center gap-1">
+                                                            <CheckCircle size={13} /> Anda telah menyetujui UAT.
+                                                        </p>
+                                                    )}
+                                                    {user?.role === 'business_user' && (
+                                                        <button
+                                                            onClick={() => setCrModalOpen(true)}
+                                                            className="mt-2 w-full px-4 py-2.5 bg-orange-500 hover:bg-orange-600 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition-colors cursor-pointer"
+                                                        >
+                                                            <RotateCcw size={14} /> Ajukan Change Request
+                                                        </button>
+                                                    )}
+                                                </div>
+                                                {crs.length > 0 && (
+                                                    <div>
+                                                        <p className="text-xs font-bold text-gray-700 mb-2">Change Request</p>
+                                                        <div className="space-y-2">
+                                                            {crs.map(cr => (
+                                                                <div key={cr.id} className={`p-3 rounded-xl border text-xs ${cr.status === 'approved' ? 'bg-emerald-50 border-emerald-200' : cr.status === 'rejected' ? 'bg-red-50 border-red-200' : 'bg-amber-50 border-amber-200'}`}>
+                                                                    <div className="flex items-center justify-between gap-2">
+                                                                        <span className="font-bold text-gray-800">{cr.title}</span>
+                                                                        <span className={`px-2 py-0.5 rounded-full text-[9px] font-bold border ${cr.status === 'approved' ? 'bg-emerald-100 text-emerald-700 border-emerald-200' : cr.status === 'rejected' ? 'bg-red-100 text-red-700 border-red-200' : 'bg-amber-100 text-amber-700 border-amber-200'}`}>
+                                                                            {cr.status === 'approved' ? 'Disetujui' : cr.status === 'rejected' ? 'Ditolak' : 'Menunggu'}
+                                                                        </span>
+                                                                    </div>
+                                                                    <p className="text-gray-600 mt-1">{cr.detail}</p>
+                                                                    <p className="text-[10px] text-gray-400 mt-1">Oleh: {cr.submittedBy}</p>
+                                                                </div>
+                                                            ))}
+                                                        </div>
+                                                    </div>
+                                                )}
+                                            </div>
+                                        )}
+
+                                        {/* SIT */}
+                                        {isSit && (
+                                            <div className="rounded-xl border border-blue-200 bg-blue-50 p-4">
+                                                <p className="text-xs font-bold text-blue-800 mb-2">Persetujuan SIT</p>
+                                                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                                                    <div className={`p-2.5 rounded-lg border text-center ${sitAppr?.developer?.approved ? 'bg-emerald-50 border-emerald-200' : 'bg-white border-gray-200'}`}>
+                                                        <p className="text-[9px] font-bold text-gray-500 uppercase">Developer</p>
+                                                        <p className={`text-[11px] font-bold mt-0.5 ${sitAppr?.developer?.approved ? 'text-emerald-700' : 'text-gray-400'}`}>
+                                                            {sitAppr?.developer?.approvedCount ?? 0}/{sitAppr?.developer?.required ?? 0}
+                                                        </p>
+                                                    </div>
+                                                    <div className={`p-2.5 rounded-lg border text-center ${sitAppr?.pm?.approved ? 'bg-emerald-50 border-emerald-200' : 'bg-white border-gray-200'}`}>
+                                                        <p className="text-[9px] font-bold text-gray-500 uppercase">PM</p>
+                                                        <p className={`text-[11px] font-bold mt-0.5 ${sitAppr?.pm?.approved ? 'text-emerald-700' : 'text-gray-400'}`}>
+                                                            {sitAppr?.pm?.approved ? '✓' : 'Menunggu'}
+                                                        </p>
+                                                    </div>
+                                                    <div className={`p-2.5 rounded-lg border text-center ${sitAppr?.development_lead?.approved ? 'bg-emerald-50 border-emerald-200' : 'bg-white border-gray-200'}`}>
+                                                        <p className="text-[9px] font-bold text-gray-500 uppercase">Dev Lead</p>
+                                                        <p className={`text-[11px] font-bold mt-0.5 ${sitAppr?.development_lead?.approved ? 'text-emerald-700' : 'text-gray-400'}`}>
+                                                            {sitAppr?.development_lead?.approved ? '✓' : 'Menunggu'}
+                                                        </p>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        )}
+                                    </div>
+                                );
+                            })()}
                         </div>
                     </div>
                 </div>
@@ -484,6 +708,68 @@ export default function Track() {
                     project={activeProjectObj}
                     onClose={() => setPreviewDoc(null)}
                 />
+            )}
+
+            {/* ── Modal Ajukan Change Request UAT (business user) ── */}
+            {crModalOpen && (
+                <div className="fixed inset-0 z-[99999] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+                    <div className="bg-white rounded-2xl shadow-2xl max-w-lg w-full p-6 border border-gray-100">
+                        <div className="flex items-center gap-3 mb-4">
+                            <div className="w-10 h-10 bg-orange-100 rounded-xl flex items-center justify-center">
+                                <RotateCcw size={20} className="text-orange-600" />
+                            </div>
+                            <div>
+                                <h3 className="font-bold text-gray-800 text-base">Ajukan Change Request UAT</h3>
+                                <p className="text-xs text-gray-500 mt-0.5">
+                                    Ajukan pembaruan, permintaan tambahan, atau perbaikan atas hasil UAT.
+                                </p>
+                            </div>
+                        </div>
+                        <div className="space-y-4">
+                            <div>
+                                <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1.5">Tipe Perubahan *</label>
+                                <div className="grid grid-cols-2 gap-2">
+                                    <button onClick={() => setCrForm(p => ({ ...p, type: 'minor' }))}
+                                        className={`px-4 py-2.5 rounded-xl border text-xs font-bold transition-all cursor-pointer ${crForm.type === 'minor' ? 'bg-orange-500 border-orange-600 text-white' : 'bg-gray-50 border-gray-200 text-gray-600 hover:bg-orange-50'}`}>
+                                        Minor — Ulang SIT
+                                    </button>
+                                    <button onClick={() => setCrForm(p => ({ ...p, type: 'mayor' }))}
+                                        className={`px-4 py-2.5 rounded-xl border text-xs font-bold transition-all cursor-pointer ${crForm.type === 'mayor' ? 'bg-red-500 border-red-600 text-white' : 'bg-gray-50 border-gray-200 text-gray-600 hover:bg-red-50'}`}>
+                                        Mayor — Kembali ke Dev
+                                    </button>
+                                </div>
+                            </div>
+                            <div>
+                                <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1.5">Judul Change Request *</label>
+                                <input type="text" value={crForm.title} onChange={e => setCrForm(p => ({ ...p, title: e.target.value }))}
+                                    placeholder="Contoh: Perubahan format laporan ekspor" className="w-full px-3 py-2.5 border border-gray-300 rounded-xl text-xs focus:outline-none focus:border-orange-500" />
+                            </div>
+                            <div>
+                                <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1.5">Detail Perubahan *</label>
+                                <textarea rows={4} value={crForm.detail} onChange={e => setCrForm(p => ({ ...p, detail: e.target.value }))}
+                                    placeholder="Jelaskan secara detail apa yang ingin diubah/ditambahkan/diperbaiki..." className="w-full px-3 py-2.5 border border-gray-300 rounded-xl text-xs focus:outline-none focus:border-orange-500 resize-none" />
+                            </div>
+                            <div>
+                                <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1.5">Kategori (opsional)</label>
+                                <input type="text" value={crForm.category} onChange={e => setCrForm(p => ({ ...p, category: e.target.value }))}
+                                    placeholder="Contoh: Fungsionalitas, UI/UX, Data" className="w-full px-3 py-2.5 border border-gray-300 rounded-xl text-xs focus:outline-none focus:border-orange-500" />
+                            </div>
+                        </div>
+                        <div className="flex gap-3 justify-end mt-4">
+                            <button onClick={() => setCrModalOpen(false)} disabled={crSubmitting}
+                                className="px-4 py-2 border border-gray-300 text-gray-700 rounded-xl font-bold text-xs hover:bg-gray-50 transition-colors cursor-pointer disabled:opacity-50">
+                                Batal
+                            </button>
+                            <button
+                                onClick={() => handleCrSubmit(activeSelected?.rawId)}
+                                disabled={!crForm.title.trim() || !crForm.detail.trim() || crSubmitting}
+                                className="px-5 py-2 bg-orange-600 hover:bg-orange-700 disabled:bg-gray-300 text-white rounded-xl font-bold text-xs transition-colors cursor-pointer disabled:cursor-not-allowed"
+                            >
+                                {crSubmitting ? 'Mengirim...' : 'Ajukan Change Request'}
+                            </button>
+                        </div>
+                    </div>
+                </div>
             )}
         </div>
     );

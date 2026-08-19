@@ -659,5 +659,255 @@ class ProjectController extends Controller
             ],
         ];
     }
+
+    /**
+     * Persetujuan UAT (Tahap 3) oleh role: business_user (pemohon), pm, development_lead.
+     * Disimpan di sit_uat_data.uat3_approvals.
+     */
+    public function uatApproval(Request $request, int $id): JsonResponse
+    {
+        $project = Project::findOrFail($id);
+        $user = $request->user();
+        $roleName = $user->role?->name;
+
+        $roleKey = match ($roleName) {
+            'business_user' => 'business_user',
+            'dev_analyst', 'project_manager' => 'pm',
+            'development_lead' => 'development_lead',
+            'super_admin', 'head_of_it' => 'pm', // Admin dianggap mewakili PM
+            default => null,
+        };
+
+        if (! $roleKey) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Role Anda tidak diizinkan memberikan persetujuan UAT.',
+            ], 403);
+        }
+
+        $status = $project->status instanceof \BackedEnum ? $project->status->value : $project->status;
+        if (! in_array($status, ['UAT_IN_PROGRESS', 'UAT_REVISION_SIT', 'UAT_REVISION_DEV'])) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Persetujuan UAT hanya dapat dilakukan saat proyek berstatus UAT.',
+            ], 422);
+        }
+
+        if ($roleKey === 'business_user') {
+            if ((int) $project->created_by !== (int) $user->id) {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'Anda bukan pemohon proyek ini.',
+                ], 403);
+            }
+        }
+        if ($roleKey === 'pm') {
+            $isAdminProxy = in_array($roleName, ['super_admin', 'head_of_it']);
+            if (! $isAdminProxy && (int) $project->pm_id !== (int) $user->id) {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'Anda bukan Project Manager proyek ini.',
+                ], 403);
+            }
+        }
+
+        $request->validate([
+            'note' => ['nullable', 'string', 'max:2000'],
+        ]);
+
+        $sitData = (array) $project->sit_uat_data;
+        $approvals = (array) ($sitData['uat3_approvals'] ?? []);
+        $approvals[$roleKey] = [
+            'approved'     => true,
+            'approvedBy'   => $user->name,
+            'approvedById' => $user->id,
+            'at'           => now()->toIso8601String(),
+            'note'         => $request->note ?? null,
+        ];
+        $sitData['uat3_approvals'] = $approvals;
+        $project->update(['sit_uat_data' => $sitData]);
+
+        \App\Models\ActivityLog::create([
+            'user_id' => $user->id,
+            'action'  => 'uat_approval',
+            'action_label' => 'Persetujuan UAT',
+            'description' => "{$user->name} ({$roleName}) menyetujui UAT pada proyek \"{$project->title}\".",
+            'subject_type' => Project::class,
+            'subject_id' => $project->id,
+            'metadata' => [
+                'project_id' => $project->id,
+                'project_name' => $project->title,
+                'user_role' => $roleName,
+                'approval_role' => $roleKey,
+            ],
+        ]);
+
+        return response()->json([
+            'status' => 'success',
+            'message' => "Persetujuan UAT dari {$roleName} berhasil disimpan.",
+            'data' => new ProjectResource($project->fresh(['tasks.assignee', 'tasks.revisionRequester', 'teamMembers.user'])),
+        ]);
+    }
+
+    /**
+     * Change Request UAT — diajukan oleh business_user (pemohon).
+     * Tersimpan di sit_uat_data.uat_change_requests[]. Jika major → kembali ke dev,
+     * minor → ulang SIT. Admin/PM/dev lead dapat menyetujui/menolak.
+     */
+    public function uatChangeRequest(Request $request, int $id): JsonResponse
+    {
+        $project = Project::findOrFail($id);
+        $user = $request->user();
+        $roleName = $user->role?->name;
+
+        // Hanya business_user (pemohon) yang boleh mengajukan change request UAT
+        if ($roleName !== 'business_user' || (int) $project->created_by !== (int) $user->id) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Hanya pemohon proyek yang dapat mengajukan change request UAT.',
+            ], 403);
+        }
+
+        $status = $project->status instanceof \BackedEnum ? $project->status->value : $project->status;
+        if (! in_array($status, ['UAT_IN_PROGRESS', 'UAT_REVISION_SIT', 'UAT_REVISION_DEV'])) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Change request UAT hanya dapat diajukan saat proyek berstatus UAT.',
+            ], 422);
+        }
+
+        $request->validate([
+            'type'      => ['required', 'string', 'in:minor,mayor'],
+            'title'     => ['required', 'string', 'max:255'],
+            'detail'    => ['required', 'string', 'max:5000'],
+            'category'  => ['nullable', 'string', 'max:100'],
+        ]);
+
+        $sitData = (array) $project->sit_uat_data;
+        $requests = (array) ($sitData['uat_change_requests'] ?? []);
+        $requests[] = [
+            'id'        => 'cr_' . time() . '_' . random_int(1000, 9999),
+            'type'      => $request->type,
+            'title'     => $request->title,
+            'detail'    => $request->detail,
+            'category'  => $request->category,
+            'submittedBy' => $user->name,
+            'submittedById' => $user->id,
+            'status'    => 'pending', // pending | approved | rejected
+            'at'        => now()->toIso8601String(),
+        ];
+        $sitData['uat_change_requests'] = $requests;
+        $project->update(['sit_uat_data' => $sitData]);
+
+        \App\Models\ActivityLog::create([
+            'user_id' => $user->id,
+            'action'  => 'uat_change_request',
+            'action_label' => 'Change Request UAT',
+            'description' => "{$user->name} mengajukan change request UAT ({$request->type}) pada proyek \"{$project->title}\": {$request->title}",
+            'subject_type' => Project::class,
+            'subject_id' => $project->id,
+            'metadata' => [
+                'project_id' => $project->id,
+                'project_name' => $project->title,
+                'user_role' => $roleName,
+                'cr_type' => $request->type,
+            ],
+        ]);
+
+        return response()->json([
+            'status' => 'success',
+            'message' => 'Change request UAT berhasil diajukan.',
+            'data' => new ProjectResource($project->fresh(['tasks.assignee', 'tasks.revisionRequester', 'teamMembers.user'])),
+        ]);
+    }
+
+    /**
+     * Putuskan (approve/reject) change request UAT — oleh PM / development_lead / super_admin / head_of_it.
+     * Jika disetujui & type mayor → status kembali ke IN_DEVELOPMENT (dev).
+     * Jika disetujui & type minor → status kembali ke SIT_REVISION (ulang SIT).
+     */
+    public function uatChangeRequestDecision(Request $request, int $id): JsonResponse
+    {
+        $project = Project::findOrFail($id);
+        $user = $request->user();
+        $roleName = $user->role?->name;
+
+        if (! in_array($roleName, ['super_admin', 'head_of_it', 'dev_analyst', 'project_manager', 'development_lead'])) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Anda tidak berwenang memutuskan change request UAT.',
+            ], 403);
+        }
+
+        $request->validate([
+            'cr_id'    => ['required', 'string'],
+            'decision' => ['required', 'string', 'in:approved,rejected'],
+            'note'     => ['nullable', 'string', 'max:2000'],
+        ]);
+
+        $sitData = (array) $project->sit_uat_data;
+        $requests = (array) ($sitData['uat_change_requests'] ?? []);
+        $found = false;
+        foreach ($requests as $i => &$cr) {
+            if (($cr['id'] ?? null) === $request->cr_id) {
+                $cr['status'] = $request->decision;
+                $cr['decisionBy'] = $user->name;
+                $cr['decisionAt'] = now()->toIso8601String();
+                $cr['decisionNote'] = $request->note ?? null;
+                $found = true;
+                $crType = $cr['type'] ?? 'minor';
+                break;
+            }
+        }
+        unset($cr);
+
+        if (! $found) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Change request tidak ditemukan.',
+            ], 404);
+        }
+
+        $sitData['uat_change_requests'] = $requests;
+
+        // Jika disetujui → alihkan status proyek sesuai tipe change request
+        $newStatus = null;
+        if ($request->decision === 'approved') {
+            // Mayor → UAT_REVISION_DEV (kembali ke development), minor → UAT_REVISION_SIT (ulang SIT)
+            $newStatus = $crType === 'mayor' ? ProjectStatus::UAT_REVISION_DEV : ProjectStatus::UAT_REVISION_SIT;
+            // Reset approvals UAT agar harus menyetujui ulang
+            if (isset($sitData['uat3_approvals'])) {
+                unset($sitData['uat3_approvals']);
+            }
+            // Tambah riwayat change request ke revisi log
+            $revisions = (array) ($sitData['revisions'] ?? []);
+            $revisions[] = [
+                'type'  => $crType === 'mayor' ? 'UAT_CHANGE_MAYOR' : 'UAT_CHANGE_MINOR',
+                'notes' => $request->note ?? ($cr['title'] ?? 'Change Request'),
+                'at'    => now()->toIso8601String(),
+                'by'    => $user->name,
+            ];
+            $sitData['revisions'] = $revisions;
+        }
+
+        $project->update(['sit_uat_data' => $sitData]);
+
+        if ($newStatus) {
+            try {
+                $this->workflowService->transition($project, $newStatus, $user, "Change Request UAT {$request->decision}: " . ($cr['title'] ?? ''));
+            } catch (\Throwable $e) {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'Change request disimpan, tetapi transisi status gagal: ' . $e->getMessage(),
+                ], 422);
+            }
+        }
+
+        return response()->json([
+            'status' => 'success',
+            'message' => "Change request UAT {$request->decision}.",
+            'data' => new ProjectResource($project->fresh(['tasks.assignee', 'tasks.revisionRequester', 'teamMembers.user'])),
+        ]);
+    }
 }
 

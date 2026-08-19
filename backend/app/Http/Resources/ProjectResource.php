@@ -62,7 +62,7 @@ class ProjectResource extends JsonResource
             'devAnalystResult' => $this->dev_analyst_result,
             'dev_analyst_result' => $this->dev_analyst_result,
             'staging_url' => $this->staging_url,
-            'sit_uat_data' => $this->sit_uat_data,
+            'sit_uat_data' => self::normalizeSitUatData($this->sit_uat_data),
             'qa_status' => $this->qa_status ?? 'NOT_SUBMITTED',
             'cyber_status' => $this->cyber_status ?? 'NOT_SUBMITTED',
             'team_allocated_by_pm' => $this->team_allocated_by_pm ?? false,
@@ -124,5 +124,30 @@ class ProjectResource extends JsonResource
             'created_at' => $this->created_at?->toIso8601String(),
             'updated_at' => $this->updated_at?->toIso8601String(),
         ];
+    }
+
+    /**
+     * Normalisasi sit_uat_data agar integer keys (mis. task id pada sit2_task_approvals)
+     * tetap menjadi OBJECT saat di-encode ke JSON (bukan berubah menjadi array).
+     */
+    public static function normalizeSitUatData(?array $sitUat): ?array
+    {
+        if (! $sitUat) return $sitUat;
+
+        // sit2_task_approvals: pastikan key task id menjadi STRING non-numeric
+        // dengan prefix "task_" agar PHP json_encode selalu menghasilkan OBJECT,
+        // bukan array (PHP me-cast numeric string key ke integer).
+        if (isset($sitUat['sit2_task_approvals']) && is_array($sitUat['sit2_task_approvals'])) {
+            $normalized = [];
+            foreach ($sitUat['sit2_task_approvals'] as $k => $v) {
+                $normalized['task_' . $k] = $v;
+            }
+            $sitUat['sit2_task_approvals'] = $normalized;
+        }
+
+        // Catatan: sit3_approvals & uat3_approvals memakai key string (developer/pm/...)
+        // sehingga tidak perlu prefix — PHP json_encode sudah menghasilkan object.
+
+        return $sitUat;
     }
 }

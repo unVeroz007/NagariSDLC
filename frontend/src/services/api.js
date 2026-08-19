@@ -269,6 +269,30 @@ export const projectService = {
             body: JSON.stringify({ note }),
         });
     },
+
+    // Persetujuan UAT Tahap 3 oleh role (business_user/pm/development_lead)
+    submitUatApproval: async (id, note = '') => {
+        return apiFetch(`${BASE_URL}/projects/${id}/uat-approval`, {
+            method: 'POST',
+            body: JSON.stringify({ note }),
+        });
+    },
+
+    // Change Request UAT (oleh business_user)
+    submitUatChangeRequest: async (id, payload) => {
+        return apiFetch(`${BASE_URL}/projects/${id}/uat-change-request`, {
+            method: 'POST',
+            body: JSON.stringify(payload),
+        });
+    },
+
+    // Putuskan Change Request UAT (approve/reject)
+    decideUatChangeRequest: async (id, payload) => {
+        return apiFetch(`${BASE_URL}/projects/${id}/uat-change-request/decision`, {
+            method: 'POST',
+            body: JSON.stringify(payload),
+        });
+    },
 };
 
 // ──────────────────────────────────────────────────────────

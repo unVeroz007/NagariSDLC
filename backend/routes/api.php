@@ -80,6 +80,9 @@ Route::prefix('v1')->group(function () {
         Route::get('/projects/{id}/timeline', [ProjectController::class, 'timeline']);
         Route::get('/projects/{id}/sit-gate', [ProjectController::class, 'sitGate']);
         Route::post('/projects/{id}/sit-approval', [ProjectController::class, 'sitApproval']);
+        Route::post('/projects/{id}/uat-approval', [ProjectController::class, 'uatApproval']);
+        Route::post('/projects/{id}/uat-change-request', [ProjectController::class, 'uatChangeRequest']);
+        Route::post('/projects/{id}/uat-change-request/decision', [ProjectController::class, 'uatChangeRequestDecision']);
         Route::post('/projects/{id}/team', [ProjectController::class, 'allocateTeam']);
 
         // ----- TASK ROUTES -----
