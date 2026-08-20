@@ -72,7 +72,7 @@ export const PROJECT_STATUS_LABEL = {
     [PROJECT_STATUS.SIT_REVISION]: 'Revisi SIT → Dev',
     [PROJECT_STATUS.UAT_IN_PROGRESS]: 'UAT Internal Berlangsung',
     [PROJECT_STATUS.UAT_PASSED]: 'UAT Internal Lulus',
-    [PROJECT_STATUS.UAT_REVISION_SIT]: 'Revisi UAT → Ulang SIT',
+    [PROJECT_STATUS.UAT_REVISION_SIT]: 'Revisi UAT → Ulang SIT (Legacy)',
     [PROJECT_STATUS.UAT_REVISION_DEV]: 'Revisi UAT → Kembali Dev',
     [PROJECT_STATUS.DEV_COMPLETED]: 'Dev Selesai — Siap QA & Siber',
     [PROJECT_STATUS.READY_FOR_QA]: 'Siap QA Testing',

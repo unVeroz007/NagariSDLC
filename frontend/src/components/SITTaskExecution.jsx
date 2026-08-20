@@ -18,8 +18,8 @@
 //       revisedBy:  string|null,
 //   } }
 //
-// Gate kelulusan: lanjut Review & Sign-Off HANYA jika SEMUA task (non take_down)
-// memiliki approved === true.
+// Gate kelulusan: lanjut Review & Sign-Off hanya jika seluruh task dalam scope
+// SIT saat ini memiliki approved === true.
 import { useState, useMemo, useEffect, useRef } from 'react';
 import toast from 'react-hot-toast';
 import {
@@ -45,8 +45,20 @@ const fmtDateTime = (iso) => {
     }
 };
 
-export default function SITTaskExecution({ project, approvals, onApprovalsChange, onRequestRevision, readOnly = false }) {
-    // Semua task proyek (kecuali TAKE DOWN)
+export default function SITTaskExecution({
+    project,
+    approvals,
+    onApprovalsChange,
+    onRequestRevision,
+    taskIds = null,
+    isTargetedRetest = false,
+    readOnly = false,
+}) {
+    const taskIdSet = useMemo(
+        () => Array.isArray(taskIds) ? new Set(taskIds.map(Number)) : null,
+        [taskIds]
+    );
+    // SIT awal menampilkan seluruh task aktif; SIT ulang hanya task dalam scope.
     const tasks = useMemo(() => {
         if (!Array.isArray(project?.tasks)) return [];
         return project.tasks
@@ -58,8 +70,9 @@ export default function SITTaskExecution({ project, approvals, onApprovalsChange
                 priority: t.priority || 'Medium',
                 revisionNote: t.revision_note || '',
             }))
-            .filter(t => t.status !== 'take_down');
-    }, [project?.tasks]);
+            .filter(t => t.status !== 'take_down'
+                && (!taskIdSet || taskIdSet.has(Number(t.id))));
+    }, [project?.tasks, taskIdSet]);
 
     // State komentar & lampiran per task (sementara sebelum disimpan)
     const [comments, setComments] = useState({});
@@ -75,13 +88,13 @@ export default function SITTaskExecution({ project, approvals, onApprovalsChange
     // Inisialisasi komentar dari approvals tersimpan
     useEffect(() => {
         const init = {};
-        (project?.tasks || []).forEach(t => {
+        tasks.forEach(t => {
             const a = approvals?.[t.id];
             const comment = typeof a === 'object' ? (a.comment || '') : '';
             if (comment) init[t.id] = comment;
         });
         setComments(init);
-    }, [project?.id, approvals]);
+    }, [approvals, tasks]);
 
     const getApproval = (taskId) => {
         const key = String(taskId);
@@ -273,7 +286,9 @@ export default function SITTaskExecution({ project, approvals, onApprovalsChange
         return (
             <div className="bg-indigo-50 border border-indigo-200 rounded-xl p-5 text-center text-xs text-indigo-700">
                 <Check size={24} className="mx-auto mb-2 text-indigo-500" />
-                Belum ada task developer yang tercatat di proyek ini. Buat task terlebih dahulu pada tab Manajemen Task.
+                {isTargetedRetest
+                    ? 'Tidak ada task Change Request Mayor yang valid pada scope SIT ulang ini.'
+                    : 'Belum ada task developer yang tercatat di proyek ini. Buat task terlebih dahulu pada tab Manajemen Task.'}
             </div>
         );
     }
@@ -285,8 +300,8 @@ export default function SITTaskExecution({ project, approvals, onApprovalsChange
                 <div className="flex items-center gap-2 font-semibold">
                     {allApproved ? <Check size={15} className="text-emerald-600" /> : <AlertCircle size={15} className="text-amber-600" />}
                     {allApproved
-                        ? `Semua ${tasks.length} task disetujui — SIT dapat lanjut ke Review & Sign-Off.`
-                        : `${approvedCount} dari ${tasks.length} task disetujui. Lanjut hanya jika SEMUA task dicentang OK.`}
+                        ? `Semua ${tasks.length} task dalam scope disetujui — SIT dapat lanjut ke Review & Sign-Off.`
+                        : `${approvedCount} dari ${tasks.length} task dalam scope disetujui. Lanjut hanya jika semuanya dicentang OK.`}
                 </div>
             </div>
 

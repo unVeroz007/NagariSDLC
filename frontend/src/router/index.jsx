@@ -10,6 +10,8 @@ import ForgotPassword from '../pages/ForgotPassword';
 import ResetPassword from '../pages/ResetPassword';
 import Unauthorized from '../pages/Unauthorized';
 import NotFound from '../pages/NotFound';
+import ExternalUatApproval from '../pages/ExternalUatApproval';
+import InternalUatApprovals from '../pages/approvals/InternalUatApprovals';
 
 // Main pages
 import Dashboard from '../pages/Dashboard';
@@ -73,7 +75,8 @@ const BUSINESS_ROLES = ['super_admin', 'head_of_it', 'business_user'];
 // Role yang boleh mengelola dokumen (upload/hapus)
 const DOC_MANAGEMENT_ROLES = ['super_admin', 'head_of_it', 'lead_group', 'project_manager', 'dev_analyst', 'development_lead'];
 // Role yang boleh membuka detail proyek (TaskDetail): PM + viewer (developer/analyst read-only)
-const TASK_DETAIL_ROLES = ['super_admin', 'dev_analyst', 'project_manager', 'development_lead', 'developer', 'analyst'];
+const TASK_DETAIL_ROLES = ['super_admin', 'head_of_it', 'lead_group', 'dev_analyst', 'project_manager', 'development_lead', 'developer', 'analyst'];
+const INTERNAL_UAT_APPROVER_ROLES = ['super_admin', 'head_of_it', 'lead_group', 'analyst', 'development_lead', 'project_manager', 'dev_analyst', 'developer'];
 
 const router = createBrowserRouter([
     // ─────────────────────────────────────────────
@@ -120,6 +123,10 @@ const router = createBrowserRouter([
         element: <Unauthorized />,
     },
     {
+        path: '/uat-approval/:token',
+        element: <ExternalUatApproval />,
+    },
+    {
         path: '*',
         element: <NotFound />,
     },
@@ -146,6 +153,14 @@ const router = createBrowserRouter([
             {
                 path: '/profile',
                 element: <Profile />,
+            },
+            {
+                path: '/approvals/uat',
+                element: (
+                    <ProtectedRoute allowedRoles={INTERNAL_UAT_APPROVER_ROLES}>
+                        <InternalUatApprovals />
+                    </ProtectedRoute>
+                ),
             },
             {
                 path: '/projects',

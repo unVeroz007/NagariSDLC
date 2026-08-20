@@ -116,6 +116,7 @@ class TaskController extends Controller
         // Jika status diubah menjadi "Selesai", bersihkan tanda revisi (task sudah
         // memenuhi arahan revisi). Dokumentasikan selesainya revisi ke activity log.
         $wasUnderRevision = (bool) $task->revision_note;
+        $revisionNote = $task->revision_note;
         $becomesDone = isset($data['status'])
             && $data['status']->value === TaskStatus::DONE->value
             && $oldStatus !== TaskStatus::DONE->value;
@@ -127,6 +128,42 @@ class TaskController extends Controller
 
         $task->update($data);
 
+        if ($wasUnderRevision && ($becomesDone || ($request->has('assignee_id') && $assigneeId))) {
+            $sitUatData = (array) $project->sit_uat_data;
+            $nextRequestStatus = $becomesDone ? 'resolved' : 'in_progress';
+            $sitUatData['uat_change_requests'] = collect($sitUatData['uat_change_requests'] ?? [])
+                ->map(function (array $changeRequest) use ($task, $nextRequestStatus, $becomesDone): array {
+                    if (
+                        (int) ($changeRequest['taskId'] ?? 0) !== (int) $task->id
+                        || ! in_array($changeRequest['status'] ?? null, ['open', 'in_progress'], true)
+                    ) {
+                        return $changeRequest;
+                    }
+
+                    return [
+                        ...$changeRequest,
+                        'status' => $nextRequestStatus,
+                        ...($becomesDone ? ['resolvedAt' => now()->toIso8601String()] : []),
+                    ];
+                })
+                ->values()
+                ->all();
+
+            if ($becomesDone) {
+                foreach (['uat2_scenarios', 'uat2_additional_requests'] as $key) {
+                    $sitUatData[$key] = collect($sitUatData[$key] ?? [])
+                        ->map(fn (array $item): array => (int) ($item['taskId'] ?? 0) === (int) $task->id
+                            && ($item['verificationStatus'] ?? null) === 'waiting_development'
+                                ? [...$item, 'verificationStatus' => 'waiting_sit']
+                                : $item)
+                        ->values()
+                        ->all();
+                }
+            }
+
+            $project->update(['sit_uat_data' => $sitUatData]);
+        }
+
         $newStatus = $task->status instanceof \BackedEnum ? $task->status->value : $task->status;
 
         if ($becomesDone && $wasUnderRevision) {
@@ -136,7 +173,7 @@ class TaskController extends Controller
                 "Task \"{$task->title}\" telah diselesaikan setelah revisi dan siap diverifikasi pada proyek \"{$project->title}\".",
                 $project,
                 $task,
-                ['revision_note' => $request->revision_note]
+                ['revision_note' => $revisionNote]
             );
         }
 

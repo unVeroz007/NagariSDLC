@@ -3,7 +3,9 @@
 namespace App\Services;
 
 use App\Enums\ProjectStatus;
+use App\Enums\TaskStatus;
 use App\Enums\UserRole;
+use App\Models\DocumentVault;
 use App\Models\Project;
 use App\Models\ProjectStatusHistory;
 use App\Models\User;
@@ -13,6 +15,8 @@ use Illuminate\Support\Facades\Broadcast;
 
 class ProjectWorkflowService
 {
+    public function __construct(private readonly UatApprovalService $uatApprovalService) {}
+
     /**
      * Matriks Transisi Status yang diperbolehkan (Maju & Mundur / Rollback).
      */
@@ -161,13 +165,13 @@ class ProjectWorkflowService
         ProjectStatus::DEV_ANALYSIS->value => [UserRole::DEVELOPMENT_LEAD->value, UserRole::ANALYST->value, UserRole::SUPER_ADMIN->value],
         ProjectStatus::DEV_ANALYSIS_DONE->value => [UserRole::ANALYST->value, UserRole::SUPER_ADMIN->value],
         ProjectStatus::IN_DEVELOPMENT->value => [UserRole::PROJECT_MANAGER->value, UserRole::DEVELOPER->value, UserRole::DEVELOPMENT_LEAD->value, UserRole::SUPER_ADMIN->value],
-        ProjectStatus::SIT_IN_PROGRESS->value => [UserRole::PROJECT_MANAGER->value, UserRole::DEVELOPMENT_LEAD->value, UserRole::DEVELOPER->value, UserRole::SUPER_ADMIN->value],
-        ProjectStatus::SIT_PASSED->value => [UserRole::PROJECT_MANAGER->value, UserRole::DEVELOPMENT_LEAD->value, UserRole::SUPER_ADMIN->value],
-        ProjectStatus::SIT_REVISION->value => [UserRole::PROJECT_MANAGER->value, UserRole::DEVELOPMENT_LEAD->value, UserRole::SUPER_ADMIN->value],
-        ProjectStatus::UAT_IN_PROGRESS->value => [UserRole::PROJECT_MANAGER->value, UserRole::BUSINESS_USER->value, UserRole::SUPER_ADMIN->value],
-        ProjectStatus::UAT_REVISION_SIT->value => [UserRole::PROJECT_MANAGER->value, UserRole::BUSINESS_USER->value, UserRole::SUPER_ADMIN->value],
-        ProjectStatus::UAT_REVISION_DEV->value => [UserRole::PROJECT_MANAGER->value, UserRole::BUSINESS_USER->value, UserRole::SUPER_ADMIN->value],
-        ProjectStatus::DEV_COMPLETED->value => [UserRole::PROJECT_MANAGER->value, UserRole::DEVELOPMENT_LEAD->value, UserRole::DEVELOPER->value, UserRole::SUPER_ADMIN->value],
+        ProjectStatus::SIT_IN_PROGRESS->value => [UserRole::PROJECT_MANAGER->value, 'dev_analyst', UserRole::DEVELOPMENT_LEAD->value, UserRole::DEVELOPER->value, UserRole::SUPER_ADMIN->value],
+        ProjectStatus::SIT_PASSED->value => [UserRole::PROJECT_MANAGER->value, 'dev_analyst', UserRole::DEVELOPMENT_LEAD->value, UserRole::SUPER_ADMIN->value],
+        ProjectStatus::SIT_REVISION->value => [UserRole::PROJECT_MANAGER->value, 'dev_analyst', UserRole::DEVELOPMENT_LEAD->value, UserRole::SUPER_ADMIN->value],
+        ProjectStatus::UAT_IN_PROGRESS->value => [UserRole::PROJECT_MANAGER->value, 'dev_analyst', UserRole::BUSINESS_USER->value, UserRole::SUPER_ADMIN->value],
+        ProjectStatus::UAT_REVISION_SIT->value => [UserRole::PROJECT_MANAGER->value, 'dev_analyst', UserRole::BUSINESS_USER->value, UserRole::SUPER_ADMIN->value],
+        ProjectStatus::UAT_REVISION_DEV->value => [UserRole::PROJECT_MANAGER->value, 'dev_analyst', UserRole::BUSINESS_USER->value, UserRole::HEAD_OF_IT->value, UserRole::SUPER_ADMIN->value],
+        ProjectStatus::DEV_COMPLETED->value => [UserRole::PROJECT_MANAGER->value, 'dev_analyst', UserRole::DEVELOPMENT_LEAD->value, UserRole::DEVELOPER->value, UserRole::SUPER_ADMIN->value],
         ProjectStatus::RETURN_TO_DEV->value => [UserRole::QA_LEAD->value, UserRole::QA_TESTER->value, UserRole::CYBER_LEAD->value, UserRole::PENTESTER->value, UserRole::SUPER_ADMIN->value],
         ProjectStatus::READY_FOR_QA->value => [UserRole::PROJECT_MANAGER->value, UserRole::SUPER_ADMIN->value],
         ProjectStatus::QA_IN_PROGRESS->value => [UserRole::QA_LEAD->value, UserRole::LEAD_GROUP->value, UserRole::SUPER_ADMIN->value],
@@ -219,8 +223,83 @@ class ProjectWorkflowService
             throw new Exception("User dengan role '{$roleLabel}' tidak memiliki wewenang untuk mengubah status ke '{$nextStatus}'.");
         }
 
-        // 4. Eksekusi Transisi dalam DB Transaction
+        // 4. Validasi prasyarat bisnis yang tidak boleh dilewati melalui API.
+        $this->validateTransitionPrerequisites($project, $targetStatus);
+
+        // 5. Eksekusi Transisi dalam DB Transaction
         return DB::transaction(function () use ($project, $currentStatus, $targetStatus, $user, $notes) {
+            if (
+                $currentStatus === ProjectStatus::UAT_REVISION_DEV->value
+                && $targetStatus === ProjectStatus::SIT_IN_PROGRESS
+            ) {
+                $sitUatData = (array) $project->sit_uat_data;
+                $sitUatData['sit_retest_scope'] = [
+                    ...(array) ($sitUatData['sit_retest_scope'] ?? []),
+                    'status' => 'in_progress',
+                    'startedAt' => now()->toIso8601String(),
+                    'startedBy' => $user->name,
+                ];
+                $project->sit_uat_data = $sitUatData;
+            }
+
+            if (
+                $currentStatus === ProjectStatus::SIT_IN_PROGRESS->value
+                && $targetStatus === ProjectStatus::SIT_PASSED
+                && $project->isTargetedSitRetest()
+            ) {
+                $sitUatData = (array) $project->sit_uat_data;
+                $sitUatData['sit_retest_scope'] = [
+                    ...(array) ($sitUatData['sit_retest_scope'] ?? []),
+                    'status' => 'passed',
+                    'passedAt' => now()->toIso8601String(),
+                    'passedBy' => $user->name,
+                ];
+                $project->sit_uat_data = $sitUatData;
+            }
+
+            if (
+                $currentStatus === ProjectStatus::SIT_PASSED->value
+                && $targetStatus === ProjectStatus::UAT_IN_PROGRESS
+            ) {
+                $sitUatData = (array) $project->sit_uat_data;
+                if (($sitUatData['uat2_resume_after_sit'] ?? false) === true) {
+                    // UAT yang ditahan dilanjutkan di Tahap 2 dalam mode verifikasi.
+                    // Hanya item Mayor yang dibuka kembali, bukan seluruh UAT.
+                    $sitUatData['activeUatStep'] = 2;
+                    $sitUatData['uat2_resume_after_sit'] = false;
+                    $sitUatData['uat2_verification_mode'] = true;
+                    $sitUatData['uat2_sit_retest_passed_at'] = now()->toIso8601String();
+                    foreach (['uat2_scenarios', 'uat2_additional_requests'] as $key) {
+                        $sitUatData[$key] = collect($sitUatData[$key] ?? [])
+                            ->map(fn (array $item): array => ($item['changeType'] ?? null) === 'mayor'
+                                && ($item['verificationStatus'] ?? null) !== 'verified'
+                                    ? [
+                                        ...$item,
+                                        'verificationStatus' => 'pending',
+                                        'verificationResult' => null,
+                                        'verificationComment' => null,
+                                        'verificationAttachments' => [],
+                                        'verifiedAt' => null,
+                                    ]
+                                    : $item)
+                            ->values()
+                            ->all();
+                    }
+                    $sitUatData['uat_change_requests'] = collect($sitUatData['uat_change_requests'] ?? [])
+                        ->map(fn (array $request): array => ($request['status'] ?? null) === 'resolved'
+                            ? [...$request, 'status' => 'sit_verified', 'sitVerifiedAt' => now()->toIso8601String()]
+                            : $request)
+                        ->values()
+                        ->all();
+                    $sitUatData['uat_hold'] = [
+                        ...(array) ($sitUatData['uat_hold'] ?? []),
+                        'status' => 'uat_verification',
+                        'sitPassedAt' => now()->toIso8601String(),
+                    ];
+                    $project->sit_uat_data = $sitUatData;
+                }
+            }
+
             $project->status = $targetStatus;
 
             if ($targetStatus === ProjectStatus::REJECTED) {
@@ -272,6 +351,161 @@ class ProjectWorkflowService
 
             return $project->fresh(['creator', 'pm', 'analyst', 'division', 'statusHistories']);
         });
+    }
+
+    /**
+     * Validasi gate bisnis lintas endpoint sebelum status proyek berubah.
+     */
+    private function validateTransitionPrerequisites(Project $project, ProjectStatus $targetStatus): void
+    {
+        if ($targetStatus === ProjectStatus::SIT_PASSED && ! $project->hasSitSignOffDocument()) {
+            throw new Exception(
+                'Dokumen Hasil Review / Berita Acara SIT wajib diunggah sebelum SIT dapat dinyatakan lulus.'
+            );
+        }
+
+        if ($targetStatus === ProjectStatus::SIT_PASSED && $project->isTargetedSitRetest()) {
+            $scopeTasks = $project->sitScopeTasks();
+            if ($scopeTasks->isEmpty()) {
+                throw new Exception('Scope SIT ulang tidak memiliki task Change Request Mayor yang valid.');
+            }
+
+            $incompleteTasks = $scopeTasks->filter(function ($task): bool {
+                $status = $task->status instanceof \BackedEnum
+                    ? $task->status->value
+                    : (string) $task->status;
+
+                return $status !== TaskStatus::DONE->value;
+            });
+            if ($incompleteTasks->isNotEmpty()) {
+                throw new Exception('Seluruh task dalam scope SIT ulang harus selesai sebelum SIT dinyatakan lulus.');
+            }
+
+            $sitUatData = (array) $project->sit_uat_data;
+            $taskApprovals = (array) ($sitUatData['sit2_task_approvals'] ?? []);
+            $unapprovedTaskIds = $scopeTasks->pluck('id')->filter(function ($taskId) use ($taskApprovals): bool {
+                $approval = $taskApprovals[$taskId]
+                    ?? $taskApprovals[(string) $taskId]
+                    ?? $taskApprovals['task_'.$taskId]
+                    ?? null;
+
+                return ! is_array($approval) || ($approval['approved'] ?? false) !== true;
+            });
+            if ($unapprovedTaskIds->isNotEmpty()) {
+                throw new Exception('Semua task dalam scope SIT ulang harus disetujui pada Eksekusi Pengujian.');
+            }
+
+            $tasksWithoutEvidence = $scopeTasks->pluck('id')->filter(function ($taskId) use ($taskApprovals): bool {
+                $approval = $taskApprovals[$taskId]
+                    ?? $taskApprovals[(string) $taskId]
+                    ?? $taskApprovals['task_'.$taskId]
+                    ?? null;
+
+                return ! is_array($approval)
+                    || collect($approval['attachments'] ?? [])->doesntContain(
+                        fn ($attachment): bool => is_array($attachment)
+                            && is_numeric($attachment['docId'] ?? null)
+                    );
+            });
+            if ($tasksWithoutEvidence->isNotEmpty()) {
+                throw new Exception('Setiap task dalam scope SIT ulang wajib memiliki lampiran bukti pengujian baru.');
+            }
+
+            $evidenceDocumentIds = $scopeTasks->pluck('id')
+                ->flatMap(function ($taskId) use ($taskApprovals) {
+                    $approval = $taskApprovals[$taskId]
+                        ?? $taskApprovals[(string) $taskId]
+                        ?? $taskApprovals['task_'.$taskId]
+                        ?? [];
+
+                    return collect($approval['attachments'] ?? [])->pluck('docId');
+                })
+                ->filter(fn ($id) => is_numeric($id))
+                ->map(fn ($id) => (int) $id)
+                ->unique();
+            $validEvidenceCount = DocumentVault::query()
+                ->where('project_id', $project->id)
+                ->where('document_type', DocumentVault::SIT_TASK_EVIDENCE_TYPE)
+                ->whereKey($evidenceDocumentIds->all())
+                ->count();
+            if ($validEvidenceCount !== $evidenceDocumentIds->count()) {
+                throw new Exception('Lampiran bukti SIT ulang harus berasal dari document vault proyek dan bertipe SIT_TASK_EVIDENCE.');
+            }
+
+            $approvals = (array) ($sitUatData['sit3_approvals'] ?? []);
+            $requiredDeveloperIds = $scopeTasks->pluck('assignee_id')
+                ->filter()
+                ->map(fn ($id) => (int) $id)
+                ->unique();
+            $approvedDeveloperIds = collect($approvals['developer']['developers'] ?? [])
+                ->map(fn (array $approval): int => (int) ($approval['userId'] ?? $approval['approvedById'] ?? 0))
+                ->filter()
+                ->unique();
+            if ($requiredDeveloperIds->diff($approvedDeveloperIds)->isNotEmpty()) {
+                throw new Exception('Semua developer dalam scope SIT ulang wajib memberikan persetujuan.');
+            }
+            if (
+                ($approvals['pm']['approved'] ?? false) !== true
+                || ($approvals['development_lead']['approved'] ?? false) !== true
+            ) {
+                throw new Exception('Persetujuan PM dan Development Lead wajib lengkap untuk SIT ulang.');
+            }
+        }
+
+        $currentStatus = $project->status instanceof ProjectStatus
+            ? $project->status->value
+            : (string) $project->status;
+
+        if (
+            $targetStatus === ProjectStatus::SIT_IN_PROGRESS
+            && $currentStatus === ProjectStatus::UAT_REVISION_DEV->value
+        ) {
+            $sitUatData = (array) $project->sit_uat_data;
+            $cycle = (int) ($sitUatData['uat_hold']['cycle'] ?? 0);
+            $activeRequests = collect($sitUatData['uat_change_requests'] ?? [])
+                ->filter(fn (array $request): bool => ($request['type'] ?? null) === 'mayor'
+                    && (int) ($request['cycle'] ?? 0) === $cycle);
+
+            if ($activeRequests->isEmpty() || $activeRequests->contains(
+                fn (array $request): bool => ($request['status'] ?? null) !== 'resolved'
+            )) {
+                throw new Exception('Semua Change Request Mayor pada siklus aktif harus diselesaikan sebelum SIT ulang dimulai.');
+            }
+
+            $taskIds = $activeRequests->pluck('taskId')->filter()->map(fn ($id) => (int) $id)->unique();
+            $completedTaskIds = $project->tasks()
+                ->whereIn('id', $taskIds->all())
+                ->whereNotNull('assignee_id')
+                ->where('status', TaskStatus::DONE->value)
+                ->pluck('id')
+                ->map(fn ($id) => (int) $id);
+            if ($taskIds->count() !== $completedTaskIds->count()) {
+                throw new Exception('Seluruh task Change Request Mayor harus memiliki assignee dan berstatus selesai sebelum SIT ulang dimulai.');
+            }
+        }
+
+        if ($targetStatus !== ProjectStatus::DEV_COMPLETED || $currentStatus !== ProjectStatus::UAT_IN_PROGRESS->value) {
+            return;
+        }
+
+        $sitUatData = (array) $project->sit_uat_data;
+        $summary = (array) ($sitUatData['uat2_summary'] ?? []);
+
+        if ((int) ($sitUatData['activeUatStep'] ?? 1) < 3 || empty($summary['conclusion'])) {
+            throw new Exception('Eksekusi UAT Tahap 2 wajib diselesaikan sebelum proyek dinyatakan DEV_COMPLETED.');
+        }
+
+        if (($sitUatData['uat2_resume_after_sit'] ?? false) === true) {
+            throw new Exception('Revisi mayor UAT dan pengujian SIT ulang harus diselesaikan terlebih dahulu.');
+        }
+
+        if (($sitUatData['uat2_verification_mode'] ?? false) === true) {
+            throw new Exception('Verifikasi user atas perbaikan Mayor UAT harus diselesaikan terlebih dahulu.');
+        }
+
+        if (! $this->uatApprovalService->allRequiredApproved($project)) {
+            throw new Exception('Seluruh persetujuan wajib dari pihak peminta dan pihak IT harus lengkap sebelum proyek dinyatakan DEV_COMPLETED.');
+        }
     }
 
     /**

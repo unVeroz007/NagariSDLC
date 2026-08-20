@@ -3,6 +3,7 @@ import { Outlet, NavLink, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { useProjects } from '../contexts/ProjectContext';
 import { menuSections, getDefaultRouteForRole } from '../data/menuConfig';
+import { internalUatApprovalService } from '../services/api';
 import NotificationBell from '../components/NotificationBell';
 import {
     Search,
@@ -14,6 +15,11 @@ import {
     AlertTriangle,
 } from 'lucide-react';
 
+const INTERNAL_UAT_APPROVER_ROLES = new Set([
+    'super_admin', 'head_of_it', 'lead_group', 'analyst',
+    'development_lead', 'project_manager', 'dev_analyst', 'developer',
+]);
+
 export default function MainLayout() {
     const { user, logout } = useAuth();
     const { projects } = useProjects();
@@ -22,6 +28,7 @@ export default function MainLayout() {
     const [isMobileOpen, setIsMobileOpen] = useState(false);
     const [isLogoutModalOpen, setIsLogoutModalOpen] = useState(false);
     const [isProfileMenuOpen, setIsProfileMenuOpen] = useState(false);
+    const [pendingUatApprovalCount, setPendingUatApprovalCount] = useState(0);
     const profileMenuRef = useRef(null);
 
     const pendingProjectsCount = (projects || []).filter(p => p.status === 'PENDING').length;
@@ -44,6 +51,27 @@ export default function MainLayout() {
             || (p.pm && typeof p.pm === 'object' ? p.pm.id : null);
         return Number(analystId) === Number(user.id) || Number(pmId) === Number(user.id);
     }).length, [projects, user]);
+
+    useEffect(() => {
+        let cancelled = false;
+        if (!user?.role || !INTERNAL_UAT_APPROVER_ROLES.has(user.role)) return undefined;
+
+        const loadPendingApprovals = async () => {
+            try {
+                const response = await internalUatApprovalService.getMyAssignments();
+                if (!cancelled) setPendingUatApprovalCount(response?.data?.pending_count || 0);
+            } catch {
+                if (!cancelled) setPendingUatApprovalCount(0);
+            }
+        };
+
+        void loadPendingApprovals();
+        const refreshTimer = window.setInterval(loadPendingApprovals, 30000);
+        return () => {
+            cancelled = true;
+            window.clearInterval(refreshTimer);
+        };
+    }, [user?.role, user?.id]);
 
     useEffect(() => {
         const onDocClick = (e) => {
@@ -180,6 +208,11 @@ export default function MainLayout() {
                                             {item.path === '/workspace/dev-analyst' && devAnalystCount > 0 && (
                                                 <span className="inline-flex items-center justify-center min-w-[20px] h-5 px-1.5 rounded-full bg-cyan-500 text-white text-[10px] font-extrabold leading-none animate-pulse">
                                                     {devAnalystCount}
+                                                </span>
+                                            )}
+                                            {item.path === '/approvals/uat' && pendingUatApprovalCount > 0 && (
+                                                <span className="inline-flex h-5 min-w-[20px] items-center justify-center rounded-full bg-amber-500 px-1.5 text-[10px] font-extrabold leading-none text-white">
+                                                    {pendingUatApprovalCount}
                                                 </span>
                                             )}
                                         </span>

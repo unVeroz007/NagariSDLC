@@ -11,7 +11,6 @@
  */
 export function generateDocumentName(projectReqId, docTypeCode, projectName) {
     const now = new Date();
-    const bulan = String(now.getMonth() + 1).padStart(2, '0');
     const tahun = now.getFullYear();
     const tanggal = String(now.getDate()).padStart(2, '0');
 
@@ -58,8 +57,10 @@ export const DOCUMENT_TYPES = {
     SIT_PLAN: { code: 'SIT_PLAN', label: 'Test Plan SIT', color: 'bg-cyan-50 text-cyan-700 border-cyan-200' },
     SIT_RESULT: { code: 'SIT_RESULT', label: 'Hasil Pelaksanaan SIT', color: 'bg-cyan-50 text-cyan-700 border-cyan-200' },
     SIT_SIGNOFF: { code: 'SIT_SIGNOFF', label: 'Berita Acara SIT', color: 'bg-cyan-50 text-cyan-700 border-cyan-200' },
+    UNDANGAN: { code: 'UNDANGAN', label: 'Undangan', color: 'bg-amber-50 text-amber-700 border-amber-200' },
     UAT_PLAN: { code: 'UAT_PLAN', label: 'Skenario UAT', color: 'bg-amber-50 text-amber-700 border-amber-200' },
     UAT_RESULT: { code: 'UAT_RESULT', label: 'Hasil Pelaksanaan UAT', color: 'bg-amber-50 text-amber-700 border-amber-200' },
+    UAT_EVIDENCE: { code: 'UAT_EVIDENCE', label: 'Bukti Temuan UAT', color: 'bg-orange-50 text-orange-700 border-orange-200' },
     UAT_SIGNOFF: { code: 'UAT_SIGNOFF', label: 'Berita Acara UAT', color: 'bg-amber-50 text-amber-700 border-amber-200' },
 
     // Fase 3 — QA & Cyber
@@ -106,6 +107,7 @@ export function detectDocTypeFromFilename(filename) {
     if (fn.includes('brd') || fn.includes('requirement')) return 'BRD';
     if (fn.includes('fsd') || fn.includes('spesifikasi')) return 'FSD';
     if (fn.includes('memo')) return 'MEMO';
+    if (fn.includes('undangan') || fn.includes('invitation')) return 'UNDANGAN';
     if (fn.includes('qa') || fn.includes('test')) return 'QA_REPORT';
     if (fn.includes('uat')) return 'UAT_RESULT';
     if (fn.includes('siber') || fn.includes('cyber') || fn.includes('pentest')) return 'CYBER_REPORT';

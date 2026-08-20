@@ -14,7 +14,7 @@ import SITUATDocumentModal from '../../components/SITUATDocumentModal';
 import SITUATWizard from '../../components/SITUATWizard';
 import { useState, useMemo, useEffect, useRef, useCallback, Fragment } from 'react';
 import toast from 'react-hot-toast';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import { useProjects, getFileFromStore } from '../../contexts/ProjectContext';
 import { useNotifications } from '../../contexts/NotificationContext';
@@ -48,7 +48,6 @@ import {
     X,
     ShieldCheck,
     Server,
-    Phone,
     CheckSquare,
     Download,
     Upload,
@@ -62,11 +61,13 @@ export default function TaskDetail() {
     const { user } = useAuth();
     const { projects, updateProject, refreshDataSilent } = useProjects();
     const { id: projectId } = useParams();
+    const [searchParams] = useSearchParams();
     const navigate = useNavigate();
+    const openedFromUatApprovals = searchParams.get('from') === 'uat-approvals';
 
     // Mode VIEWER: developer & analyst hanya bisa melihat (read-only).
     // Kecuali developer tetap bisa update status task miliknya sendiri (di My Tasks).
-    const isViewerOnly = ['developer', 'analyst'].includes(user?.role);
+    const isViewerOnly = ['developer', 'analyst', 'head_of_it', 'lead_group'].includes(user?.role);
     const isDeveloperAssignee = user?.role === 'developer';
 
     // Reset posisi scroll browser ke paling atas (0, 0) saat laman dibuka
@@ -176,7 +177,9 @@ export default function TaskDetail() {
         return members;
     }, [project?.team, project?.pm, project?.analyst]);
 
-    const [activeTab, setActiveTab] = useState('tasks'); // tasks, sit_uat, documents, activity
+    const [activeTab, setActiveTab] = useState(() => (
+        searchParams.get('tab') === 'sit_uat' ? 'sit_uat' : 'tasks'
+    )); // tasks, sit_uat, documents, activity
     const { addNotification } = useNotifications();
 
     // ─── SIT & UAT Internal State & Helpers ──────────────────────────────────
@@ -836,11 +839,11 @@ export default function TaskDetail() {
             <div className="max-w-7xl mx-auto w-full flex flex-col gap-6">
                 {/* Back Button — viewer (developer/analyst) kembali ke Daftar Proyek */}
                 <button
-                    onClick={() => navigate(isViewerOnly ? '/projects' : '/pm/tasks')}
+                    onClick={() => navigate(openedFromUatApprovals ? '/approvals/uat' : (isViewerOnly ? '/projects' : '/pm/tasks'))}
                     className="flex items-center gap-2 text-gray-500 hover:text-[#00529C] transition-colors text-sm mb-2"
                 >
                     <ChevronLeft size={18} />
-                    {isViewerOnly ? 'Kembali ke Daftar Proyek' : 'Kembali ke Daftar Proyek'}
+                    {openedFromUatApprovals ? 'Kembali ke Persetujuan UAT Saya' : 'Kembali ke Daftar Proyek'}
                 </button>
 
                 {/* Project Header */}
@@ -867,12 +870,6 @@ export default function TaskDetail() {
                                 <AlertCircle size={14} />
                                 {project.priority}
                             </span>
-                            {project.contactPhone && (
-                                <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold border bg-green-50 border-green-200 text-green-700">
-                                    <Phone size={14} />
-                                    {project.contactPhone}
-                                </span>
-                            )}
                         </div>
                     </div>
                     <div className="flex gap-3">
@@ -1377,6 +1374,7 @@ export default function TaskDetail() {
                             addNotification={addNotification}
                             navigate={navigate}
                             isViewer={isViewerOnly}
+                            initialUatStep={searchParams.get('uatStep')}
                         />
                     )}
 

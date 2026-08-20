@@ -16,6 +16,7 @@ use App\Http\Controllers\Api\V1\ReleaseRequestController;
 use App\Http\Controllers\Api\V1\RoleController;
 use App\Http\Controllers\Api\V1\TaskController;
 use App\Http\Controllers\Api\V1\UserController;
+use App\Http\Controllers\Api\V1\UatApprovalController;
 use App\Http\Controllers\Api\V1\WorkspaceController;
 use Illuminate\Support\Facades\Route;
 
@@ -28,6 +29,18 @@ Route::prefix('v1')->group(function () {
         ->middleware('throttle:5,1');
     Route::post('/auth/login', [AuthController::class, 'login'])
         ->middleware('throttle:5,1'); // 5 login attempts per minute
+
+    // Link persetujuan UAT non-IT. Token pribadi + pencocokan nomor HP.
+    Route::get('/uat-approvals/{token}', [UatApprovalController::class, 'preview'])
+        ->middleware('throttle:30,1');
+    Route::post('/uat-approvals/{token}/verify', [UatApprovalController::class, 'verify'])
+        ->middleware('throttle:10,1');
+    Route::get('/uat-approvals/{token}/detail', [UatApprovalController::class, 'detail'])
+        ->middleware('throttle:60,1');
+    Route::post('/uat-approvals/{token}/decision', [UatApprovalController::class, 'externalDecision'])
+        ->middleware('throttle:10,1');
+    Route::get('/uat-approvals/{token}/documents/{document}/download', [UatApprovalController::class, 'download'])
+        ->middleware('throttle:30,1');
 
     // Authenticated Routes
     Route::middleware('auth:sanctum')->group(function () {
@@ -69,6 +82,9 @@ Route::prefix('v1')->group(function () {
         // Activity log — read untuk semua user terautentikasi (dipakai juga utk log proyek per PM)
         Route::get('/activity-logs', [ActivityLogController::class, 'index']);
 
+        // Inbox personal approval UAT untuk Developer, Analyst/PM, Lead, dan Head of IT.
+        Route::get('/me/uat-approvals', [UatApprovalController::class, 'myAssignments']);
+
         // ----- PROJECT ROUTES -----
         Route::get('/projects', [ProjectController::class, 'index']);
         Route::get('/projects/next-req-id', [ProjectController::class, 'nextReqId']);
@@ -81,7 +97,16 @@ Route::prefix('v1')->group(function () {
         Route::get('/projects/{id}/timeline', [ProjectController::class, 'timeline']);
         Route::get('/projects/{id}/sit-gate', [ProjectController::class, 'sitGate']);
         Route::post('/projects/{id}/sit-approval', [ProjectController::class, 'sitApproval']);
+        Route::post('/projects/{id}/uat-execution', [ProjectController::class, 'submitUatExecution']);
+        Route::put('/projects/{id}/uat-execution/draft', [ProjectController::class, 'saveUatExecutionDraft']);
+        Route::post('/projects/{id}/uat-major-verification', [ProjectController::class, 'submitUatMajorVerification']);
+        // Kompatibilitas client lama; UI baru memakai approver individual di bawah.
         Route::post('/projects/{id}/uat-approval', [ProjectController::class, 'uatApproval']);
+        Route::get('/projects/{id}/uat-approval-matrix', [UatApprovalController::class, 'matrix']);
+        Route::post('/projects/{id}/uat-approval-rounds/sync', [UatApprovalController::class, 'sync']);
+        Route::post('/projects/{id}/uat-approval-rounds', [UatApprovalController::class, 'restart']);
+        Route::post('/projects/{id}/uat-approvers/{approver}/link', [UatApprovalController::class, 'generateLink']);
+        Route::post('/projects/{id}/uat-approvers/{approver}/decision', [UatApprovalController::class, 'internalDecision']);
         Route::post('/projects/{id}/uat-change-request', [ProjectController::class, 'uatChangeRequest']);
         Route::post('/projects/{id}/uat-change-request/decision', [ProjectController::class, 'uatChangeRequestDecision']);
         Route::post('/projects/{id}/team', [ProjectController::class, 'allocateTeam']);

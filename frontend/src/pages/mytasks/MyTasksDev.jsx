@@ -80,6 +80,11 @@ export default function MyTasksDev() {
 
                 if (!isMine) return;
 
+                const projectSitUatData = p.sitUatData || p.sit_uat_data || {};
+                const taskUatScenario = (projectSitUatData.uat2_scenarios || []).find(
+                    scenario => Number(scenario.taskId) === Number(t.id)
+                );
+
                 tasks.push({
                     id: t.id,
                     title: t.title || t.name || 'Task Pengembangan',
@@ -89,13 +94,14 @@ export default function MyTasksDev() {
                     priority: t.priority || 'Medium',
                     deadline: t.due_date || t.deadline || '',
                     status: mapTaskStatusToLabel(t.status),
-                    revisionNote: t.revision_note || '',
-                    revisionRequestedBy: t.revision_requested_by || '',
+                    revisionNote: t.revision_note || (taskUatScenario?.result === 'revision' ? taskUatScenario.request : '') || '',
+                    revisionType: taskUatScenario?.changeType || null,
+                    revisionRequestedBy: t.revision_requested_by || projectSitUatData.uat2_summary?.submittedBy || '',
                     revisionRequestedAt: t.revision_requested_at || null,
-                    // Bukti lampiran SIT (yang perlu diperiksa saat revisi)
-                    sitAttachments: (() => {
+                    // Bukti SIT/UAT yang menjadi konteks arahan revisi developer.
+                    revisionAttachments: (() => {
                         try {
-                            const approvals = p.sitUatData?.sit2_task_approvals || p.sit_uat_data?.sit2_task_approvals || {};
+                            const approvals = projectSitUatData.sit2_task_approvals || {};
                             let entry = null;
                             // Backend bisa kirim "task_10" (prefix) atau "10"
                             if (Array.isArray(approvals)) {
@@ -104,7 +110,9 @@ export default function MyTasksDev() {
                             } else {
                                 entry = approvals[`task_${t.id}`] ?? approvals[t.id] ?? approvals[String(t.id)] ?? null;
                             }
-                            return entry?.attachments || [];
+                            const sitAttachments = (entry?.attachments || []).map(doc => ({ ...doc, evidenceSource: 'SIT' }));
+                            const uatAttachments = (taskUatScenario?.attachments || []).map(doc => ({ ...doc, evidenceSource: 'UAT' }));
+                            return [...sitAttachments, ...uatAttachments];
                         } catch {
                             return [];
                         }
@@ -224,7 +232,7 @@ export default function MyTasksDev() {
         }
     };
 
-    // ── Lihat / Unduh bukti lampiran SIT (untuk task yang direvisi) ──
+    // Lihat / unduh bukti pengujian SIT/UAT untuk task yang direvisi.
     const [previewSitDoc, setPreviewSitDoc] = useState(null);
     const [sitDocLoading, setSitDocLoading] = useState(false);
     const viewSitAttachment = async (doc) => {
@@ -438,23 +446,28 @@ export default function MyTasksDev() {
                                                     <div className="mt-2 p-2 bg-orange-50 border border-orange-200 rounded-lg text-[11px] text-orange-800">
                                                         <div className="flex items-center gap-1 font-bold mb-0.5">
                                                             <AlertCircle size={11} className="text-orange-500" />
-                                                            Permintaan Revisi dari PM
+                                                            {task.revisionType === 'minor'
+                                                                ? 'Perbaikan Minor UAT — Tanpa Rollback'
+                                                                : task.revisionType === 'mayor'
+                                                                    ? 'Change Request Mayor UAT'
+                                                                    : 'Permintaan Revisi dari PM'}
                                                         </div>
                                                         <p className="leading-relaxed">{task.revisionNote}</p>
                                                         {task.revisionRequestedBy && (
                                                             <p className="text-[10px] text-orange-600 mt-1">Oleh: {task.revisionRequestedBy}</p>
                                                         )}
-                                                        {/* Bukti lampiran SIT yang perlu diperbaiki */}
-                                                        {task.sitAttachments && task.sitAttachments.length > 0 && (
+                                                        {/* Bukti pengujian yang perlu diperiksa saat revisi */}
+                                                        {task.revisionAttachments && task.revisionAttachments.length > 0 && (
                                                             <div className="mt-2 pt-2 border-t border-orange-200">
                                                                 <p className="text-[10px] font-bold text-orange-700 mb-1 flex items-center gap-1">
-                                                                    <Paperclip size={10} /> Bukti dari SIT ({task.sitAttachments.length})
+                                                                    <Paperclip size={10} /> Bukti Pengujian ({task.revisionAttachments.length})
                                                                 </p>
                                                                 <div className="space-y-1">
-                                                                    {task.sitAttachments.map(doc => (
-                                                                        <div key={doc.id} className="flex items-center gap-1.5 bg-white/70 rounded-lg px-2 py-1 border border-orange-100">
+                                                                    {task.revisionAttachments.map(doc => (
+                                                                        <div key={`${doc.evidenceSource}_${doc.docId || doc.id}`} className="flex items-center gap-1.5 bg-white/70 rounded-lg px-2 py-1 border border-orange-100">
+                                                                            <span className="text-[9px] font-black text-orange-600">{doc.evidenceSource}</span>
                                                                             <span className="text-[10px] font-semibold text-gray-700 truncate flex-1">{doc.originalName || doc.name}</span>
-                                                                            {doc.url && (
+                                                                            {(doc.docId || doc.url) && (
                                                                                 <>
                                                                                     <button onClick={() => viewSitAttachment(doc)} title="Lihat"
                                                                                         className="p-1 text-gray-500 hover:text-blue-600 rounded hover:bg-blue-50 transition-colors cursor-pointer">
@@ -536,7 +549,7 @@ export default function MyTasksDev() {
                 </div>
             </div>
 
-            {/* Modal Pratinjau Bukti SIT */}
+            {/* Modal Pratinjau Bukti Pengujian */}
             {previewSitDoc && (
                 <div className="fixed inset-0 z-[99997] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
                     <div className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl max-h-[90vh] flex flex-col overflow-hidden">
@@ -556,7 +569,7 @@ export default function MyTasksDev() {
                         </div>
                         <div className="flex-1 overflow-auto bg-gray-100 p-4">
                             {previewSitDoc.blobUrl && (
-                                <iframe src={previewSitDoc.blobUrl} title="Pratinjau Bukti SIT" className="w-full h-[60vh] rounded-xl bg-white border border-gray-200" />
+                                <iframe src={previewSitDoc.blobUrl} title="Pratinjau Bukti Pengujian" className="w-full h-[60vh] rounded-xl bg-white border border-gray-200" />
                             )}
                         </div>
                         <div className="flex justify-end gap-2 px-5 py-3 border-t border-gray-200 bg-gray-50/70">

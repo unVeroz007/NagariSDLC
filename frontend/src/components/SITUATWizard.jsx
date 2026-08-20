@@ -2,13 +2,13 @@
 // Wizard Multi-Step SIT & UAT Internal untuk Proyek Bank Nagari (Versi Refactored)
 //
 // Business logic yang diterapkan:
-//  1) Gatekeeper SIT: proyek hanya boleh masuk SIT jika SEMUA task developer berstatus
-//     "Selesai/Done". Task berstatus "TAKE DOWN" DIABAIKAN (tidak dihitung syarat/progress).
+//  1) Gatekeeper SIT: SIT awal memakai semua task aktif; SIT ulang UAT Mayor hanya
+//     memakai task Change Request pada scope siklus aktif. TAKE DOWN selalu diabaikan.
 //  2) Alur revisi task terintegrasi: PM dapat mengembalikan task ke developer (status →
 //     in_progress) lengkap dengan catatan/arahan revisi, tersimpan & tampil di board developer.
-//  3) Tab "Eksekusi Pengujian" menampilkan tabel seluruh task developer, tiap baris punya
+//  3) Tab "Eksekusi Pengujian" menampilkan task sesuai scope SIT, tiap baris punya
 //     checkbox OK, kolom komentar/temuan, dan tombol Kembalikan/Revisi.
-//  4) Lanjut ke "Review & Sign-Off" / UAT HANYA jika SEMUA task dicentang OK.
+//  4) Lanjut ke "Review & Sign-Off" / UAT hanya jika semua task dalam scope dicentang OK.
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import toast from 'react-hot-toast';
@@ -17,10 +17,10 @@ import {
     Upload, X, FileText, ArrowRight, ArrowLeft, AlertTriangle,
     RotateCcw, Send, Paperclip, Info, ChevronRight, Clock,
     Eye, Download, Printer, Building2, ClipboardList, Bug,
-    UserCheck, FileCheck, BookOpen, Users, Trash2, Plus, Check, Edit
+    UserCheck, FileCheck, BookOpen, Users, Trash2, Plus, Check, Edit, Save, RefreshCw, Link2
 } from 'lucide-react';
 import { generateDocumentName, getDocumentTypeInfo, formatFileSize } from '../utils/documentNaming';
-import { taskService, projectService, documentService } from '../services/api';
+import { taskService, projectService, documentService, userService } from '../services/api';
 import SITTaskExecution from './SITTaskExecution';
 import DocumentViewerModal from './DocumentViewerModal';
 
@@ -37,10 +37,97 @@ const fmtDate = (iso) => {
     return new Date(iso).toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' });
 };
 
+// Format yang diterima backend untuk verifikasi link: 08..., 8..., atau +62...
+// Nilai hanya dinormalisasi untuk validasi; input asli tetap ditampilkan kepada PM.
+const normalizeIndonesianPhone = (value) => {
+    let digits = String(value || '').replace(/\D+/g, '');
+    if (digits.startsWith('620')) digits = `62${digits.slice(3)}`;
+    if (digits.startsWith('0')) digits = `62${digits.slice(1)}`;
+    if (digits.startsWith('8')) digits = `62${digits}`;
+    return /^62[0-9]{8,13}$/.test(digits) ? digits : null;
+};
+
 // ─── Constants ───────────────────────────────────────────────────────────────
 const SIT_STATUSES = ['IN_DEVELOPMENT', 'SIT_IN_PROGRESS', 'SIT_REVISION', 'RETURN_TO_DEV'];
 const UAT_STATUSES = ['SIT_PASSED', 'UAT_IN_PROGRESS', 'UAT_REVISION_SIT', 'UAT_REVISION_DEV'];
 const DONE_STATUSES = ['DEV_COMPLETED'];
+const SIT_SIGN_OFF_DOCUMENT_TYPES = ['SIT_RESULT', 'SIT_SIGNOFF'];
+const UAT_PREPARATION_DOCUMENT_TYPES = ['UNDANGAN', 'UAT_PLAN', 'LAMPIRAN', 'LAINNYA'];
+const UAT_APPROVAL_ROLES = [
+    { value: 'requester', label: 'Pemohon Proyek', side: 'requester' },
+    { value: 'requester_group_lead', label: 'Pimpinan Grup Pemohon', side: 'requester' },
+    { value: 'requester_division_lead', label: 'Pimpinan Divisi Pemohon', side: 'requester' },
+    { value: 'developer', label: 'Developer', side: 'it' },
+    { value: 'analyst_pm', label: 'Analyst / Project Manager', side: 'it' },
+    { value: 'development_group_lead', label: 'Pimpinan Grup Pengembangan', side: 'it' },
+    { value: 'technology_division_lead', label: 'Pimpinan Divisi Teknologi dan Digitalisasi', side: 'it' },
+];
+const REQUIRED_SINGLE_UAT_APPROVAL_ROLES = UAT_APPROVAL_ROLES
+    .filter(role => role.value !== 'developer')
+    .map(role => role.value);
+const UAT_INTERNAL_ACCOUNT_ROLES = {
+    developer: ['developer'],
+    analyst_pm: ['project_manager', 'dev_analyst', 'analyst'],
+    development_group_lead: ['development_lead', 'lead_group'],
+    technology_division_lead: ['head_of_it'],
+};
+
+const participantId = () => globalThis.crypto?.randomUUID?.()
+    || `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 14)}`;
+
+const buildUatExecutionScenarios = (savedScenarios, tasks, savedAdditionalRequests = []) => {
+    const additionalRequestTaskIds = new Set(
+        (Array.isArray(savedAdditionalRequests) ? savedAdditionalRequests : [])
+            .map(item => Number(item?.taskId))
+            .filter(Boolean)
+    );
+    const savedByTask = new Map(
+        (Array.isArray(savedScenarios) ? savedScenarios : [])
+            .filter(item => item?.taskId != null)
+            .map(item => [Number(item.taskId), item])
+    );
+
+    return (Array.isArray(tasks) ? tasks : [])
+        .filter(task => String(task.status || '').toLowerCase() !== 'take_down'
+            && !additionalRequestTaskIds.has(Number(task.id)))
+        .map(task => {
+            const saved = savedByTask.get(Number(task.id));
+            return {
+                id: saved?.id || `task_${task.id}`,
+                taskId: Number(task.id),
+                scenario: saved?.scenario || task.title || task.name || `Task ${task.id}`,
+                result: saved?.result || '',
+                changeType: saved?.changeType || '',
+                request: saved?.request || '',
+                comment: saved?.comment || '',
+                attachments: Array.isArray(saved?.attachments) ? saved.attachments : [],
+                verificationStatus: saved?.verificationStatus || null,
+                verificationResult: saved?.verificationResult || '',
+                verificationComment: saved?.verificationComment || '',
+                verificationAttachments: Array.isArray(saved?.verificationAttachments)
+                    ? saved.verificationAttachments
+                    : [],
+            };
+        });
+};
+
+const buildUatAdditionalRequests = (savedRequests) => (
+    Array.isArray(savedRequests) ? savedRequests : []
+).map(request => ({
+    id: request.id || `uat_request_${Date.now()}_${Math.random().toString(36).slice(2)}`,
+    title: request.title || '',
+    changeType: request.changeType || '',
+    detail: request.detail || '',
+    comment: request.comment || '',
+    attachments: Array.isArray(request.attachments) ? request.attachments : [],
+    taskId: request.taskId || null,
+    verificationStatus: request.verificationStatus || null,
+    verificationResult: request.verificationResult || '',
+    verificationComment: request.verificationComment || '',
+    verificationAttachments: Array.isArray(request.verificationAttachments)
+        ? request.verificationAttachments
+        : [],
+}));
 
 // 🔓 MODE PEMERIKSAAN/UNLOCK: bila true, seluruh tahapan SIT & UAT dapat dibuka
 // dan diedit tanpa terkunci status proyek (untuk keperluan cek/testing/development).
@@ -78,7 +165,7 @@ function useFileUpload(category) {
 // Menampilkan daftar dokumen dengan:
 //  - dropdown PILIHAN TIPE FILE (di-masking sesuai format XXX/GPTD/TIPE/...)
 //  - tombol Lihat / Unduh / Hapus
-function DocList({ docs, onRemove, onView, onDownload, onTypeChange, docTypeOptions, readOnly = false }) {
+function DocList({ docs, onRemove, onView, onDownload, onTypeChange, docTypeOptions, readOnly = false, allowTypeChange = true }) {
     if (!docs?.length) return (
         <div className="mt-2 py-4 border-2 border-dashed border-gray-200 rounded-xl text-center text-gray-400 text-xs">
             <FileText size={20} className="mx-auto mb-1 text-gray-300" />
@@ -100,7 +187,7 @@ function DocList({ docs, onRemove, onView, onDownload, onTypeChange, docTypeOpti
                             </p>
                         </div>
                         <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-all">
-                            {doc.url && (
+                            {(doc.docId || doc.url) && (
                                 <>
                                     <button onClick={() => onView?.(doc)} title="Lihat"
                                         className="p-1.5 text-gray-500 hover:text-blue-600 rounded-lg hover:bg-blue-50 transition-colors cursor-pointer">
@@ -125,7 +212,7 @@ function DocList({ docs, onRemove, onView, onDownload, onTypeChange, docTypeOpti
                         <select
                             value={doc.doc_type || 'LAINNYA'}
                             onChange={(e) => onTypeChange?.(i, e.target.value)}
-                            disabled={readOnly}
+                            disabled={readOnly || !allowTypeChange}
                             className="px-2 py-1 bg-white border border-gray-300 rounded-lg text-[10px] font-bold text-gray-700 focus:ring-2 focus:ring-[#00529C] outline-none cursor-pointer disabled:bg-gray-100"
                         >
                             {(docTypeOptions || []).map(([code, label]) => (
@@ -179,10 +266,34 @@ function StepTab({ step, isActive, isCompleted, onClick }) {
 }
 
 // ─── MAIN COMPONENT ─────────────────────────────────────────────────────────
-export default function SITUATWizard({ project, updateProject, addNotification, navigate, refreshProject, isViewer = false }) {
+export default function SITUATWizard({ project, updateProject, addNotification, navigate, refreshProject, isViewer = false, initialUatStep = null }) {
     const status = project?.status || 'IN_DEVELOPMENT';
     const sitUatData = project?.sitUatData || {};
     const { user } = useAuth();
+    const sitRetestCycle = Number(sitUatData.uat_hold?.cycle || 0);
+    const isTargetedSitRetest = sitUatData.uat2_resume_after_sit === true && sitRetestCycle > 0;
+    const sitRetestTaskIds = useMemo(() => {
+        if (!isTargetedSitRetest) return [];
+
+        const savedScope = sitUatData.sit_retest_scope || {};
+        const scopedIds = Number(savedScope.cycle || 0) === sitRetestCycle
+            ? (savedScope.taskIds || [])
+            : [];
+        const fallbackIds = (sitUatData.uat_change_requests || [])
+            .filter(request => request.type === 'mayor' && Number(request.cycle || 0) === sitRetestCycle)
+            .map(request => request.taskId);
+
+        return [...new Set((scopedIds.length > 0 ? scopedIds : fallbackIds)
+            .map(Number)
+            .filter(Boolean))];
+    }, [isTargetedSitRetest, sitRetestCycle, sitUatData.sit_retest_scope, sitUatData.uat_change_requests]);
+    const sitRetestTaskIdSet = useMemo(() => new Set(sitRetestTaskIds), [sitRetestTaskIds]);
+    const sitScopeTasks = useMemo(() => {
+        const tasks = Array.isArray(project?.tasks) ? project.tasks : [];
+
+        return tasks.filter(task => String(task.status || '').toLowerCase() !== 'take_down'
+            && (!isTargetedSitRetest || sitRetestTaskIdSet.has(Number(task.id))));
+    }, [isTargetedSitRetest, project?.tasks, sitRetestTaskIdSet]);
 
     // Role user saat ini → apakah dia pemegang hak approval SIT.
     // PM (dev_analyst / project_manager) = Analyst Pengembangan.
@@ -193,21 +304,29 @@ export default function SITUATWizard({ project, updateProject, addNotification, 
     const sit3Approvals = sitUatData.sit3_approvals || {};
 
     // Jumlah developer (assignee task unik) yang harus approve
-    const requiredDeveloperCount = useMemo(() => {
-        if (!Array.isArray(project?.tasks)) return 0;
-        return new Set(
-            project.tasks
+    const requiredDeveloperIds = useMemo(() => (
+        [...new Set(
+            sitScopeTasks
                 .map(t => t.assignee_id ?? t.assignee_detail?.id)
                 .filter(id => id != null)
                 .map(id => Number(id))
-        ).size;
-    }, [project?.tasks]);
+        )]
+    ), [sitScopeTasks]);
+    const requiredDeveloperCount = requiredDeveloperIds.length;
 
     // Jumlah developer yang sudah approve
     const approvedDeveloperCount = useMemo(() => {
         const devList = sit3Approvals?.developer?.developers || [];
-        return devList.length;
-    }, [sit3Approvals?.developer?.developers]);
+        const requiredIdSet = new Set(requiredDeveloperIds);
+        return devList.filter(approval => requiredIdSet.has(Number(
+            approval.userId ?? approval.approvedById
+        ))).length;
+    }, [requiredDeveloperIds, sit3Approvals?.developer?.developers]);
+    const isCurrentUserRequiredDeveloper = user?.role === 'developer'
+        && requiredDeveloperIds.includes(Number(user?.id));
+    const hasCurrentDeveloperApproved = (sit3Approvals?.developer?.developers || []).some(
+        approval => Number(approval.userId ?? approval.approvedById) === Number(user?.id)
+    );
 
     // Semua approval lengkap: semua developer + PM (Analyst Pengembangan) + development_lead
     const devApproved = requiredDeveloperCount > 0 && approvedDeveloperCount >= requiredDeveloperCount;
@@ -217,7 +336,10 @@ export default function SITUATWizard({ project, updateProject, addNotification, 
 
     // ── State ─────────────────────────────────────────────────────────────
     const [activeSitStep, setActiveSitStep] = useState(sitUatData.activeSitStep || 1);
-    const [activeUatStep, setActiveUatStep] = useState(sitUatData.activeUatStep || 1);
+    const [activeUatStep, setActiveUatStep] = useState(() => {
+        const requestedStep = Number(initialUatStep);
+        return [1, 2, 3].includes(requestedStep) ? requestedStep : (sitUatData.activeUatStep || 1);
+    });
 
     // SIT Step 1 data
     const [sit1, setSit1] = useState({
@@ -278,13 +400,29 @@ export default function SITUATWizard({ project, updateProject, addNotification, 
         unit: sitUatData.uat1_unit || '',
         docs: sitUatData.uat1_docs || [],
     });
-    // UAT Step 2 data
+    const [uatInternalUsers, setUatInternalUsers] = useState([]);
+
+    useEffect(() => {
+        let cancelled = false;
+        if (activeUatStep !== 1) return undefined;
+        userService.getAll()
+            .then(response => {
+                if (!cancelled) setUatInternalUsers((response?.data || []).filter(account => account.is_active !== false));
+            })
+            .catch(() => {
+                if (!cancelled) setUatInternalUsers([]);
+            });
+        return () => { cancelled = true; };
+    }, [activeUatStep]);
+    // UAT Step 2 data — hasil dicatat per skenario/task, bukan angka manual.
     const [uat2, setUat2] = useState({
-        executedCount: sitUatData.uat2_executedCount || '',
-        passedCount: sitUatData.uat2_passedCount || '',
-        findings: sitUatData.uat2_findings || '',
-        execNotes: sitUatData.uat2_execNotes || '',
-        docs: sitUatData.uat2_docs || [],
+        scenarios: buildUatExecutionScenarios(
+            sitUatData.uat2_scenarios,
+            project?.tasks,
+            sitUatData.uat2_additional_requests
+        ),
+        additionalRequests: buildUatAdditionalRequests(sitUatData.uat2_additional_requests),
+        execNotes: sitUatData.uat2_summary?.notes || sitUatData.uat2_execNotes || '',
     });
     // UAT Step 3 data
     const [uat3, setUat3] = useState({
@@ -294,14 +432,38 @@ export default function SITUATWizard({ project, updateProject, addNotification, 
     });
 
     // Revision & modal state (SIT/UAT level)
-    const [showRevisionModal, setShowRevisionModal] = useState(false);
-    const [revisionType, setRevisionType] = useState(null); // 'SIT_TO_DEV' | 'UAT_TO_SIT' | 'UAT_TO_DEV'
-    const [revisionNotes, setRevisionNotes] = useState('');
     const [submitting, setSubmitting] = useState(false);
+    const [savingUatDraft, setSavingUatDraft] = useState(false);
 
     // Pratinjau dokumen (modal) & status upload
     const [previewDoc, setPreviewDoc] = useState(null);
     const [uploadingCategory, setUploadingCategory] = useState(null);
+    const [uploadingUatScenarioId, setUploadingUatScenarioId] = useState(null);
+
+    const hasUploadedSitSignOffDocument = useMemo(
+        () => (sit3.docs || []).some(doc => (
+            Boolean(doc?.docId)
+            && SIT_SIGN_OFF_DOCUMENT_TYPES.includes(doc.doc_type)
+            && doc.isUploading !== true
+        )),
+        [sit3.docs]
+    );
+    const hasSitReviewNotes = sit3.reviewNotes.trim().length > 0;
+    const isSitSignOffUploading = uploadingCategory === 'SIT_SIGNOFF';
+    const isUatApprovalUploading = uploadingCategory === 'UAT_APPROVAL';
+    const canPassSit = allSitApproved
+        && hasSitReviewNotes
+        && hasUploadedSitSignOffDocument
+        && !isSitSignOffUploading;
+    const sitPassBlockedReason = isSitSignOffUploading
+        ? 'Tunggu hingga dokumen selesai diunggah.'
+        : !hasUploadedSitSignOffDocument
+            ? 'Unggah minimal satu dokumen Hasil Review / Berita Acara SIT terlebih dahulu.'
+            : !hasSitReviewNotes
+                ? 'Catatan Review Akhir / Keputusan wajib diisi.'
+                : !allSitApproved
+                    ? 'Semua persetujuan Developer, PM / Analyst Pengembangan, dan Development Lead harus lengkap.'
+                    : '';
 
     // Revision history (SIT/UAT level)
     const revisions = sitUatData.revisions || [];
@@ -309,7 +471,6 @@ export default function SITUATWizard({ project, updateProject, addNotification, 
     // ── File upload refs ───────────────────────────────────────────────────
     const sit3FileRef = useRef(null);
     const uat1FileRef = useRef(null);
-    const uat2FileRef = useRef(null);
     const uat3FileRef = useRef(null);
 
     // ── Upload dokumen SIT/UAT dengan MASKING nama & PILIHAN tipe file ──
@@ -318,8 +479,8 @@ export default function SITUATWizard({ project, updateProject, addNotification, 
     // saat tipe dipilih / saat step disimpan.
     const getDefaultDocType = (cat) => ({
         'SIT_SIGNOFF': 'SIT_SIGNOFF',
-        'UAT_PREP': 'UAT_PLAN',
-        'UAT_EXEC': 'UAT_RESULT',
+        'UAT_PREP': 'UNDANGAN',
+        'UAT_EXEC': 'UAT_EVIDENCE',
         'UAT_APPROVAL': 'UAT_SIGNOFF',
     }[cat] || 'LAINNYA');
 
@@ -328,13 +489,20 @@ export default function SITUATWizard({ project, updateProject, addNotification, 
             BRD: 'BRD', MEMO: 'Memo', LAMPIRAN: 'Lampiran', LAINNYA: 'Lainnya',
             FSD: 'FSD', ARSITEKTUR: 'Arsitektur', SIT_PLAN: 'Test Plan SIT',
             SIT_RESULT: 'Hasil SIT', SIT_SIGNOFF: 'Berita Acara SIT',
-            UAT_PLAN: 'Skenario UAT', UAT_RESULT: 'Hasil UAT', UAT_SIGNOFF: 'Berita Acara UAT',
+            UNDANGAN: 'Undangan', UAT_PLAN: 'Skenario UAT',
+            UAT_RESULT: 'Hasil UAT', UAT_EVIDENCE: 'Bukti Temuan UAT', UAT_SIGNOFF: 'Berita Acara UAT',
             QA_REPORT: 'Laporan QA', QA_SIGNOFF: 'QA Sign-Off',
             CYBER_REPORT: 'Laporan Siber', CYBER_SIGNOFF: 'Cyber Sign-Off',
             RELEASE_PLAN: 'Rencana Rilis', SPREADSHEET: 'Spreadsheet',
             GAMBAR: 'Gambar/Screenshot', ARSIP: 'Arsip ZIP',
         });
-        return base;
+        if (cat === 'SIT_SIGNOFF') {
+            return base.filter(([code]) => SIT_SIGN_OFF_DOCUMENT_TYPES.includes(code));
+        }
+        if (cat === 'UAT_PREP') {
+            return base.filter(([code]) => UAT_PREPARATION_DOCUMENT_TYPES.includes(code));
+        }
+        return base.filter(([code]) => code !== 'UNDANGAN');
     };
 
     const maskedDocName = (docType) => generateDocumentName(
@@ -434,11 +602,256 @@ export default function SITUATWizard({ project, updateProject, addNotification, 
         }
     };
 
-    const onUpload = (e, setter, key, cat) => {
+    /**
+     * Dokumen sign-off SIT adalah gate wajib. Berkas langsung diunggah dan
+     * referensinya dipersist sebelum tombol kelulusan SIT dapat digunakan.
+     */
+    const uploadSitSignOffDocuments = async (files) => {
+        if (!project?.id || !files.length || isSitSignOffUploading) return;
+
+        setUploadingCategory('SIT_SIGNOFF');
+        const uploadedDocs = [];
+        const failedFiles = [];
+
+        try {
+            for (const file of files) {
+                try {
+                    const documentType = 'SIT_SIGNOFF';
+                    const response = await documentService.upload(file, {
+                        project_id: project.id,
+                        document_type: documentType,
+                        original_filename: file.name,
+                    });
+                    const serverDocument = response?.data || {};
+                    if (!serverDocument.id) {
+                        throw new Error('Server tidak mengembalikan ID dokumen yang valid.');
+                    }
+                    const extension = (file.name.split('.').pop() || 'file').toLowerCase();
+                    const maskedName = serverDocument.file_name
+                        || `${maskedDocName(documentType)}.${extension}`;
+                    const typeInfo = getDocumentTypeInfo(documentType);
+
+                    uploadedDocs.push({
+                        id: `SIT_SIGNOFF_${serverDocument.id}`,
+                        docId: serverDocument.id,
+                        name: maskedName,
+                        originalName: file.name,
+                        maskedName,
+                        size: formatFileSize(file.size),
+                        type: extension.toUpperCase(),
+                        url: URL.createObjectURL(file),
+                        rawFile: file,
+                        uploadedAt: serverDocument.created_at || new Date().toISOString(),
+                        category: 'SIT_SIGNOFF',
+                        doc_type: documentType,
+                        color: typeInfo.color,
+                        isUploading: false,
+                    });
+                } catch (error) {
+                    failedFiles.push({ name: file.name, message: error.message });
+                }
+            }
+
+            if (!uploadedDocs.length) {
+                const detail = failedFiles[0]?.message ? `: ${failedFiles[0].message}` : '';
+                throw new Error(`Tidak ada dokumen yang berhasil diunggah${detail}`);
+            }
+
+            const nextDocs = [...(sit3.docs || []), ...uploadedDocs];
+
+            try {
+                await projectService.update(project.id, {
+                    sitUatData: buildSitUatData({ sit3_docs: sanitizeDocs(nextDocs) }),
+                });
+            } catch (error) {
+                await Promise.allSettled(
+                    uploadedDocs
+                        .filter(doc => doc.docId)
+                        .map(doc => documentService.delete(doc.docId))
+                );
+                uploadedDocs.forEach(doc => {
+                    if (doc.url?.startsWith('blob:')) URL.revokeObjectURL(doc.url);
+                });
+                throw new Error(
+                    `Dokumen terunggah tetapi gagal ditautkan ke tahap SIT: ${error.message}`,
+                    { cause: error }
+                );
+            }
+
+            setSit3(previous => ({ ...previous, docs: nextDocs }));
+            refreshProject?.();
+
+            if (failedFiles.length > 0) {
+                toast.error(`${uploadedDocs.length} dokumen berhasil, ${failedFiles.length} gagal diunggah.`);
+            } else {
+                toast.success('Dokumen Berita Acara SIT berhasil diunggah dan disimpan.');
+            }
+        } catch (error) {
+            toast.error(error.message || 'Gagal mengunggah dokumen Berita Acara SIT.');
+        } finally {
+            setUploadingCategory(null);
+        }
+    };
+
+    /**
+     * Dokumen persetujuan final langsung diunggah dan ditautkan ke proyek agar
+     * approver eksternal dapat memeriksanya sebelum memberikan keputusan.
+     */
+    const uploadUatApprovalDocuments = async (files) => {
+        if (!project?.id || !files.length || isUatApprovalUploading) return;
+        if ((uatApprovalMatrix?.approvers || []).some(approver => approver.status !== 'pending')) {
+            toast.error('Dokumen tidak dapat diubah setelah keputusan approval pertama tercatat. Buat putaran approval baru terlebih dahulu jika dokumen harus diganti.');
+            return;
+        }
+
+        setUploadingCategory('UAT_APPROVAL');
+        const uploadedDocs = [];
+        const failedFiles = [];
+
+        try {
+            for (const file of files) {
+                try {
+                    const documentType = 'UAT_SIGNOFF';
+                    const response = await documentService.upload(file, {
+                        project_id: project.id,
+                        document_type: documentType,
+                        original_filename: file.name,
+                    });
+                    const serverDocument = response?.data || {};
+                    if (!serverDocument.id) {
+                        throw new Error('Server tidak mengembalikan ID dokumen yang valid.');
+                    }
+
+                    const extension = (file.name.split('.').pop() || 'file').toLowerCase();
+                    const maskedName = serverDocument.file_name
+                        || `${maskedDocName(documentType)}.${extension}`;
+                    const typeInfo = getDocumentTypeInfo(documentType);
+                    uploadedDocs.push({
+                        id: `UAT_APPROVAL_${serverDocument.id}`,
+                        docId: serverDocument.id,
+                        name: maskedName,
+                        originalName: file.name,
+                        maskedName,
+                        size: formatFileSize(file.size),
+                        type: extension.toUpperCase(),
+                        url: URL.createObjectURL(file),
+                        rawFile: file,
+                        uploadedAt: serverDocument.created_at || new Date().toISOString(),
+                        category: 'UAT_APPROVAL',
+                        doc_type: documentType,
+                        color: typeInfo.color,
+                        isUploading: false,
+                    });
+                } catch (error) {
+                    failedFiles.push({ name: file.name, message: error.message });
+                }
+            }
+
+            if (!uploadedDocs.length) {
+                const detail = failedFiles[0]?.message ? `: ${failedFiles[0].message}` : '';
+                throw new Error(`Tidak ada dokumen yang berhasil diunggah${detail}`);
+            }
+
+            const nextDocs = [...(uat3.docs || []), ...uploadedDocs];
+            try {
+                await projectService.update(project.id, {
+                    sitUatData: buildSitUatData({ uat3_docs: sanitizeDocs(nextDocs) }),
+                });
+            } catch (error) {
+                await Promise.allSettled(
+                    uploadedDocs.filter(doc => doc.docId).map(doc => documentService.delete(doc.docId))
+                );
+                uploadedDocs.forEach(doc => {
+                    if (doc.url?.startsWith('blob:')) URL.revokeObjectURL(doc.url);
+                });
+                throw new Error(`Dokumen terunggah tetapi gagal ditautkan ke Persetujuan Final UAT: ${error.message}`, { cause: error });
+            }
+
+            setUat3(previous => ({ ...previous, docs: nextDocs }));
+            refreshProject?.();
+            if (failedFiles.length > 0) {
+                toast.error(`${uploadedDocs.length} dokumen berhasil, ${failedFiles.length} gagal diunggah.`);
+            } else {
+                toast.success('Dokumen Persetujuan Final UAT tersimpan dan tersedia pada link approval eksternal.');
+            }
+        } catch (error) {
+            toast.error(error.message || 'Gagal mengunggah dokumen Persetujuan Final UAT.');
+        } finally {
+            setUploadingCategory(null);
+        }
+    };
+
+    const onUpload = (e, setter, cat) => {
         const files = Array.from(e.target.files || []);
         if (!files.length) return;
-        addDraftDocs(setter, files, cat);
         if (e.target) e.target.value = '';
+        if (cat === 'SIT_SIGNOFF') {
+            void uploadSitSignOffDocuments(files);
+            return;
+        }
+        if (cat === 'UAT_APPROVAL') {
+            void uploadUatApprovalDocuments(files);
+            return;
+        }
+        addDraftDocs(setter, files, cat);
+    };
+
+    const removeSitSignOffDocument = async (index) => {
+        if (isSitSignOffUploading) return;
+
+        const target = sit3.docs?.[index];
+        if (!target) return;
+
+        setUploadingCategory('SIT_SIGNOFF');
+        try {
+            if (target.docId) {
+                await documentService.delete(target.docId);
+            }
+
+            const nextDocs = (sit3.docs || []).filter((_, docIndex) => docIndex !== index);
+            setSit3(previous => ({ ...previous, docs: nextDocs }));
+            await projectService.update(project.id, {
+                sitUatData: buildSitUatData({ sit3_docs: sanitizeDocs(nextDocs) }),
+            });
+
+            if (target.url?.startsWith('blob:')) URL.revokeObjectURL(target.url);
+            refreshProject?.();
+            toast('Berkas dihapus.', { icon: '🗑️' });
+        } catch (error) {
+            toast.error(`Gagal menghapus dokumen: ${error.message}`);
+            refreshProject?.();
+        } finally {
+            setUploadingCategory(null);
+        }
+    };
+
+    const removeUatApprovalDocument = async (index) => {
+        if (isUatApprovalUploading) return;
+        if ((uatApprovalMatrix?.approvers || []).some(approver => approver.status !== 'pending')) {
+            toast.error('Dokumen tidak dapat dihapus setelah keputusan approval pertama tercatat.');
+            return;
+        }
+        const target = uat3.docs?.[index];
+        if (!target) return;
+
+        setUploadingCategory('UAT_APPROVAL');
+        try {
+            const nextDocs = (uat3.docs || []).filter((_, docIndex) => docIndex !== index);
+            await projectService.update(project.id, {
+                sitUatData: buildSitUatData({ uat3_docs: sanitizeDocs(nextDocs) }),
+            });
+            if (target.docId) await documentService.delete(target.docId);
+
+            setUat3(previous => ({ ...previous, docs: nextDocs }));
+            if (target.url?.startsWith('blob:')) URL.revokeObjectURL(target.url);
+            refreshProject?.();
+            toast('Dokumen Persetujuan Final dihapus dan tidak lagi tersedia pada link eksternal.', { icon: '🗑️' });
+        } catch (error) {
+            toast.error(`Gagal menghapus dokumen: ${error.message}`);
+            refreshProject?.();
+        } finally {
+            setUploadingCategory(null);
+        }
     };
 
     const onRemoveDoc = async (setter, idx) => {
@@ -452,6 +865,319 @@ export default function SITUATWizard({ project, updateProject, addNotification, 
             try { await documentService.delete(removed.docId); } catch { /* ignore */ }
         }
         toast('Berkas dihapus.', { icon: '🗑️' });
+    };
+
+    const updateUatScenario = (scenarioId, field, value) => {
+        setUat2(previous => ({
+            ...previous,
+            scenarios: previous.scenarios.map(item => {
+                if (item.id !== scenarioId) return item;
+                if (field === 'result' && value === 'accepted') {
+                    return { ...item, result: value, changeType: '', request: '' };
+                }
+                return { ...item, [field]: value };
+            }),
+        }));
+    };
+
+    const addUatAdditionalRequest = () => {
+        setUat2(previous => ({
+            ...previous,
+            additionalRequests: [
+                ...(previous.additionalRequests || []),
+                {
+                    id: `uat_request_${Date.now()}_${Math.random().toString(36).slice(2)}`,
+                    title: '',
+                    changeType: '',
+                    detail: '',
+                    comment: '',
+                    attachments: [],
+                    taskId: null,
+                },
+            ],
+        }));
+    };
+
+    const updateUatAdditionalRequest = (requestId, field, value) => {
+        setUat2(previous => ({
+            ...previous,
+            additionalRequests: (previous.additionalRequests || []).map(item =>
+                item.id === requestId ? { ...item, [field]: value } : item
+            ),
+        }));
+    };
+
+    const removeUatAdditionalRequest = async (requestId) => {
+        const request = (uat2.additionalRequests || []).find(item => item.id === requestId);
+        if (!request || uploadingUatScenarioId) return;
+
+        setUploadingUatScenarioId(requestId);
+        try {
+            await Promise.allSettled(
+                (request.attachments || [])
+                    .filter(attachment => attachment.docId)
+                    .map(attachment => documentService.delete(attachment.docId))
+            );
+            setUat2(previous => ({
+                ...previous,
+                additionalRequests: (previous.additionalRequests || []).filter(item => item.id !== requestId),
+            }));
+            toast('Permintaan tambahan dihapus.', { icon: '🗑️' });
+        } finally {
+            setUploadingUatScenarioId(null);
+        }
+    };
+
+    const uploadUatEvidence = async (scenarioId, files) => {
+        if (!project?.id || !files.length || uploadingUatScenarioId) return;
+
+        setUploadingUatScenarioId(scenarioId);
+        const uploaded = [];
+        const failed = [];
+        try {
+            for (const file of files) {
+                try {
+                    const response = await documentService.upload(file, {
+                        project_id: project.id,
+                        document_type: 'UAT_EVIDENCE',
+                        original_filename: file.name,
+                    });
+                    const document = response?.data || {};
+                    if (!document.id) throw new Error('Server tidak mengembalikan ID dokumen.');
+
+                    const extension = (file.name.split('.').pop() || 'file').toUpperCase();
+                    const maskedName = document.file_name
+                        || `${maskedDocName('UAT_EVIDENCE')}.${extension.toLowerCase()}`;
+                    uploaded.push({
+                        id: `UAT_EVIDENCE_${document.id}`,
+                        docId: document.id,
+                        name: maskedName,
+                        maskedName,
+                        originalName: file.name,
+                        size: formatFileSize(file.size),
+                        type: extension,
+                        uploadedAt: document.created_at || new Date().toISOString(),
+                        category: 'UAT_EVIDENCE',
+                        doc_type: 'UAT_EVIDENCE',
+                        color: getDocumentTypeInfo('UAT_EVIDENCE').color,
+                    });
+                } catch (error) {
+                    failed.push(`${file.name}: ${error.message}`);
+                }
+            }
+
+            if (uploaded.length > 0) {
+                setUat2(previous => ({
+                    ...previous,
+                    scenarios: previous.scenarios.map(item => item.id === scenarioId
+                        ? { ...item, attachments: [...(item.attachments || []), ...uploaded] }
+                        : item),
+                }));
+                toast.success(`${uploaded.length} lampiran bukti UAT berhasil diunggah.`);
+            }
+            if (failed.length > 0) toast.error(`${failed.length} lampiran gagal diunggah.`);
+        } finally {
+            setUploadingUatScenarioId(null);
+        }
+    };
+
+    const uploadUatAdditionalRequestEvidence = async (requestId, files) => {
+        if (!project?.id || !files.length || uploadingUatScenarioId) return;
+
+        setUploadingUatScenarioId(requestId);
+        const uploaded = [];
+        const failed = [];
+        try {
+            for (const file of files) {
+                try {
+                    const response = await documentService.upload(file, {
+                        project_id: project.id,
+                        document_type: 'UAT_EVIDENCE',
+                        original_filename: file.name,
+                    });
+                    const document = response?.data || {};
+                    if (!document.id) throw new Error('Server tidak mengembalikan ID dokumen.');
+                    const extension = (file.name.split('.').pop() || 'file').toUpperCase();
+                    const maskedName = document.file_name
+                        || `${maskedDocName('UAT_EVIDENCE')}.${extension.toLowerCase()}`;
+                    uploaded.push({
+                        id: `UAT_EVIDENCE_${document.id}`,
+                        docId: document.id,
+                        name: maskedName,
+                        maskedName,
+                        originalName: file.name,
+                        size: formatFileSize(file.size),
+                        type: extension,
+                        uploadedAt: document.created_at || new Date().toISOString(),
+                        category: 'UAT_EVIDENCE',
+                        doc_type: 'UAT_EVIDENCE',
+                        color: getDocumentTypeInfo('UAT_EVIDENCE').color,
+                    });
+                } catch (error) {
+                    failed.push(`${file.name}: ${error.message}`);
+                }
+            }
+
+            if (uploaded.length > 0) {
+                setUat2(previous => ({
+                    ...previous,
+                    additionalRequests: (previous.additionalRequests || []).map(item => item.id === requestId
+                        ? { ...item, attachments: [...(item.attachments || []), ...uploaded] }
+                        : item),
+                }));
+                toast.success(`${uploaded.length} lampiran permintaan user berhasil diunggah.`);
+            }
+            if (failed.length > 0) toast.error(`${failed.length} lampiran gagal diunggah.`);
+        } finally {
+            setUploadingUatScenarioId(null);
+        }
+    };
+
+    const removeUatEvidence = async (scenarioId, attachmentIndex) => {
+        const scenario = uat2.scenarios.find(item => item.id === scenarioId);
+        const attachment = scenario?.attachments?.[attachmentIndex];
+        if (!attachment || uploadingUatScenarioId) return;
+
+        setUploadingUatScenarioId(scenarioId);
+        try {
+            if (attachment.docId) await documentService.delete(attachment.docId);
+            setUat2(previous => ({
+                ...previous,
+                scenarios: previous.scenarios.map(item => item.id === scenarioId
+                    ? { ...item, attachments: item.attachments.filter((_, index) => index !== attachmentIndex) }
+                    : item),
+            }));
+            toast('Lampiran bukti dihapus.', { icon: '🗑️' });
+        } catch (error) {
+            toast.error(`Gagal menghapus lampiran: ${error.message}`);
+        } finally {
+            setUploadingUatScenarioId(null);
+        }
+    };
+
+    const removeUatAdditionalRequestEvidence = async (requestId, attachmentIndex) => {
+        const request = (uat2.additionalRequests || []).find(item => item.id === requestId);
+        const attachment = request?.attachments?.[attachmentIndex];
+        if (!attachment || uploadingUatScenarioId) return;
+
+        setUploadingUatScenarioId(requestId);
+        try {
+            if (attachment.docId) await documentService.delete(attachment.docId);
+            setUat2(previous => ({
+                ...previous,
+                additionalRequests: (previous.additionalRequests || []).map(item => item.id === requestId
+                    ? { ...item, attachments: item.attachments.filter((_, index) => index !== attachmentIndex) }
+                    : item),
+            }));
+            toast('Lampiran permintaan user dihapus.', { icon: '🗑️' });
+        } catch (error) {
+            toast.error(`Gagal menghapus lampiran: ${error.message}`);
+        } finally {
+            setUploadingUatScenarioId(null);
+        }
+    };
+
+    const getUatVerificationUploadKey = (source, itemId) => `uat_verification_${source}_${itemId}`;
+
+    const uploadUatMajorVerificationEvidence = async (source, itemId, files) => {
+        if (!project?.id || !files.length || uploadingUatScenarioId) return;
+
+        const collectionKey = source === 'scenario' ? 'scenarios' : 'additionalRequests';
+        const currentItem = (uat2[collectionKey] || []).find(item => item.id === itemId);
+        const remainingSlots = Math.max(0, 10 - (currentItem?.verificationAttachments || []).length);
+        if (remainingSlots === 0) {
+            toast.error('Maksimal 10 lampiran bukti untuk setiap item verifikasi Mayor.');
+            return;
+        }
+        const filesToUpload = files.slice(0, remainingSlots);
+        if (filesToUpload.length < files.length) {
+            toast(`Hanya ${filesToUpload.length} berkas yang diunggah karena batas maksimal 10 lampiran.`, { icon: 'ℹ️' });
+        }
+
+        const uploadKey = getUatVerificationUploadKey(source, itemId);
+        setUploadingUatScenarioId(uploadKey);
+        try {
+            const results = await Promise.allSettled(filesToUpload.map(async file => {
+                const response = await documentService.upload(file, {
+                    project_id: project.id,
+                    document_type: 'UAT_EVIDENCE',
+                    original_filename: file.name,
+                });
+                const document = response?.data || {};
+                if (!document.id) throw new Error('Server tidak mengembalikan ID dokumen.');
+
+                const extension = (file.name.split('.').pop() || 'file').toUpperCase();
+                const maskedName = document.file_name
+                    || `${maskedDocName('UAT_EVIDENCE')}.${extension.toLowerCase()}`;
+
+                return {
+                    id: `UAT_VERIFICATION_EVIDENCE_${document.id}`,
+                    docId: document.id,
+                    name: maskedName,
+                    maskedName,
+                    originalName: file.name,
+                    size: formatFileSize(file.size),
+                    type: extension,
+                    uploadedAt: document.created_at || new Date().toISOString(),
+                    category: 'UAT_EVIDENCE',
+                    doc_type: 'UAT_EVIDENCE',
+                    color: getDocumentTypeInfo('UAT_EVIDENCE').color,
+                };
+            }));
+            const uploaded = results
+                .filter(result => result.status === 'fulfilled')
+                .map(result => result.value);
+            const failedCount = results.length - uploaded.length;
+
+            if (uploaded.length > 0) {
+                setUat2(previous => ({
+                    ...previous,
+                    [collectionKey]: (previous[collectionKey] || []).map(item => item.id === itemId
+                        ? {
+                            ...item,
+                            verificationAttachments: [
+                                ...(item.verificationAttachments || []),
+                                ...uploaded,
+                            ],
+                        }
+                        : item),
+                }));
+                toast.success(`${uploaded.length} bukti verifikasi Mayor berhasil diunggah.`);
+            }
+            if (failedCount > 0) {
+                toast.error(`${failedCount} lampiran bukti verifikasi gagal diunggah.`);
+            }
+        } finally {
+            setUploadingUatScenarioId(null);
+        }
+    };
+
+    const removeUatMajorVerificationEvidence = async (source, itemId, attachmentIndex) => {
+        const collectionKey = source === 'scenario' ? 'scenarios' : 'additionalRequests';
+        const item = (uat2[collectionKey] || []).find(entry => entry.id === itemId);
+        const attachment = item?.verificationAttachments?.[attachmentIndex];
+        if (!attachment || uploadingUatScenarioId) return;
+
+        const uploadKey = getUatVerificationUploadKey(source, itemId);
+        setUploadingUatScenarioId(uploadKey);
+        try {
+            if (attachment.docId) await documentService.delete(attachment.docId);
+            setUat2(previous => ({
+                ...previous,
+                [collectionKey]: (previous[collectionKey] || []).map(entry => entry.id === itemId
+                    ? {
+                        ...entry,
+                        verificationAttachments: (entry.verificationAttachments || [])
+                            .filter((_, index) => index !== attachmentIndex),
+                    }
+                    : entry),
+            }));
+            toast('Lampiran bukti verifikasi dihapus.', { icon: '🗑️' });
+        } catch (error) {
+            toast.error(`Gagal menghapus bukti verifikasi: ${error.message}`);
+        } finally {
+            setUploadingUatScenarioId(null);
+        }
     };
 
     const viewDoc = async (doc) => {
@@ -509,27 +1235,25 @@ export default function SITUATWizard({ project, updateProject, addNotification, 
     const isComplete = stUpper === 'DEV_COMPLETED' && !UNLOCK_ALL_STAGES;
 
     // ── Gate helper: status task developer ────────────────────────────────
-    // Task TAKE DOWN diabaikan; syarat masuk SIT = semua task tersisa berstatus done.
+    // SIT pertama mencakup semua task aktif. SIT ulang Mayor hanya memakai task
+    // dalam scope Change Request siklus aktif.
     const taskGate = useCallback(() => {
-        const taskList = Array.isArray(project?.tasks) ? project.tasks : [];
-        const eligible = taskList.filter(t => String(t.status || '').toLowerCase() !== 'take_down');
-        const doneTasks = eligible.filter(t => String(t.status || '').toLowerCase() === 'done');
-        const incompleteTasks = eligible.filter(t => String(t.status || '').toLowerCase() !== 'done');
+        const isReady = task => String(task.status || '').toLowerCase() === 'done'
+            && (!isTargetedSitRetest || Boolean(task.assignee_id ?? task.assignee_detail?.id));
+        const doneTasks = sitScopeTasks.filter(isReady);
+        const incompleteTasks = sitScopeTasks.filter(task => !isReady(task));
         return {
-            total: eligible.length,
+            total: sitScopeTasks.length,
             done: doneTasks.length,
             incomplete: incompleteTasks.map(t => ({ id: t.id, title: t.title || t.name || 'Task', status: t.status })),
-            canStart: eligible.length > 0 && incompleteTasks.length === 0,
+            canStart: sitScopeTasks.length > 0 && incompleteTasks.length === 0,
         };
-    }, [project?.tasks]);
+    }, [isTargetedSitRetest, sitScopeTasks]);
 
     // ── Derived stats dari task approvals (untuk ringkasan & dokumen) ─────
     const eligibleTaskIds = useMemo(() => {
-        if (!Array.isArray(project?.tasks)) return [];
-        return project.tasks
-            .filter(t => String(t.status || '').toLowerCase() !== 'take_down')
-            .map(t => t.id);
-    }, [project?.tasks]);
+        return sitScopeTasks.map(task => task.id);
+    }, [sitScopeTasks]);
 
     const approvedTaskCount = eligibleTaskIds.filter(id => {
         const a = sit2Approvals?.[id];
@@ -542,6 +1266,123 @@ export default function SITUATWizard({ project, updateProject, addNotification, 
         return comment.trim().length > 0;
     }).length;
 
+    const sit2Validation = useMemo(() => {
+        if (eligibleTaskIds.length === 0) return 'Belum ada task yang dapat diuji pada tahap SIT.';
+
+        const incompleteTasks = taskGate().incomplete;
+        if (incompleteTasks.length > 0) {
+            return `Masih ada ${incompleteTasks.length} task yang belum selesai setelah proses revisi.`;
+        }
+
+        if (approvedTaskCount !== eligibleTaskIds.length) {
+            return `Semua ${eligibleTaskIds.length} task harus disetujui (OK) sebelum dilanjutkan ke approval.`;
+        }
+
+        if (isTargetedSitRetest) {
+            const tasksWithoutEvidence = eligibleTaskIds.filter(id => {
+                const approval = sit2Approvals?.[id];
+                return !Array.isArray(approval?.attachments)
+                    || !approval.attachments.some(attachment => Boolean(attachment?.docId));
+            });
+            if (tasksWithoutEvidence.length > 0) {
+                return `${tasksWithoutEvidence.length} task dalam scope SIT ulang belum memiliki lampiran bukti pengujian baru.`;
+            }
+        }
+
+        const revisedTasksWithoutNewEvidence = eligibleTaskIds.filter(id => {
+            const approval = sit2Approvals?.[id];
+            if (!approval || typeof approval !== 'object' || !approval.revisedAt) return false;
+
+            const revisedAt = Date.parse(approval.revisedAt);
+            return !(approval.attachments || []).some(attachment =>
+                attachment.uploadedAt && Date.parse(attachment.uploadedAt) > revisedAt
+            );
+        });
+
+        if (revisedTasksWithoutNewEvidence.length > 0) {
+            return `${revisedTasksWithoutNewEvidence.length} task hasil revisi belum memiliki lampiran bukti baru.`;
+        }
+
+        return '';
+    }, [approvedTaskCount, eligibleTaskIds, isTargetedSitRetest, sit2Approvals, taskGate]);
+
+    const uat2Summary = useMemo(() => {
+        const scenarios = Array.isArray(uat2.scenarios) ? uat2.scenarios : [];
+        const additionalRequests = Array.isArray(uat2.additionalRequests) ? uat2.additionalRequests : [];
+        const acceptedCount = scenarios.filter(item => item.result === 'accepted').length;
+        const minorCount = scenarios.filter(item => item.result === 'revision' && item.changeType === 'minor').length
+            + additionalRequests.filter(item => item.changeType === 'minor').length;
+        const majorCount = scenarios.filter(item => item.result === 'revision' && item.changeType === 'mayor').length
+            + additionalRequests.filter(item => item.changeType === 'mayor').length;
+        return {
+            executedCount: scenarios.filter(item => ['accepted', 'revision'].includes(item.result)).length,
+            acceptedCount,
+            revisionCount: minorCount + majorCount,
+            minorCount,
+            majorCount,
+            additionalRequestCount: additionalRequests.length,
+            conclusion: majorCount > 0 ? 'major_revision' : (minorCount > 0 ? 'minor_revision' : 'accepted'),
+        };
+    }, [uat2.additionalRequests, uat2.scenarios]);
+
+    const uat2Validation = useMemo(() => {
+        const scenarios = Array.isArray(uat2.scenarios) ? uat2.scenarios : [];
+        if (scenarios.length === 0) return 'Belum ada task aktif yang dapat dijadikan skenario UAT.';
+        if (scenarios.some(item => !['accepted', 'revision'].includes(item.result))) {
+            return 'Tentukan hasil Diterima atau Revisi untuk setiap skenario.';
+        }
+        if (scenarios.some(item => item.result === 'revision' && !['minor', 'mayor'].includes(item.changeType))) {
+            return 'Pilih tipe perubahan Minor atau Mayor untuk setiap skenario revisi.';
+        }
+        if (scenarios.some(item => item.result === 'revision' && !item.request?.trim())) {
+            return 'Detail permintaan perubahan wajib diisi untuk setiap skenario revisi.';
+        }
+        const additionalRequests = Array.isArray(uat2.additionalRequests) ? uat2.additionalRequests : [];
+        if (additionalRequests.some(item => !item.title?.trim())) {
+            return 'Judul setiap permintaan tambahan user wajib diisi.';
+        }
+        if (additionalRequests.some(item => !['minor', 'mayor'].includes(item.changeType))) {
+            return 'Pilih tipe Minor atau Mayor untuk setiap permintaan tambahan user.';
+        }
+        if (additionalRequests.some(item => !item.detail?.trim())) {
+            return 'Detail setiap permintaan tambahan user wajib diisi.';
+        }
+        if (uploadingUatScenarioId) return 'Tunggu hingga seluruh lampiran bukti selesai diunggah.';
+        return '';
+    }, [uat2.additionalRequests, uat2.scenarios, uploadingUatScenarioId]);
+    const uat2IsSubmitted = Boolean(sitUatData.uat2_summary?.submittedAt);
+    const uat2VerificationMode = sitUatData.uat2_verification_mode === true;
+    const uat2AwaitingMajorVerification = sitUatData.uat2_resume_after_sit === true
+        || uat2VerificationMode;
+    const uat2EditingLocked = uatDone
+        || uat2IsSubmitted
+        || status === 'UAT_REVISION_DEV'
+        || sitUatData.uat2_resume_after_sit === true
+        || uat2VerificationMode;
+    const uatMajorVerificationItems = useMemo(() => [
+        ...(uat2.scenarios || [])
+            .filter(item => item.changeType === 'mayor' && item.verificationStatus === 'pending')
+            .map(item => ({ ...item, source: 'scenario', title: item.scenario })),
+        ...(uat2.additionalRequests || [])
+            .filter(item => item.changeType === 'mayor' && item.verificationStatus === 'pending')
+            .map(item => ({ ...item, source: 'additional_request' })),
+    ], [uat2.additionalRequests, uat2.scenarios]);
+    const uatMajorVerificationValidation = useMemo(() => {
+        if (!uat2VerificationMode) return '';
+        if (uatMajorVerificationItems.length === 0) return 'Tidak ada item Mayor yang tersedia untuk diverifikasi.';
+        if (uatMajorVerificationItems.some(item => !['accepted', 'revision'].includes(item.verificationResult))) {
+            return 'Tentukan apakah setiap perbaikan Mayor Diterima atau Masih Revisi.';
+        }
+        if (uatMajorVerificationItems.some(item => item.verificationResult === 'revision' && !item.verificationComment?.trim())) {
+            return 'Alasan wajib diisi untuk perbaikan Mayor yang masih memerlukan revisi.';
+        }
+        if (uatMajorVerificationItems.some(item => !(item.verificationAttachments || []).some(document => document?.docId))) {
+            return 'Unggah minimal satu lampiran bukti verifikasi untuk setiap item Mayor.';
+        }
+        if (uploadingUatScenarioId) return 'Tunggu hingga seluruh lampiran bukti verifikasi selesai diproses.';
+        return '';
+    }, [uat2VerificationMode, uatMajorVerificationItems, uploadingUatScenarioId]);
+
     // ── Completion check per step ──────────────────────────────────────────
     const sit1Done = sitDone || (status === 'SIT_IN_PROGRESS' && activeSitStep > 1);
     const sit2Done = sitDone || (status === 'SIT_IN_PROGRESS' && activeSitStep > 2);
@@ -552,9 +1393,16 @@ export default function SITUATWizard({ project, updateProject, addNotification, 
 
     // ── Persist helper ─────────────────────────────────────────────────────
     // Bersihkan docs dari field yang tidak bisa diserialize (rawFile, blob url)
-    const sanitizeDocs = (docs) => (docs || []).map(({ rawFile, isUploading, ...rest }) => rest);
+    const sanitizeDocs = (docs) => (docs || []).map(doc => {
+        const sanitized = { ...doc };
+        delete sanitized.rawFile;
+        delete sanitized.isUploading;
+        if (sanitized.url?.startsWith('blob:')) delete sanitized.url;
+        return sanitized;
+    });
 
     const buildSitUatData = (overrides = {}) => ({
+        ...sitUatData,
         activeSitStep, activeUatStep,
         sit1_stagingUrl: sit1.stagingUrl,
         sit2_totalCases: taskGate().done,
@@ -567,9 +1415,20 @@ export default function SITUATWizard({ project, updateProject, addNotification, 
         uat1_participants: uat1.participants,
         uat1_startDate: uat1.startDate, uat1_endDate: uat1.endDate,
         uat1_unit: uat1.unit,
-        uat2_executedCount: uat2.executedCount, uat2_passedCount: uat2.passedCount,
-        uat2_findings: uat2.findings, uat2_execNotes: uat2.execNotes,
-        uat2_docs: sanitizeDocs(uat2.docs),
+        uat2_executedCount: uat2Summary.executedCount,
+        uat2_passedCount: uat2Summary.acceptedCount,
+        uat2_findings: uat2Summary.revisionCount,
+        uat2_execNotes: uat2.execNotes,
+        uat2_scenarios: (uat2.scenarios || []).map(item => ({
+            ...item,
+            attachments: sanitizeDocs(item.attachments),
+            verificationAttachments: sanitizeDocs(item.verificationAttachments),
+        })),
+        uat2_additional_requests: (uat2.additionalRequests || []).map(item => ({
+            ...item,
+            attachments: sanitizeDocs(item.attachments),
+            verificationAttachments: sanitizeDocs(item.verificationAttachments),
+        })),
         uat3_approvalNotes: uat3.approvalNotes, uat3_approvedBy: uat3.approvedBy,
         uat3_docs: sanitizeDocs(uat3.docs),
         revisions,
@@ -620,49 +1479,113 @@ export default function SITUATWizard({ project, updateProject, addNotification, 
         }
         if (!gate.canStart) {
             const names = gate.incomplete.map(t => t.title).join(', ');
-            toast.error(`Tidak dapat memulai SIT: masih ada ${gate.incomplete.length} task belum selesai (${names}). Semua task harus berstatus Selesai, kecuali Take Down.`);
+            toast.error(`Tidak dapat memulai SIT: masih ada ${gate.incomplete.length} task dalam scope belum selesai (${names}).`);
             return;
         }
-        updateProject(project.id, { status: 'SIT_IN_PROGRESS', sitUatData: buildSitUatData({ activeSitStep: 1 }) });
+        const startsMajorRevisionCycle = status === 'UAT_REVISION_DEV' || sitUatData.uat2_resume_after_sit === true;
+        updateProject(project.id, {
+            status: 'SIT_IN_PROGRESS',
+            sitUatData: buildSitUatData({
+                activeSitStep: 1,
+                ...(startsMajorRevisionCycle ? {
+                    sit2_task_approvals: {},
+                    sit3_reviewNotes: '',
+                    sit3_docs: [],
+                    sit3_approvals: {},
+                    uat3_approvals: {},
+                } : {}),
+            }),
+        });
         toast.success(`Pengujian SIT dimulai untuk proyek "${project.name}".`);
     };
 
+    const handleSaveSITDraft = async () => {
+        if (!project?.id) return;
+
+        setSubmitting(true);
+        try {
+            await projectService.update(project.id, {
+                sitUatData: buildSitUatData({
+                    activeSitStep: 2,
+                    sit2_draft_saved_at: new Date().toISOString(),
+                    sit2_submitted_at: null,
+                }),
+            });
+            toast.success('Draft Eksekusi SIT berhasil disimpan. Anda dapat melanjutkan setelah revisi dan lampiran bukti terbaru selesai.');
+            refreshProject?.();
+        } catch (err) {
+            toast.error(`Gagal menyimpan draft Eksekusi SIT: ${err.message}`);
+        } finally {
+            setSubmitting(false);
+        }
+    };
+
     const handleSaveSITStep = async (step) => {
-        // Validasi: dari Eksekusi (step 2) -> Review (step 3) hanya jika SEMUA task disetujui OK
-        if (step === 2) {
-            const eligibleIds = Array.isArray(project?.tasks)
-                ? project.tasks.filter(t => String(t.status || '').toLowerCase() !== 'take_down').map(t => t.id)
-                : [];
-            const approvedIds = eligibleIds.filter(id => {
-                const a = sit2Approvals?.[id];
-                return typeof a === 'object' ? a.approved === true : a === true;
-            }).length;
-            if (eligibleIds.length === 0 || approvedIds !== eligibleIds.length) {
-                toast.error(`Lanjut ke Review & Sign-Off memerlukan SEMUA ${eligibleIds.length} task disetujui (OK). Saat ini ${approvedIds} disetujui.`);
-                return;
-            }
+        if (step === 2 && sit2Validation) {
+            toast.error(sit2Validation);
+            return;
         }
         // Upload draft dokumen yang belum di-upload (agar docId tersimpan di sitUatData)
         setSubmitting(true);
-        await uploadAllDrafts(setSit3, sit3.docs);
-        const nextStep = step + 1;
-        setActiveSitStep(nextStep);
-        updateProject(project.id, { status: 'SIT_IN_PROGRESS', sitUatData: buildSitUatData({ activeSitStep: nextStep }) });
-        toast.success(`SIT Tahap ${step} tersimpan. Lanjut ke Tahap ${nextStep}.`);
-        setSubmitting(false);
+        try {
+            await uploadAllDrafts(setSit3, sit3.docs);
+            const nextStep = step + 1;
+            await updateProject(project.id, {
+                status: 'SIT_IN_PROGRESS',
+                sitUatData: buildSitUatData({
+                    activeSitStep: nextStep,
+                    ...(step === 2 ? { sit2_submitted_at: new Date().toISOString() } : {}),
+                }),
+            });
+            setActiveSitStep(nextStep);
+            toast.success(`SIT Tahap ${step} tersimpan. Lanjut ke Tahap ${nextStep}.`);
+        } finally {
+            setSubmitting(false);
+        }
     };
 
     const handleSITPass = async () => {
+        const resumesMajorUatVerification = sitUatData.uat2_resume_after_sit === true;
+        if (!hasUploadedSitSignOffDocument) {
+            toast.error('Unggah minimal satu dokumen Hasil Review / Berita Acara SIT sebelum melanjutkan ke UAT Internal.');
+            return;
+        }
+        if (!hasSitReviewNotes) {
+            toast.error('Catatan Review Akhir / Keputusan wajib diisi.');
+            return;
+        }
+        if (!allSitApproved) {
+            toast.error('Semua persetujuan SIT harus lengkap sebelum melanjutkan ke UAT Internal.');
+            return;
+        }
+        if (isSitSignOffUploading) {
+            toast.error('Tunggu hingga dokumen selesai diunggah.');
+            return;
+        }
+
         setSubmitting(true);
-        await uploadAllDrafts(setSit3, sit3.docs);
-        updateProject(project.id, {
-            status: 'SIT_PASSED',
-            sitPassedAt: new Date().toISOString(),
-            sitUatData: buildSitUatData({ activeSitStep: 3, activeUatStep: 1 }),
-        });
-        addNotification?.('SIT Lulus!', `Proyek "${project.name}" lulus SIT. UAT Internal dapat dimulai.`, 'success', '/pm/workspace');
-        toast.success(`🎉 SIT Lulus! Proyek siap melanjutkan ke UAT Internal.`);
-        setSubmitting(false);
+        try {
+            await projectService.update(project.id, {
+                sitUatData: buildSitUatData({ activeSitStep: 3, activeUatStep: resumesMajorUatVerification ? 2 : 1 }),
+            });
+            await projectService.updateStatus(project.id, 'SIT_PASSED', sit3.reviewNotes.trim());
+            addNotification?.(
+                'SIT Lulus!',
+                resumesMajorUatVerification
+                    ? `Proyek "${project.name}" lulus SIT ulang dan siap memverifikasi perbaikan Mayor di UAT.`
+                    : `Proyek "${project.name}" lulus SIT. UAT Internal dapat dimulai.`,
+                'success',
+                '/pm/workspace'
+            );
+            toast.success(resumesMajorUatVerification
+                ? '🎉 SIT ulang lulus! Lanjutkan verifikasi perbaikan Mayor di UAT Tab 2.'
+                : '🎉 SIT Lulus! Proyek siap melanjutkan ke UAT Internal.');
+            refreshProject?.();
+        } catch (error) {
+            toast.error(`SIT belum dapat dinyatakan lulus: ${error.message}`);
+        } finally {
+            setSubmitting(false);
+        }
     };
 
     // ── Handler: Persetujuan SIT per role (Developer/Analis/Development Lead) ──
@@ -687,35 +1610,34 @@ export default function SITUATWizard({ project, updateProject, addNotification, 
         }
     };
 
-    const handleSITRevision = () => {
-        if (!revisionNotes.trim()) { toast.error('Catatan revisi wajib diisi!'); return; }
-        setSubmitting(true);
-        const newRevision = { type: 'SIT_TO_DEV', notes: revisionNotes.trim(), at: new Date().toISOString(), by: sf(project?.pm, 'Tim TI') };
-        const newRevisions = [...revisions, newRevision];
-        updateProject(project.id, {
-            status: 'SIT_REVISION',
-            sitUatData: buildSitUatData({ revisions: newRevisions, activeSitStep: 1 }),
-        });
-        addNotification?.('Revisi SIT Diminta', `Proyek "${project.name}" dikembalikan ke Development karena SIT gagal.`, 'warning', '/pm/workspace');
-        toast.error(`↩️ Revisi diminta. Proyek kembali ke Development.`);
-        setRevisionNotes('');
-        setShowRevisionModal(false);
-        setSubmitting(false);
-    };
-
-    // ── Auto-fill peserta, unit & tanggal pelaksanaan UAT (Tab 1) ──
-    // Peserta otomatis: pemohon (business user), PM/Analyst Pengembangan, developer.
-    // Unit otomatis dari divisi pemohon; tanggal default = hari ini.
+    // ── Auto-fill peserta dan unit UAT (Tab 1) ──
+    // Peserta otomatis tetap dapat diedit. Approver pihak peminta memakai link
+    // pribadi, sedangkan approver IT harus ditautkan ke akun aplikasi.
+    // Unit otomatis dari divisi pemohon. Tanggal wajib dipilih sendiri oleh PM.
     const buildUatParticipants = useCallback(() => {
         const participants = [];
-        const addP = (name, role, unit = '', phone = '') => {
-            if (name && !participants.some(p => p.name === name)) participants.push({ name, role, unit, phone });
+        const addP = (name, role, unit = '', phone = '', approval = {}) => {
+            if (name && !participants.some(p => p.name === name)) participants.push({
+                id: participantId(), name, role, unit, phone,
+                isApprover: false, approvalRole: '', approvalMode: '', userId: null,
+                ...approval,
+            });
         };
-        addP(sf(project?.creator, ''), 'Pemohon (Business User)', sf(project?.creator?.division_detail || project?.creator?.division, ''), sf(project?.contact_phone || project?.contactPhone, ''));
-        addP(sf(project?.pm, ''), 'PM / Analyst Pengembangan', 'Divisi Pengembangan TI');
+        addP(
+            sf(project?.creator, ''),
+            'Pemohon (Business User)',
+            sf(project?.creator?.division_detail || project?.creator?.division, ''),
+            '',
+            { isApprover: true, approvalRole: 'requester', approvalMode: 'external_link' }
+        );
+        addP(sf(project?.pm, ''), 'PM / Analyst Pengembangan', 'Divisi Pengembangan TI', '', {
+            isApprover: true, approvalRole: 'analyst_pm', approvalMode: 'internal_account', userId: project?.pm?.id || project?.pm_id || null,
+        });
         addP(sf(project?.analyst, ''), 'System Analyst', 'Divisi Pengembangan TI');
         (Array.isArray(project?.tasks) ? project.tasks : []).forEach(t => {
-            addP(t.assignee_detail?.name || t.assignee, 'Developer', 'Divisi Pengembangan TI');
+            addP(t.assignee_detail?.name || t.assignee, 'Developer', 'Divisi Pengembangan TI', '', {
+                isApprover: true, approvalRole: 'developer', approvalMode: 'internal_account', userId: t.assignee_detail?.id || t.assignee_id || null,
+            });
         });
         return participants;
     }, [project]);
@@ -736,30 +1658,37 @@ export default function SITUATWizard({ project, updateProject, addNotification, 
             if (!prev.preparedBy) {
                 updates.preparedBy = sf(project?.pm, '');
             }
-            // Tanggal pelaksanaan default hari ini (jika kosong)
-            if (!prev.startDate) {
-                updates.startDate = new Date().toISOString().slice(0, 10);
-            }
             if (Object.keys(updates).length === 0) return prev;
             return { ...prev, ...updates };
         });
     }, [activeUatStep, project?.id, buildUatParticipants]);
 
     const handleStartUAT = () => {
+        const resumesMajorVerification = sitUatData.uat2_resume_after_sit === true
+            || sitUatData.uat2_verification_mode === true;
         // Auto-fill peserta UAT dari proyek: pemohon (creator), PM, analyst, developer
         const participants = (uat1.participants || []).length > 0 ? uat1.participants : buildUatParticipants();
         setUat1(prev => ({ ...prev, participants }));
+        setActiveUatStep(resumesMajorVerification ? 2 : 1);
         updateProject(project.id, {
             status: 'UAT_IN_PROGRESS',
-            sitUatData: buildSitUatData({ activeUatStep: 1, uat1_participants: participants }),
+            sitUatData: buildSitUatData({
+                activeUatStep: resumesMajorVerification ? 2 : 1,
+                uat1_participants: participants,
+            }),
         });
-        toast.success(`Pengujian UAT Internal dimulai untuk proyek "${project.name}".`);
+        toast.success(resumesMajorVerification
+            ? `SIT ulang selesai. Verifikasi perbaikan Mayor proyek "${project.name}" dapat dilakukan di UAT Tab 2.`
+            : `Pengujian UAT Internal dimulai untuk proyek "${project.name}".`);
     };
 
     // ── Handler peserta UAT ──
     const [editingUatIdx, setEditingUatIdx] = useState(null); // idx peserta yang sedang diedit (inline)
     const handleAddUatParticipant = () => {
-        const participants = [...(uat1.participants || []), { name: '', role: '', unit: '', phone: '' }];
+        const participants = [...(uat1.participants || []), {
+            id: participantId(), name: '', role: '', unit: '', phone: '',
+            isApprover: false, approvalRole: '', approvalMode: '', userId: null,
+        }];
         setUat1(prev => ({ ...prev, participants }));
         setEditingUatIdx(participants.length - 1);
         persistSitUatData({ uat1_participants: participants });
@@ -771,7 +1700,57 @@ export default function SITUATWizard({ project, updateProject, addNotification, 
         if (editingUatIdx === idx) setEditingUatIdx(null);
     };
     const handleUatParticipantChange = (idx, field, val) => {
-        const participants = (uat1.participants || []).map((p, i) => i === idx ? { ...p, [field]: val } : p);
+        const participants = (uat1.participants || []).map((p, i) => {
+            if (i !== idx) return p;
+            const next = { ...p, id: p.id || participantId(), [field]: val };
+            if (field === 'participationType') {
+                if (val === 'participant') {
+                    return {
+                        ...next,
+                        isApprover: false,
+                        approvalRole: '',
+                        approvalMode: '',
+                        userId: null,
+                        role: '',
+                    };
+                }
+                const approvalRole = UAT_APPROVAL_ROLES.find(item => item.value === val);
+                const approvalMode = approvalRole?.side === 'requester' ? 'external_link' : 'internal_account';
+                return {
+                    ...next,
+                    isApprover: true,
+                    approvalRole: val,
+                    approvalMode,
+                    userId: null,
+                    role: approvalRole?.label || '',
+                    name: approvalMode === 'internal_account' || p.approvalMode === 'internal_account' ? '' : p.name,
+                    unit: approvalMode === 'internal_account' || p.approvalMode === 'internal_account' ? '' : p.unit,
+                    phone: approvalMode === 'internal_account' || p.approvalMode === 'internal_account' ? '' : p.phone,
+                };
+            }
+            if (field === 'approvalRole') {
+                const role = UAT_APPROVAL_ROLES.find(item => item.value === val);
+                next.approvalMode = role?.side === 'requester' ? 'external_link' : 'internal_account';
+                next.userId = null;
+                next.role = role?.label || next.role;
+            }
+            if (field === 'userId') {
+                const account = uatInternalUsers.find(item => Number(item.id) === Number(val));
+                if (account) {
+                    next.userId = Number(account.id);
+                    next.name = account.name;
+                    next.unit = account.division || next.unit;
+                    next.phone = '';
+                    next.role = UAT_APPROVAL_ROLES.find(item => item.value === next.approvalRole)?.label || next.role;
+                } else {
+                    next.userId = null;
+                    next.name = '';
+                    next.unit = '';
+                    next.phone = '';
+                }
+            }
+            return next;
+        });
         setUat1(prev => ({ ...prev, participants }));
         // Tidak langsung persist per ketikan (boros) — persist saat klik "Selesai"
     };
@@ -781,11 +1760,52 @@ export default function SITUATWizard({ project, updateProject, addNotification, 
         setEditingUatIdx(null);
     };
 
+    const projectDeveloperUserIds = new Set(
+        (project?.tasks || [])
+            .map(task => Number(task.assignee_id || task.assignee?.id || task.assignee_detail?.id))
+            .filter(Boolean)
+    );
+
+    const uatApproverValidation = (() => {
+        const approvers = (uat1.participants || []).filter(participant => participant.isApprover === true);
+        for (const role of REQUIRED_SINGLE_UAT_APPROVAL_ROLES) {
+            if (approvers.filter(participant => participant.approvalRole === role).length !== 1) {
+                return `${UAT_APPROVAL_ROLES.find(item => item.value === role)?.label} wajib ditetapkan tepat satu orang.`;
+            }
+        }
+        if (!approvers.some(participant => participant.approvalRole === 'developer')) {
+            return 'Minimal satu Developer wajib ditetapkan sebagai approver.';
+        }
+        if (approvers.some(participant => !participant.name?.trim())) return 'Nama seluruh approver wajib diisi.';
+        if (approvers.some(participant => participant.approvalMode === 'external_link' && !participant.phone?.trim())) {
+            return 'Nomor HP seluruh approver pihak peminta wajib diisi.';
+        }
+        const invalidExternalApprover = approvers.find(participant => (
+            participant.approvalMode === 'external_link' && !normalizeIndonesianPhone(participant.phone)
+        ));
+        if (invalidExternalApprover) {
+            return `Nomor HP ${invalidExternalApprover.name || 'approver pihak peminta'} tidak valid. Gunakan format 08... atau +62...`;
+        }
+        if (approvers.some(participant => participant.approvalMode === 'internal_account' && !participant.userId)) {
+            return 'Seluruh approver pihak IT wajib ditautkan ke akun aplikasi.';
+        }
+        const invalidDeveloper = approvers.find(participant => participant.approvalRole === 'developer'
+            && !projectDeveloperUserIds.has(Number(participant.userId)));
+        if (invalidDeveloper) {
+            return `${invalidDeveloper.name || 'Developer yang dipilih'} bukan developer yang mengerjakan task pada proyek ini.`;
+        }
+        return '';
+    })();
+
     // Skenario UAT otomatis dari task (nama task sebagai daftar skenario)
     const uatScenarioTasks = useMemo(() => {
         if (!Array.isArray(project?.tasks)) return [];
-        return project.tasks.filter(t => String(t.status || '').toLowerCase() !== 'take_down');
-    }, [project?.tasks]);
+        const additionalRequestTaskIds = new Set(
+            (uat2.additionalRequests || []).map(item => Number(item.taskId)).filter(Boolean)
+        );
+        return project.tasks.filter(task => String(task.status || '').toLowerCase() !== 'take_down'
+            && !additionalRequestTaskIds.has(Number(task.id)));
+    }, [project?.tasks, uat2.additionalRequests]);
 
     const handleSaveUATStep = async (step) => {
         const nextStep = step + 1;
@@ -796,50 +1816,219 @@ export default function SITUATWizard({ project, updateProject, addNotification, 
             toast.error('Unggah minimal 1 dokumen undangan UAT sebelum lanjut ke Eksekusi.');
             return;
         }
+        if (step === 1 && uatApproverValidation) {
+            setSubmitting(false);
+            toast.error(uatApproverValidation);
+            return;
+        }
         if (step === 1) await uploadAllDrafts(setUat1, uat1.docs);
-        if (step === 2) await uploadAllDrafts(setUat2, uat2.docs);
         setActiveUatStep(nextStep);
         updateProject(project.id, { status: 'UAT_IN_PROGRESS', sitUatData: buildSitUatData({ activeUatStep: nextStep }) });
         toast.success(`UAT Tahap ${step} tersimpan. Lanjut ke Tahap ${nextStep}.`);
         setSubmitting(false);
     };
 
-    const handleUATPass = async () => {
-        setSubmitting(true);
-        await uploadAllDrafts(setUat3, uat3.docs);
-        updateProject(project.id, {
-            status: 'DEV_COMPLETED',
-            uatPassedAt: new Date().toISOString(),
-            sitUatData: buildSitUatData({ activeUatStep: 3 }),
-        });
-        addNotification?.('BAST Diterbitkan — DEV COMPLETED!', `Proyek "${project.name}" lulus SIT & UAT Internal. Siap QA & Siber.`, 'success', '/pm/workspace');
-        toast.success(`🎉 BAST Diterbitkan! Proyek resmi berstatus DEV_COMPLETED.`);
-        setSubmitting(false);
+    const buildUatExecutionPayload = () => ({
+        scenarios: (uat2.scenarios || []).map(item => ({
+            id: item.id,
+            task_id: item.taskId,
+            scenario: item.scenario.trim(),
+            result: item.result || null,
+            change_type: item.result === 'revision' ? (item.changeType || null) : null,
+            request: item.result === 'revision' ? (item.request.trim() || null) : null,
+            comment: item.comment?.trim() || null,
+            attachments: (item.attachments || []).map(document => ({ docId: document.docId })),
+        })),
+        additional_requests: (uat2.additionalRequests || []).map(item => ({
+            id: item.id,
+            title: item.title.trim() || null,
+            change_type: item.changeType || null,
+            detail: item.detail.trim() || null,
+            comment: item.comment?.trim() || null,
+            attachments: (item.attachments || []).map(document => ({ docId: document.docId })),
+        })),
+        notes: uat2.execNotes.trim() || null,
+    });
+
+    const handleSaveUATDraft = async () => {
+        if (!project?.id) return;
+        if (uploadingUatScenarioId) {
+            toast.error('Tunggu hingga seluruh lampiran bukti selesai diunggah sebelum menyimpan draft.');
+            return;
+        }
+
+        setSavingUatDraft(true);
+        try {
+            await projectService.saveUatExecutionDraft(project.id, buildUatExecutionPayload());
+            toast.success('Draft Eksekusi UAT berhasil disimpan. Data masih dapat diperbarui sebelum disubmit final.');
+            refreshProject?.();
+        } catch (error) {
+            toast.error(`Gagal menyimpan draft Eksekusi UAT: ${error.message}`);
+        } finally {
+            setSavingUatDraft(false);
+        }
     };
 
-    // ── Persetujuan UAT multi-role: business_user (pemohon), pm, development_lead ──
-    // Role user saat ini untuk approval UAT
-    const uatCurrentRoleKey = ['development_lead'].includes(user?.role)
-        ? 'development_lead'
-        : (['dev_analyst', 'project_manager'].includes(user?.role) ? 'pm' : (user?.role === 'business_user' ? 'business_user' : null));
-    const uat3Approvals = sitUatData.uat3_approvals || {};
-    const allUatApproved = ['business_user', 'pm', 'development_lead'].every(
-        rk => uat3Approvals?.[rk]?.approved === true
-    );
+    const handleSubmitUatExecution = async () => {
+        if (uat2Validation) {
+            toast.error(uat2Validation);
+            return;
+        }
+        if (uatApproverValidation) {
+            setActiveUatStep(1);
+            toast.error(`Data approver harus diperbaiki di UAT Tab 1: ${uatApproverValidation}`);
+            return;
+        }
 
+        setSubmitting(true);
+        try {
+            const response = await projectService.submitUatExecution(project.id, buildUatExecutionPayload());
+            const requiresDevelopmentRevision = response?.meta?.requires_development_revision === true;
+
+            if (requiresDevelopmentRevision) {
+                setSit2Approvals({});
+                setSit3({ reviewNotes: '', docs: [] });
+                setActiveSitStep(1);
+                setActiveUatStep(2);
+                toast.error('Revisi mayor tercatat sebagai Change Request. Proyek dikembalikan ke developer dan wajib menjalani SIT ulang.');
+                addNotification?.(
+                    'Change Request Mayor UAT',
+                    `Proyek "${project.name}" dikembalikan ke developer. Setelah perbaikan, SIT harus diulang.`,
+                    'warning',
+                    '/pm/workspace'
+                );
+            } else {
+                setActiveUatStep(3);
+                toast.success(uat2Summary.minorCount > 0
+                    ? 'Hasil UAT tersimpan. Revisi minor dapat dikerjakan tanpa rollback; lanjut ke Persetujuan Final.'
+                    : 'Seluruh skenario diterima. Lanjut ke Persetujuan Final UAT.');
+            }
+            refreshProject?.();
+        } catch (error) {
+            toast.error(`Hasil UAT gagal disimpan: ${error.message}`);
+        } finally {
+            setSubmitting(false);
+        }
+    };
+
+    const updateUatMajorVerification = (source, itemId, field, value) => {
+        const collectionKey = source === 'scenario' ? 'scenarios' : 'additionalRequests';
+        setUat2(previous => ({
+            ...previous,
+            [collectionKey]: (previous[collectionKey] || []).map(item =>
+                item.id === itemId ? { ...item, [field]: value } : item
+            ),
+        }));
+    };
+
+    const handleSubmitUatMajorVerification = async () => {
+        if (uatMajorVerificationValidation) {
+            toast.error(uatMajorVerificationValidation);
+            return;
+        }
+
+        setSubmitting(true);
+        try {
+            const response = await projectService.submitUatMajorVerification(project.id, {
+                items: uatMajorVerificationItems.map(item => ({
+                    source: item.source,
+                    id: item.id,
+                    result: item.verificationResult,
+                    comment: item.verificationComment?.trim() || null,
+                    attachments: (item.verificationAttachments || []).map(document => ({ docId: document.docId })),
+                })),
+            });
+            const requiresAnotherRevision = response?.meta?.requires_development_revision === true;
+            if (requiresAnotherRevision) {
+                setActiveUatStep(2);
+                toast.error('Sebagian perbaikan Mayor masih belum sesuai. UAT kembali di-hold dan Change Request lanjutan dibuat.');
+            } else {
+                setActiveUatStep(3);
+                toast.success('Seluruh perbaikan Mayor diterima. UAT dilanjutkan ke Persetujuan Final.');
+            }
+            refreshProject?.();
+        } catch (error) {
+            toast.error(`Verifikasi perbaikan Mayor gagal disimpan: ${error.message}`);
+        } finally {
+            setSubmitting(false);
+        }
+    };
+
+    const handleUATPass = async () => {
+        setSubmitting(true);
+        try {
+            await uploadAllDrafts(setUat3, uat3.docs);
+            await projectService.update(project.id, {
+                status: 'DEV_COMPLETED',
+                uatPassedAt: new Date().toISOString(),
+                sitUatData: buildSitUatData({ activeUatStep: 3 }),
+            });
+            addNotification?.('BAST Diterbitkan — DEV COMPLETED!', `Proyek "${project.name}" lulus SIT & UAT Internal. Siap QA & Siber.`, 'success', '/pm/workspace');
+            toast.success('🎉 BAST Diterbitkan! Proyek resmi berstatus DEV_COMPLETED.');
+            refreshProject?.();
+        } catch (error) {
+            toast.error(`UAT belum dapat diselesaikan: ${error.message}`);
+        } finally {
+            setSubmitting(false);
+        }
+    };
+
+    // ── Matrix persetujuan UAT per orang dan per putaran ──
+    const [uatApprovalMatrix, setUatApprovalMatrix] = useState(null);
+    const [uatMatrixLoading, setUatMatrixLoading] = useState(false);
     const [uatApprovalNote, setUatApprovalNote] = useState('');
     const [uatApprovalSubmitting, setUatApprovalSubmitting] = useState(false);
-    const handleSubmitUatApproval = async () => {
-        if (!uatCurrentRoleKey || !project?.id) return;
-        if (uat3Approvals?.[uatCurrentRoleKey]?.approved) {
-            toast.info('Anda sudah memberikan persetujuan UAT.');
+    const canManageUatApprovals = ['super_admin', 'head_of_it'].includes(user?.role)
+        || (['dev_analyst', 'project_manager'].includes(user?.role) && Number(project?.pm?.id || project?.pm_id) === Number(user?.id));
+    const allUatApproved = uatApprovalMatrix?.all_approved === true;
+    const hasRecordedUatApprovalDecision = (uatApprovalMatrix?.approvers || []).some(
+        approver => approver.status !== 'pending'
+    );
+    const externalUatApprovers = (uatApprovalMatrix?.approvers || []).filter(
+        approver => approver.approval_mode === 'external_link'
+    );
+    const currentUserUatApprovals = (uatApprovalMatrix?.approvers || []).filter(
+        approver => approver.approval_mode === 'internal_account' && Number(approver.user_id) === Number(user?.id)
+    );
+
+    const loadUatApprovalMatrix = useCallback(async (showLoading = true) => {
+        if (!project?.id || activeUatStep < 3) return;
+        if (showLoading) setUatMatrixLoading(true);
+        try {
+            const response = await projectService.getUatApprovalMatrix(project.id);
+            setUatApprovalMatrix(response?.data || null);
+        } catch (error) {
+            if (error.status !== 404) toast.error(`Gagal memuat matrix approval UAT: ${error.message}`);
+        } finally {
+            setUatMatrixLoading(false);
+        }
+    }, [activeUatStep, project]);
+
+    useEffect(() => {
+        let cancelled = false;
+        if (!project?.id || activeUatStep < 3) return undefined;
+        projectService.getUatApprovalMatrix(project.id)
+            .then(response => {
+                if (!cancelled) setUatApprovalMatrix(response?.data || null);
+            })
+            .catch(error => {
+                if (!cancelled && error.status !== 404) toast.error(`Gagal memuat matrix approval UAT: ${error.message}`);
+            });
+        return () => { cancelled = true; };
+    }, [activeUatStep, project?.id]);
+
+    const handleSubmitUatApproval = async (approverId, decision = 'approved') => {
+        if (!approverId || !project?.id) return;
+        if (decision === 'rejected' && !uatApprovalNote.trim()) {
+            toast.error('Alasan penolakan atau permintaan revisi wajib diisi.');
             return;
         }
         setUatApprovalSubmitting(true);
         try {
-            await projectService.submitUatApproval(project.id, uatApprovalNote.trim());
-            toast.success('Persetujuan UAT Anda berhasil disimpan.');
+            await projectService.submitUatApproval(project.id, approverId, decision, uatApprovalNote.trim());
+            toast.success(decision === 'approved' ? 'Persetujuan UAT Anda berhasil disimpan.' : 'Penolakan UAT berhasil disimpan.');
             setUatApprovalNote('');
+            await loadUatApprovalMatrix();
             refreshProject?.();
         } catch (err) {
             toast.error(`Gagal menyimpan persetujuan: ${err.message}`);
@@ -848,77 +2037,57 @@ export default function SITUATWizard({ project, updateProject, addNotification, 
         }
     };
 
-    // ── Change Request UAT (diajukan business_user) ──
+    const handleCopyExternalApprovalLink = async (approver) => {
+        if (uatApprovalSubmitting) return;
+        setUatApprovalSubmitting(true);
+        try {
+            const response = await projectService.generateUatApprovalLink(project.id, approver.id);
+            const url = `${window.location.origin}/uat-approval/${response.data.token}`;
+            if (navigator.clipboard?.writeText) {
+                await navigator.clipboard.writeText(url);
+                toast.success(`Link pribadi untuk ${approver.name} berhasil dibuat dan disalin.`);
+            } else {
+                window.prompt(`Salin link pribadi untuk ${approver.name}:`, url);
+            }
+            await loadUatApprovalMatrix();
+        } catch (error) {
+            toast.error(`Gagal membuat link: ${error.message}`);
+        } finally {
+            setUatApprovalSubmitting(false);
+        }
+    };
+
+    const handleRestartUatApprovalRound = async () => {
+        if (!window.confirm('Putaran aktif akan ditutup dan seluruh approval harus dilakukan ulang. Lanjutkan?')) return;
+        setUatApprovalSubmitting(true);
+        try {
+            await projectService.restartUatApprovalRound(project.id);
+            await loadUatApprovalMatrix();
+            toast.success('Putaran approval UAT baru berhasil dibuat dari peserta terbaru.');
+        } catch (error) {
+            toast.error(`Gagal membuat putaran baru: ${error.message}`);
+        } finally {
+            setUatApprovalSubmitting(false);
+        }
+    };
+
+    const handleSyncUatApprovalRound = async () => {
+        if (!window.confirm('Sinkronkan matrix Tab 3 dengan daftar approver terbaru di Tab 1? Approval yang sudah sah tetap dipertahankan.')) return;
+        setUatApprovalSubmitting(true);
+        try {
+            const response = await projectService.syncUatApprovalRound(project.id);
+            setUatApprovalMatrix(response?.data || null);
+            toast.success('Matrix approval UAT berhasil disinkronkan dengan peserta Tab 1.');
+            refreshProject?.();
+        } catch (error) {
+            toast.error(`Gagal menyinkronkan peserta approval: ${error.message}`);
+        } finally {
+            setUatApprovalSubmitting(false);
+        }
+    };
+
+    // Riwayat Change Request, termasuk yang dibentuk otomatis dari UAT Tahap 2.
     const uatChangeRequests = sitUatData.uat_change_requests || [];
-    const [showCrModal, setShowCrModal] = useState(false);
-    const [crForm, setCrForm] = useState({ type: 'minor', title: '', detail: '', category: '' });
-    const [crSubmitting, setCrSubmitting] = useState(false);
-    const handleSubmitChangeRequest = async () => {
-        if (!crForm.title.trim() || !crForm.detail.trim()) {
-            toast.error('Judul dan detail change request wajib diisi!');
-            return;
-        }
-        setCrSubmitting(true);
-        try {
-            await projectService.submitUatChangeRequest(project.id, {
-                type: crForm.type,
-                title: crForm.title.trim(),
-                detail: crForm.detail.trim(),
-                category: crForm.category,
-            });
-            toast.success('Change request UAT berhasil diajukan.');
-            setShowCrModal(false);
-            setCrForm({ type: 'minor', title: '', detail: '', category: '' });
-            refreshProject?.();
-        } catch (err) {
-            toast.error(`Gagal mengajukan change request: ${err.message}`);
-        } finally {
-            setCrSubmitting(false);
-        }
-    };
-
-    // Putuskan change request (oleh PM/Dev Lead/admin)
-    const [crDecisionSubmitting, setCrDecisionSubmitting] = useState(null);
-    const handleDecideChangeRequest = async (cr, decision) => {
-        setCrDecisionSubmitting(cr.id);
-        try {
-            const note = window.prompt(
-                `Catatan ${decision === 'approved' ? 'persetujuan' : 'penolakan'} change request "${cr.title}" (opsional):`,
-                ''
-            );
-            await projectService.decideUatChangeRequest(project.id, { cr_id: cr.id, decision, note: note || '' });
-            toast.success(`Change request ${decision === 'approved' ? 'disetujui' : 'ditolak'}.`);
-            refreshProject?.();
-        } catch (err) {
-            toast.error(`Gagal memproses change request: ${err.message}`);
-        } finally {
-            setCrDecisionSubmitting(null);
-        }
-    };
-
-    const handleUATRevision = () => {
-        if (!revisionNotes.trim()) { toast.error('Catatan revisi wajib diisi!'); return; }
-        setSubmitting(true);
-        const newStatus = revisionType === 'UAT_TO_SIT' ? 'UAT_REVISION_SIT' : 'UAT_REVISION_DEV';
-        const newRevision = { type: revisionType, notes: revisionNotes.trim(), at: new Date().toISOString(), by: sf(project?.pm, 'Tim TI') };
-        const newRevisions = [...revisions, newRevision];
-        const nextActiveSit = revisionType === 'UAT_TO_SIT' ? 1 : (sitUatData.activeSitStep || 1);
-        updateProject(project.id, {
-            status: newStatus,
-            sitUatData: buildSitUatData({ revisions: newRevisions, activeUatStep: 1, activeSitStep: nextActiveSit }),
-        });
-        addNotification?.(
-            revisionType === 'UAT_TO_SIT' ? 'UAT Dikembalikan ke SIT' : 'UAT Dikembalikan ke Development',
-            `Proyek "${project.name}" mengalami ${revisionType === 'UAT_TO_SIT' ? 'revisi minor (ulang SIT)' : 'revisi mayor (kembali ke dev)'}.`,
-            'warning',
-            '/pm/workspace'
-        );
-        toast.warning(`Revisi ${revisionType === 'UAT_TO_SIT' ? 'minor (ulang SIT)' : 'mayor (kembali ke dev)'} diproses.`);
-        setRevisionNotes('');
-        setShowRevisionModal(false);
-        setSubmitting(false);
-    };
-
     // ── Handler: Kembalikan Task ke Developer (alur revisi task terintegrasi) ──
     const handleReturnTaskRevision = async () => {
         if (!showTaskRevisionModal) return;
@@ -999,7 +2168,7 @@ export default function SITUATWizard({ project, updateProject, addNotification, 
             <div className="bg-white rounded-2xl border border-gray-200 p-4 shadow-sm">
                 <div className="flex items-center gap-2 mb-2">
                     <ShieldCheck size={16} className="text-sky-600" />
-                    <h4 className="font-bold text-sm text-gray-800">Syarat Masuk SIT (Gate) — Task Developer</h4>
+                    <h4 className="font-bold text-sm text-gray-800">Syarat Masuk SIT (Gate) — {isTargetedSitRetest ? 'Scope Revisi Mayor' : 'Task Developer'}</h4>
                 </div>
                 {(() => {
                     const gate = taskGate();
@@ -1020,8 +2189,10 @@ export default function SITUATWizard({ project, updateProject, addNotification, 
                                 {gate.total === 0
                                     ? 'Belum ada task developer. Buat & selesaikan task sebelum memulai SIT.'
                                     : gate.canStart
-                                        ? 'Semua task telah selesai. SIT siap dimulai.'
-                                        : 'Masih ada task belum selesai. Selesaikan seluruh task (kecuali "Take Down") sebelum memulai SIT.'}
+                                        ? `Semua task ${isTargetedSitRetest ? 'dalam scope revisi ' : ''}telah selesai. SIT siap dimulai.`
+                                        : isTargetedSitRetest
+                                            ? 'Masih ada task dalam scope revisi yang belum selesai atau belum memiliki assignee.'
+                                            : 'Masih ada task yang belum selesai.'}
                             </p>
                         </div>
                     );
@@ -1052,7 +2223,7 @@ export default function SITUATWizard({ project, updateProject, addNotification, 
                     <AlertTriangle size={18} className="text-red-600 shrink-0 mt-0.5" />
                     <div>
                         <p className="font-bold text-red-900 text-sm">UAT Memerlukan Revisi Mayor ke Development</p>
-                        <p className="text-xs text-red-800 mt-0.5">Issue kritis ditemukan saat UAT. Pengembangan harus diulang. SIT dan UAT akan dimulai dari awal.</p>
+                        <p className="text-xs text-red-800 mt-0.5">Change Request mayor harus diselesaikan developer. Setelah perbaikan, jalankan SIT ulang; jika lulus, kembali ke UAT Tab 2 untuk memverifikasi hanya item Mayor sebelum Persetujuan Final.</p>
                     </div>
                 </div>
             )}
@@ -1084,6 +2255,7 @@ export default function SITUATWizard({ project, updateProject, addNotification, 
                     <div className="p-6">
                         <RevisionBanner revisions={revisions} type="SIT_TO_DEV" />
                         <RevisionBanner revisions={revisions} type="UAT_TO_DEV" />
+                        <RevisionBanner revisions={revisions} type="UAT_CHANGE_MAYOR" />
                         <div className="text-center py-4">
                             <Server size={36} className="mx-auto text-sky-400 mb-3" />
                             <p className="text-sm font-semibold text-gray-700 mb-1">
@@ -1125,8 +2297,22 @@ export default function SITUATWizard({ project, updateProject, addNotification, 
                                     {sit1Done && <span className="ml-auto text-[10px] font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">Selesai ✓</span>}
                                 </div>
                                 <p className="text-xs text-gray-500 mb-3">
-                                    Lengkapi environment yang akan diuji. Jumlah skenario otomatis mengikuti task yang sudah Selesai.
+                                    {isTargetedSitRetest
+                                        ? 'SIT ulang ini bersifat terarah. Environment tetap disiapkan, tetapi skenario hanya mencakup task yang terkena Change Request Mayor pada siklus aktif.'
+                                        : 'Lengkapi environment yang akan diuji. Jumlah skenario otomatis mengikuti task yang sudah Selesai.'}
                                 </p>
+
+                                {isTargetedSitRetest && (
+                                    <div className="rounded-xl border border-violet-200 bg-violet-50 p-4 flex items-start gap-3 text-violet-800">
+                                        <RotateCcw size={16} className="shrink-0 mt-0.5" />
+                                        <div>
+                                            <p className="text-xs font-bold">SIT Ulang Terarah — Siklus #{sitRetestCycle}</p>
+                                            <p className="text-[11px] mt-1 leading-relaxed">
+                                                Hanya {sitRetestTaskIds.length} task yang terdampak revisi/request Mayor yang diuji ulang. Task lain mempertahankan hasil SIT sebelumnya dan tidak masuk ke tabel eksekusi siklus ini.
+                                            </p>
+                                        </div>
+                                    </div>
+                                )}
 
                                 {/* Kartu utama: URL Staging + jumlah skenario */}
                                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
@@ -1173,8 +2359,8 @@ export default function SITUATWizard({ project, updateProject, addNotification, 
                                         : <AlertTriangle size={15} className="text-amber-500 shrink-0" />}
                                     <span className="font-semibold">
                                         {taskGate().canStart
-                                            ? 'Semua task sudah Selesai — SIT siap dilaksanakan.'
-                                            : `Masih ada ${taskGate().incomplete.length} task belum selesai. Selesai-kan semua task agar skenario tercatat otomatis.`}
+                                            ? `Semua task ${isTargetedSitRetest ? 'dalam scope revisi ' : ''}sudah Selesai — SIT siap dilaksanakan.`
+                                            : `Masih ada ${taskGate().incomplete.length} task dalam scope yang belum selesai.`}
                                     </span>
                                 </div>
 
@@ -1228,9 +2414,11 @@ export default function SITUATWizard({ project, updateProject, addNotification, 
                                         <Info size={14} className="shrink-0" />
                                         <span className="font-semibold">
                                             Pass Rate Task: {taskGate().total > 0 ? Math.round((approvedTaskCount / taskGate().total) * 100) : 0}%
-                                            {approvedTaskCount === taskGate().total
-                                                ? ' ✓ Semua task disetujui — siap lanjut ke Review & Sign-Off.'
-                                                : ' ⚠ Masih ada task belum disetujui (OK). Lanjut hanya jika SEMUA task dicentang OK.'}
+                                            {!sit2Validation
+                                                ? ' ✓ Seluruh syarat lengkap — siap dilanjutkan ke approval.'
+                                                : approvedTaskCount === taskGate().total
+                                                    ? ` ⚠ ${sit2Validation}`
+                                                    : ' ⚠ Masih ada task dalam scope yang belum disetujui (OK).'}
                                         </span>
                                     </div>
                                 )}
@@ -1242,21 +2430,34 @@ export default function SITUATWizard({ project, updateProject, addNotification, 
                                         <h5 className="font-bold text-sm text-gray-800">Persetujuan Task Developer (Syarat Lanjut SIT)</h5>
                                     </div>
                                     <p className="text-[11px] text-gray-500 mb-2">
-                                        Centang <strong>OK</strong> pada setiap task yang sudah lolos &amp; disetujui tim. Lampirkan <strong>bukti</strong> (screenshot/file) per task melalui kolom <strong>Lampiran Bukti</strong>. Gunakan <strong>Revisi</strong> untuk mengembalikan task ke developer. Lanjut ke Review &amp; Sign-Off hanya jika SEMUA task disetujui.
+                                        Centang <strong>OK</strong> pada setiap task dalam scope yang sudah lolos. Lampirkan <strong>bukti pengujian baru</strong> per task. Gunakan <strong>Revisi</strong> bila hasil belum sesuai. Lanjut ke Review &amp; Sign-Off hanya jika seluruh task dalam scope disetujui.
                                     </p>
                                     <SITTaskExecution
                                         project={project}
                                         approvals={sit2Approvals}
                                         onApprovalsChange={handleApprovalsChange}
                                         onRequestRevision={setShowTaskRevisionModal}
+                                        taskIds={eligibleTaskIds}
+                                        isTargetedRetest={isTargetedSitRetest}
                                     />
                                 </div>
 
+                                <div className="rounded-xl border border-indigo-200 bg-indigo-50 p-3 text-[11px] text-indigo-800">
+                                    {isTargetedSitRetest
+                                        ? <>Simpan sebagai <strong>draft</strong> jika pengujian belum selesai. Finalisasi hanya dapat dilakukan setelah seluruh task dalam scope selesai, disetujui, dan memiliki lampiran bukti baru untuk siklus ini.</>
+                                        : <>Simpan sebagai <strong>draft</strong> jika pengujian atau revisi belum selesai. Finalisasi hanya dapat dilakukan setelah seluruh task selesai dan disetujui, serta task hasil revisi memiliki lampiran bukti baru.</>}
+                                </div>
+
                                 {!sitDone && (status === 'SIT_IN_PROGRESS' || UNLOCK_ALL_STAGES) && activeSitStep === 2 && (
-                                    <div className="flex justify-end pt-2">
-                                        <button onClick={() => handleSaveSITStep(2)} disabled={taskGate().total === 0 || approvedTaskCount !== taskGate().total}
+                                    <div className="flex flex-col-reverse sm:flex-row sm:justify-end gap-2 pt-2">
+                                        <button onClick={handleSaveSITDraft} disabled={submitting || taskGate().total === 0}
+                                            className="px-5 py-2.5 bg-white hover:bg-indigo-50 disabled:bg-gray-100 disabled:text-gray-400 disabled:cursor-not-allowed text-indigo-700 border border-indigo-300 text-xs font-bold rounded-xl flex items-center justify-center gap-2 transition-all cursor-pointer">
+                                            {submitting ? <Clock size={14} /> : <Save size={14} />}
+                                            {submitting ? 'Menyimpan...' : 'Simpan sebagai Draft'}
+                                        </button>
+                                        <button onClick={() => handleSaveSITStep(2)} disabled={Boolean(sit2Validation) || submitting}
                                             className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-white text-xs font-bold rounded-xl flex items-center gap-2 transition-all cursor-pointer">
-                                            Simpan &amp; Lanjut Review <ArrowRight size={14} />
+                                            Simpan Final &amp; Lanjut Approval <ArrowRight size={14} />
                                         </button>
                                     </div>
                                 )}
@@ -1318,11 +2519,10 @@ export default function SITUATWizard({ project, updateProject, addNotification, 
                                             let detail = null;
                                             if (isDev) {
                                                 approved = devApproved;
-                                                const devList = ap?.developers || [];
                                                 detail = devApproved
                                                     ? `✓ ${approvedDeveloperCount}/${requiredDeveloperCount} developer menyetujui`
-                                                    : devList.length > 0
-                                                        ? `${devList.length}/${requiredDeveloperCount} developer menyetujui`
+                                                    : approvedDeveloperCount > 0
+                                                        ? `${approvedDeveloperCount}/${requiredDeveloperCount} developer menyetujui`
                                                         : 'Belum ada developer menyetujui';
                                             } else {
                                                 approved = ap?.approved === true;
@@ -1363,7 +2563,7 @@ export default function SITUATWizard({ project, updateProject, addNotification, 
                                     </div>
 
                                     {/* Form approval untuk role saat ini */}
-                                    {currentRoleKey === 'developer' && !devApproved && !sitDone && (
+                                    {currentRoleKey === 'developer' && isCurrentUserRequiredDeveloper && !hasCurrentDeveloperApproved && !sitDone && (
                                         <div className="mt-3 p-3 bg-teal-50 border border-teal-200 rounded-xl">
                                             <p className="text-[11px] font-bold text-teal-800 mb-2 flex items-center gap-1.5">
                                                 <UserCheck size={13} /> Anda (sebagai Developer) dapat menyetujui SIT
@@ -1388,7 +2588,7 @@ export default function SITUATWizard({ project, updateProject, addNotification, 
                                             </button>
                                         </div>
                                     )}
-                                    {currentRoleKey === 'developer' && devApproved && (
+                                    {currentRoleKey === 'developer' && isCurrentUserRequiredDeveloper && hasCurrentDeveloperApproved && (
                                         <p className="text-[10px] text-emerald-600 mt-2 flex items-center gap-1">
                                             <CheckCircle2 size={11} /> Anda telah menyetujui SIT pada proyek ini.
                                         </p>
@@ -1436,19 +2636,42 @@ export default function SITUATWizard({ project, updateProject, addNotification, 
                                 {/* Dokumen Hasil Review */}
                                 <div>
                                     <div className="flex items-center justify-between mb-1.5">
-                                        <label className="text-xs font-bold text-gray-600 uppercase tracking-wider">Dokumen: Hasil Review / Berita Acara SIT</label>
-                                        {!sitDone && (
+                                        <div className="flex items-center gap-2">
+                                            <label className="text-xs font-bold text-gray-600 uppercase tracking-wider">Dokumen: Hasil Review / Berita Acara SIT</label>
+                                            <span className="px-2 py-0.5 rounded-full bg-red-50 text-red-600 border border-red-200 text-[9px] font-extrabold uppercase">Wajib</span>
+                                        </div>
+                                        {!sitDone && !isViewer && (
                                             <label className={`px-3 py-1.5 bg-teal-600 hover:bg-teal-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 transition-colors ${uploadingCategory === 'SIT_SIGNOFF' ? 'opacity-60 cursor-wait' : 'cursor-pointer'}`}>
                                                 {uploadingCategory === 'SIT_SIGNOFF' ? (
                                                     <><span className="w-3 h-3 border-2 border-white/40 border-t-white rounded-full animate-spin" /> Mengunggah...</>
                                                 ) : (
                                                     <><Upload size={12} /> Upload</>
                                                 )}
-                                                <input type="file" ref={sit3FileRef} multiple accept=".pdf,.xls,.xlsx,.jpg,.jpeg,.png,.zip" onChange={e => onUpload(e, setSit3, 'docs', 'SIT_SIGNOFF')} className="hidden" />
+                                                <input type="file" ref={sit3FileRef} multiple accept=".pdf,.xls,.xlsx,.jpg,.jpeg,.png,.zip" disabled={isSitSignOffUploading} onChange={e => onUpload(e, setSit3, 'SIT_SIGNOFF')} className="hidden" />
                                             </label>
                                         )}
                                     </div>
-                                    <DocList docs={sit3.docs} onRemove={i => onRemoveDoc(setSit3, i)} onView={viewDoc} onDownload={downloadDoc} onTypeChange={(i, t) => changeDocType(setSit3, i, t)} docTypeOptions={docTypeOptions('SIT_SIGNOFF')} readOnly={sitDone} />
+                                    <p className="text-[10px] text-gray-500 mb-2">
+                                        Minimal satu dokumen harus selesai diunggah ke server sebelum SIT dapat dinyatakan lulus.
+                                    </p>
+                                    <DocList
+                                        docs={sit3.docs}
+                                        onRemove={removeSitSignOffDocument}
+                                        onView={viewDoc}
+                                        onDownload={downloadDoc}
+                                        docTypeOptions={docTypeOptions('SIT_SIGNOFF')}
+                                        readOnly={sitDone || isSitSignOffUploading}
+                                        allowTypeChange={false}
+                                    />
+                                    {hasUploadedSitSignOffDocument ? (
+                                        <p className="mt-2 text-[10px] font-semibold text-emerald-700 flex items-center gap-1">
+                                            <CheckCircle2 size={11} /> Dokumen wajib telah tersimpan di server.
+                                        </p>
+                                    ) : (
+                                        <p className="mt-2 text-[10px] font-semibold text-amber-700 flex items-center gap-1">
+                                            <AlertTriangle size={11} /> Tombol lanjut ke UAT tetap terkunci sampai dokumen berhasil diunggah.
+                                        </p>
+                                    )}
                                 </div>
 
                                 {/* Action buttons (hanya non-viewer) — revisi dilakukan di Tahap 2 */}
@@ -1456,18 +2679,22 @@ export default function SITUATWizard({ project, updateProject, addNotification, 
                                     <div className="flex flex-col gap-3 pt-2 border-t border-gray-100">
                                         <button
                                             onClick={handleSITPass}
-                                            disabled={submitting || !sit3.reviewNotes || !allSitApproved}
-                                            title={allSitApproved ? '' : 'Semua persetujuan (Developer, PM / Analyst Pengembangan, Development Lead) harus lengkap terlebih dahulu'}
-                                            className={`w-full px-6 py-3 text-white text-sm font-bold rounded-xl flex items-center justify-center gap-2 transition-all shadow-sm active:scale-95 ${allSitApproved && sit3.reviewNotes ? 'bg-teal-600 hover:bg-teal-700 cursor-pointer' : 'bg-gray-300 cursor-not-allowed'}`}
+                                            disabled={submitting || !canPassSit}
+                                            title={sitPassBlockedReason}
+                                            className={`w-full px-6 py-3 text-white text-sm font-bold rounded-xl flex items-center justify-center gap-2 transition-all shadow-sm active:scale-95 ${canPassSit && !submitting ? 'bg-teal-600 hover:bg-teal-700 cursor-pointer' : 'bg-gray-300 cursor-not-allowed'}`}
                                         >
-                                            <CheckCircle2 size={14} /> SIT Lulus — Lanjut ke UAT Internal
+                                            {submitting ? (
+                                                <><span className="w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin" /> Memproses Kelulusan SIT...</>
+                                            ) : (
+                                                <><CheckCircle2 size={14} /> {sitUatData.uat2_resume_after_sit ? 'SIT Ulang Lulus — Verifikasi Mayor di UAT' : 'SIT Lulus — Lanjut ke UAT Internal'}</>
+                                            )}
                                         </button>
+                                        {sitPassBlockedReason && (
+                                            <p className="text-[10px] text-amber-700 text-right flex items-center justify-end gap-1">
+                                                <Lock size={10} /> {sitPassBlockedReason}
+                                            </p>
+                                        )}
                                     </div>
-                                )}
-                                {!allSitApproved && !sitDone && !isViewer && (
-                                    <p className="text-[10px] text-gray-400 text-right">
-                                        Tombol "SIT Lulus" aktif setelah Developer, PM / Analyst Pengembangan, dan Development Lead menyetujui.
-                                    </p>
                                 )}
                                 {sitDone && (
                                     <div className="flex items-center gap-2 p-3 bg-teal-50 border border-teal-200 rounded-xl text-xs text-teal-800">
@@ -1517,13 +2744,17 @@ export default function SITUATWizard({ project, updateProject, addNotification, 
                 {(status === 'SIT_PASSED' && !UNLOCK_ALL_STAGES) && (
                     <div className="p-6 text-center">
                         <CheckSquare size={36} className="mx-auto text-amber-400 mb-3" />
-                        <p className="text-sm font-semibold text-gray-700 mb-1">SIT telah lulus! Siap memulai UAT Internal.</p>
-                        <p className="text-xs text-gray-500 mb-4">Pastikan PM dan perwakilan Divisi Peminta sudah siap untuk pengujian fungsional bisnis.</p>
+                        <p className="text-sm font-semibold text-gray-700 mb-1">
+                            {uat2AwaitingMajorVerification ? 'SIT ulang telah lulus! Siap memverifikasi perbaikan Mayor.' : 'SIT telah lulus! Siap memulai UAT Internal.'}
+                        </p>
+                        <p className="text-xs text-gray-500 mb-4">
+                            {uat2AwaitingMajorVerification ? 'Hasil UAT sebelumnya tetap terkunci; hanya item Mayor yang perlu diverifikasi ulang oleh user.' : 'Pastikan PM dan perwakilan Divisi Peminta sudah siap untuk pengujian fungsional bisnis.'}
+                        </p>
                         <button
                             onClick={handleStartUAT}
                             className="px-6 py-2.5 bg-amber-500 hover:bg-amber-600 text-white font-bold text-sm rounded-xl transition-all shadow-md cursor-pointer flex items-center gap-2 mx-auto"
                         >
-                            <ArrowRight size={16} /> Mulai UAT Internal
+                            <ArrowRight size={16} /> {uat2AwaitingMajorVerification ? 'Verifikasi Perbaikan Mayor' : 'Mulai UAT Internal'}
                         </button>
                     </div>
                 )}
@@ -1613,8 +2844,22 @@ export default function SITUATWizard({ project, updateProject, addNotification, 
                                     </div>
                                     <div>
                                         <label className="block text-xs font-bold text-gray-600 uppercase tracking-wider mb-1.5">Tanggal Pelaksanaan *</label>
-                                        <input type="date" value={uat1.startDate} onChange={e => setUat1(p => ({ ...p, startDate: e.target.value }))} disabled={uatDone}
-                                            className="w-full px-3 py-2.5 border border-gray-200 rounded-xl text-xs focus:outline-none focus:border-amber-500 bg-gray-50 disabled:bg-gray-100" />
+                                        <input
+                                            type="date"
+                                            lang="id-ID"
+                                            value={uat1.startDate}
+                                            onChange={e => setUat1(p => ({ ...p, startDate: e.target.value }))}
+                                            placeholder="dd/mm/yyyy"
+                                            aria-label="Tanggal Pelaksanaan UAT"
+                                            aria-invalid={!uat1.startDate}
+                                            disabled={uatDone}
+                                            className={`w-full px-3 py-2.5 border rounded-xl text-xs focus:outline-none focus:border-amber-500 disabled:bg-gray-100 ${uat1.startDate ? 'border-gray-200 bg-gray-50' : 'border-amber-300 bg-amber-50/50 text-gray-500'}`}
+                                        />
+                                        {!uat1.startDate && !uatDone && (
+                                            <p className="text-[10px] text-amber-700 mt-1 flex items-center gap-1">
+                                                <AlertTriangle size={10} /> Belum dipilih — tentukan tanggal pelaksanaan UAT.
+                                            </p>
+                                        )}
                                     </div>
                                     <div>
                                         <label className="block text-xs font-bold text-gray-600 uppercase tracking-wider mb-1.5">Disiapkan Oleh (PM / Analis Pengembangan) *</label>
@@ -1629,33 +2874,47 @@ export default function SITUATWizard({ project, updateProject, addNotification, 
                                 <div className="bg-white border border-gray-200 rounded-2xl p-4">
                                     <div className="flex items-center justify-between mb-2">
                                         <label className="text-xs font-bold text-gray-700 uppercase tracking-wider">Peserta yang Terlibat</label>
-                                        {!uatDone && (
+                                        {!uatDone && !isViewer && canManageUatApprovals && (
                                             <button onClick={handleAddUatParticipant} className="px-3 py-1.5 bg-amber-500 hover:bg-amber-600 text-white rounded-lg text-[10px] font-bold flex items-center gap-1 transition-colors cursor-pointer">
                                                 <Plus size={12} /> Tambah Peserta
                                             </button>
                                         )}
                                     </div>
-                                    <p className="text-[11px] text-gray-500 mb-3">
-                                        Otomatis terisi dari pemohon (business user), PM/Analyst Pengembangan, analis, dan developer proyek. Tambahkan pihak lain bila diperlukan.
-                                    </p>
+                                    <div className="mb-3 rounded-xl border border-blue-200 bg-blue-50 p-3">
+                                        <p className="text-[11px] font-bold text-blue-800">Cara pengisian yang baru</p>
+                                        <ol className="mt-1.5 grid gap-1 text-[10px] leading-relaxed text-blue-700 sm:grid-cols-3">
+                                            <li><strong>1.</strong> Pilih keterlibatan atau posisi approval.</li>
+                                            <li><strong>2.</strong> Pihak IT dipilih dari akun; identitas terisi otomatis.</li>
+                                            <li><strong>3.</strong> Link pihak peminta dibuat PM di UAT Tab 3 setelah hasil Tab 2 disimpan final.</li>
+                                        </ol>
+                                    </div>
                                     {uat1.participants.length === 0 ? (
                                         <p className="text-[11px] text-gray-400 italic">Peserta akan terisi otomatis dari pihak yang terlibat dalam proyek.</p>
                                     ) : (
-                                        <div className="border border-gray-200 rounded-xl overflow-hidden">
-                                            <table className="table-auto w-full text-left text-xs">
+                                        <div className="border border-gray-200 rounded-xl overflow-x-auto">
+                                            <table className="table-auto w-full min-w-[1050px] text-left text-xs">
                                                 <thead>
                                                     <tr className="bg-gray-100/80 border-b border-gray-200 text-gray-600 text-[11px] font-bold uppercase tracking-wider">
                                                         <th className="py-2.5 px-4 text-left">Nama Peserta</th>
-                                                        <th className="py-2.5 px-4 text-left">Peran</th>
+                                                        <th className="py-2.5 px-4 text-left">Peran / Kedudukan</th>
                                                         <th className="py-2.5 px-4 text-left">Divisi</th>
-                                                        <th className="py-2.5 px-4 text-left">Kontak</th>
+                                                        <th className="py-2.5 px-4 text-left">No. HP Verifikasi</th>
+                                                        <th className="py-2.5 px-4 text-left min-w-72">Keterlibatan &amp; Approval</th>
                                                         <th className="py-2.5 px-4 text-center w-24">Aksi</th>
                                                     </tr>
                                                 </thead>
                                                 <tbody className="divide-y divide-gray-100">
                                                     {uat1.participants.map((p, idx) => {
                                                         const isEditing = editingUatIdx === idx;
-                                                        const editable = !uatDone;
+                                                        const editable = !uatDone && !isViewer && canManageUatApprovals;
+                                                        const approvalRole = UAT_APPROVAL_ROLES.find(role => role.value === p.approvalRole);
+                                                        const hasInvalidPhone = p.approvalMode === 'external_link'
+                                                            && Boolean(p.phone?.trim())
+                                                            && !normalizeIndonesianPhone(p.phone);
+                                                        const eligibleInternalAccounts = uatInternalUsers.filter(account => (
+                                                            (UAT_INTERNAL_ACCOUNT_ROLES[p.approvalRole] || []).includes(account.role)
+                                                            && (p.approvalRole !== 'developer' || projectDeveloperUserIds.has(Number(account.id)))
+                                                        ));
                                                         return (
                                                             <tr key={idx} className={`hover:bg-amber-50/40 transition-colors ${isEditing ? 'bg-amber-50/60' : ''}`}>
                                                                 {/* Nama */}
@@ -1665,22 +2924,29 @@ export default function SITUATWizard({ project, updateProject, addNotification, 
                                                                             type="text"
                                                                             value={p.name}
                                                                             onChange={e => handleUatParticipantChange(idx, 'name', e.target.value)}
-                                                                            placeholder="Nama peserta"
-                                                                            className="w-full px-2.5 py-1.5 border border-amber-300 rounded-lg text-xs focus:outline-none focus:border-amber-500 bg-white"
+                                                                            placeholder={p.approvalMode === 'internal_account' ? 'Terisi dari akun IT' : 'Nama peserta'}
+                                                                            disabled={p.approvalMode === 'internal_account'}
+                                                                            className="w-full px-2.5 py-1.5 border border-amber-300 rounded-lg text-xs focus:outline-none focus:border-amber-500 bg-white disabled:bg-gray-100 disabled:text-gray-500"
                                                                         />
                                                                     ) : (p.name || <span className="text-gray-400 italic">-</span>)}
                                                                 </td>
                                                                 {/* Peran */}
                                                                 <td className="py-2.5 px-4 text-gray-600">
                                                                     {isEditing ? (
-                                                                        <input
-                                                                            type="text"
-                                                                            value={p.role}
-                                                                            onChange={e => handleUatParticipantChange(idx, 'role', e.target.value)}
-                                                                            placeholder="Peran"
-                                                                            className="w-full px-2.5 py-1.5 border border-amber-300 rounded-lg text-xs focus:outline-none focus:border-amber-500 bg-white"
-                                                                        />
-                                                                    ) : (p.role || <span className="text-gray-400 italic">-</span>)}
+                                                                        p.isApprover === true ? (
+                                                                            <div className="rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-xs font-semibold text-amber-800">
+                                                                                {approvalRole?.label || 'Pilih posisi approval'}
+                                                                            </div>
+                                                                        ) : (
+                                                                            <input
+                                                                                type="text"
+                                                                                value={p.role}
+                                                                                onChange={e => handleUatParticipantChange(idx, 'role', e.target.value)}
+                                                                                placeholder="Contoh: Saksi UAT / Pengguna aplikasi"
+                                                                                className="w-full px-2.5 py-1.5 border border-amber-300 rounded-lg text-xs focus:outline-none focus:border-amber-500 bg-white"
+                                                                            />
+                                                                        )
+                                                                    ) : ((p.isApprover ? approvalRole?.label : p.role) || <span className="text-gray-400 italic">-</span>)}
                                                                 </td>
                                                                 {/* Divisi */}
                                                                 <td className="py-2.5 px-4 text-gray-600">
@@ -1690,21 +2956,80 @@ export default function SITUATWizard({ project, updateProject, addNotification, 
                                                                             value={p.unit}
                                                                             onChange={e => handleUatParticipantChange(idx, 'unit', e.target.value)}
                                                                             placeholder="Divisi"
-                                                                            className="w-full px-2.5 py-1.5 border border-amber-300 rounded-lg text-xs focus:outline-none focus:border-amber-500 bg-white"
+                                                                            disabled={p.approvalMode === 'internal_account'}
+                                                                            className="w-full px-2.5 py-1.5 border border-amber-300 rounded-lg text-xs focus:outline-none focus:border-amber-500 bg-white disabled:bg-gray-100 disabled:text-gray-500"
                                                                         />
                                                                     ) : (p.unit || <span className="text-gray-400 italic">-</span>)}
                                                                 </td>
-                                                                {/* Kontak */}
+                                                                {/* Nomor HP hanya diperlukan untuk approval melalui link eksternal */}
+                                                                <td className="py-2.5 px-4 text-gray-600">
+                                                                    {p.approvalMode !== 'external_link' ? (
+                                                                        <span className="text-[10px] italic text-gray-400">Tidak diperlukan</span>
+                                                                    ) : isEditing ? (
+                                                                        <div>
+                                                                            <input
+                                                                                type="tel"
+                                                                                inputMode="tel"
+                                                                                value={p.phone || ''}
+                                                                                onChange={e => handleUatParticipantChange(idx, 'phone', e.target.value)}
+                                                                                placeholder="Contoh: 0812-3456-7890"
+                                                                                aria-invalid={hasInvalidPhone}
+                                                                                className={`w-full rounded-lg border bg-white px-2.5 py-1.5 text-xs focus:outline-none ${hasInvalidPhone ? 'border-red-400 focus:border-red-500' : 'border-amber-300 focus:border-amber-500'}`}
+                                                                            />
+                                                                            {hasInvalidPhone ? (
+                                                                                <p className="mt-1 text-[9px] font-semibold text-red-600">Gunakan format 08... atau +62...</p>
+                                                                            ) : null}
+                                                                        </div>
+                                                                    ) : (p.phone || <span className="font-semibold text-red-600">Belum diisi</span>)}
+                                                                </td>
+                                                                {/* Konfigurasi approval */}
                                                                 <td className="py-2.5 px-4 text-gray-600">
                                                                     {isEditing ? (
-                                                                        <input
-                                                                            type="text"
-                                                                            value={p.phone || ''}
-                                                                            onChange={e => handleUatParticipantChange(idx, 'phone', e.target.value)}
-                                                                            placeholder="Nomor telpon"
-                                                                            className="w-full px-2.5 py-1.5 border border-amber-300 rounded-lg text-xs focus:outline-none focus:border-amber-500 bg-white"
-                                                                        />
-                                                                    ) : (p.phone || <span className="text-gray-400 italic">-</span>)}
+                                                                        <div className="space-y-2">
+                                                                            <label className="block text-[9px] font-bold uppercase tracking-wide text-gray-500">Pilih keterlibatan</label>
+                                                                            <select
+                                                                                value={p.isApprover === true ? (p.approvalRole || '') : 'participant'}
+                                                                                onChange={e => handleUatParticipantChange(idx, 'participationType', e.target.value)}
+                                                                                className="w-full px-2.5 py-2 border border-amber-300 rounded-lg text-xs bg-white focus:outline-none focus:border-amber-500"
+                                                                            >
+                                                                                <option value="participant">Peserta UAT saja — tidak approval</option>
+                                                                                <optgroup label="Pihak Peminta — link pribadi + nomor HP">
+                                                                                    {UAT_APPROVAL_ROLES.filter(role => role.side === 'requester').map(role => <option key={role.value} value={role.value}>{role.label}</option>)}
+                                                                                </optgroup>
+                                                                                <optgroup label="Pihak IT — menggunakan akun aplikasi">
+                                                                                    {UAT_APPROVAL_ROLES.filter(role => role.side === 'it').map(role => <option key={role.value} value={role.value}>{role.label}</option>)}
+                                                                                </optgroup>
+                                                                            </select>
+                                                                            {p.approvalMode === 'internal_account' && (
+                                                                                <>
+                                                                                    <label className="block text-[9px] font-bold uppercase tracking-wide text-gray-500">Akun pihak IT</label>
+                                                                                    <select value={p.userId || ''}
+                                                                                        onChange={e => handleUatParticipantChange(idx, 'userId', e.target.value)}
+                                                                                        className="w-full px-2.5 py-2 border border-blue-300 rounded-lg text-xs bg-white focus:outline-none focus:border-blue-500">
+                                                                                        <option value="">Pilih akun sesuai kedudukan</option>
+                                                                                        {eligibleInternalAccounts.map(account => <option key={account.id} value={account.id}>{account.name} — {account.role_detail?.display_name || account.role}</option>)}
+                                                                                    </select>
+                                                                                    {eligibleInternalAccounts.length > 0 ? (
+                                                                                        <p className="text-[9px] text-blue-600">{p.approvalRole === 'developer' ? 'Hanya developer yang mengerjakan task proyek ini yang ditampilkan. ' : ''}Nama, divisi, dan kedudukan akan terisi otomatis dari akun yang dipilih. Nomor HP tidak diperlukan karena approval dilakukan melalui akun.</p>
+                                                                                    ) : (
+                                                                                        <p className="text-[9px] font-semibold text-red-600">Belum ada akun dengan role yang sesuai. Tambahkan atau perbaiki role akun melalui pengelolaan pengguna.</p>
+                                                                                    )}
+                                                                                </>
+                                                                            )}
+                                                                            {p.approvalMode === 'external_link' && (
+                                                                                <div className="rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-2 text-[9px] leading-relaxed text-amber-700">
+                                                                                    PM akan membuat link pribadi di <strong>UAT Tab 3</strong>. Penerima wajib memasukkan nomor HP yang dicatat pada baris ini.
+                                                                                </div>
+                                                                            )}
+                                                                        </div>
+                                                                    ) : p.isApprover === true ? (
+                                                                        <div>
+                                                                            <span className={`inline-flex rounded-full px-2 py-1 text-[9px] font-bold ${p.approvalMode === 'external_link' ? 'bg-amber-100 text-amber-700' : 'bg-blue-100 text-blue-700'}`}>
+                                                                                {p.approvalMode === 'external_link' ? 'LINK PRIBADI + NO. HP' : 'AKUN INTERNAL'}
+                                                                            </span>
+                                                                            <p className="mt-1 font-semibold text-[11px]">{approvalRole?.label || 'Posisi belum dipilih'}</p>
+                                                                        </div>
+                                                                    ) : <span className="text-gray-400 italic">Peserta saja</span>}
                                                                 </td>
                                                                 {/* Aksi */}
                                                                 <td className="py-2.5 px-4 text-center">
@@ -1746,6 +3071,16 @@ export default function SITUATWizard({ project, updateProject, addNotification, 
                                             </table>
                                         </div>
                                     )}
+                                    {uatApproverValidation ? (
+                                        <div className="mt-3 flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 p-3 text-[11px] text-amber-800">
+                                            <AlertTriangle size={14} className="shrink-0 mt-0.5" />
+                                            <span><strong>Konfigurasi approval belum lengkap:</strong> {uatApproverValidation}</span>
+                                        </div>
+                                    ) : (
+                                        <div className="mt-3 flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-[11px] font-semibold text-emerald-700">
+                                            <CheckCircle2 size={14} /> Matrix approver UAT sudah lengkap.
+                                        </div>
+                                    )}
                                 </div>
 
                                 {/* Catatan persiapan */}
@@ -1772,7 +3107,7 @@ export default function SITUATWizard({ project, updateProject, addNotification, 
                                                 ) : (
                                                     <><Upload size={12} /> Upload</>
                                                 )}
-                                                <input type="file" ref={uat1FileRef} multiple accept=".pdf,.xls,.xlsx,.jpg,.jpeg,.png,.zip" onChange={e => onUpload(e, setUat1, 'docs', 'UAT_PREP')} className="hidden" />
+                                                <input type="file" ref={uat1FileRef} multiple accept=".pdf,.xls,.xlsx,.jpg,.jpeg,.png,.zip" onChange={e => onUpload(e, setUat1, 'UAT_PREP')} className="hidden" />
                                             </label>
                                         )}
                                     </div>
@@ -1793,55 +3128,472 @@ export default function SITUATWizard({ project, updateProject, addNotification, 
                         {/* ── UAT Step 2: Eksekusi ─────────────────────── */}
                         {activeUatStep === 2 && (
                             <div className="p-5 space-y-4">
-                                <div className="flex items-center gap-2 mb-3">
-                                    <UserCheck size={16} className="text-orange-600" />
-                                    <h5 className="font-bold text-sm text-gray-800">Tahap 2: Eksekusi UAT Internal &amp; Temuan</h5>
-                                    {uat2Done && <span className="ml-auto text-[10px] font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">Selesai ✓</span>}
-                                </div>
-                                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                                    <div>
-                                        <label className="block text-xs font-bold text-gray-600 uppercase tracking-wider mb-1.5">Skenario Dieksekusi *</label>
-                                        <input type="number" value={uat2.executedCount} onChange={e => setUat2(p => ({ ...p, executedCount: e.target.value }))}
-                                            placeholder="Contoh: 20" disabled={uatDone}
-                                            className="w-full px-3 py-2.5 border border-gray-200 rounded-xl text-xs focus:outline-none focus:border-orange-500 bg-gray-50 disabled:bg-gray-100" />
+                                <div className="flex items-start justify-between gap-3 mb-3">
+                                    <div className="flex items-center gap-2">
+                                        <UserCheck size={16} className="text-orange-600" />
+                                        <div>
+                                            <h5 className="font-bold text-sm text-gray-800">Tahap 2: Eksekusi UAT Internal &amp; Temuan</h5>
+                                            <p className="text-[11px] text-gray-500 mt-0.5">User mencoba dan mendemonstrasikan fungsi proyek secara langsung. Catat keputusan pada setiap skenario.</p>
+                                        </div>
                                     </div>
-                                    <div>
-                                        <label className="block text-xs font-bold text-gray-600 uppercase tracking-wider mb-1.5">Skenario Diterima *</label>
-                                        <input type="number" value={uat2.passedCount} onChange={e => setUat2(p => ({ ...p, passedCount: e.target.value }))}
-                                            placeholder="Contoh: 19" disabled={uatDone}
-                                            className="w-full px-3 py-2.5 border border-gray-200 rounded-xl text-xs focus:outline-none focus:border-orange-500 bg-gray-50 disabled:bg-gray-100" />
-                                    </div>
-                                    <div>
-                                        <label className="block text-xs font-bold text-gray-600 uppercase tracking-wider mb-1.5">Temuan / CR</label>
-                                        <input type="number" value={uat2.findings} onChange={e => setUat2(p => ({ ...p, findings: e.target.value }))}
-                                            placeholder="Contoh: 1" disabled={uatDone}
-                                            className="w-full px-3 py-2.5 border border-gray-200 rounded-xl text-xs focus:outline-none focus:border-orange-500 bg-gray-50 disabled:bg-gray-100" />
-                                    </div>
+                                    {uat2Done && <span className="shrink-0 text-[10px] font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">Selesai ✓</span>}
                                 </div>
-                                <div>
-                                    <label className="block text-xs font-bold text-gray-600 uppercase tracking-wider mb-1.5">Catatan Hasil UAT &amp; Temuan Detail</label>
-                                    <textarea rows={3} value={uat2.execNotes} onChange={e => setUat2(p => ({ ...p, execNotes: e.target.value }))}
-                                        placeholder="Catatan hasil pengujian, temuan bug/CR, status perbaikan..." disabled={uatDone}
-                                        className="w-full px-3 py-2.5 border border-gray-200 rounded-xl text-xs focus:outline-none focus:border-orange-500 bg-gray-50 resize-none disabled:bg-gray-100" />
+
+                                <div className="p-3.5 bg-blue-50 border border-blue-200 rounded-xl flex items-start gap-2.5 text-[11px] text-blue-800 leading-relaxed">
+                                    <Info size={15} className="shrink-0 mt-0.5 text-blue-600" />
+                                    <span><strong>Diterima</strong> berarti fungsi sesuai kebutuhan. Jika memilih <strong>Revisi</strong>, tentukan Minor atau Mayor dan tuliskan permintaan user. Minor diperbaiki tanpa memundurkan alur; Mayor menjadi Change Request, kembali ke developer, dan wajib SIT ulang.</span>
                                 </div>
-                                <div>
-                                    <div className="flex items-center justify-between mb-1.5">
-                                        <label className="text-xs font-bold text-gray-600 uppercase tracking-wider">Dokumen: Bukti Eksekusi UAT &amp; Sign-off Sheet</label>
-                                        {!uatDone && (
-                                            <label className="px-3 py-1.5 bg-orange-500 hover:bg-orange-600 text-white rounded-xl text-xs font-bold cursor-pointer flex items-center gap-1.5 transition-colors">
-                                                <Upload size={12} /> Upload
-                                                <input type="file" ref={uat2FileRef} multiple accept=".pdf,.xls,.xlsx,.jpg,.jpeg,.png,.zip" onChange={e => onUpload(e, setUat2, 'docs', 'UAT_EXEC')} className="hidden" />
-                                            </label>
+
+                                {(status === 'UAT_REVISION_DEV' || sitUatData.uat2_resume_after_sit === true) && (
+                                    <div className="p-4 bg-red-50 border border-red-200 rounded-xl flex items-start gap-3 text-red-800">
+                                        <Lock size={16} className="shrink-0 mt-0.5" />
+                                        <div>
+                                            <p className="text-xs font-bold">UAT sedang di-hold untuk Change Request Mayor</p>
+                                            <p className="text-[11px] mt-1 leading-relaxed">Hasil UAT tetap terkunci sebagai jejak audit. Developer menyelesaikan item Mayor terlebih dahulu, lalu seluruh perubahan menjalani SIT ulang sebelum kembali ke tab ini untuk verifikasi user.</p>
+                                        </div>
+                                    </div>
+                                )}
+
+                                {uat2VerificationMode && (
+                                    <div className="p-4 bg-emerald-50 border border-emerald-200 rounded-xl flex items-start gap-3 text-emerald-800">
+                                        <CheckCircle2 size={16} className="shrink-0 mt-0.5" />
+                                        <div>
+                                            <p className="text-xs font-bold">SIT ulang lulus — verifikasi perbaikan Mayor</p>
+                                            <p className="text-[11px] mt-1 leading-relaxed">User hanya perlu memeriksa kembali item Mayor di bagian verifikasi. Skenario dan request lain tetap memakai hasil UAT sebelumnya.</p>
+                                        </div>
+                                    </div>
+                                )}
+
+                                <div className="space-y-3">
+                                    {(uat2.scenarios || []).map((scenario, index) => {
+                                        const isRevision = scenario.result === 'revision';
+                                        const isLocked = uat2EditingLocked;
+                                        return (
+                                            <div key={scenario.id} className={`rounded-2xl border p-4 ${scenario.changeType === 'mayor' ? 'border-red-200 bg-red-50/30' : isRevision ? 'border-amber-200 bg-amber-50/30' : 'border-gray-200 bg-white'}`}>
+                                                <div className="flex flex-col lg:flex-row lg:items-start gap-3">
+                                                    <div className="flex-1 min-w-0">
+                                                        <div className="flex items-start gap-2">
+                                                            <span className="w-6 h-6 rounded-lg bg-orange-100 text-orange-700 font-black text-[10px] flex items-center justify-center shrink-0">{index + 1}</span>
+                                                            <div>
+                                                                <p className="font-bold text-xs text-gray-800 leading-relaxed">{scenario.scenario}</p>
+                                                                <p className="text-[10px] text-gray-400 mt-0.5">Referensi task #{scenario.taskId}</p>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                    <div className="w-full lg:w-48 shrink-0">
+                                                        <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">Hasil Pengujian *</label>
+                                                        <select
+                                                            value={scenario.result}
+                                                            onChange={event => updateUatScenario(scenario.id, 'result', event.target.value)}
+                                                            disabled={isLocked}
+                                                            className="w-full px-3 py-2 border border-gray-300 rounded-xl text-xs font-semibold bg-white focus:outline-none focus:border-orange-500 disabled:bg-gray-100"
+                                                        >
+                                                            <option value="">Pilih hasil...</option>
+                                                            <option value="accepted">Diterima</option>
+                                                            <option value="revision">Revisi</option>
+                                                        </select>
+                                                    </div>
+                                                </div>
+
+                                                {isRevision && (
+                                                    <div className="grid grid-cols-1 lg:grid-cols-3 gap-3 mt-3 pt-3 border-t border-gray-200">
+                                                        <div>
+                                                            <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">Tipe Perubahan *</label>
+                                                            <select
+                                                                value={scenario.changeType}
+                                                                onChange={event => updateUatScenario(scenario.id, 'changeType', event.target.value)}
+                                                                disabled={isLocked}
+                                                                className="w-full px-3 py-2 border border-gray-300 rounded-xl text-xs font-semibold bg-white focus:outline-none focus:border-orange-500 disabled:bg-gray-100"
+                                                            >
+                                                                <option value="">Pilih tipe...</option>
+                                                                <option value="minor">Minor — tanpa rollback</option>
+                                                                <option value="mayor">Mayor — Change Request</option>
+                                                            </select>
+                                                        </div>
+                                                        <div className="lg:col-span-2">
+                                                            <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">Permintaan Perubahan / Perbaikan *</label>
+                                                            <textarea
+                                                                rows={2}
+                                                                value={scenario.request}
+                                                                onChange={event => updateUatScenario(scenario.id, 'request', event.target.value)}
+                                                                placeholder="Jelaskan kebutuhan user, perilaku yang diharapkan, dan kriteria hasil perbaikannya..."
+                                                                disabled={isLocked}
+                                                                className="w-full px-3 py-2 border border-gray-300 rounded-xl text-xs bg-white resize-none focus:outline-none focus:border-orange-500 disabled:bg-gray-100"
+                                                            />
+                                                        </div>
+                                                    </div>
+                                                )}
+
+                                                <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 mt-3">
+                                                    <div>
+                                                        <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">Komentar / Catatan Demonstrasi</label>
+                                                        <textarea
+                                                            rows={2}
+                                                            value={scenario.comment}
+                                                            onChange={event => updateUatScenario(scenario.id, 'comment', event.target.value)}
+                                                            placeholder="Catatan user, kondisi pengujian, atau informasi pendukung..."
+                                                            disabled={isLocked}
+                                                            className="w-full px-3 py-2 border border-gray-300 rounded-xl text-xs bg-white resize-none focus:outline-none focus:border-orange-500 disabled:bg-gray-100"
+                                                        />
+                                                    </div>
+                                                    <div>
+                                                        <div className="flex items-center justify-between gap-2">
+                                                            <label className="block text-[10px] font-bold text-gray-500 uppercase">Lampiran Bukti</label>
+                                                            {!isLocked && (
+                                                                <label className={`px-2.5 py-1.5 bg-orange-500 hover:bg-orange-600 text-white rounded-lg text-[10px] font-bold flex items-center gap-1 cursor-pointer ${uploadingUatScenarioId ? 'opacity-60 pointer-events-none' : ''}`}>
+                                                                    {uploadingUatScenarioId === scenario.id ? <Clock size={11} /> : <Paperclip size={11} />}
+                                                                    {uploadingUatScenarioId === scenario.id ? 'Mengunggah...' : 'Lampirkan'}
+                                                                    <input
+                                                                        type="file"
+                                                                        multiple
+                                                                        accept=".pdf,.xls,.xlsx,.jpg,.jpeg,.png,.zip"
+                                                                        className="hidden"
+                                                                        onChange={event => {
+                                                                            const files = Array.from(event.target.files || []);
+                                                                            event.target.value = '';
+                                                                            void uploadUatEvidence(scenario.id, files);
+                                                                        }}
+                                                                    />
+                                                                </label>
+                                                            )}
+                                                        </div>
+                                                        <DocList
+                                                            docs={scenario.attachments}
+                                                            onRemove={attachmentIndex => removeUatEvidence(scenario.id, attachmentIndex)}
+                                                            onView={viewDoc}
+                                                            onDownload={downloadDoc}
+                                                            docTypeOptions={[["UAT_EVIDENCE", "Bukti Temuan UAT"]]}
+                                                            readOnly={isLocked || uploadingUatScenarioId === scenario.id}
+                                                            allowTypeChange={false}
+                                                        />
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+
+                                <section className="rounded-2xl border border-violet-200 bg-violet-50/30 p-4 space-y-3">
+                                    <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
+                                        <div>
+                                            <div className="flex items-center gap-2">
+                                                <Plus size={15} className="text-violet-600" />
+                                                <h6 className="text-xs font-bold text-violet-900">Permintaan Tambahan User</h6>
+                                            </div>
+                                            <p className="text-[11px] text-violet-700 mt-1 leading-relaxed">
+                                                Catat task atau kebutuhan baru yang muncul saat demonstrasi. Minor menjadi tindak lanjut kecil tanpa rollback; Mayor menjadi Change Request, menahan UAT, dan wajib melalui developer serta SIT ulang.
+                                            </p>
+                                        </div>
+                                        {!uat2EditingLocked && (
+                                            <button
+                                                type="button"
+                                                onClick={addUatAdditionalRequest}
+                                                className="shrink-0 px-3 py-2 bg-violet-600 hover:bg-violet-700 text-white rounded-xl text-[11px] font-bold flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+                                            >
+                                                <Plus size={13} /> Tambah Request
+                                            </button>
                                         )}
                                     </div>
-                                    <DocList docs={uat2.docs} onRemove={i => onRemoveDoc(setUat2, i)} onView={viewDoc} onDownload={downloadDoc} onTypeChange={(i, t) => changeDocType(setUat2, i, t)} docTypeOptions={docTypeOptions('UAT_EXEC')} readOnly={uatDone} />
+
+                                    {(uat2.additionalRequests || []).length === 0 ? (
+                                        <div className="rounded-xl border border-dashed border-violet-200 bg-white/70 px-4 py-5 text-center text-[11px] text-violet-500">
+                                            Tidak ada permintaan tambahan dari user pada sesi UAT ini.
+                                        </div>
+                                    ) : (
+                                        <div className="space-y-3">
+                                            {(uat2.additionalRequests || []).map((request, index) => (
+                                                <div key={request.id} className={`rounded-xl border bg-white p-4 ${request.changeType === 'mayor' ? 'border-red-200' : 'border-violet-200'}`}>
+                                                    <div className="flex items-center justify-between gap-2 mb-3">
+                                                        <p className="text-[11px] font-bold text-gray-700">Request Tambahan #{index + 1}</p>
+                                                        {!uat2EditingLocked && (
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => void removeUatAdditionalRequest(request.id)}
+                                                                disabled={uploadingUatScenarioId === request.id}
+                                                                className="p-1.5 text-red-500 hover:bg-red-50 rounded-lg disabled:opacity-50 cursor-pointer"
+                                                                title="Hapus request tambahan"
+                                                            >
+                                                                <Trash2 size={13} />
+                                                            </button>
+                                                        )}
+                                                    </div>
+
+                                                    <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
+                                                        <div className="lg:col-span-2">
+                                                            <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">Judul Task / Request Baru *</label>
+                                                            <input
+                                                                value={request.title}
+                                                                onChange={event => updateUatAdditionalRequest(request.id, 'title', event.target.value)}
+                                                                placeholder="Contoh: Tambahkan ekspor laporan bulanan"
+                                                                disabled={uat2EditingLocked}
+                                                                className="w-full px-3 py-2 border border-gray-300 rounded-xl text-xs bg-white focus:outline-none focus:border-violet-500 disabled:bg-gray-100"
+                                                            />
+                                                        </div>
+                                                        <div>
+                                                            <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">Tipe Permintaan *</label>
+                                                            <select
+                                                                value={request.changeType}
+                                                                onChange={event => updateUatAdditionalRequest(request.id, 'changeType', event.target.value)}
+                                                                disabled={uat2EditingLocked}
+                                                                className="w-full px-3 py-2 border border-gray-300 rounded-xl text-xs font-semibold bg-white focus:outline-none focus:border-violet-500 disabled:bg-gray-100"
+                                                            >
+                                                                <option value="">Pilih tipe...</option>
+                                                                <option value="minor">Minor — tindak lanjut kecil</option>
+                                                                <option value="mayor">Mayor — Change Request</option>
+                                                            </select>
+                                                        </div>
+                                                    </div>
+
+                                                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 mt-3">
+                                                        <div>
+                                                            <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">Detail Permintaan *</label>
+                                                            <textarea
+                                                                rows={3}
+                                                                value={request.detail}
+                                                                onChange={event => updateUatAdditionalRequest(request.id, 'detail', event.target.value)}
+                                                                placeholder="Jelaskan kebutuhan baru, hasil yang diharapkan, dan ruang lingkupnya..."
+                                                                disabled={uat2EditingLocked}
+                                                                className="w-full px-3 py-2 border border-gray-300 rounded-xl text-xs bg-white resize-none focus:outline-none focus:border-violet-500 disabled:bg-gray-100"
+                                                            />
+                                                            <label className="block text-[10px] font-bold text-gray-500 uppercase mt-3 mb-1">Komentar / Catatan</label>
+                                                            <textarea
+                                                                rows={2}
+                                                                value={request.comment}
+                                                                onChange={event => updateUatAdditionalRequest(request.id, 'comment', event.target.value)}
+                                                                placeholder="Konteks diskusi, prioritas, atau catatan kesepakatan..."
+                                                                disabled={uat2EditingLocked}
+                                                                className="w-full px-3 py-2 border border-gray-300 rounded-xl text-xs bg-white resize-none focus:outline-none focus:border-violet-500 disabled:bg-gray-100"
+                                                            />
+                                                        </div>
+                                                        <div>
+                                                            <div className="flex items-center justify-between gap-2">
+                                                                <label className="block text-[10px] font-bold text-gray-500 uppercase">Lampiran Bukti</label>
+                                                                {!uat2EditingLocked && (
+                                                                    <label className={`px-2.5 py-1.5 bg-violet-600 hover:bg-violet-700 text-white rounded-lg text-[10px] font-bold flex items-center gap-1 cursor-pointer ${uploadingUatScenarioId ? 'opacity-60 pointer-events-none' : ''}`}>
+                                                                        {uploadingUatScenarioId === request.id ? <Clock size={11} /> : <Paperclip size={11} />}
+                                                                        {uploadingUatScenarioId === request.id ? 'Mengunggah...' : 'Lampirkan'}
+                                                                        <input
+                                                                            type="file"
+                                                                            multiple
+                                                                            accept=".pdf,.xls,.xlsx,.jpg,.jpeg,.png,.zip"
+                                                                            className="hidden"
+                                                                            onChange={event => {
+                                                                                const files = Array.from(event.target.files || []);
+                                                                                event.target.value = '';
+                                                                                void uploadUatAdditionalRequestEvidence(request.id, files);
+                                                                            }}
+                                                                        />
+                                                                    </label>
+                                                                )}
+                                                            </div>
+                                                            <DocList
+                                                                docs={request.attachments}
+                                                                onRemove={attachmentIndex => removeUatAdditionalRequestEvidence(request.id, attachmentIndex)}
+                                                                onView={viewDoc}
+                                                                onDownload={downloadDoc}
+                                                                docTypeOptions={[["UAT_EVIDENCE", "Bukti Permintaan User"]]}
+                                                                readOnly={uat2EditingLocked || uploadingUatScenarioId === request.id}
+                                                                allowTypeChange={false}
+                                                            />
+                                                            {request.taskId && (
+                                                                <p className="mt-2 text-[10px] text-slate-500">Task developer terkait: #{request.taskId}</p>
+                                                            )}
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    )}
+                                </section>
+
+                                {uat2VerificationMode && (
+                                    <section className="rounded-2xl border-2 border-emerald-300 bg-emerald-50/40 p-4 space-y-3">
+                                        <div>
+                                            <div className="flex items-center gap-2">
+                                                <UserCheck size={15} className="text-emerald-700" />
+                                                <h6 className="text-xs font-bold text-emerald-900">Verifikasi Ulang Item Mayor oleh User</h6>
+                                            </div>
+                                            <p className="text-[11px] text-emerald-700 mt-1 leading-relaxed">
+                                                Nilai hanya perbaikan Mayor yang sudah diselesaikan developer dan dinyatakan lulus SIT ulang. Setiap item wajib memiliki bukti verifikasi baru. Jika satu item masih revisi, UAT kembali di-hold untuk siklus perbaikan berikutnya.
+                                            </p>
+                                        </div>
+
+                                        {uatMajorVerificationItems.map((item, index) => (
+                                            <div key={`${item.source}_${item.id}`} className="rounded-xl border border-emerald-200 bg-white p-4">
+                                                <div className="flex flex-col lg:flex-row lg:items-start gap-3">
+                                                    <div className="flex-1 min-w-0">
+                                                        <div className="flex items-start gap-2">
+                                                            <span className="w-6 h-6 rounded-lg bg-emerald-100 text-emerald-700 font-black text-[10px] flex items-center justify-center shrink-0">{index + 1}</span>
+                                                            <div>
+                                                                <p className="text-[10px] font-bold uppercase text-emerald-600">{item.source === 'scenario' ? 'Revisi Skenario UAT' : 'Request Tambahan User'}</p>
+                                                                <p className="font-bold text-xs text-gray-800 mt-0.5">{item.title}</p>
+                                                                <p className="text-[10px] text-gray-500 mt-1">Permintaan awal: {item.source === 'scenario' ? item.request : item.detail}</p>
+                                                                {item.taskId && <p className="text-[10px] text-gray-400 mt-0.5">Task developer #{item.taskId}</p>}
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                    <div className="w-full lg:w-56 shrink-0">
+                                                        <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">Hasil Verifikasi *</label>
+                                                        <select
+                                                            value={item.verificationResult || ''}
+                                                            onChange={event => updateUatMajorVerification(item.source, item.id, 'verificationResult', event.target.value)}
+                                                            className="w-full px-3 py-2 border border-gray-300 rounded-xl text-xs font-semibold bg-white focus:outline-none focus:border-emerald-500"
+                                                        >
+                                                            <option value="">Pilih hasil...</option>
+                                                            <option value="accepted">Perbaikan Diterima</option>
+                                                            <option value="revision">Masih Revisi</option>
+                                                        </select>
+                                                    </div>
+                                                </div>
+                                                <div className="mt-3 pt-3 border-t border-gray-100">
+                                                    <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">
+                                                        {item.verificationResult === 'revision' ? 'Alasan Masih Revisi *' : 'Catatan Verifikasi'}
+                                                    </label>
+                                                    <textarea
+                                                        rows={2}
+                                                        value={item.verificationComment || ''}
+                                                        onChange={event => updateUatMajorVerification(item.source, item.id, 'verificationComment', event.target.value)}
+                                                        placeholder={item.verificationResult === 'revision' ? 'Jelaskan bagian yang belum sesuai dan hasil yang diharapkan...' : 'Catatan penerimaan atau hasil demonstrasi ulang...'}
+                                                        className="w-full px-3 py-2 border border-gray-300 rounded-xl text-xs bg-white resize-none focus:outline-none focus:border-emerald-500"
+                                                    />
+                                                </div>
+                                                <div className="mt-3 rounded-xl border border-emerald-200 bg-emerald-50/40 p-3">
+                                                    <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-2">
+                                                        <div>
+                                                            <label className="block text-[10px] font-bold text-emerald-800 uppercase">Lampiran Bukti Verifikasi *</label>
+                                                            <p className="text-[10px] text-emerald-700 mt-0.5">Lampirkan screenshot, berita acara, hasil demonstrasi, atau bukti pendukung lain untuk item ini.</p>
+                                                        </div>
+                                                        <label className={`shrink-0 px-2.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-[10px] font-bold flex items-center justify-center gap-1 cursor-pointer ${uploadingUatScenarioId ? 'opacity-60 pointer-events-none' : ''}`}>
+                                                            {uploadingUatScenarioId === getUatVerificationUploadKey(item.source, item.id)
+                                                                ? <Clock size={11} />
+                                                                : <Paperclip size={11} />}
+                                                            {uploadingUatScenarioId === getUatVerificationUploadKey(item.source, item.id)
+                                                                ? 'Mengunggah...'
+                                                                : 'Upload Bukti'}
+                                                            <input
+                                                                type="file"
+                                                                multiple
+                                                                accept=".pdf,.xls,.xlsx,.jpg,.jpeg,.png,.zip"
+                                                                className="hidden"
+                                                                disabled={Boolean(uploadingUatScenarioId)}
+                                                                onChange={event => {
+                                                                    const files = Array.from(event.target.files || []);
+                                                                    event.target.value = '';
+                                                                    void uploadUatMajorVerificationEvidence(item.source, item.id, files);
+                                                                }}
+                                                            />
+                                                        </label>
+                                                    </div>
+                                                    <DocList
+                                                        docs={item.verificationAttachments || []}
+                                                        onRemove={attachmentIndex => removeUatMajorVerificationEvidence(
+                                                            item.source,
+                                                            item.id,
+                                                            attachmentIndex
+                                                        )}
+                                                        onView={viewDoc}
+                                                        onDownload={downloadDoc}
+                                                        docTypeOptions={[["UAT_EVIDENCE", "Bukti Verifikasi Mayor"]]}
+                                                        readOnly={Boolean(uploadingUatScenarioId)}
+                                                        allowTypeChange={false}
+                                                    />
+                                                </div>
+                                            </div>
+                                        ))}
+
+                                        <div className="flex flex-col items-end gap-1.5 pt-1">
+                                            <button
+                                                type="button"
+                                                onClick={handleSubmitUatMajorVerification}
+                                                disabled={submitting || Boolean(uatMajorVerificationValidation)}
+                                                className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-white text-xs font-bold rounded-xl flex items-center justify-center gap-2 transition-all cursor-pointer"
+                                            >
+                                                {submitting ? <Clock size={14} /> : <CheckCircle2 size={14} />}
+                                                {submitting ? 'Menyimpan Verifikasi...' : 'Simpan Verifikasi Mayor'}
+                                            </button>
+                                            {uatMajorVerificationValidation && <p className="text-[10px] text-amber-700">{uatMajorVerificationValidation}</p>}
+                                        </div>
+                                    </section>
+                                )}
+
+                                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
+                                    {[
+                                        { label: 'Dieksekusi', value: uat2Summary.executedCount, color: 'text-slate-700' },
+                                        { label: 'Diterima', value: uat2Summary.acceptedCount, color: 'text-emerald-700' },
+                                        { label: 'Request Baru', value: uat2Summary.additionalRequestCount, color: 'text-violet-700' },
+                                        { label: 'Total Revisi', value: uat2Summary.revisionCount, color: 'text-orange-700' },
+                                        { label: 'Minor', value: uat2Summary.minorCount, color: 'text-amber-700' },
+                                        { label: 'Mayor / CR', value: uat2Summary.majorCount, color: 'text-red-700' },
+                                    ].map(item => (
+                                        <div key={item.label} className="p-3 bg-slate-50 border border-slate-200 rounded-xl text-center">
+                                            <p className="text-[9px] font-bold uppercase text-slate-500">{item.label}</p>
+                                            <p className={`text-lg font-black mt-0.5 ${item.color}`}>{item.value}</p>
+                                        </div>
+                                    ))}
                                 </div>
-                                {!uatDone && (status === 'UAT_IN_PROGRESS' || UNLOCK_ALL_STAGES) && activeUatStep === 2 && (
-                                    <div className="flex justify-end pt-2">
-                                        <button onClick={() => handleSaveUATStep(2)} disabled={!uat2.executedCount || !uat2.passedCount}
-                                            className="px-5 py-2.5 bg-orange-500 hover:bg-orange-600 disabled:bg-gray-300 disabled:cursor-not-allowed text-white text-xs font-bold rounded-xl flex items-center gap-2 transition-all cursor-pointer">
-                                            Simpan &amp; Lanjut Persetujuan Final <ArrowRight size={14} />
-                                        </button>
+
+                                <div className={`p-4 rounded-xl border flex items-start gap-3 ${uat2Summary.majorCount > 0 ? 'bg-red-50 border-red-200 text-red-800' : uat2Summary.minorCount > 0 ? 'bg-amber-50 border-amber-200 text-amber-800' : 'bg-emerald-50 border-emerald-200 text-emerald-800'}`}>
+                                    {uat2Summary.majorCount > 0 ? <AlertTriangle size={17} className="shrink-0 mt-0.5" /> : <CheckCircle2 size={17} className="shrink-0 mt-0.5" />}
+                                    <div>
+                                        <p className="text-xs font-bold">
+                                            Kesimpulan: {uat2Summary.majorCount > 0 ? 'Revisi Mayor / Change Request' : uat2Summary.minorCount > 0 ? 'Revisi Minor' : 'Diterima'}
+                                        </p>
+                                        <p className="text-[11px] mt-1 leading-relaxed">
+                                            {uat2Summary.majorCount > 0
+                                                ? 'UAT belum dapat disetujui. Saat disimpan, proyek kembali ke developer; setelah perbaikan wajib SIT ulang, lalu user memverifikasi item Mayor di Tab 2 sebelum Persetujuan Final.'
+                                                : uat2Summary.minorCount > 0
+                                                    ? 'Perbaikan minor dapat dibantu developer tanpa memundurkan status proyek dan tidak memerlukan SIT ulang.'
+                                                    : 'Seluruh skenario yang sudah dinilai diterima dan dapat dilanjutkan ke persetujuan final.'}
+                                        </p>
+                                    </div>
+                                </div>
+
+                                <div>
+                                    <label className="block text-xs font-bold text-gray-600 uppercase tracking-wider mb-1.5">Catatan Umum Hasil UAT</label>
+                                    <textarea rows={3} value={uat2.execNotes} onChange={event => setUat2(previous => ({ ...previous, execNotes: event.target.value }))}
+                                        placeholder="Ringkasan demonstrasi, keputusan user, atau tindak lanjut umum..."
+                                        disabled={uat2EditingLocked}
+                                        className="w-full px-3 py-2.5 border border-gray-200 rounded-xl text-xs focus:outline-none focus:border-orange-500 bg-gray-50 resize-none disabled:bg-gray-100" />
+                                </div>
+
+                                {uat2IsSubmitted && (
+                                    <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl text-[11px] text-slate-600 flex items-start gap-2">
+                                        <Lock size={13} className="shrink-0 mt-0.5" />
+                                        <span>Snapshot hasil UAT telah disimpan dan dikunci untuk menjaga jejak audit. Lampiran tetap dapat dilihat dan diunduh.{uat2VerificationMode ? ' Hanya hasil verifikasi item Mayor yang dapat diubah.' : ''}</span>
+                                    </div>
+                                )}
+
+                                {!uat2IsSubmitted && !uat2VerificationMode && status !== 'UAT_REVISION_DEV' && sitUatData.uat2_resume_after_sit !== true && (
+                                    <div className="p-3 bg-orange-50 border border-orange-200 rounded-xl text-[11px] text-orange-800 leading-relaxed">
+                                        Gunakan <strong>Simpan sebagai Draft</strong> selama hasil pengujian, permintaan perubahan, atau lampiran bukti masih dilengkapi. Draft tidak mengunci data dan tidak menjalankan alur revisi Mayor/Minor. Alur tersebut baru diproses saat hasil UAT disimpan final.
+                                    </div>
+                                )}
+
+                                {!uatDone && !uat2VerificationMode && (status === 'UAT_IN_PROGRESS' || UNLOCK_ALL_STAGES) && activeUatStep === 2 && (
+                                    <div className="flex flex-col items-end gap-1.5 pt-2">
+                                        <div className="w-full flex flex-col-reverse sm:flex-row sm:justify-end gap-2">
+                                            <button
+                                                onClick={handleSaveUATDraft}
+                                                disabled={savingUatDraft || submitting || uat2IsSubmitted || uploadingUatScenarioId || (uat2.scenarios || []).length === 0 || status === 'UAT_REVISION_DEV' || sitUatData.uat2_resume_after_sit === true}
+                                                className="px-5 py-2.5 bg-white hover:bg-orange-50 disabled:bg-gray-100 disabled:text-gray-400 disabled:cursor-not-allowed text-orange-700 border border-orange-300 text-xs font-bold rounded-xl flex items-center justify-center gap-2 transition-all cursor-pointer"
+                                            >
+                                                {savingUatDraft ? <Clock size={14} /> : <Save size={14} />}
+                                                {savingUatDraft ? 'Menyimpan Draft...' : 'Simpan sebagai Draft'}
+                                            </button>
+                                            <button
+                                                onClick={handleSubmitUatExecution}
+                                                disabled={Boolean(uat2Validation) || submitting || savingUatDraft || uat2IsSubmitted || status === 'UAT_REVISION_DEV' || sitUatData.uat2_resume_after_sit === true}
+                                                className="px-5 py-2.5 bg-orange-500 hover:bg-orange-600 disabled:bg-gray-300 disabled:cursor-not-allowed text-white text-xs font-bold rounded-xl flex items-center justify-center gap-2 transition-all cursor-pointer"
+                                            >
+                                                {submitting ? <Clock size={14} /> : uat2Summary.majorCount > 0 ? <RotateCcw size={14} /> : <ArrowRight size={14} />}
+                                                {submitting
+                                                    ? 'Menyimpan Hasil UAT...'
+                                                    : uat2Summary.majorCount > 0
+                                                        ? 'Simpan Final & Kembalikan ke Developer'
+                                                        : 'Simpan Final & Lanjut Persetujuan'}
+                                            </button>
+                                        </div>
+                                        {uat2Validation && <p className="text-[10px] text-amber-700">{uat2Validation}</p>}
                                     </div>
                                 )}
                             </div>
@@ -1862,8 +3614,8 @@ export default function SITUATWizard({ project, updateProject, addNotification, 
                                         {[
                                             { label: 'Unit Peminta', val: uat1.unit || project?.division || '-' },
                                             { label: 'Skenario UAT', val: `${uatScenarioTasks.length}` },
-                                            { label: 'Dieksekusi', val: uat2.executedCount || '-' },
-                                            { label: 'Diterima', val: uat2.passedCount || '-' },
+                                            { label: 'Dieksekusi', val: uat2Summary.executedCount || '-' },
+                                            { label: 'Diterima', val: uat2Summary.acceptedCount || '-' },
                                         ].map(s => (
                                             <div key={s.label} className="bg-white rounded-lg p-2.5 border border-slate-200">
                                                 <p className="text-slate-500 text-[9px] font-bold uppercase">{s.label}</p>
@@ -1873,100 +3625,176 @@ export default function SITUATWizard({ project, updateProject, addNotification, 
                                     </div>
                                 </div>
 
+                                {currentUserUatApprovals.some(item => item.status === 'pending') && !uatDone ? (
+                                    <div id="my-uat-approval" className="rounded-2xl border-2 border-blue-300 bg-blue-50 p-4 shadow-sm">
+                                        <p className="flex items-center gap-1.5 text-sm font-bold text-blue-900"><UserCheck size={16} /> Keputusan UAT Menunggu Anda</p>
+                                        <p className="mt-1 text-[10px] leading-relaxed text-blue-700">Tinjau ringkasan hasil, matrix persetujuan, dan dokumen Persetujuan Final pada halaman ini sebelum mengirim keputusan.</p>
+                                        <button type="button" onClick={() => document.getElementById('uat-final-documents')?.scrollIntoView({ behavior: 'smooth', block: 'center' })}
+                                            className="mt-2 inline-flex items-center gap-1.5 rounded-lg border border-blue-200 bg-white px-3 py-1.5 text-[10px] font-bold text-blue-700 hover:bg-blue-100">
+                                            <FileText size={12} /> Periksa Dokumen Final
+                                        </button>
+                                        <textarea rows={2} value={uatApprovalNote} onChange={e => setUatApprovalNote(e.target.value)}
+                                            placeholder="Catatan keputusan (wajib jika menolak / meminta revisi)..."
+                                            className="mt-3 w-full resize-none rounded-xl border border-blue-200 bg-white px-3 py-2 text-xs focus:border-blue-500 focus:outline-none" />
+                                        <div className="mt-2 space-y-2">
+                                            {currentUserUatApprovals.filter(item => item.status === 'pending').map(approver => (
+                                                <div key={approver.id} className="flex w-full flex-wrap items-center gap-2 rounded-xl border border-blue-100 bg-white p-3">
+                                                    <div className="mr-auto">
+                                                        <p className="text-[9px] font-bold uppercase tracking-wide text-blue-500">Anda bertindak sebagai</p>
+                                                        <p className="text-xs font-bold text-gray-800">{approver.approval_role_label}</p>
+                                                    </div>
+                                                    <button onClick={() => handleSubmitUatApproval(approver.id, 'approved')} disabled={uatApprovalSubmitting}
+                                                        className="rounded-lg bg-emerald-600 px-4 py-2 text-[11px] font-bold text-white hover:bg-emerald-700 disabled:bg-gray-300"><CheckCircle2 size={13} className="mr-1 inline" />Setujui UAT</button>
+                                                    <button onClick={() => handleSubmitUatApproval(approver.id, 'rejected')} disabled={uatApprovalSubmitting}
+                                                        className="rounded-lg bg-red-600 px-4 py-2 text-[11px] font-bold text-white hover:bg-red-700 disabled:bg-gray-300"><X size={13} className="mr-1 inline" />Tolak / Minta Revisi</button>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                ) : null}
+
+                                {/* ── Distribusi link approval pihak peminta ── */}
+                                {canManageUatApprovals ? (
+                                <div className="overflow-hidden rounded-2xl border border-amber-200 bg-white">
+                                    <div className="border-b border-amber-200 bg-amber-50 px-4 py-3">
+                                        <div className="flex items-start gap-2">
+                                            <Link2 size={16} className="mt-0.5 shrink-0 text-amber-600" />
+                                            <div>
+                                                <h6 className="text-sm font-bold text-amber-900">Distribusi Link Approval Pihak Peminta</h6>
+                                                <p className="mt-0.5 text-[10px] leading-relaxed text-amber-700">
+                                                    PM atau pihak IT membuat satu link pribadi untuk setiap approver, lalu mengirimkannya langsung kepada orang terkait. Penerima membuka link dan memverifikasi nomor HP yang terdaftar sebelum melihat hasil UAT.
+                                                </p>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div className="p-4">
+                                        {uatMatrixLoading ? (
+                                            <div className="py-5 text-center text-xs text-gray-400">Memuat daftar penerima link...</div>
+                                        ) : !uatApprovalMatrix ? (
+                                            <div className="rounded-xl border border-dashed border-amber-300 bg-amber-50/50 p-3 text-[11px] leading-relaxed text-amber-800">
+                                                Link belum dapat dibuat. Simpan hasil UAT Tab 2 sebagai <strong>final</strong> terlebih dahulu agar putaran approval dan link pribadi dibuat dengan data hasil pengujian yang terkunci.
+                                            </div>
+                                        ) : externalUatApprovers.length === 0 ? (
+                                            <div className="rounded-xl border border-dashed border-gray-300 p-3 text-[11px] text-gray-500">
+                                                Belum ada approver pihak peminta. Tambahkan dan tentukan kedudukannya melalui UAT Tab 1.
+                                            </div>
+                                        ) : (
+                                            <div className="space-y-2">
+                                                {externalUatApprovers.map(approver => {
+                                                    const isPending = approver.status === 'pending';
+                                                    return (
+                                                        <div key={approver.id} className="flex flex-col gap-3 rounded-xl border border-gray-200 bg-gray-50 p-3 sm:flex-row sm:items-center">
+                                                            <div className="min-w-0 flex-1">
+                                                                <div className="flex flex-wrap items-center gap-2">
+                                                                    <p className="truncate text-xs font-bold text-gray-800">{approver.name}</p>
+                                                                    <span className={`rounded-full px-2 py-0.5 text-[9px] font-bold ${approver.status === 'approved' ? 'bg-emerald-100 text-emerald-700' : approver.status === 'rejected' ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700'}`}>
+                                                                        {approver.status === 'approved' ? 'Sudah menyetujui' : approver.status === 'rejected' ? 'Menolak / revisi' : 'Menunggu approval'}
+                                                                    </span>
+                                                                </div>
+                                                                <p className="mt-0.5 text-[10px] text-gray-500">{approver.approval_role_label}{approver.unit ? ` · ${approver.unit}` : ''}</p>
+                                                                <p className="mt-1 text-[10px] font-medium text-gray-600">Verifikasi HP: {approver.phone_masked || 'Nomor belum tersedia'}</p>
+                                                            </div>
+                                                            {canManageUatApprovals && isPending ? (
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() => handleCopyExternalApprovalLink(approver)}
+                                                                    disabled={uatApprovalSubmitting}
+                                                                    className="inline-flex shrink-0 items-center justify-center gap-1.5 rounded-lg border border-amber-300 bg-amber-500 px-3 py-2 text-[10px] font-bold text-white transition-colors hover:bg-amber-600 disabled:cursor-not-allowed disabled:bg-gray-300"
+                                                                >
+                                                                    {approver.link_ready ? <RefreshCw size={12} /> : <Link2 size={12} />}
+                                                                    {approver.link_ready ? 'Buat Ulang & Salin Link' : 'Buat & Salin Link'}
+                                                                </button>
+                                                            ) : !canManageUatApprovals && isPending ? (
+                                                                <p className="shrink-0 text-[10px] italic text-gray-400">Link dikelola PM / pihak IT</p>
+                                                            ) : null}
+                                                        </div>
+                                                    );
+                                                })}
+                                                <p className="pt-1 text-[9px] leading-relaxed text-gray-400">
+                                                    Membuat ulang link akan menggantikan link sebelumnya. Kirim hanya link terbaru kepada penerima yang sesuai.
+                                                </p>
+                                            </div>
+                                        )}
+                                    </div>
+                                </div>
+                                ) : null}
+
                                 {/* ── Persetujuan Multi-Role UAT ── */}
                                 <div className="bg-white border border-gray-200 rounded-2xl p-4">
-                                    <div className="flex items-center gap-2 mb-3">
+                                    <div className="flex flex-wrap items-center gap-2 mb-3">
                                         <ShieldCheck size={15} className="text-emerald-600" />
-                                        <h6 className="font-bold text-sm text-gray-800">Persetujuan UAT</h6>
-                                        <span className="ml-auto text-[10px] font-bold text-gray-500">
-                                            {['business_user', 'pm', 'development_lead'].filter(rk => uat3Approvals?.[rk]?.approved).length} / 3 disetujui
-                                        </span>
-                                    </div>
-                                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                                        {[
-                                            { key: 'business_user', label: 'Pemohon (Business User)', desc: 'Perwakilan unit peminta', color: 'amber', icon: <Users size={16} className="text-amber-500" /> },
-                                            { key: 'pm', label: 'PM / Analyst Pengembangan', desc: 'Project Manager proyek', color: 'indigo', icon: <UserCheck size={16} className="text-indigo-500" /> },
-                                            { key: 'development_lead', label: 'Development Lead', desc: 'Pimpinan pengembangan', color: 'emerald', icon: <ShieldCheck size={16} className="text-emerald-500" /> },
-                                        ].map(r => {
-                                            const ap = uat3Approvals?.[r.key];
-                                            const approved = ap?.approved === true;
-                                            const colorMap = { amber: 'amber', indigo: 'indigo', emerald: 'emerald' }[r.color];
-                                            return (
-                                                <div key={r.key} className={`rounded-xl border p-3 transition-all ${approved ? 'bg-emerald-50 border-emerald-200' : 'bg-gray-50 border-gray-200'}`}>
-                                                    <div className="flex items-center justify-between">
-                                                        <div className={`w-9 h-9 rounded-xl flex items-center justify-center ${approved ? 'bg-emerald-100' : `bg-${colorMap}-100`}`}>
-                                                            {r.icon}
-                                                        </div>
-                                                        {approved ? (
-                                                            <span className="px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 text-[9px] font-bold border border-emerald-200 flex items-center gap-1">
-                                                                <CheckCircle2 size={9} /> Disetujui
-                                                            </span>
-                                                        ) : (
-                                                            <span className="px-2 py-0.5 rounded-full bg-gray-200 text-gray-500 text-[9px] font-bold">Menunggu</span>
-                                                        )}
-                                                    </div>
-                                                    <p className="font-bold text-gray-800 text-xs mt-2">{r.label}</p>
-                                                    <p className="text-[10px] text-gray-400">{r.desc}</p>
-                                                    {approved ? (
-                                                        <p className="text-[10px] text-emerald-700 mt-1.5">
-                                                            ✓ {ap.approvedBy} • {fmtDate(ap.at)}
-                                                        </p>
-                                                    ) : (
-                                                        <p className="text-[10px] text-gray-300 mt-1.5">Belum memberikan persetujuan</p>
-                                                    )}
-                                                </div>
-                                            );
-                                        })}
-                                    </div>
-
-                                    {/* Form approval untuk role saat ini */}
-                                    {uatCurrentRoleKey && !uat3Approvals?.[uatCurrentRoleKey]?.approved && !uatDone && (
-                                        <div className="mt-3 p-3 bg-emerald-50 border border-emerald-200 rounded-xl">
-                                            <p className="text-[11px] font-bold text-emerald-800 mb-2 flex items-center gap-1.5">
-                                                <UserCheck size={13} /> Anda (sebagai {uatCurrentRoleKey === 'development_lead' ? 'Development Lead' : uatCurrentRoleKey === 'pm' ? 'PM / Analyst Pengembangan' : 'Pemohon (Business User)'}) dapat menyetujui UAT
-                                            </p>
-                                            <textarea
-                                                rows={2}
-                                                value={uatApprovalNote}
-                                                onChange={e => setUatApprovalNote(e.target.value)}
-                                                placeholder="Catatan persetujuan (opsional)..."
-                                                className="w-full px-3 py-2 border border-gray-200 rounded-xl text-xs focus:outline-none focus:border-emerald-500 bg-white resize-none"
-                                            />
-                                            <button
-                                                onClick={handleSubmitUatApproval}
-                                                disabled={uatApprovalSubmitting}
-                                                className="mt-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:bg-gray-300 text-white text-xs font-bold rounded-xl flex items-center gap-2 transition-all cursor-pointer disabled:cursor-not-allowed"
-                                            >
-                                                {uatApprovalSubmitting ? (
-                                                    <><span className="w-3 h-3 border-2 border-white/40 border-t-white rounded-full animate-spin" /> Menyimpan...</>
-                                                ) : (
-                                                    <><CheckCircle2 size={13} /> Setujui UAT</>
-                                                )}
-                                            </button>
+                                        <div>
+                                            <h6 className="font-bold text-sm text-gray-800">Matrix Persetujuan UAT</h6>
+                                            <p className="text-[10px] text-gray-400">Putaran {uatApprovalMatrix?.round_number || '-'} · keputusan tercatat per orang</p>
                                         </div>
-                                    )}
-                                    {uatCurrentRoleKey && uat3Approvals?.[uatCurrentRoleKey]?.approved && (
-                                        <p className="text-[10px] text-emerald-600 mt-2 flex items-center gap-1">
-                                            <CheckCircle2 size={11} /> Anda telah menyetujui UAT pada proyek ini.
-                                        </p>
+                                        <span className="ml-auto text-[10px] font-bold text-gray-500">
+                                            {uatApprovalMatrix?.approved_count || 0} / {uatApprovalMatrix?.required_count || 0} disetujui
+                                        </span>
+                                        {canManageUatApprovals && uatApprovalMatrix?.is_out_of_sync && !uatDone && (
+                                            <button onClick={handleSyncUatApprovalRound} disabled={uatApprovalSubmitting}
+                                                className="px-3 py-1.5 rounded-lg bg-blue-50 text-blue-700 border border-blue-200 text-[10px] font-bold flex items-center gap-1">
+                                                <RefreshCw size={11} /> Sinkronkan Peserta Tab 1
+                                            </button>
+                                        )}
+                                        {canManageUatApprovals && hasRecordedUatApprovalDecision && !uatDone && (
+                                            <button onClick={handleRestartUatApprovalRound} disabled={uatApprovalSubmitting}
+                                                className="px-3 py-1.5 rounded-lg bg-orange-50 text-orange-700 border border-orange-200 text-[10px] font-bold flex items-center gap-1">
+                                                <RefreshCw size={11} /> Buat Putaran Baru
+                                            </button>
+                                        )}
+                                    </div>
+                                    {uatMatrixLoading ? (
+                                        <div className="py-8 text-center text-xs text-gray-400">Memuat matrix approval...</div>
+                                    ) : !uatApprovalMatrix ? (
+                                        <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">Matrix approval belum tersedia. Pastikan hasil UAT Tahap 2 sudah disimpan final.</div>
+                                    ) : (
+                                        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                                            {[
+                                                { side: 'requester', title: 'Pihak Peminta', tone: 'amber' },
+                                                { side: 'it', title: 'Pihak Teknologi Informasi', tone: 'blue' },
+                                            ].map(group => (
+                                                <div key={group.side} className="rounded-xl border border-gray-200 p-3">
+                                                    <p className="text-[11px] font-bold uppercase tracking-wide text-gray-600 mb-2">{group.title}</p>
+                                                    <div className="space-y-2">
+                                                        {(uatApprovalMatrix.approvers || []).filter(item => item.side === group.side).map(approver => {
+                                                            const statusClasses = approver.status === 'approved'
+                                                                ? 'bg-emerald-100 text-emerald-700'
+                                                                : approver.status === 'rejected'
+                                                                    ? 'bg-red-100 text-red-700'
+                                                                    : 'bg-gray-100 text-gray-600';
+                                                            return (
+                                                                <div key={approver.id} className="rounded-xl bg-gray-50 border border-gray-100 p-3">
+                                                                    <div className="flex items-start justify-between gap-2">
+                                                                        <div>
+                                                                            <p className="font-bold text-xs text-gray-800">{approver.name}</p>
+                                                                            <p className="text-[10px] text-gray-500">{approver.approval_role_label}{approver.unit ? ` · ${approver.unit}` : ''}</p>
+                                                                        </div>
+                                                                        <span className={`px-2 py-0.5 rounded-full text-[9px] font-bold ${statusClasses}`}>
+                                                                            {approver.status === 'approved' ? 'Disetujui' : approver.status === 'rejected' ? 'Ditolak' : 'Menunggu'}
+                                                                        </span>
+                                                                    </div>
+                                                                    {approver.decision_note ? <p className="mt-2 text-[10px] italic text-gray-600">“{approver.decision_note}”</p> : null}
+                                                                    {approver.decided_at ? <p className="mt-1 text-[9px] text-gray-400">{fmtDate(approver.decided_at)}</p> : null}
+                                                                </div>
+                                                            );
+                                                        })}
+                                                    </div>
+                                                </div>
+                                            ))}
+                                        </div>
                                     )}
                                 </div>
 
-                                {/* ── Change Request UAT ── */}
+                                {/* Riwayat Change Request UAT */}
                                 <div className="bg-white border border-gray-200 rounded-2xl p-4">
                                     <div className="flex items-center justify-between mb-2">
                                         <div className="flex items-center gap-2">
                                             <RotateCcw size={14} className="text-orange-500" />
-                                            <h6 className="font-bold text-sm text-gray-800">Change Request UAT</h6>
+                                            <h6 className="font-bold text-sm text-gray-800">Riwayat Perubahan UAT</h6>
                                         </div>
-                                        {user?.role === 'business_user' && !uatDone && (
-                                            <button onClick={() => setShowCrModal(true)} className="px-3 py-1.5 bg-orange-500 hover:bg-orange-600 text-white rounded-lg text-[10px] font-bold flex items-center gap-1 transition-colors cursor-pointer">
-                                                <Plus size={12} /> Ajukan Change Request
-                                            </button>
-                                        )}
                                     </div>
                                     <p className="text-[11px] text-gray-500 mb-2">
-                                        Pemohon dapat mengajukan pembaruan, permintaan tambahan, atau perbaikan (minor/mayor). Mayor akan kembali ke development, minor mengulang SIT.
+                                        Permintaan perubahan dicatat pada Tahap 2. Revisi minor tidak memundurkan alur; revisi mayor menjadi Change Request dan mewajibkan perbaikan developer serta SIT ulang.
                                     </p>
                                     {uatChangeRequests.length === 0 ? (
                                         <p className="text-[11px] text-gray-400 italic">Belum ada change request diajukan.</p>
@@ -1991,24 +3819,6 @@ export default function SITUATWizard({ project, updateProject, addNotification, 
                                                             Diajukan oleh: {cr.submittedBy} • {fmtDate(cr.at)}
                                                             {cr.status !== 'pending' && cr.decisionBy && ` • Keputusan: ${cr.decisionBy}`}
                                                         </p>
-                                                        {cr.status === 'pending' && user?.role !== 'business_user' && !uatDone && (
-                                                            <div className="flex gap-2 mt-2">
-                                                                <button
-                                                                    onClick={() => handleDecideChangeRequest(cr, 'approved')}
-                                                                    disabled={crDecisionSubmitting === cr.id}
-                                                                    className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 disabled:bg-gray-300 text-white rounded-lg text-[10px] font-bold transition-colors cursor-pointer"
-                                                                >
-                                                                    Setujui (perbaiki)
-                                                                </button>
-                                                                <button
-                                                                    onClick={() => handleDecideChangeRequest(cr, 'rejected')}
-                                                                    disabled={crDecisionSubmitting === cr.id}
-                                                                    className="px-3 py-1.5 bg-red-100 hover:bg-red-200 border border-red-300 text-red-700 rounded-lg text-[10px] font-bold transition-colors cursor-pointer"
-                                                                >
-                                                                    Tolak
-                                                                </button>
-                                                            </div>
-                                                        )}
                                                     </div>
                                                 );
                                             })}
@@ -2020,56 +3830,51 @@ export default function SITUATWizard({ project, updateProject, addNotification, 
                                     <div className="sm:col-span-2">
                                         <label className="block text-xs font-bold text-gray-600 uppercase tracking-wider mb-1.5">Catatan Persetujuan Final</label>
                                         <textarea rows={2} value={uat3.approvalNotes} onChange={e => setUat3(p => ({ ...p, approvalNotes: e.target.value }))}
-                                            placeholder="Pernyataan persetujuan: semua skenario bisnis telah diverifikasi dan dinyatakan memenuhi kebutuhan FSD..." disabled={uatDone}
+                                            placeholder="Pernyataan persetujuan: semua skenario bisnis telah diverifikasi dan dinyatakan memenuhi kebutuhan FSD..." disabled={uatDone || !canManageUatApprovals}
                                             className="w-full px-3 py-2.5 border border-gray-200 rounded-xl text-xs focus:outline-none focus:border-emerald-500 bg-gray-50 resize-none disabled:bg-gray-100" />
                                     </div>
                                     <div>
                                         <label className="block text-xs font-bold text-gray-600 uppercase tracking-wider mb-1.5">Disetujui Oleh</label>
                                         <input type="text" value={uat3.approvedBy} onChange={e => setUat3(p => ({ ...p, approvedBy: e.target.value }))}
-                                            placeholder="Nama PM, Nama Perwakilan Divisi" disabled={uatDone}
+                                            placeholder="Nama PM, Nama Perwakilan Divisi" disabled={uatDone || !canManageUatApprovals}
                                             className="w-full px-3 py-2.5 border border-gray-200 rounded-xl text-xs focus:outline-none focus:border-emerald-500 bg-gray-50 disabled:bg-gray-100" />
                                     </div>
                                 </div>
-                                <div>
+                                <div id="uat-final-documents">
                                     <div className="flex items-center justify-between mb-1.5">
-                                        <label className="text-xs font-bold text-gray-600 uppercase tracking-wider">Dokumen: Form Persetujuan &amp; Tanda Tangan Digital</label>
-                                        {!uatDone && (
-                                            <label className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold cursor-pointer flex items-center gap-1.5 transition-colors">
-                                                <Upload size={12} /> Upload
-                                                <input type="file" ref={uat3FileRef} multiple accept=".pdf,.xls,.xlsx,.jpg,.jpeg,.png,.zip" onChange={e => onUpload(e, setUat3, 'docs', 'UAT_APPROVAL')} className="hidden" />
+                                        <div>
+                                            <label className="text-xs font-bold text-gray-600 uppercase tracking-wider">Dokumen: Form Persetujuan &amp; Tanda Tangan Digital</label>
+                                            <p className="mt-0.5 text-[10px] text-gray-400">Setelah upload selesai, dokumen langsung tersedia untuk diperiksa oleh approver eksternal melalui link pribadi.</p>
+                                        </div>
+                                        {canManageUatApprovals && !uatDone && !hasRecordedUatApprovalDecision && (
+                                            <label className={`px-3 py-1.5 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 transition-colors ${isUatApprovalUploading ? 'bg-gray-300 cursor-not-allowed' : 'bg-emerald-600 hover:bg-emerald-700 cursor-pointer'}`}>
+                                                {isUatApprovalUploading ? <RefreshCw size={12} className="animate-spin" /> : <Upload size={12} />}
+                                                {isUatApprovalUploading ? 'Mengunggah...' : 'Upload'}
+                                                <input type="file" ref={uat3FileRef} multiple disabled={isUatApprovalUploading} accept=".pdf,.xls,.xlsx,.jpg,.jpeg,.png,.zip" onChange={e => onUpload(e, setUat3, 'UAT_APPROVAL')} className="hidden" />
                                             </label>
                                         )}
                                     </div>
-                                    <DocList docs={uat3.docs} onRemove={i => onRemoveDoc(setUat3, i)} onView={viewDoc} onDownload={downloadDoc} onTypeChange={(i, t) => changeDocType(setUat3, i, t)} docTypeOptions={docTypeOptions('UAT_APPROVAL')} readOnly={uatDone} />
+                                    <DocList docs={uat3.docs} onRemove={removeUatApprovalDocument} onView={viewDoc} onDownload={downloadDoc} docTypeOptions={[['UAT_SIGNOFF', 'Berita Acara UAT']]} readOnly={uatDone || !canManageUatApprovals || isUatApprovalUploading || hasRecordedUatApprovalDecision} allowTypeChange={false} />
+                                    {hasRecordedUatApprovalDecision && !uatDone ? (
+                                        <p className="mt-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[10px] text-amber-800">
+                                            Dokumen dikunci karena keputusan approval sudah mulai tercatat. Jika dokumen harus diganti, buat putaran approval baru agar seluruh pihak meninjau versi yang sama.
+                                        </p>
+                                    ) : null}
                                 </div>
                                 {/* Action buttons */}
-                                {!uatDone && (status === 'UAT_IN_PROGRESS' || UNLOCK_ALL_STAGES) && activeUatStep === 3 && (
+                                {canManageUatApprovals && !uatDone && (status === 'UAT_IN_PROGRESS' || UNLOCK_ALL_STAGES) && activeUatStep === 3 && (
                                     <div className="flex flex-col gap-3 pt-2 border-t border-gray-100">
-                                        <div className="flex flex-col sm:flex-row gap-2">
-                                            <button
-                                                onClick={() => { setRevisionType('UAT_TO_SIT'); setShowRevisionModal(true); }}
-                                                className="flex-1 px-4 py-2.5 bg-orange-50 hover:bg-orange-100 border border-orange-300 text-orange-700 text-xs font-bold rounded-xl flex items-center justify-center gap-2 transition-all cursor-pointer"
-                                            >
-                                                <RotateCcw size={13} /> Revisi Minor — Ulang SIT
-                                            </button>
-                                            <button
-                                                onClick={() => { setRevisionType('UAT_TO_DEV'); setShowRevisionModal(true); }}
-                                                className="flex-1 px-4 py-2.5 bg-red-50 hover:bg-red-100 border border-red-300 text-red-700 text-xs font-bold rounded-xl flex items-center justify-center gap-2 transition-all cursor-pointer"
-                                            >
-                                                <AlertTriangle size={13} /> Revisi Mayor — Kembali ke Dev
-                                            </button>
-                                        </div>
                                         <button
                                             onClick={handleUATPass}
-                                            disabled={submitting || !allUatApproved}
-                                            title={allUatApproved ? '' : 'Semua persetujuan (Pemohon, PM, Development Lead) harus lengkap terlebih dahulu'}
+                                            disabled={submitting || !allUatApproved || sitUatData.uat2_resume_after_sit === true || uat2VerificationMode}
+                                            title={allUatApproved ? '' : 'Seluruh persetujuan wajib dari pihak peminta dan pihak IT harus lengkap terlebih dahulu'}
                                             className={`w-full px-6 py-3 text-white text-sm font-bold rounded-xl flex items-center justify-center gap-2 transition-all shadow-md active:scale-95 ${allUatApproved ? 'bg-emerald-600 hover:bg-emerald-700 cursor-pointer' : 'bg-gray-300 cursor-not-allowed'}`}
                                         >
                                             <Send size={16} /> UAT Lulus — Tetapkan DEV_COMPLETED &amp; Lanjut ke QA / Siber
                                         </button>
                                         {!allUatApproved && (
                                             <p className="text-[10px] text-gray-400 text-center">
-                                                Tombol "UAT Lulus" aktif setelah Pemohon, PM, dan Development Lead menyetujui.
+                                                Tombol "UAT Lulus" aktif setelah seluruh approver wajib pada putaran aktif menyetujui.
                                             </p>
                                         )}
                                     </div>
@@ -2142,58 +3947,6 @@ export default function SITUATWizard({ project, updateProject, addNotification, 
                 </div>
             )}
 
-            {/* ─── MODAL: Revision tingkat SIT/UAT ─── */}
-            {showRevisionModal && (
-                <div className="fixed inset-0 z-[99998] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
-                    <div className="bg-white rounded-2xl shadow-2xl max-w-lg w-full p-6 border border-gray-100">
-                        <div className="flex items-center gap-3 mb-4">
-                            <div className="w-10 h-10 bg-orange-100 rounded-xl flex items-center justify-center">
-                                <AlertTriangle size={20} className="text-orange-600" />
-                            </div>
-                            <div>
-                                <h3 className="font-bold text-gray-800 text-base">
-                                    {revisionType === 'SIT_TO_DEV' && 'Konfirmasi Revisi SIT → Development'}
-                                    {revisionType === 'UAT_TO_SIT' && 'Konfirmasi Revisi UAT → Ulang SIT'}
-                                    {revisionType === 'UAT_TO_DEV' && 'Konfirmasi Revisi UAT → Development (Mayor)'}
-                                </h3>
-                                <p className="text-xs text-gray-500 mt-0.5">
-                                    {revisionType === 'SIT_TO_DEV' && 'Proyek akan dikembalikan ke tim Development.'}
-                                    {revisionType === 'UAT_TO_SIT' && 'Tim TI harus mengulangi SIT sebelum UAT dilanjutkan.'}
-                                    {revisionType === 'UAT_TO_DEV' && 'Pengembangan ulang diperlukan. SIT dan UAT akan diulang dari awal.'}
-                                </p>
-                            </div>
-                        </div>
-                        <div className="mb-4">
-                            <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1.5">
-                                Catatan Revisi / Alasan Penolakan <span className="text-red-500">*</span>
-                            </label>
-                            <textarea
-                                rows={4}
-                                value={revisionNotes}
-                                onChange={e => setRevisionNotes(e.target.value)}
-                                placeholder="Jelaskan secara detail apa yang perlu diperbaiki, defect apa yang ditemukan, dan kriteria apa yang harus dipenuhi sebelum pengujian ulang..."
-                                className="w-full px-3 py-2.5 border border-gray-300 rounded-xl text-sm focus:outline-none focus:border-orange-500 resize-none"
-                                autoFocus
-                            />
-                            {!revisionNotes.trim() && <p className="text-xs text-red-500 mt-1">Catatan revisi wajib diisi.</p>}
-                        </div>
-                        <div className="flex gap-3 justify-end">
-                            <button onClick={() => { setShowRevisionModal(false); setRevisionNotes(''); }}
-                                className="px-4 py-2 border border-gray-300 text-gray-700 rounded-xl font-bold text-xs hover:bg-gray-50 transition-colors cursor-pointer">
-                                Batal
-                            </button>
-                            <button
-                                onClick={revisionType === 'SIT_TO_DEV' ? handleSITRevision : handleUATRevision}
-                                disabled={!revisionNotes.trim() || submitting}
-                                className="px-5 py-2 bg-orange-600 hover:bg-orange-700 disabled:bg-gray-300 text-white rounded-xl font-bold text-xs transition-colors cursor-pointer disabled:cursor-not-allowed"
-                            >
-                                Konfirmasi &amp; Kirim Revisi
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            )}
-
             {/* ─── MODAL: Kembalikan Task ke Developer ─── */}
             {showTaskRevisionModal && (
                 <div className="fixed inset-0 z-[99999] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
@@ -2256,67 +4009,6 @@ export default function SITUATWizard({ project, updateProject, addNotification, 
                 />
             )}
 
-            {/* ─── MODAL: Ajukan Change Request UAT ─── */}
-            {showCrModal && (
-                <div className="fixed inset-0 z-[99999] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
-                    <div className="bg-white rounded-2xl shadow-2xl max-w-lg w-full p-6 border border-gray-100">
-                        <div className="flex items-center gap-3 mb-4">
-                            <div className="w-10 h-10 bg-orange-100 rounded-xl flex items-center justify-center">
-                                <RotateCcw size={20} className="text-orange-600" />
-                            </div>
-                            <div>
-                                <h3 className="font-bold text-gray-800 text-base">Ajukan Change Request UAT</h3>
-                                <p className="text-xs text-gray-500 mt-0.5">
-                                    Ajukan pembaruan, permintaan tambahan, atau perbaikan atas hasil UAT.
-                                </p>
-                            </div>
-                        </div>
-                        <div className="space-y-4">
-                            <div>
-                                <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1.5">Tipe Perubahan *</label>
-                                <div className="grid grid-cols-2 gap-2">
-                                    <button onClick={() => setCrForm(p => ({ ...p, type: 'minor' }))}
-                                        className={`px-4 py-2.5 rounded-xl border text-xs font-bold transition-all cursor-pointer ${crForm.type === 'minor' ? 'bg-orange-500 border-orange-600 text-white' : 'bg-gray-50 border-gray-200 text-gray-600 hover:bg-orange-50'}`}>
-                                        Minor — Ulang SIT
-                                    </button>
-                                    <button onClick={() => setCrForm(p => ({ ...p, type: 'mayor' }))}
-                                        className={`px-4 py-2.5 rounded-xl border text-xs font-bold transition-all cursor-pointer ${crForm.type === 'mayor' ? 'bg-red-500 border-red-600 text-white' : 'bg-gray-50 border-gray-200 text-gray-600 hover:bg-red-50'}`}>
-                                        Mayor — Kembali ke Dev
-                                    </button>
-                                </div>
-                            </div>
-                            <div>
-                                <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1.5">Judul Change Request *</label>
-                                <input type="text" value={crForm.title} onChange={e => setCrForm(p => ({ ...p, title: e.target.value }))}
-                                    placeholder="Contoh: Perubahan format laporan ekspor" className="w-full px-3 py-2.5 border border-gray-300 rounded-xl text-xs focus:outline-none focus:border-orange-500" />
-                            </div>
-                            <div>
-                                <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1.5">Detail Perubahan *</label>
-                                <textarea rows={4} value={crForm.detail} onChange={e => setCrForm(p => ({ ...p, detail: e.target.value }))}
-                                    placeholder="Jelaskan secara detail apa yang ingin diubah/ditambahkan/diperbaiki..." className="w-full px-3 py-2.5 border border-gray-300 rounded-xl text-xs focus:outline-none focus:border-orange-500 resize-none" />
-                            </div>
-                            <div>
-                                <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1.5">Kategori (opsional)</label>
-                                <input type="text" value={crForm.category} onChange={e => setCrForm(p => ({ ...p, category: e.target.value }))}
-                                    placeholder="Contoh: Fungsionalitas, UI/UX, Data" className="w-full px-3 py-2.5 border border-gray-300 rounded-xl text-xs focus:outline-none focus:border-orange-500" />
-                            </div>
-                        </div>
-                        <div className="flex gap-3 justify-end mt-4">
-                            <button onClick={() => setShowCrModal(false)} disabled={crSubmitting}
-                                className="px-4 py-2 border border-gray-300 text-gray-700 rounded-xl font-bold text-xs hover:bg-gray-50 transition-colors cursor-pointer disabled:opacity-50">
-                                Batal
-                            </button>
-                            <button
-                                onClick={handleSubmitChangeRequest}
-                                disabled={!crForm.title.trim() || !crForm.detail.trim() || crSubmitting}
-                                className="px-5 py-2 bg-orange-600 hover:bg-orange-700 disabled:bg-gray-300 text-white rounded-xl font-bold text-xs transition-colors cursor-pointer disabled:cursor-not-allowed"
-                            >
-                                {crSubmitting ? 'Mengirim...' : 'Ajukan Change Request'}
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            )}
         </div>
     );
 }

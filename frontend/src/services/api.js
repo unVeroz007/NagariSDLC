@@ -116,6 +116,17 @@ async function apiFetch(url, options = {}) {
     return handleResponse(res);
 }
 
+function buildApiErrorMessage(errBody, status) {
+    const baseMessage = errBody.message || `HTTP ${status}`;
+    if (!errBody.errors || typeof errBody.errors !== 'object') return baseMessage;
+
+    const detailMessages = [...new Set(Object.values(errBody.errors).flat())]
+        .filter(message => message && message !== baseMessage);
+    return detailMessages.length > 0
+        ? `${baseMessage}: ${detailMessages.join(', ')}`
+        : baseMessage;
+}
+
 // ──────────────────────────────────────────────────────────
 // Helper: handle response dari fetch
 // ──────────────────────────────────────────────────────────
@@ -127,18 +138,14 @@ async function handleResponse(res) {
             window.dispatchEvent(new Event('auth:unauthorized'));
         }
 
-        let errBody = {};
+        let errBody;
         try {
             errBody = await res.json();
         } catch {
             errBody = { message: `HTTP ${res.status}: Terjadi kesalahan server.` };
         }
 
-        let errMsg = errBody.message || `HTTP ${res.status}`;
-        if (errBody.errors && typeof errBody.errors === 'object') {
-            const messages = Object.values(errBody.errors).flat().join(', ');
-            if (messages) errMsg = `${errMsg}: ${messages}`;
-        }
+        const errMsg = buildApiErrorMessage(errBody, res.status);
         const error = new Error(errMsg);
         error.status = res.status;
         error.data = errBody;
@@ -146,6 +153,26 @@ async function handleResponse(res) {
     }
 
     // 204 No Content
+    if (res.status === 204) return null;
+    return res.json();
+}
+
+// Endpoint link approval tidak boleh memicu logout sesi aplikasi ketika sesi
+// eksternalnya kedaluwarsa atau nomor verifikasi tidak cocok.
+async function handlePublicResponse(res) {
+    if (!res.ok) {
+        let errBody;
+        try {
+            errBody = await res.json();
+        } catch {
+            errBody = { message: `HTTP ${res.status}: Terjadi kesalahan server.` };
+        }
+        const errMsg = buildApiErrorMessage(errBody, res.status);
+        const error = new Error(errMsg);
+        error.status = res.status;
+        error.data = errBody;
+        throw error;
+    }
     if (res.status === 204) return null;
     return res.json();
 }
@@ -270,11 +297,53 @@ export const projectService = {
         });
     },
 
-    // Persetujuan UAT Tahap 3 oleh role (business_user/pm/development_lead)
-    submitUatApproval: async (id, note = '') => {
-        return apiFetch(`${BASE_URL}/projects/${id}/uat-approval`, {
+    getUatApprovalMatrix: async (id) => {
+        return apiFetch(`${BASE_URL}/projects/${id}/uat-approval-matrix`);
+    },
+
+    restartUatApprovalRound: async (id) => {
+        return apiFetch(`${BASE_URL}/projects/${id}/uat-approval-rounds`, {
             method: 'POST',
-            body: JSON.stringify({ note }),
+        });
+    },
+
+    syncUatApprovalRound: async (id) => {
+        return apiFetch(`${BASE_URL}/projects/${id}/uat-approval-rounds/sync`, {
+            method: 'POST',
+        });
+    },
+
+    generateUatApprovalLink: async (id, approverId) => {
+        return apiFetch(`${BASE_URL}/projects/${id}/uat-approvers/${approverId}/link`, { method: 'POST' });
+    },
+
+    submitUatApproval: async (id, approverId, decision, note = '') => {
+        return apiFetch(`${BASE_URL}/projects/${id}/uat-approvers/${approverId}/decision`, {
+            method: 'POST',
+            body: JSON.stringify({ decision, note }),
+        });
+    },
+
+    // Snapshot hasil UAT Tahap 2 per skenario; kesimpulan dihitung server.
+    submitUatExecution: async (id, payload) => {
+        return apiFetch(`${BASE_URL}/projects/${id}/uat-execution`, {
+            method: 'POST',
+            body: JSON.stringify(payload),
+        });
+    },
+
+    saveUatExecutionDraft: async (id, payload) => {
+        return apiFetch(`${BASE_URL}/projects/${id}/uat-execution/draft`, {
+            method: 'PUT',
+            body: JSON.stringify(payload),
+        });
+    },
+
+    // Verifikasi item Mayor setelah developer selesai dan SIT ulang lulus.
+    submitUatMajorVerification: async (id, payload) => {
+        return apiFetch(`${BASE_URL}/projects/${id}/uat-major-verification`, {
+            method: 'POST',
+            body: JSON.stringify(payload),
         });
     },
 
@@ -486,6 +555,56 @@ export const documentService = {
     },
 
     delete: async (id) => apiFetch(`${BASE_URL}/documents/${id}`, { method: 'DELETE' }),
+};
+
+export const externalUatApprovalService = {
+    preview: async (token) => {
+        const res = await fetch(`${BASE_URL}/uat-approvals/${encodeURIComponent(token)}`, {
+            headers: { Accept: 'application/json' },
+        });
+        return handlePublicResponse(res);
+    },
+
+    verify: async (token, phone) => {
+        const res = await fetch(`${BASE_URL}/uat-approvals/${encodeURIComponent(token)}/verify`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+            body: JSON.stringify({ phone }),
+        });
+        return handlePublicResponse(res);
+    },
+
+    detail: async (token, accessToken) => {
+        const res = await fetch(`${BASE_URL}/uat-approvals/${encodeURIComponent(token)}/detail`, {
+            headers: { Accept: 'application/json', 'X-UAT-Approval-Access': accessToken },
+        });
+        return handlePublicResponse(res);
+    },
+
+    decide: async (token, accessToken, decision, note = '') => {
+        const res = await fetch(`${BASE_URL}/uat-approvals/${encodeURIComponent(token)}/decision`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                Accept: 'application/json',
+                'X-UAT-Approval-Access': accessToken,
+            },
+            body: JSON.stringify({ decision, note }),
+        });
+        return handlePublicResponse(res);
+    },
+
+    downloadDocument: async (token, accessToken, documentId) => {
+        const res = await fetch(`${BASE_URL}/uat-approvals/${encodeURIComponent(token)}/documents/${documentId}/download`, {
+            headers: { 'X-UAT-Approval-Access': accessToken },
+        });
+        if (!res.ok) throw new Error(`Gagal mengunduh dokumen (HTTP ${res.status})`);
+        return res.blob();
+    },
+};
+
+export const internalUatApprovalService = {
+    getMyAssignments: async () => apiFetch(`${BASE_URL}/me/uat-approvals`),
 };
 
 export const activityLogService = {

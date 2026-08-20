@@ -5,12 +5,17 @@ namespace App\Http\Controllers\Api\V1;
 use App\Enums\ProjectStatus;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Project\StoreProjectRequest;
+use App\Http\Requests\Project\SaveUatExecutionDraftRequest;
+use App\Http\Requests\Project\SubmitUatExecutionRequest;
+use App\Http\Requests\Project\SubmitUatMajorVerificationRequest;
 use App\Http\Requests\Project\UpdateProjectStatusRequest;
 use App\Http\Resources\ProjectResource;
 use App\Http\Resources\ProjectStatusHistoryResource;
 use App\Models\Division;
 use App\Models\Project;
 use App\Services\ProjectWorkflowService;
+use App\Services\UatExecutionService;
+use App\Services\UatApprovalService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -18,8 +23,32 @@ use Throwable;
 
 class ProjectController extends Controller
 {
+    /** Keys yang hanya boleh ditulis oleh endpoint workflow khusus. */
+    private const SERVER_MANAGED_SIT_UAT_KEYS = [
+        'uat2_scenarios',
+        'uat2_additional_requests',
+        'uat2_summary',
+        'uat2_executedCount',
+        'uat2_passedCount',
+        'uat2_findings',
+        'uat2_execNotes',
+        'uat2_resume_after_sit',
+        'uat2_verification_mode',
+        'uat2_verification_history',
+        'uat2_major_revision_verified_at',
+        'uat2_major_revision_resolved_at',
+        'uat_hold',
+        'uat_revision_cycles',
+        'sit_retest_scope',
+        'uat3_approvals',
+        'uat_change_requests',
+        'sit_cycles',
+    ];
+
     public function __construct(
-        protected ProjectWorkflowService $workflowService
+        protected ProjectWorkflowService $workflowService,
+        protected UatExecutionService $uatExecutionService,
+        protected UatApprovalService $uatApprovalService
     ) {}
 
     public function nextReqId(): JsonResponse
@@ -254,6 +283,20 @@ class ProjectController extends Controller
             $typeValue = 'NON_RBB';
         }
 
+        $incomingSitUatData = $request->input('sit_uat_data', $request->input('sitUatData'));
+        $mergedSitUatData = null;
+        if (is_array($incomingSitUatData)) {
+            $currentSitUatData = (array) $project->sit_uat_data;
+            foreach (self::SERVER_MANAGED_SIT_UAT_KEYS as $key) {
+                if (array_key_exists($key, $currentSitUatData)) {
+                    $incomingSitUatData[$key] = $currentSitUatData[$key];
+                } else {
+                    unset($incomingSitUatData[$key]);
+                }
+            }
+            $mergedSitUatData = array_replace($currentSitUatData, $incomingSitUatData);
+        }
+
         $updateData = array_filter([
             'title'                  => $request->title,
             'description'            => $request->description,
@@ -267,7 +310,7 @@ class ProjectController extends Controller
             'current_stage_deadline' => $request->current_stage_deadline ?? $request->input('deadline'),
             'staging_url'            => $request->staging_url,
             'uat_notes'              => $request->uat_notes,
-            'sit_uat_data'           => $request->filled('sit_uat_data') ? $request->sit_uat_data : ($request->sitUatData ?? null),
+            'sit_uat_data'           => $mergedSitUatData,
             'analyst_result'         => $request->input('analystResult') ?? $request->input('analyst_result'),
             'dev_analyst_result'    => $request->input('devAnalystResult') ?? $request->input('dev_analyst_result'),
             'qa_status'              => $request->qa_status,
@@ -459,19 +502,20 @@ class ProjectController extends Controller
     }
 
     /**
-     * Gatekeeper SIT: pastikan seluruh task developer sudah selesai (Done)
-     * sebelum proyek boleh masuk tahap SIT. Task berstatus TAKE_DOWN diabaikan.
+     * Gatekeeper SIT. SIT pertama mencakup seluruh task aktif; SIT ulang akibat
+     * UAT Mayor hanya mencakup task pada scope Change Request siklus aktif.
      */
     public function sitGate(int $id): JsonResponse
     {
         $project = Project::with('tasks.assignee')->findOrFail($id);
 
-        $tasks = $project->tasks;
+        $tasks = $project->sitScopeTasks();
 
         // Semua task yang TIDAK berstatus done / take_down = blocker
-        $incomplete = $tasks->filter(function ($t) {
+        $incomplete = $tasks->filter(function ($t) use ($project) {
             $status = $t->status instanceof \BackedEnum ? $t->status->value : $t->status;
-            return ! in_array($status, ['done', 'take_down']);
+            return ! in_array($status, ['done', 'take_down'])
+                || ($project->isTargetedSitRetest() && ! $t->assignee_id);
         })->values();
 
         $totalCount = $tasks->filter(function ($t) {
@@ -479,9 +523,10 @@ class ProjectController extends Controller
             return $status !== 'take_down';
         })->count();
 
-        $doneCount = $tasks->filter(function ($t) {
+        $doneCount = $tasks->filter(function ($t) use ($project) {
             $status = $t->status instanceof \BackedEnum ? $t->status->value : $t->status;
-            return $status === 'done';
+            return $status === 'done'
+                && (! $project->isTargetedSitRetest() || (bool) $t->assignee_id);
         })->count();
 
         return response()->json([
@@ -496,7 +541,14 @@ class ProjectController extends Controller
                 ]),
                 'total_task'    => $totalCount,
                 'done_task'     => $doneCount,
-                'take_down_task'=> $tasks->filter(fn($t) => ($t->status instanceof \BackedEnum ? $t->status->value : $t->status) === 'take_down')->count(),
+                'take_down_task'=> $project->tasks->filter(fn($t) => ($t->status instanceof \BackedEnum ? $t->status->value : $t->status) === 'take_down')->count(),
+                'scope' => [
+                    'mode' => $project->isTargetedSitRetest() ? 'targeted_retest' : 'full',
+                    'cycle' => $project->isTargetedSitRetest()
+                        ? (int) ($project->sit_uat_data['uat_hold']['cycle'] ?? 0)
+                        : null,
+                    'task_ids' => $tasks->pluck('id')->map(fn ($id) => (int) $id)->values(),
+                ],
             ],
         ]);
     }
@@ -538,8 +590,8 @@ class ProjectController extends Controller
             ], 422);
         }
 
-        // Daftar semua developer (assignee task unik) yang harus approve
-        $requiredDeveloperIds = $project->tasks
+        // Pada SIT ulang terarah, hanya developer task terdampak yang wajib approve.
+        $requiredDeveloperIds = $project->sitScopeTasks()
             ->pluck('assignee_id')
             ->filter(fn($id) => $id !== null)
             ->unique()
@@ -578,7 +630,14 @@ class ProjectController extends Controller
         if ($roleKey === 'developer') {
             // Inisialisasi slot developer
             $devApproval = (array) ($approvals['developer'] ?? []);
-            $devList = (array) ($devApproval['developers'] ?? []);
+            $devList = collect($devApproval['developers'] ?? [])
+                ->filter(fn (array $approval): bool => in_array(
+                    (int) ($approval['userId'] ?? $approval['approvedById'] ?? 0),
+                    $requiredDeveloperIds,
+                    true
+                ))
+                ->values()
+                ->all();
             $userId = (int) $user->id;
             $alreadyApproved = collect($devList)->contains(fn($d) => (int) ($d['userId'] ?? $d['approvedById'] ?? 0) === $userId);
             if (! $alreadyApproved) {
@@ -637,14 +696,20 @@ class ProjectController extends Controller
      */
     public static function sitApprovalStatus(array $approvals, $project): array
     {
-        $requiredDevCount = $project->tasks
+        $requiredDeveloperIds = $project->sitScopeTasks()
             ->pluck('assignee_id')
             ->filter(fn($id) => $id !== null)
             ->unique()
-            ->count();
+            ->map(fn ($id) => (int) $id)
+            ->values();
+        $requiredDevCount = $requiredDeveloperIds->count();
 
         $devApproval = (array) ($approvals['developer'] ?? []);
-        $devApproved = (int) ($devApproval['approvedCount'] ?? count((array) ($devApproval['developers'] ?? [])));
+        $approvedDeveloperIds = collect($devApproval['developers'] ?? [])
+            ->map(fn (array $approval): int => (int) ($approval['userId'] ?? $approval['approvedById'] ?? 0))
+            ->filter()
+            ->unique();
+        $devApproved = $requiredDeveloperIds->intersect($approvedDeveloperIds)->count();
 
         return [
             'developer' => [
@@ -689,10 +754,22 @@ class ProjectController extends Controller
         }
 
         $status = $project->status instanceof \BackedEnum ? $project->status->value : $project->status;
-        if (! in_array($status, ['UAT_IN_PROGRESS', 'UAT_REVISION_SIT', 'UAT_REVISION_DEV'])) {
+        if ($status !== ProjectStatus::UAT_IN_PROGRESS->value) {
             return response()->json([
                 'status' => 'error',
                 'message' => 'Persetujuan UAT hanya dapat dilakukan saat proyek berstatus UAT.',
+            ], 422);
+        }
+
+        $sitData = (array) $project->sit_uat_data;
+        if (
+            (int) ($sitData['activeUatStep'] ?? 1) < 3
+            || ($sitData['uat2_resume_after_sit'] ?? false) === true
+            || ($sitData['uat2_verification_mode'] ?? false) === true
+        ) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Persetujuan final belum tersedia. Selesaikan eksekusi UAT dan seluruh revisi mayor terlebih dahulu.',
             ], 422);
         }
 
@@ -718,7 +795,6 @@ class ProjectController extends Controller
             'note' => ['nullable', 'string', 'max:2000'],
         ]);
 
-        $sitData = (array) $project->sit_uat_data;
         $approvals = (array) ($sitData['uat3_approvals'] ?? []);
         $approvals[$roleKey] = [
             'approved'     => true,
@@ -753,9 +829,82 @@ class ProjectController extends Controller
     }
 
     /**
+     * Simpan hasil UAT Tahap 2 per skenario. Ringkasan dan keputusan alur
+     * dihitung oleh server; revisi mayor otomatis menjadi Change Request.
+     */
+    public function submitUatExecution(SubmitUatExecutionRequest $request, int $id): JsonResponse
+    {
+        $project = Project::findOrFail($id);
+        $savedProject = $this->uatExecutionService->submit(
+            $project,
+            $request->user(),
+            $request->validated()
+        );
+        $summary = (array) ($savedProject->sit_uat_data['uat2_summary'] ?? []);
+        $isMajorRevision = ($summary['conclusion'] ?? null) === 'major_revision';
+
+        return response()->json([
+            'status' => 'success',
+            'message' => $isMajorRevision
+                ? 'Hasil UAT tersimpan. Revisi mayor dicatat sebagai Change Request dan proyek dikembalikan ke developer.'
+                : 'Hasil UAT tersimpan. Proyek dapat melanjutkan ke persetujuan final UAT.',
+            'data' => new ProjectResource($savedProject),
+            'meta' => [
+                'conclusion' => $summary['conclusion'] ?? null,
+                'requires_development_revision' => $isMajorRevision,
+                'next_uat_step' => $isMajorRevision ? 2 : 3,
+            ],
+        ]);
+    }
+
+    public function saveUatExecutionDraft(SaveUatExecutionDraftRequest $request, int $id): JsonResponse
+    {
+        $project = Project::findOrFail($id);
+        $savedProject = $this->uatExecutionService->saveDraft(
+            $project,
+            $request->user(),
+            $request->validated()
+        );
+
+        return response()->json([
+            'status' => 'success',
+            'message' => 'Draft Eksekusi UAT berhasil disimpan.',
+            'data' => new ProjectResource($savedProject),
+        ]);
+    }
+
+    /**
+     * Verifikasi item Mayor setelah developer selesai dan SIT ulang lulus.
+     * Hanya item terdampak yang diuji ulang; hasil UAT lainnya tetap terkunci.
+     */
+    public function submitUatMajorVerification(SubmitUatMajorVerificationRequest $request, int $id): JsonResponse
+    {
+        $project = Project::findOrFail($id);
+        $savedProject = $this->uatExecutionService->verifyMajorRevisions(
+            $project,
+            $request->user(),
+            $request->validated()
+        );
+        $sitUatData = (array) $savedProject->sit_uat_data;
+        $requiresAnotherRevision = ($sitUatData['uat2_resume_after_sit'] ?? false) === true;
+
+        return response()->json([
+            'status' => 'success',
+            'message' => $requiresAnotherRevision
+                ? 'Sebagian perbaikan masih belum sesuai. UAT kembali ditahan dan Change Request lanjutan dibuat.'
+                : 'Seluruh perbaikan Mayor diterima. UAT dapat dilanjutkan ke persetujuan final.',
+            'data' => new ProjectResource($savedProject),
+            'meta' => [
+                'requires_development_revision' => $requiresAnotherRevision,
+                'next_uat_step' => $requiresAnotherRevision ? 2 : 3,
+            ],
+        ]);
+    }
+
+    /**
      * Change Request UAT — diajukan oleh business_user (pemohon).
-     * Tersimpan di sit_uat_data.uat_change_requests[]. Jika major → kembali ke dev,
-     * minor → ulang SIT. Admin/PM/dev lead dapat menyetujui/menolak.
+     * Tersimpan di sit_uat_data.uat_change_requests[]. Jika mayor, kembali ke dev;
+     * minor diselesaikan tanpa rollback. Admin/PM/dev lead dapat memutuskan.
      */
     public function uatChangeRequest(Request $request, int $id): JsonResponse
     {
@@ -826,8 +975,8 @@ class ProjectController extends Controller
 
     /**
      * Putuskan (approve/reject) change request UAT — oleh PM / development_lead / super_admin / head_of_it.
-     * Jika disetujui & type mayor → status kembali ke IN_DEVELOPMENT (dev).
-     * Jika disetujui & type minor → status kembali ke SIT_REVISION (ulang SIT).
+     * Jika disetujui & type mayor, proyek kembali ke development dan SIT ulang.
+     * Jika disetujui & type minor, status proyek tidak berubah.
      */
     public function uatChangeRequestDecision(Request $request, int $id): JsonResponse
     {
@@ -876,11 +1025,17 @@ class ProjectController extends Controller
         // Jika disetujui → alihkan status proyek sesuai tipe change request
         $newStatus = null;
         if ($request->decision === 'approved') {
-            // Mayor → UAT_REVISION_DEV (kembali ke development), minor → UAT_REVISION_SIT (ulang SIT)
-            $newStatus = $crType === 'mayor' ? ProjectStatus::UAT_REVISION_DEV : ProjectStatus::UAT_REVISION_SIT;
-            // Reset approvals UAT agar harus menyetujui ulang
-            if (isset($sitData['uat3_approvals'])) {
-                unset($sitData['uat3_approvals']);
+            // Revisi minor dikerjakan di UAT tanpa rollback. Hanya mayor yang kembali ke development.
+            if ($crType === 'mayor') {
+                $newStatus = ProjectStatus::UAT_REVISION_DEV;
+                $sitData['uat2_resume_after_sit'] = true;
+                $sitData['activeSitStep'] = 1;
+                $sitData['activeUatStep'] = 2;
+                $sitData['sit2_task_approvals'] = [];
+                $sitData['sit3_reviewNotes'] = '';
+                $sitData['sit3_docs'] = [];
+                $sitData['sit3_approvals'] = [];
+                $sitData['uat3_approvals'] = [];
             }
             // Tambah riwayat change request ke revisi log
             $revisions = (array) ($sitData['revisions'] ?? []);
@@ -896,6 +1051,7 @@ class ProjectController extends Controller
         $project->update(['sit_uat_data' => $sitData]);
 
         if ($newStatus) {
+            $this->uatApprovalService->supersedeActiveRounds($project, 'Change Request Mayor UAT disetujui');
             try {
                 $this->workflowService->transition($project, $newStatus, $user, "Change Request UAT {$request->decision}: " . ($cr['title'] ?? ''));
             } catch (\Throwable $e) {
@@ -913,4 +1069,3 @@ class ProjectController extends Controller
         ]);
     }
 }
-

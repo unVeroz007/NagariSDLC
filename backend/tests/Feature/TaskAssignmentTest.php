@@ -551,6 +551,7 @@ class TaskAssignmentTest extends TestCase
         $project->update([
             'status' => ProjectStatus::UAT_IN_PROGRESS->value,
             'created_by' => $biz->id,
+            'sit_uat_data' => ['activeUatStep' => 3],
         ]);
 
         $response = $this->actingAs($biz)->postJson("/api/v1/projects/{$project->id}/uat-approval", [

@@ -44,6 +44,7 @@ export const menuSections = {
             label: 'UTAMA',
             items: [
                 { label: 'Dashboard Utama', path: '/dashboard', icon: 'LayoutDashboard' },
+                { label: 'Persetujuan UAT Saya', path: '/approvals/uat', icon: 'UserCheck' },
                 { label: 'Daftar Semua Proyek', path: '/projects', icon: 'List', end: true },
                 { label: 'Lacak Status Proyek', path: '/pm/tracker', icon: 'MapPin' },
                 { label: 'Manajemen Dokumen', path: '/documents', icon: 'Folders' },
@@ -73,9 +74,9 @@ export const menuSections = {
             items: [
                 { label: 'Pengajuan QA', path: '/pm/qa-request', icon: 'Send' },
                 { label: 'Workspace QA', path: '/workspace/qa', icon: 'Bug' },
+                { label: 'Tugas QA Saya', path: '/my-tasks/qa', icon: 'CheckSquare' },
                 { label: 'Pengajuan Cyber', path: '/pm/cyber-request', icon: 'Shield' },
                 { label: 'Workspace Cyber', path: '/workspace/cyber', icon: 'ShieldCheck' },
-                { label: 'Tugas QA Saya', path: '/my-tasks/qa', icon: 'CheckSquare' },
                 { label: 'Tugas Siber Saya', path: '/my-tasks/cyber', icon: 'Lock' },
             ],
         },
@@ -104,6 +105,7 @@ export const menuSections = {
             label: 'UTAMA',
             items: [
                 { label: 'Workspace Lead', path: '/workspace/lead', icon: 'UserCheck' },
+                { label: 'Persetujuan UAT Saya', path: '/approvals/uat', icon: 'ShieldCheck' },
                 { label: 'Antrean Review', path: '/queue', icon: 'Clock' },
                 { label: 'Daftar Semua Proyek', path: '/projects', icon: 'List', end: true },
             ],
@@ -114,6 +116,7 @@ export const menuSections = {
             label: 'UTAMA',
             items: [
                 { label: 'Workspace Analyst', path: '/workspace/analyst', icon: 'FileText' },
+                { label: 'Persetujuan UAT Saya', path: '/approvals/uat', icon: 'ShieldCheck' },
                 { label: 'Daftar Semua Proyek', path: '/projects', icon: 'List', end: true },
             ],
         },
@@ -123,6 +126,7 @@ export const menuSections = {
             label: 'UTAMA',
             items: [
                 { label: 'Workspace Development', path: '/workspace/dev-lead', icon: 'Users' },
+                { label: 'Persetujuan UAT Saya', path: '/approvals/uat', icon: 'ShieldCheck' },
                 { label: 'PM Workspace', path: '/pm/workspace', icon: 'Briefcase' },
                 { label: 'Kanban Board', path: '/pm/kanban', icon: 'Kanban' },
                 { label: 'Daftar Semua Proyek', path: '/projects', icon: 'List', end: true },
@@ -134,6 +138,7 @@ export const menuSections = {
             label: 'UTAMA',
             items: [
                 { label: 'Tugas Developer Saya', path: '/my-tasks/dev', icon: 'Code' },
+                { label: 'Persetujuan UAT Saya', path: '/approvals/uat', icon: 'UserCheck' },
                 { label: 'Kanban Board', path: '/pm/kanban', icon: 'Kanban' },
                 { label: 'Daftar Semua Proyek', path: '/projects', icon: 'List', end: true },
             ],
@@ -145,6 +150,7 @@ export const menuSections = {
             label: 'UTAMA',
             items: [
                 { label: 'PM Workspace', path: '/pm/workspace', icon: 'Briefcase' },
+                { label: 'Persetujuan UAT Saya', path: '/approvals/uat', icon: 'UserCheck' },
                 { label: 'Kanban Board', path: '/pm/kanban', icon: 'Kanban' },
                 { label: 'Lacak Status Proyek', path: '/pm/tracker', icon: 'MapPin' },
                 { label: 'Daftar Semua Proyek', path: '/projects', icon: 'List', end: true },
@@ -177,6 +183,7 @@ export const menuSections = {
             label: 'UTAMA',
             items: [
                 { label: 'Workspace Analis (Dev)', path: '/workspace/dev-analyst', icon: 'Cpu' },
+                { label: 'Persetujuan UAT Saya', path: '/approvals/uat', icon: 'UserCheck' },
                 { label: 'PM Workspace', path: '/pm/workspace', icon: 'Briefcase' },
                 { label: 'Kanban Board', path: '/pm/kanban', icon: 'Kanban' },
                 { label: 'Lacak Status Proyek', path: '/pm/tracker', icon: 'MapPin' },
@@ -258,6 +265,7 @@ export const menuSections = {
             label: 'UTAMA',
             items: [
                 { label: 'Quality Gate', path: '/quality-gate', icon: 'Verified' },
+                { label: 'Persetujuan UAT Saya', path: '/approvals/uat', icon: 'UserCheck' },
                 { label: 'Dashboard Utama', path: '/dashboard', icon: 'LayoutDashboard' },
                 { label: 'Daftar Semua Proyek', path: '/projects', icon: 'List', end: true },
             ],
@@ -279,4 +287,4 @@ export const menuSections = {
             ],
         },
     ],
-};
+};

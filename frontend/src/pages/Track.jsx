@@ -33,31 +33,17 @@ const statusOptions = ['Semua Status', 'Sedang Berjalan', 'Selesai', 'Ditolak'];
 
 export default function Track() {
     const { user } = useAuth();
-    const { projects, refreshDataSilent } = useProjects();
+    const { projects } = useProjects();
     const location = useLocation();
     const [searchParams] = useSearchParams();
     const [previewDoc, setPreviewDoc] = useState(null);
     const detailPanelRef = useRef(null);
     const navigate = useNavigate();
 
-    // ── Persetujuan UAT & Change Request (business user) ──
-    const [uatApproving, setUatApproving] = useState(false);
+    // ── Change Request UAT (business user) ──
     const [crModalOpen, setCrModalOpen] = useState(false);
     const [crForm, setCrForm] = useState({ type: 'minor', title: '', detail: '', category: '' });
     const [crSubmitting, setCrSubmitting] = useState(false);
-
-    const handleUatApprove = async (projectId) => {
-        setUatApproving(true);
-        try {
-            await projectService.submitUatApproval(projectId, '');
-            toast.success('Persetujuan UAT Anda berhasil disimpan.');
-            refreshDataSilent?.();
-        } catch (err) {
-            toast.error(`Gagal menyimpan persetujuan: ${err.message}`);
-        } finally {
-            setUatApproving(false);
-        }
-    };
 
     const handleCrSubmit = async (projectId) => {
         if (!crForm.title.trim() || !crForm.detail.trim()) {
@@ -598,7 +584,6 @@ export default function Track() {
                                 const stRaw = activeSelected?.statusRaw;
                                 const isUat = ['UAT_IN_PROGRESS', 'UAT_REVISION_SIT', 'UAT_REVISION_DEV', 'DEV_COMPLETED'].includes(stRaw);
                                 const isSit = ['SIT_IN_PROGRESS', 'SIT_REVISION'].includes(stRaw);
-                                const uatAppr = sd.uat3_approvals || {};
                                 const crs = sd.uat_change_requests || [];
                                 const sitAppr = sd.sit3_approvals || {};
                                 if (!isSit && !isUat) return null;
@@ -614,36 +599,12 @@ export default function Track() {
                                             <div className="space-y-4">
                                                 <div className="rounded-xl border border-amber-200 bg-amber-50 p-4">
                                                     <p className="text-xs font-bold text-amber-800 mb-2">Persetujuan UAT</p>
-                                                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                                                        {[
-                                                            { key: 'business_user', label: 'Pemohon' },
-                                                            { key: 'pm', label: 'PM' },
-                                                            { key: 'development_lead', label: 'Dev Lead' },
-                                                        ].map(r => (
-                                                            <div key={r.key} className={`p-2.5 rounded-lg border text-center ${uatAppr?.[r.key]?.approved ? 'bg-emerald-50 border-emerald-200' : 'bg-white border-gray-200'}`}>
-                                                                <p className="text-[9px] font-bold text-gray-500 uppercase">{r.label}</p>
-                                                                <p className={`text-[11px] font-bold mt-0.5 ${uatAppr?.[r.key]?.approved ? 'text-emerald-700' : 'text-gray-400'}`}>
-                                                                    {uatAppr?.[r.key]?.approved ? '✓ Disetujui' : 'Menunggu'}
-                                                                </p>
-                                                            </div>
-                                                        ))}
-                                                    </div>
-                                                    {user?.role === 'business_user' && !uatAppr?.business_user?.approved && (
-                                                        <button
-                                                            onClick={() => handleUatApprove(activeSelected?.rawId)}
-                                                            disabled={uatApproving}
-                                                            className="mt-3 w-full px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 disabled:bg-gray-300 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition-colors cursor-pointer"
-                                                        >
-                                                            {uatApproving ? (
-                                                                <><span className="w-3 h-3 border-2 border-white/40 border-t-white rounded-full animate-spin" /> Menyimpan...</>
-                                                            ) : (
-                                                                <><CheckCircle size={14} /> Setujui UAT Sebagai Pemohon</>
-                                                            )}
-                                                        </button>
-                                                    )}
-                                                    {user?.role === 'business_user' && uatAppr?.business_user?.approved && (
-                                                        <p className="mt-3 text-[11px] text-emerald-600 font-bold flex items-center gap-1">
-                                                            <CheckCircle size={13} /> Anda telah menyetujui UAT.
+                                                    <p className="text-[11px] text-amber-800 leading-relaxed">
+                                                        Persetujuan pihak peminta dilakukan melalui link pribadi yang dibuat PM untuk setiap peserta UAT. Buka link tersebut dan verifikasi nomor HP terdaftar untuk melihat hasil serta memberikan keputusan.
+                                                    </p>
+                                                    {user?.role === 'business_user' && (Number(sd.activeUatStep || 1) < 3 || sd.uat2_resume_after_sit === true) && (
+                                                        <p className="mt-3 text-[11px] text-amber-700 font-semibold flex items-start gap-1.5">
+                                                            <Clock size={13} className="shrink-0 mt-0.5" /> Persetujuan final tersedia setelah eksekusi UAT dan seluruh revisi mayor/SIT ulang selesai.
                                                         </p>
                                                     )}
                                                     {user?.role === 'business_user' && (
@@ -740,11 +701,11 @@ export default function Track() {
                                 <div className="grid grid-cols-2 gap-2">
                                     <button onClick={() => setCrForm(p => ({ ...p, type: 'minor' }))}
                                         className={`px-4 py-2.5 rounded-xl border text-xs font-bold transition-all cursor-pointer ${crForm.type === 'minor' ? 'bg-orange-500 border-orange-600 text-white' : 'bg-gray-50 border-gray-200 text-gray-600 hover:bg-orange-50'}`}>
-                                        Minor — Ulang SIT
+                                        Minor — Tanpa Rollback
                                     </button>
                                     <button onClick={() => setCrForm(p => ({ ...p, type: 'mayor' }))}
                                         className={`px-4 py-2.5 rounded-xl border text-xs font-bold transition-all cursor-pointer ${crForm.type === 'mayor' ? 'bg-red-500 border-red-600 text-white' : 'bg-gray-50 border-gray-200 text-gray-600 hover:bg-red-50'}`}>
-                                        Mayor — Kembali ke Dev
+                                        Mayor — Kembali Dev &amp; SIT Ulang
                                     </button>
                                 </div>
                             </div>
