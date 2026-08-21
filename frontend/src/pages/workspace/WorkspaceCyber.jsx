@@ -7,6 +7,13 @@ import RBBBadge from '../../components/RBBBadge';
 import ProjectTypeBadge from '../../components/ProjectTypeBadge';
 import LoadingSpinner from '../../components/LoadingSpinner';
 import DocumentViewerModal from '../../components/DocumentViewerModal';
+import {
+    PROJECT_STATUS,
+    TRACK_STATUS,
+    TRACK_STATUS_LABEL,
+    getCyberTrackStatus,
+    isTrackPassed,
+} from '../../constants/projectStatus';
 import toast from 'react-hot-toast';
 
 import {
@@ -82,8 +89,8 @@ export default function WorkspaceCyber() {
         return (pentestAuditors || []).map(a => {
             const activeCount = (projects || []).filter(p => {
                 if (terminalStatuses.has(p.status)) return false;
-                const cyberSt = String(p.cyberStatus || p.cyber_status || '').toUpperCase();
-                if (cyberSt === 'PASSED' || cyberSt === 'REVIEW') return false;
+                const cyberSt = getCyberTrackStatus(p);
+                if (cyberSt === TRACK_STATUS.PASSED || cyberSt === TRACK_STATUS.REVIEW) return false;
                 const assigneeName = String(p.cyberAssignee || p.cyber_assignee || '').toLowerCase();
                 return assigneeName && a.name && assigneeName === a.name.toLowerCase();
             }).length;
@@ -107,9 +114,12 @@ export default function WorkspaceCyber() {
     // Tab 1 (Disposisi): proyek yang sudah diajukan PM ke Cyber Lead
     const cyberProjects = useMemo(() => {
         let list = (projects || []).filter(p => {
-            const cyberSt = String(p.cyberStatus || p.cyber_status || '').toUpperCase();
+            const cyberSt = getCyberTrackStatus(p);
             const st = String(p.status || '').toUpperCase();
-            return (cyberSt === 'SUBMITTED' || st === 'CYBER_IN_PROGRESS') && cyberSt !== 'IN_PROGRESS' && cyberSt !== 'PASSED';
+            return (cyberSt === TRACK_STATUS.SUBMITTED || st === PROJECT_STATUS.CYBER_IN_PROGRESS)
+                && cyberSt !== TRACK_STATUS.IN_PROGRESS
+                && cyberSt !== TRACK_STATUS.REVIEW
+                && !isTrackPassed(cyberSt);
         });
         const isPrivileged = user?.role && ['super_admin', 'lead_group', 'head_of_it', 'development_lead'].includes(user.role);
         if (!isPrivileged && user?.name) {
@@ -118,12 +128,9 @@ export default function WorkspaceCyber() {
         return list;
     }, [projects, user]);
 
-    // Tab 2 (Review Lead): laporan pentest dari Pentester sudah masuk (cyberStatus === 'REVIEW')
+    // Tab 2 (Review Lead): laporan pentest dari Pentester sudah masuk (cyber_status === 'REVIEW')
     const reviewLeadProjects = useMemo(() => {
-        let list = (projects || []).filter(p => {
-            const cyberSt = String(p.cyberStatus || p.cyber_status || '').toUpperCase();
-            return cyberSt === 'REVIEW';
-        });
+        let list = (projects || []).filter(p => getCyberTrackStatus(p) === TRACK_STATUS.REVIEW);
         const isPrivileged = user?.role && ['super_admin', 'lead_group', 'head_of_it', 'development_lead'].includes(user.role);
         if (!isPrivileged && user?.name) {
             list = list.filter(p => String(p.cyberAssignee || '').toLowerCase().includes(user.name.toLowerCase()));
@@ -170,12 +177,15 @@ export default function WorkspaceCyber() {
         }
         setIsSubmitting(true);
         try {
+            // Disposisi Cyber Lead: jalur Siber masuk pengerjaan dan status utama naik
+            // ke CYBER_IN_PROGRESS. Kenaikan status ini memang wewenang Cyber Lead —
+            // PM hanya menandai pengajuan pada kolom cyber_status.
+            // Nama auditor dititipkan ke catatan transisi karena belum ada kolom
+            // penugasan auditor pada tabel projects.
             await updateProject(activeProject.id, {
-                cyberStatus: 'IN_PROGRESS',
-                cyberAssignee: selectedPentester,
-                cyberLeadNotes: instructions,
-                cyber_lead_notes: instructions,
-                status: activeProject.status === 'CYBER_IN_PROGRESS' ? 'CYBER_IN_PROGRESS' : activeProject.status
+                cyber_status: TRACK_STATUS.IN_PROGRESS,
+                status: PROJECT_STATUS.CYBER_IN_PROGRESS,
+                notes: [`Disposisi Audit Keamanan Siber kepada ${selectedPentester}.`, instructions].filter(Boolean).join(' '),
             });
             toast.success(`Proyek ${activeProject.name} berhasil didisposisikan ke Security Auditor (${selectedPentester})!`);
             addNotification('Disposisi Pentest', `Proyek ${activeProject.name} telah didisposisikan ke ${selectedPentester}.`, 'info');
@@ -192,24 +202,24 @@ export default function WorkspaceCyber() {
         if (!activeProject) return;
         setIsSubmitting(true);
         try {
-            const isQAPassed = String(activeProject.qaStatus || '').toUpperCase() === 'PASSED';
             const auditorIsPass = activeProject.auditorResult?.isPass !== false;
-            const newCyberStatus = auditorIsPass ? 'PASSED' : 'FAILED';
-            const newStatus = !auditorIsPass
-                ? 'RETURN_TO_DEV'
-                : isQAPassed ? 'TESTING_PASSED' : 'CYBER_PASSED';
+
+            // Kelulusan jalur Siber ditetapkan backend dari transisi CYBER_PASSED, jadi
+            // cyber_status tidak dikirim saat lulus. Saat tidak lulus, penetapan FAILED
+            // wajib menyertai RETURN_TO_DEV — backend menolak salah satunya saja.
             await updateProject(activeProject.id, {
-                cyberStatus: newCyberStatus,
-                cyber_status: newCyberStatus,
-                cyberPassedAt: new Date().toISOString(),
-                cyberLeadApprovalNote: leadApprovalNote,
-                cyber_lead_approval_note: leadApprovalNote,
-                status: newStatus
+                status: auditorIsPass ? PROJECT_STATUS.CYBER_PASSED : PROJECT_STATUS.RETURN_TO_DEV,
+                ...(auditorIsPass ? {} : { cyber_status: TRACK_STATUS.FAILED }),
+                notes: [
+                    `Sign-off Audit Keamanan Siber oleh ${user?.name || 'Cyber Lead'}: ${auditorIsPass ? 'LULUS' : 'TIDAK LULUS'}.`,
+                    leadApprovalNote,
+                ].filter(Boolean).join(' '),
             });
-            toast.success(`Sign-off Lead Cyber untuk proyek "${activeProject.name}" berhasil! Status: ${newCyberStatus}.`);
+            const resultLabel = auditorIsPass ? TRACK_STATUS_LABEL.PASSED : TRACK_STATUS_LABEL.FAILED;
+            toast.success(`Sign-off Lead Cyber untuk proyek "${activeProject.name}" berhasil! Status: ${resultLabel}.`);
             addNotification(
                 'Sign-off Lead Cyber Disetujui',
-                `Proyek ${activeProject.name} mendapat sign-off Lead Cyber (${newCyberStatus}). Hasil dikembalikan ke PM.`,
+                `Proyek ${activeProject.name} mendapat sign-off Lead Cyber (${resultLabel}). Hasil dikembalikan ke PM.`,
                 auditorIsPass ? 'success' : 'warning',
                 '/pm/release-request'
             );

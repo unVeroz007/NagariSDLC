@@ -505,10 +505,18 @@ export default function SITUATWizard({ project, updateProject, addNotification, 
         return base.filter(([code]) => code !== 'UNDANGAN');
     };
 
-    const maskedDocName = (docType) => generateDocumentName(
+    const maskedDocName = (docType, discriminators = []) => generateDocumentName(
         project?.req_id || project?.id,
         docType,
-        project?.title || project?.name
+        project?.title || project?.name,
+        discriminators
+    );
+
+    // Penanda item untuk nama masking lampiran bukti UAT. Dikirim ke server sebagai
+    // `context_label` supaya tiap lampiran bertipe UAT_EVIDENCE bernama berbeda dan
+    // langsung terbaca berasal dari task / item mana.
+    const uatItemLabel = (item, index, fallbackPrefix) => (
+        item?.taskId ? `TASK-${item.taskId}` : `${fallbackPrefix}-${index + 1}`
     );
 
     const addDraftDocs = (setter, files, cat) => {
@@ -931,6 +939,9 @@ export default function SITUATWizard({ project, updateProject, addNotification, 
     const uploadUatEvidence = async (scenarioId, files) => {
         if (!project?.id || !files.length || uploadingUatScenarioId) return;
 
+        const scenarioIndex = (uat2.scenarios || []).findIndex(item => item.id === scenarioId);
+        const contextLabel = uatItemLabel((uat2.scenarios || [])[scenarioIndex], scenarioIndex, 'SKENARIO');
+
         setUploadingUatScenarioId(scenarioId);
         const uploaded = [];
         const failed = [];
@@ -941,13 +952,14 @@ export default function SITUATWizard({ project, updateProject, addNotification, 
                         project_id: project.id,
                         document_type: 'UAT_EVIDENCE',
                         original_filename: file.name,
+                        context_label: contextLabel,
                     });
                     const document = response?.data || {};
                     if (!document.id) throw new Error('Server tidak mengembalikan ID dokumen.');
 
                     const extension = (file.name.split('.').pop() || 'file').toUpperCase();
                     const maskedName = document.file_name
-                        || `${maskedDocName('UAT_EVIDENCE')}.${extension.toLowerCase()}`;
+                        || `${maskedDocName('UAT_EVIDENCE', [contextLabel])}.${extension.toLowerCase()}`;
                     uploaded.push({
                         id: `UAT_EVIDENCE_${document.id}`,
                         docId: document.id,
@@ -984,6 +996,9 @@ export default function SITUATWizard({ project, updateProject, addNotification, 
     const uploadUatAdditionalRequestEvidence = async (requestId, files) => {
         if (!project?.id || !files.length || uploadingUatScenarioId) return;
 
+        const requestIndex = (uat2.additionalRequests || []).findIndex(item => item.id === requestId);
+        const contextLabel = uatItemLabel((uat2.additionalRequests || [])[requestIndex], requestIndex, 'PERMINTAAN');
+
         setUploadingUatScenarioId(requestId);
         const uploaded = [];
         const failed = [];
@@ -994,12 +1009,13 @@ export default function SITUATWizard({ project, updateProject, addNotification, 
                         project_id: project.id,
                         document_type: 'UAT_EVIDENCE',
                         original_filename: file.name,
+                        context_label: contextLabel,
                     });
                     const document = response?.data || {};
                     if (!document.id) throw new Error('Server tidak mengembalikan ID dokumen.');
                     const extension = (file.name.split('.').pop() || 'file').toUpperCase();
                     const maskedName = document.file_name
-                        || `${maskedDocName('UAT_EVIDENCE')}.${extension.toLowerCase()}`;
+                        || `${maskedDocName('UAT_EVIDENCE', [contextLabel])}.${extension.toLowerCase()}`;
                     uploaded.push({
                         id: `UAT_EVIDENCE_${document.id}`,
                         docId: document.id,
@@ -1083,7 +1099,9 @@ export default function SITUATWizard({ project, updateProject, addNotification, 
         if (!project?.id || !files.length || uploadingUatScenarioId) return;
 
         const collectionKey = source === 'scenario' ? 'scenarios' : 'additionalRequests';
-        const currentItem = (uat2[collectionKey] || []).find(item => item.id === itemId);
+        const currentItemIndex = (uat2[collectionKey] || []).findIndex(item => item.id === itemId);
+        const currentItem = (uat2[collectionKey] || [])[currentItemIndex];
+        const contextLabel = `VERIFIKASI-${uatItemLabel(currentItem, currentItemIndex, source === 'scenario' ? 'SKENARIO' : 'PERMINTAAN')}`;
         const remainingSlots = Math.max(0, 10 - (currentItem?.verificationAttachments || []).length);
         if (remainingSlots === 0) {
             toast.error('Maksimal 10 lampiran bukti untuk setiap item verifikasi Mayor.');
@@ -1102,13 +1120,14 @@ export default function SITUATWizard({ project, updateProject, addNotification, 
                     project_id: project.id,
                     document_type: 'UAT_EVIDENCE',
                     original_filename: file.name,
+                    context_label: contextLabel,
                 });
                 const document = response?.data || {};
                 if (!document.id) throw new Error('Server tidak mengembalikan ID dokumen.');
 
                 const extension = (file.name.split('.').pop() || 'file').toUpperCase();
                 const maskedName = document.file_name
-                    || `${maskedDocName('UAT_EVIDENCE')}.${extension.toLowerCase()}`;
+                    || `${maskedDocName('UAT_EVIDENCE', [contextLabel])}.${extension.toLowerCase()}`;
 
                 return {
                     id: `UAT_VERIFICATION_EVIDENCE_${document.id}`,

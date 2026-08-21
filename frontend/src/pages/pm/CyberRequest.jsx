@@ -6,6 +6,15 @@ import LoadingSpinner from '../../components/LoadingSpinner';
 import DocumentViewerModal from '../../components/DocumentViewerModal';
 import toast from 'react-hot-toast';
 import { generateDocumentName, DOCUMENT_TYPES, formatFileSize } from '../../utils/documentNaming';
+import { documentService } from '../../services/api';
+import {
+  PROJECT_STATUS,
+  TRACK_STATUS,
+  canStartCyberTrack,
+  getCyberTrackStatus,
+  isTrackActive,
+  isTrackPassed,
+} from '../../constants/projectStatus';
 
 import { useNavigate } from 'react-router-dom';
 import RBBBadge from '../../components/RBBBadge';
@@ -62,17 +71,20 @@ export default function CyberRequest() {
 
   // Filter proyek yang bisa diajukan ke Cyber oleh PM.
   // Mendukung 3 skenario alur kerja paralel yang fleksibel:
-  // 1. Cyber Dulu: PM ajukan ke Cyber dari IN_DEVELOPMENT atau READY_FOR_QA
+  // 1. Cyber Dulu: PM ajukan ke Cyber dari IN_DEVELOPMENT atau DEV_COMPLETED
   // 2. Serentak (Paralel): PM ajukan ke Cyber bersamaan dengan QA (saat QA_IN_PROGRESS)
   // 3. QA Dulu: PM ajukan ke Cyber setelah QA selesai (QA_PASSED)
   // + RETURN_TO_DEV: PM bisa resubmit ke Cyber setelah perbaikan vulnerability
   const readyProjects = useMemo(() => {
     let list = projects.filter(p => {
-      const cyberSt = String(p.cyberStatus || p.cyber_status || '').toUpperCase();
+      const cyberSt = getCyberTrackStatus(p);
       const st = String(p.status || '').toUpperCase();
-      const isEligibleStage = ['DEV_COMPLETED', 'SIT_PASSED', 'UAT_PASSED', 'IN_DEVELOPMENT', 'READY_FOR_QA', 'QA_IN_PROGRESS', 'QA_PASSED', 'RETURN_TO_DEV'].includes(st);
-      const isAlreadySubmittedCyber = ['SUBMITTED', 'IN_PROGRESS', 'PASSED'].includes(cyberSt) || st === 'CYBER_IN_PROGRESS';
-      return isEligibleStage && !isAlreadySubmittedCyber;
+      // Jalur Siber yang sudah berjalan (termasuk menunggu review Lead) atau sudah
+      // lulus tidak boleh diajukan ulang supaya tidak ada pengajuan ganda.
+      const isAlreadySubmittedCyber = isTrackActive(cyberSt) || isTrackPassed(cyberSt)
+        || st === PROJECT_STATUS.CYBER_IN_PROGRESS
+        || st === PROJECT_STATUS.CYBER_PASSED;
+      return canStartCyberTrack(st) && !isAlreadySubmittedCyber;
     });
 
     const isPrivileged = user?.role && ['super_admin', 'lead_group', 'head_of_it', 'development_lead'].includes(user.role);
@@ -184,34 +196,49 @@ export default function CyberRequest() {
 
     setIsSubmitting(true);
     try {
-      const liveProj = (projects || []).find(p => String(p.id) === String(selectedProject.id)) || selectedProject;
-      const isQAActive = ['SUBMITTED', 'IN_PROGRESS'].includes(String(liveProj.qaStatus || liveProj.qa_status || '').toUpperCase()) || ['READY_FOR_QA', 'QA_IN_PROGRESS'].includes(liveProj.status);
+      // Unggah dokumen pendukung ke document vault supaya benar-benar tersimpan
+      // dan namanya di-masking oleh backend. Payload `documents` pada endpoint
+      // update proyek tidak pernah dibaca backend, jadi tidak dipakai lagi.
+      const failedUploads = [];
+      for (const uploadedFile of uploadedFiles) {
+        if (!uploadedFile.rawFile) continue;
+        try {
+          await documentService.upload(uploadedFile.rawFile, {
+            project_id: selectedProject.id,
+            document_type: DOCUMENT_TYPES.CYBER_REPORT.code,
+            original_filename: uploadedFile.originalName || uploadedFile.rawFile.name,
+          });
+        } catch (uploadErr) {
+          failedUploads.push(uploadedFile.originalName || uploadedFile.name);
+          toast.error(`Gagal mengunggah "${uploadedFile.originalName || uploadedFile.name}": ${uploadErr.message}`);
+        }
+      }
 
-      const newUploadedDocs = uploadedFiles.map(f => ({
-        id: `cyber-doc-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
-        name: f.name,
-        type: 'Dokumen Tambahan Audit Siber',
-        size: f.size,
-        uploadedAt: new Date().toISOString(),
-        author: user?.name || 'Project Manager',
-        url: f.url
-      }));
+      if (failedUploads.length > 0 && failedUploads.length === uploadedFiles.filter(f => f.rawFile).length) {
+        throw new Error('Seluruh dokumen pendukung gagal diunggah. Pengajuan Audit Keamanan Siber dibatalkan.');
+      }
 
-      const existingDocs = Array.isArray(liveProj.documents) ? liveProj.documents : [];
-      const updatedDocs = [...existingDocs, ...newUploadedDocs];
+      // Pengajuan hanya menandai jalur Siber. Status utama sengaja TIDAK dikirim:
+      // kenaikan ke CYBER_IN_PROGRESS adalah wewenang Cyber Lead saat mendisposisikan
+      // auditor, persis seperti QA Lead pada jalur QA. Dengan begitu satu penunjuk
+      // siklus tidak diperebutkan dua jalur yang berjalan paralel.
+      // `notes` tetap dikirim karena backend menyimpannya pada metadata audit
+      // perubahan jalur pengujian — satu-satunya jejak pengajuan ini, sebab tidak
+      // ada transisi status yang bisa membawa catatannya.
+      const submissionNote = [
+        `Pengajuan Audit Keamanan Siber oleh ${user?.name || 'Project Manager'}.`,
+        `Prioritas audit: ${formData.testPriority}.`,
+        `Target selesai: ${formData.targetDate}.`,
+        formData.stagingUrl ? `Staging URL: ${formData.stagingUrl}.` : null,
+        formData.technicalNotes ? `Catatan teknis: ${formData.technicalNotes}` : null,
+      ].filter(Boolean).join(' ');
 
       await updateProject(selectedProject.id, {
-        status: isQAActive ? 'TESTING_IN_PROGRESS' : 'CYBER_IN_PROGRESS',
-        cyberStatus: 'SUBMITTED',
-        ...(liveProj.qaStatus ? { qaStatus: liveProj.qaStatus } : {}),
-        cyberSubmittedAt: new Date().toISOString(),
-        cyberTargetDate: formData.targetDate,
-        cyberStagingUrl: formData.stagingUrl,
-        cyberNotes: formData.technicalNotes,
-        documents: updatedDocs
+        cyber_status: TRACK_STATUS.SUBMITTED,
+        staging_url: formData.stagingUrl,
+        current_stage_deadline: formData.targetDate,
+        notes: submissionNote,
       });
-
-
 
       addNotification(
         'Pengajuan Cyber Security Berhasil',
@@ -237,6 +264,9 @@ export default function CyberRequest() {
     toast.success('Staging URL berhasil disalin ke clipboard!');
   };
 
+  // Dokumen prasyarat per fase/aktivitas: BRD, MEMO, FSD, Berita Acara SIT/UAT, dsb.
+  // Lampiran bukti per task/skenario SIT & UAT sengaja tidak ikut (dikecualikan di
+  // getProjectRealDocuments) karena Cyber memverifikasi dokumen fase, bukan bukti per task.
   const projectDocsList = useMemo(() => {
     return getProjectRealDocuments(selectedProject);
   }, [selectedProject]);

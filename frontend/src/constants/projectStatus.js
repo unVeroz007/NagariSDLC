@@ -253,6 +253,119 @@ export const getProjectPhaseKey = (status) => {
 };
 
 /**
+ * Status jalur pengujian independen QA & Keamanan Siber.
+ * Mirror dari backend App\Enums\TrackStatus (kolom projects.qa_status & projects.cyber_status).
+ *
+ * Dipisahkan dari PROJECT_STATUS karena projects.status hanya menyimpan SATU
+ * penunjuk siklus utama, sedangkan dua jalur ini berjalan paralel dan bisa
+ * maju-mundur sendiri tanpa saling menimpa.
+ */
+export const TRACK_STATUS = {
+    NOT_SUBMITTED: 'NOT_SUBMITTED',
+    SUBMITTED: 'SUBMITTED',
+    IN_PROGRESS: 'IN_PROGRESS',
+    REVIEW: 'REVIEW',
+    PASSED: 'PASSED',
+    FAILED: 'FAILED',
+};
+
+export const TRACK_STATUS_LABEL = {
+    [TRACK_STATUS.NOT_SUBMITTED]: 'Belum Diajukan',
+    [TRACK_STATUS.SUBMITTED]: 'Sudah Diajukan',
+    [TRACK_STATUS.IN_PROGRESS]: 'Sedang Dikerjakan',
+    [TRACK_STATUS.REVIEW]: 'Menunggu Review Lead',
+    [TRACK_STATUS.PASSED]: 'Lulus',
+    [TRACK_STATUS.FAILED]: 'Tidak Lulus',
+};
+
+/**
+ * Baca status jalur QA dari objek proyek, apa pun bentuk key-nya
+ * (camelCase dari state lokal, snake_case dari ProjectResource).
+ */
+export const getQaTrackStatus = (project) =>
+    String(project?.qaStatus || project?.qa_status || TRACK_STATUS.NOT_SUBMITTED).trim().toUpperCase();
+
+export const getCyberTrackStatus = (project) =>
+    String(project?.cyberStatus || project?.cyber_status || TRACK_STATUS.NOT_SUBMITTED).trim().toUpperCase();
+
+/** Jalur sudah dinyatakan lulus oleh Lead. */
+export const isTrackPassed = (trackStatus) =>
+    String(trackStatus || '').trim().toUpperCase() === TRACK_STATUS.PASSED;
+
+/** Jalur sedang berjalan: sudah diajukan namun belum ada keputusan akhir. */
+export const isTrackActive = (trackStatus) =>
+    [TRACK_STATUS.SUBMITTED, TRACK_STATUS.IN_PROGRESS, TRACK_STATUS.REVIEW]
+        .includes(String(trackStatus || '').trim().toUpperCase());
+
+/**
+ * Gate UAT final: dua jalur pengujian harus lulus.
+ * Sengaja dihitung dari kolom jalur — bukan dari status utama — supaya urutan
+ * siapa yang sign-off lebih dulu tidak mengubah hasilnya. Aturan yang sama
+ * ditegakkan backend pada ProjectWorkflowService::validateTransitionPrerequisites().
+ */
+export const canRequestFinalUat = (project) =>
+    isTrackPassed(getQaTrackStatus(project)) && isTrackPassed(getCyberTrackStatus(project));
+
+/**
+ * Status utama yang secara sah boleh naik ke READY_FOR_QA menurut matriks transisi
+ * backend (ProjectWorkflowService::$allowedTransitions).
+ *
+ * Di luar daftar ini, pengajuan QA hanya menulis kolom qa_status dan sengaja TIDAK
+ * menyentuh status utama — misalnya saat jalur Siber sedang memegang penunjuk siklus
+ * (CYBER_IN_PROGRESS / CYBER_PASSED). Menyertakan status di kasus itu hanya
+ * menghasilkan 422 tanpa menambah informasi apa pun.
+ */
+export const STATUSES_ALLOWING_READY_FOR_QA = [
+    PROJECT_STATUS.IN_DEVELOPMENT,
+    PROJECT_STATUS.DEV_COMPLETED,
+    PROJECT_STATUS.RETURN_TO_DEV,
+];
+
+export const canAdvanceStatusToReadyForQa = (status) =>
+    STATUSES_ALLOWING_READY_FOR_QA.includes(String(status || '').trim().toUpperCase());
+
+/**
+ * Status utama tempat fase pengujian QA masih bisa dimulai atau dilanjutkan.
+ *
+ * Daftar ini adalah gabungan status yang menurut matriks transisi backend boleh naik
+ * ke READY_FOR_QA atau langsung ke QA_IN_PROGRESS. Artinya: seluruh proyek yang lolos
+ * filter ini pasti bisa diajukan PM, didisposisi QA Lead, lalu di-sign-off tanpa
+ * ditolak state machine.
+ *
+ * SIT_PASSED dan UAT_PASSED sengaja tidak masuk. Menurut alur resmi, keluaran UAT
+ * Internal adalah DEV_COMPLETED — itulah pintu masuk fase QA/Siber — sedangkan
+ * UAT_PASSED adalah UAT final yang justru terjadi SESUDAH kedua jalur lulus.
+ */
+export const STATUSES_ALLOWING_QA_TRACK_START = [
+    PROJECT_STATUS.IN_DEVELOPMENT,
+    PROJECT_STATUS.DEV_COMPLETED,
+    PROJECT_STATUS.RETURN_TO_DEV,
+    PROJECT_STATUS.READY_FOR_QA,
+    PROJECT_STATUS.QA_IN_PROGRESS,
+    PROJECT_STATUS.QA_PASSED,
+    PROJECT_STATUS.CYBER_IN_PROGRESS,
+    PROJECT_STATUS.CYBER_PASSED,
+];
+
+/** Padanan STATUSES_ALLOWING_QA_TRACK_START untuk jalur Keamanan Siber. */
+export const STATUSES_ALLOWING_CYBER_TRACK_START = [
+    PROJECT_STATUS.IN_DEVELOPMENT,
+    PROJECT_STATUS.DEV_COMPLETED,
+    PROJECT_STATUS.RETURN_TO_DEV,
+    PROJECT_STATUS.READY_FOR_QA,
+    PROJECT_STATUS.QA_IN_PROGRESS,
+    PROJECT_STATUS.QA_PASSED,
+    PROJECT_STATUS.CYBER_IN_PROGRESS,
+    PROJECT_STATUS.CYBER_PASSED,
+];
+
+export const canStartQaTrack = (status) =>
+    STATUSES_ALLOWING_QA_TRACK_START.includes(String(status || '').trim().toUpperCase());
+
+export const canStartCyberTrack = (status) =>
+    STATUSES_ALLOWING_CYBER_TRACK_START.includes(String(status || '').trim().toUpperCase());
+
+/**
  * Helper komposit untuk melacak status pengujian paralel QA & Siber secara akurat.
  * Mencegah konflik status tertimpa saat QA & Pentest Siber berjalan bersamaan.
  */
@@ -260,8 +373,8 @@ export const getParallelTestingBadge = (project) => {
     if (!project) return { label: 'Development', colorClass: 'bg-cyan-100 text-cyan-800 border-cyan-200' };
 
     const status = String(project.status || '').toUpperCase();
-    const qa = String(project.qaStatus || project.qa_status || '').toUpperCase();
-    const cyber = String(project.cyberStatus || project.cyber_status || '').toUpperCase();
+    const qa = getQaTrackStatus(project);
+    const cyber = getCyberTrackStatus(project);
 
     // Cek jika QA dan Siber 100% LULUS DUA-DUANYA
     if ((qa === 'PASSED' || status === 'QA_PASSED') && (cyber === 'PASSED' || status === 'CYBER_PASSED')) {
@@ -269,6 +382,21 @@ export const getParallelTestingBadge = (project) => {
             label: '🎉 QA & Siber LULUS',
             colorClass: 'bg-emerald-100 text-emerald-800 border-emerald-300 font-bold',
             isComplete: true
+        };
+    }
+
+    // Ada jalur yang dinyatakan TIDAK LULUS — tampilkan lebih dulu supaya defect
+    // tidak tertutup oleh label jalur lain yang masih berjalan.
+    if (qa === TRACK_STATUS.FAILED || cyber === TRACK_STATUS.FAILED) {
+        const failedTracks = [
+            qa === TRACK_STATUS.FAILED ? 'QA' : null,
+            cyber === TRACK_STATUS.FAILED ? 'Siber' : null,
+        ].filter(Boolean).join(' & ');
+
+        return {
+            label: `⚠️ ${failedTracks} Tidak Lulus`,
+            colorClass: 'bg-red-100 text-red-800 border-red-300 font-bold',
+            isFailed: true
         };
     }
 

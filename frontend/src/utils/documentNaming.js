@@ -1,15 +1,18 @@
 /**
- * generateDocumentName(projectReqId, docTypeCode, projectName)
+ * generateDocumentName(projectReqId, docTypeCode, projectName, discriminators)
  *
- * Format: XXX/GPTD/{TIPE}/DD-BulanYYYY_{PROJECT_NAME}
+ * Format: XXX/GPTD/{TIPE}/DD-BulanYYYY_{PROJECT_NAME}[_{PENANDA}...]
  * Contoh: 001/GPTD/BRD/08-August2026_Migrasi
+ * Contoh bukti: 001/GPTD/SIT_TASK_EVIDENCE/08-Agustus2026_Migrasi_TASK-42
  *
  * @param {string} projectReqId - req_id proyek (misal "REQ-5" atau "REQ-2026-001")
  * @param {string} docTypeCode  - kode tipe dokumen (misal "BRD", "MEMO", "LAMPIRAN", "FSD", dll)
  * @param {string} projectName  - nama proyek singkat
+ * @param {string[]} [discriminators] - penanda pembeda opsional untuk dokumen bukti
+ *                                     (misal ["TASK-42"]); disamakan dengan format server
  * @returns {string} nama dokumen terformat
  */
-export function generateDocumentName(projectReqId, docTypeCode, projectName) {
+export function generateDocumentName(projectReqId, docTypeCode, projectName, discriminators = []) {
     const now = new Date();
     const tahun = now.getFullYear();
     const tanggal = String(now.getDate()).padStart(2, '0');
@@ -38,7 +41,14 @@ export function generateDocumentName(projectReqId, docTypeCode, projectName) {
         .replace(/\s+/g, '_')
         .substring(0, 30);
 
-    return `${nomorProyek}/GPTD/${docTypeCode}/${tanggal}-${bulanLabel}${tahun}_${cleanName}`;
+    // Penanda pembeda mengikuti aturan sanitasi server: huruf, angka, tanda hubung.
+    const suffix = (Array.isArray(discriminators) ? discriminators : [discriminators])
+        .map(part => String(part ?? '').replace(/[^A-Za-z0-9-]/g, '').replace(/^-+|-+$/g, '').toUpperCase())
+        .filter(Boolean)
+        .map(part => `_${part.substring(0, 24)}`)
+        .join('');
+
+    return `${nomorProyek}/GPTD/${docTypeCode}/${tanggal}-${bulanLabel}${tahun}_${cleanName}${suffix}`;
 }
 
 /**
@@ -62,6 +72,7 @@ export const DOCUMENT_TYPES = {
     UAT_RESULT: { code: 'UAT_RESULT', label: 'Hasil Pelaksanaan UAT', color: 'bg-amber-50 text-amber-700 border-amber-200' },
     UAT_EVIDENCE: { code: 'UAT_EVIDENCE', label: 'Bukti Temuan UAT', color: 'bg-orange-50 text-orange-700 border-orange-200' },
     UAT_SIGNOFF: { code: 'UAT_SIGNOFF', label: 'Berita Acara UAT', color: 'bg-amber-50 text-amber-700 border-amber-200' },
+    SIT_TASK_EVIDENCE: { code: 'SIT_TASK_EVIDENCE', label: 'Bukti Pengujian Task SIT', color: 'bg-orange-50 text-orange-700 border-orange-200' },
 
     // Fase 3 — QA & Cyber
     QA_REPORT: { code: 'QA_REPORT', label: 'Laporan QA Testing', color: 'bg-indigo-50 text-indigo-700 border-indigo-200' },
@@ -82,6 +93,23 @@ export const DOCUMENT_TYPES = {
  * Tipe dokumen yang diizinkan saat inisiasi proyek (Fase 1)
  */
 export const INITIATION_DOC_TYPES = ['BRD', 'MEMO', 'LAMPIRAN', 'LAINNYA'];
+
+/**
+ * Tipe dokumen lampiran BUKTI per task / per skenario pada SIT & UAT.
+ *
+ * Lampiran ini hanya bermakna pada konteks task/skenario tempat ia diunggah
+ * (panel eksekusi SIT per task & wizard SIT/UAT), bukan sebagai dokumen
+ * prasyarat per fase. Karena itu dikecualikan dari daftar dokumen umum yang
+ * dibaca lintas fase — mis. prasyarat pengajuan QA & Cyber.
+ */
+export const EVIDENCE_DOCUMENT_TYPES = ['SIT_TASK_EVIDENCE', 'UAT_EVIDENCE'];
+
+/**
+ * Cek apakah sebuah kode tipe dokumen termasuk lampiran bukti SIT/UAT.
+ */
+export function isEvidenceDocumentType(code) {
+    return EVIDENCE_DOCUMENT_TYPES.includes(String(code || '').toUpperCase());
+}
 
 /**
  * Ambil info tipe dokumen dari kode

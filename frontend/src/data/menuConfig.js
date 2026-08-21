@@ -149,6 +149,7 @@ export const menuSections = {
         {
             label: 'UTAMA',
             items: [
+                { label: 'Workspace Analis (Dev)', path: '/workspace/dev-analyst', icon: 'Cpu' },
                 { label: 'PM Workspace', path: '/pm/workspace', icon: 'Briefcase' },
                 { label: 'Persetujuan UAT Saya', path: '/approvals/uat', icon: 'UserCheck' },
                 { label: 'Kanban Board', path: '/pm/kanban', icon: 'Kanban' },

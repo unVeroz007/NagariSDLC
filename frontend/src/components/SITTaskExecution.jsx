@@ -150,12 +150,14 @@ export default function SITTaskExecution({
         const current = getApproval(taskId);
         setUploadingTaskId(taskId);
         try {
-            // Upload PARALLEL agar beberapa file selesai bersamaan (bukan satu per satu)
+            // Upload PARALLEL agar beberapa file selesai bersamaan (bukan satu per satu).
+            // context_label membuat nama masking tiap bukti berbeda & terlacak ke task-nya.
             const results = await Promise.allSettled(
                 list.map(f => documentService.upload(f, {
                     project_id: project.id,
                     document_type: 'SIT_TASK_EVIDENCE',
                     original_filename: f.name,
+                    context_label: `TASK-${taskId}`,
                 }))
             );
             const newAttachments = [];

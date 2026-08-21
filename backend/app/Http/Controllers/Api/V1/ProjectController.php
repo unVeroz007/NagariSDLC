@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api\V1;
 
 use App\Enums\ProjectStatus;
+use App\Enums\TrackStatus;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Project\StoreProjectRequest;
 use App\Http\Requests\Project\SaveUatExecutionDraftRequest;
@@ -11,8 +12,10 @@ use App\Http\Requests\Project\SubmitUatMajorVerificationRequest;
 use App\Http\Requests\Project\UpdateProjectStatusRequest;
 use App\Http\Resources\ProjectResource;
 use App\Http\Resources\ProjectStatusHistoryResource;
+use App\Models\ActivityLog;
 use App\Models\Division;
 use App\Models\Project;
+use App\Services\ProjectAccessService;
 use App\Services\ProjectWorkflowService;
 use App\Services\UatExecutionService;
 use App\Services\UatApprovalService;
@@ -45,10 +48,30 @@ class ProjectController extends Controller
         'sit_cycles',
     ];
 
+    /**
+     * Nilai jalur pengujian yang boleh ditulis langsung lewat endpoint update umum.
+     *
+     * PASSED sengaja tidak termasuk: kelulusan hanya boleh lahir dari transisi status
+     * (QA_PASSED / CYBER_PASSED) atau dari endpoint laporan pengujian, karena hanya di
+     * sana otorisasi role Lead / tester benar-benar diperiksa.
+     *
+     * FAILED boleh dikirim, namun penulisannya ditahan sampai transisi RETURN_TO_DEV
+     * pada request yang sama berhasil, sehingga pemeriksaan role tetap menjadi penentu
+     * (lihat penanganan $failedTrackColumns di update()).
+     */
+    private const CLIENT_WRITABLE_TRACK_STATUSES = [
+        TrackStatus::NOT_SUBMITTED->value,
+        TrackStatus::SUBMITTED->value,
+        TrackStatus::IN_PROGRESS->value,
+        TrackStatus::REVIEW->value,
+        TrackStatus::FAILED->value,
+    ];
+
     public function __construct(
         protected ProjectWorkflowService $workflowService,
         protected UatExecutionService $uatExecutionService,
-        protected UatApprovalService $uatApprovalService
+        protected UatApprovalService $uatApprovalService,
+        protected ProjectAccessService $accessService
     ) {}
 
     public function nextReqId(): JsonResponse
@@ -62,101 +85,14 @@ class ProjectController extends Controller
     public function index(Request $request): JsonResponse
     {
         $user = $request->user();
-        $roleName = $user->role?->name;
+        $user->loadMissing('role');
 
         $query = Project::with(['creator', 'pm', 'analyst', 'division', 'documents', 'teamMembers.user', 'statusHistories.changedBy', 'tasks.assignee', 'tasks.revisionRequester']);
 
         // ─── ROLE-BASED DATA ISOLATION ───
-        // Super Admin, Head of IT, Lead Group: bisa lihat SEMUA proyek
-        // Role lain: hanya lihat proyek yang menjadi tanggung jawab mereka
-        if (! in_array($roleName, ['super_admin', 'head_of_it', 'lead_group'])) {
-
-            if ($roleName === 'business_user') {
-                $query->where('created_by', $user->id);
-
-            } elseif ($roleName === 'analyst' || $roleName === 'dev_analyst') {
-                // Analyst: melihat proyek di fase analisis (agar saling tahu siapa pegang proyek mana)
-                // Dev Analyst (= PM): melihat proyek fase analisis (konteks kerja analis)
-                // + proyek yang DIA kelola sebagai PM (pm_id = dia) di SEMUA tahap
-                // + proyek SIT yang butuh persetujuannya (analyst_id = dia, status SIT)
-                $query->where(function ($q) use ($user, $roleName) {
-                    $q->whereIn('status', [
-                        ProjectStatus::PENDING->value,
-                        ProjectStatus::IN_REVIEW->value,
-                        ProjectStatus::ANALYSIS_APPROVED->value,
-                        ProjectStatus::READY_FOR_DEVELOPMENT->value,
-                        ProjectStatus::DEV_ANALYSIS->value,
-                        ProjectStatus::DEV_ANALYSIS_DONE->value,
-                    ]);
-                    if ($roleName === 'dev_analyst') {
-                        $q->orWhere('pm_id', $user->id);
-                    }
-                    // Analyst dapat melihat & menyetujui SIT untuk proyek yang dia tangani
-                    $q->orWhere(function ($sq) use ($user) {
-                        $sq->where('analyst_id', $user->id)
-                           ->whereIn('status', [
-                               ProjectStatus::SIT_IN_PROGRESS->value,
-                               ProjectStatus::SIT_REVISION->value,
-                           ]);
-                    });
-                });
-
-            } elseif ($roleName === 'development_lead') {
-                // Development Lead: semua proyek di fase pengembangan (bukan cuma punya dia)
-                // Karena Lead Dev mengelola alokasi semua proyek, biarkan semua proyek terlihat
-                // (opsional: bisa ditambah filter jika dibutuhkan)
-
-            } elseif ($roleName === 'project_manager') {
-                // PM hanya lihat proyek yang dikelola dia
-                $query->where('pm_id', $user->id);
-
-            } elseif ($roleName === 'developer') {
-                // Developer hanya lihat proyek di mana dia anggota tim
-                // + proyek SIT yang menunggu persetujuannya (dia assignee task, status SIT)
-                $query->where(function ($q) use ($user) {
-                    $q->whereHas('teamMembers', fn($qq) => $qq->where('user_id', $user->id))
-                      ->orWhere(function ($sq) use ($user) {
-                          $sq->whereIn('status', [
-                              ProjectStatus::SIT_IN_PROGRESS->value,
-                              ProjectStatus::SIT_REVISION->value,
-                          ])->whereHas('tasks', function ($tq) use ($user) {
-                              $tq->where('assignee_id', $user->id);
-                          });
-                      });
-                });
-
-            } elseif (in_array($roleName, ['qa_lead', 'qa_tester'])) {
-                // QA: proyek di fase QA atau sudah pernah masuk QA
-                $query->whereIn('status', [
-                    ProjectStatus::READY_FOR_QA->value,
-                    ProjectStatus::QA_IN_PROGRESS->value,
-                    ProjectStatus::QA_PASSED->value,
-                    ProjectStatus::RETURN_TO_DEV->value,
-                    ProjectStatus::CYBER_IN_PROGRESS->value,
-                    ProjectStatus::CYBER_PASSED->value,
-                    ProjectStatus::READY_FOR_UAT->value,
-                    ProjectStatus::UAT_PASSED->value,
-                    ProjectStatus::PENDING_GOLIVE->value,
-                    ProjectStatus::LIVE_PRODUCTION->value,
-                ]);
-
-            } elseif (in_array($roleName, ['cyber_lead', 'pentester'])) {
-                // Cyber: proyek di fase Cyber atau sudah pernah masuk Cyber
-                $query->whereIn('status', [
-                    ProjectStatus::DEV_COMPLETED->value,
-                    ProjectStatus::READY_FOR_QA->value,
-                    ProjectStatus::QA_IN_PROGRESS->value,
-                    ProjectStatus::QA_PASSED->value,
-                    ProjectStatus::RETURN_TO_DEV->value,
-                    ProjectStatus::CYBER_IN_PROGRESS->value,
-                    ProjectStatus::CYBER_PASSED->value,
-                    ProjectStatus::READY_FOR_UAT->value,
-                    ProjectStatus::UAT_PASSED->value,
-                    ProjectStatus::PENDING_GOLIVE->value,
-                    ProjectStatus::LIVE_PRODUCTION->value,
-                ]);
-            }
-        }
+        // Aturan visibilitas dipusatkan di ProjectAccessService agar daftar ini dan
+        // pemeriksaan akses di show()/update() tidak pernah menyimpang satu sama lain.
+        $this->accessService->applyVisibilityScope($query, $user);
 
         // ─── EXISTING FILTERS ───
         if ($request->filled('status')) {
@@ -226,10 +162,22 @@ class ProjectController extends Controller
         ], 201);
     }
 
-    public function show(int $id): JsonResponse
+    public function show(Request $request, int $id): JsonResponse
     {
         $project = Project::with(['creator', 'pm', 'analyst', 'division', 'statusHistories.changedBy', 'teamMembers.user', 'tasks.assignee', 'tasks.revisionRequester'])
             ->findOrFail($id);
+
+        $user = $request->user();
+        $user->loadMissing('role');
+
+        // Penyaringan di index() saja tidak cukup: tanpa pemeriksaan di sini, ID proyek
+        // milik orang lain masih dapat dibuka langsung lewat endpoint ini.
+        if (! $this->accessService->canView($user, $project)) {
+            return response()->json([
+                'status'  => 'error',
+                'message' => 'Anda tidak memiliki akses ke proyek ini.',
+            ], 403);
+        }
 
         return response()->json([
             'status' => 'success',
@@ -241,9 +189,100 @@ class ProjectController extends Controller
      * General project update (non-status fields: pm_id, analyst_id, staging_url, uat_notes, etc.)
      * If 'status' is provided, routes through ProjectWorkflowService.
      */
+    /**
+     * Catat perubahan status jalur pengujian ke activity_logs.
+     *
+     * Pengajuan QA / Siber oleh PM tidak selalu memicu transisi status utama —
+     * misalnya saat jalur lain sedang memegang penunjuk siklus — sehingga tanpa
+     * pencatatan ini ada perubahan keadaan proyek yang tidak punya jejak audit sama
+     * sekali. Seluruh isi log ditulis server, bukan diambil dari payload klien.
+     */
+    private function recordTrackStatusAudit(Project $project, Request $request, array $statusBeforeUpdate): void
+    {
+        $trackLabels = [
+            'qa_status'    => 'Pengujian QA',
+            'cyber_status' => 'Audit Keamanan Siber',
+        ];
+
+        $user = $request->user();
+        $user?->loadMissing('role');
+
+        foreach ($trackLabels as $column => $trackLabel) {
+            $previousStatus = TrackStatus::normalize($statusBeforeUpdate[$column] ?? null);
+            $currentStatus = TrackStatus::normalize($project->{$column});
+
+            if ($previousStatus === $currentStatus) {
+                continue;
+            }
+
+            ActivityLog::create([
+                'user_id'      => $user?->id,
+                'action'       => 'update_project_track_status',
+                'action_label' => 'Mengubah Status Jalur Pengujian',
+                'description'  => "Status {$trackLabel} proyek \"{$project->title}\" diubah dari {$previousStatus->label()} menjadi {$currentStatus->label()}.",
+                'subject_type' => Project::class,
+                'subject_id'   => $project->id,
+                'metadata'     => [
+                    'project_id'   => $project->id,
+                    'project_name' => $project->title,
+                    'track'        => $column,
+                    'from_status'  => $previousStatus->value,
+                    'to_status'    => $currentStatus->value,
+                    'user_name'    => $user?->name,
+                    'user_role'    => $user?->role?->display_name ?? $user?->role?->name,
+                    // Catatan pengaju disimpan apa adanya sebagai lampiran konteks.
+                    // Deskripsi log di atas tetap ditulis server, jadi isi kiriman
+                    // klien tidak bisa menyamarkan apa yang sebenarnya terjadi.
+                    'notes'        => $request->input('notes'),
+                ],
+                'ip_address'   => $request->ip(),
+                'status'       => 'success',
+                'created_at'   => now(),
+            ]);
+        }
+    }
+
+    /**
+     * Samakan bentuk input jalur pengujian sebelum divalidasi.
+     *
+     * Frontend memakai camelCase (`qaStatus` / `cyberStatus`) sedangkan kolom
+     * database snake_case, sehingga tanpa normalisasi ini nilai yang dikirim
+     * terbuang tanpa error. Nilainya sekaligus dinaikkan ke huruf kapital supaya
+     * satu-satunya bentuk yang tersimpan sesuai enum TrackStatus.
+     */
+    private function normalizeTrackStatusInput(Request $request): void
+    {
+        foreach (['qa_status' => 'qaStatus', 'cyber_status' => 'cyberStatus'] as $column => $camelCaseAlias) {
+            $value = $request->input($column, $request->input($camelCaseAlias));
+
+            if ($value === null || $value === '') {
+                continue;
+            }
+
+            $request->merge([$column => mb_strtoupper(trim((string) $value))]);
+        }
+    }
+
     public function update(Request $request, int $id): JsonResponse
     {
         $project = Project::findOrFail($id);
+
+        $user = $request->user();
+        $user->loadMissing('role');
+
+        // Gerbang tulis. Lebih ketat daripada gerbang baca: mengubah field proyek
+        // menuntut keterlibatan langsung, bukan sekadar berada di fase yang sama.
+        // Tanpa ini, analis lain dapat menimpa `analyst_result` proyek yang bukan
+        // tanggung jawabnya. Pemeriksaan wewenang transisi status tetap dijalankan
+        // ProjectWorkflowService di bawah.
+        if (! $this->accessService->canUpdate($user, $project)) {
+            return response()->json([
+                'status'  => 'error',
+                'message' => 'Anda tidak memiliki akses untuk mengubah proyek ini.',
+            ], 403);
+        }
+
+        $this->normalizeTrackStatusInput($request);
 
         $request->validate([
             'title'                  => ['sometimes', 'string', 'max:255'],
@@ -260,12 +299,31 @@ class ProjectController extends Controller
             'sit_uat_data'           => ['sometimes', 'nullable'],
             'sitUatData'             => ['sometimes', 'nullable'],
             'analyst_result'         => ['sometimes', 'nullable'],
-            'dev_analyst_result'    => ['sometimes', 'nullable'],            'qa_status'              => ['sometimes', 'nullable', 'string'],
-            'cyber_status'           => ['sometimes', 'nullable', 'string'],
+            'dev_analyst_result'     => ['sometimes', 'nullable'],
+            'qa_status'              => ['sometimes', 'nullable', 'string', 'in:'.implode(',', self::CLIENT_WRITABLE_TRACK_STATUSES)],
+            'cyber_status'           => ['sometimes', 'nullable', 'string', 'in:'.implode(',', self::CLIENT_WRITABLE_TRACK_STATUSES)],
             'team_allocated_by_pm'   => ['sometimes', 'nullable', 'boolean'],
             'status'                 => ['sometimes', 'string'],
             'project_type'           => ['sometimes', 'nullable', 'string', 'in:baru,perbaikan,update'],
+        ], [
+            'qa_status.in'    => 'Status jalur QA tidak dikenali. Kelulusan QA hanya dapat ditetapkan melalui sign-off QA Lead.',
+            'cyber_status.in' => 'Status jalur Keamanan Siber tidak dikenali. Kelulusan audit hanya dapat ditetapkan melalui sign-off Cyber Lead.',
         ]);
+
+        // Penetapan TIDAK LULUS wajib menyertakan transisi RETURN_TO_DEV pada request
+        // yang sama. Pemeriksaan role transisi itulah yang memastikan hanya QA Lead /
+        // Cyber Lead (atau tester terkait) yang bisa menjatuhkan keputusan gagal.
+        $failedTrackColumns = collect(['qa_status', 'cyber_status'])
+            ->filter(fn (string $column): bool => $request->input($column) === TrackStatus::FAILED->value)
+            ->values();
+
+        if ($failedTrackColumns->isNotEmpty()
+            && $request->input('status') !== ProjectStatus::RETURN_TO_DEV->value) {
+            return response()->json([
+                'status'  => 'error',
+                'message' => 'Penetapan jalur pengujian TIDAK LULUS harus disertai pengembalian proyek ke Development (RETURN_TO_DEV).',
+            ], 422);
+        }
 
         // Resolve analyst_id from analyst name if needed (workspace sends analyst name)
         $analystId = $request->analyst_id;
@@ -312,18 +370,40 @@ class ProjectController extends Controller
             'uat_notes'              => $request->uat_notes,
             'sit_uat_data'           => $mergedSitUatData,
             'analyst_result'         => $request->input('analystResult') ?? $request->input('analyst_result'),
-            'dev_analyst_result'    => $request->input('devAnalystResult') ?? $request->input('dev_analyst_result'),
-            'qa_status'              => $request->qa_status,
-            'cyber_status'           => $request->cyber_status,
+            'dev_analyst_result'     => $request->input('devAnalystResult') ?? $request->input('dev_analyst_result'),
+            'qa_status'              => $request->input('qa_status'),
+            'cyber_status'           => $request->input('cyber_status'),
             'team_allocated_by_pm'   => $request->has('team_allocated_by_pm') ? (bool) $request->team_allocated_by_pm : null,
         ], fn($v) => ! is_null($v));
 
+        // Nilai TIDAK LULUS ditahan sampai transisi RETURN_TO_DEV terbukti berhasil,
+        // supaya keputusan gagal tidak pernah tersimpan oleh pemanggil yang ternyata
+        // tidak berwenang melakukan transisi tersebut.
+        foreach ($failedTrackColumns as $column) {
+            unset($updateData[$column]);
+        }
+
+        $trackStatusBeforeUpdate = [
+            'qa_status'    => $project->qa_status,
+            'cyber_status' => $project->cyber_status,
+        ];
+
         $project->update($updateData);
+
+        $this->recordTrackStatusAudit($project, $request, $trackStatusBeforeUpdate);
 
         // Handle status transition through the state machine
         if ($request->filled('status')) {
+            $targetStatus = ProjectStatus::tryFrom($request->status);
+
+            if (! $targetStatus) {
+                return response()->json([
+                    'status'  => 'error',
+                    'message' => "Data proyek diperbarui, namun status tujuan \"{$request->status}\" tidak dikenali sistem.",
+                ], 422);
+            }
+
             try {
-                $targetStatus = ProjectStatus::from($request->status);
                 $notes = $request->input('notes') ?? $request->input('leadNote') ?? $request->input('lead_note');
                 $this->workflowService->transition(
                     $project,
@@ -336,6 +416,21 @@ class ProjectController extends Controller
                     'status'  => 'error',
                     'message' => 'Data proyek diperbarui, namun transisi status gagal: ' . $e->getMessage(),
                 ], 422);
+            }
+
+            if ($failedTrackColumns->isNotEmpty()) {
+                $trackStatusBeforeFailure = [
+                    'qa_status'    => $project->qa_status,
+                    'cyber_status' => $project->cyber_status,
+                ];
+
+                $project->update(
+                    $failedTrackColumns
+                        ->mapWithKeys(fn (string $column): array => [$column => TrackStatus::FAILED->value])
+                        ->all()
+                );
+
+                $this->recordTrackStatusAudit($project, $request, $trackStatusBeforeFailure);
             }
         }
 

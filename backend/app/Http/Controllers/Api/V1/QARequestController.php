@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api\V1;
 
 use App\Enums\ProjectStatus;
 use App\Enums\TestResult;
+use App\Enums\TrackStatus;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\TestReport\StoreTestReportRequest;
 use App\Http\Resources\TestReportResource;
@@ -67,6 +68,15 @@ class QARequestController extends Controller
                 $request->user(),
                 "QA Test Result: {$result->value}. " . ($request->notes ?? '')
             );
+
+            // Jalur QA wajib mencatat hasil akhirnya sendiri, terlepas dari status
+            // utama proyek. Ditulis setelah transisi lolos supaya hasil pengujian
+            // tidak pernah tercatat oleh pengguna yang tidak berwenang.
+            $project->update([
+                'qa_status' => ($result === TestResult::PASS)
+                    ? TrackStatus::PASSED->value
+                    : TrackStatus::FAILED->value,
+            ]);
         } catch (Throwable $e) {
             // Report saved but transition failed — return warning
             return response()->json([

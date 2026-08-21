@@ -92,9 +92,23 @@ React. Komunikasi murni REST API (JSON), auth via Bearer token.
 - **RBAC**: role gate di route & di controller (`role:` middleware).
 - **Otorisasi dokumen**: `DocumentController@download` cek relasi user ke proyek.
 - **Otorisasi chat**: `ChatController` cek akses proyek.
-- **Isolasi data**: `ProjectController@index` filter per role
-  (business_user → created_by; PM → pm_id; analyst → fase analisis + proyek SIT
-  yang ditugaskan; dll).
+- **Isolasi data**: `ProjectAccessService` adalah satu sumber kebenaran aturan
+  visibilitas proyek. `applyVisibilityScope()` menyaring daftar
+  (`ProjectController@index`, `WorkspaceController@show`), `canView()` menjaga baca
+  satu proyek (`ProjectController@show`, `TaskController@getByProject`), dan
+  `canUpdate()` menjaga tulis (`ProjectController@update`,
+  `TaskController@store`). Ringkasan aturan: role pengawas (super_admin,
+  head_of_it, lead_group) melihat semua; business_user → `created_by`;
+  project_manager → `pm_id`; analyst → `analyst_id` (hanya proyek yang
+  didisposisikan kepadanya, termasuk saat masih `PENDING` tanpa analis);
+  developer → anggota tim atau assignee task; development_lead, QA, dan Cyber →
+  berbasis fase karena tabel `projects` tidak punya kolom penugasan untuk role
+  itu. Keterlibatan personal (pemohon, PM, analis, anggota tim, assignee task,
+  approver UAT) selalu memberi akses baca meski status sudah bergerak maju.
+  Transisi status punya lapisan tambahan di `ProjectWorkflowService`: role
+  analyst hanya boleh mentransisikan proyek dengan `analyst_id` dirinya, agar
+  jejak `status_histories` tidak tercatat atas nama orang yang bukan pemegang
+  disposisi.
 - **Input**: Form Request + `validate()`.
 
 ## 6. Penyimpanan

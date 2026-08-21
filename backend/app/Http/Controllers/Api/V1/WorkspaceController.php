@@ -8,11 +8,14 @@ use App\Http\Resources\ProjectResource;
 use App\Http\Resources\ProjectTaskResource;
 use App\Models\Project;
 use App\Models\ProjectTask;
+use App\Services\ProjectAccessService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
 class WorkspaceController extends Controller
 {
+    public function __construct(protected ProjectAccessService $accessService) {}
+
     /**
      * Mengambil item kerja spesifik sesuai role yang sedang login.
      */
@@ -36,6 +39,13 @@ class WorkspaceController extends Controller
 
         // Mendapatkan proyek yang relevan berdasarkan role
         $query = Project::with(['creator', 'pm', 'analyst', 'division']);
+
+        // Batas visibilitas per pengguna diterapkan lebih dulu, lalu dipersempit lagi
+        // oleh filter fase di bawah. Tanpa lapisan ini, penyaringan yang hanya berbasis
+        // status membuat setiap pengguna melihat proyek rekan satu role-nya — misalnya
+        // seorang analis melihat antrean analis lain, atau business user melihat proyek
+        // divisi lain yang sedang UAT.
+        $this->accessService->applyVisibilityScope($query, $user);
 
         switch ($role) {
             case 'lead_group':

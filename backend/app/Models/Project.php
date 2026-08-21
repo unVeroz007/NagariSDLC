@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use App\Enums\ProjectStatus;
+use App\Enums\TrackStatus;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -123,6 +124,39 @@ class Project extends Model
     public function uatApprovalRounds(): HasMany
     {
         return $this->hasMany(UatApprovalRound::class);
+    }
+
+    /**
+     * Status jalur QA yang sudah dinormalisasi.
+     *
+     * Kolom `qa_status` sengaja TIDAK dicast langsung ke TrackStatus agar satu
+     * baris lama bernilai di luar enum tidak membuat pembacaan model melempar
+     * exception. Gunakan accessor ini sebagai satu-satunya cara membaca jalur QA
+     * di sisi backend.
+     */
+    public function qaTrackStatus(): TrackStatus
+    {
+        return TrackStatus::normalize($this->qa_status);
+    }
+
+    /**
+     * Status jalur Keamanan Siber yang sudah dinormalisasi.
+     */
+    public function cyberTrackStatus(): TrackStatus
+    {
+        return TrackStatus::normalize($this->cyber_status);
+    }
+
+    /**
+     * Dua jalur pengujian paralel (QA & Siber) sudah lulus semuanya.
+     *
+     * Ini prasyarat tunggal untuk maju ke UAT final, dan sengaja dihitung dari
+     * kolom jalur — bukan dari `status` — supaya urutan siapa yang selesai lebih
+     * dulu tidak memengaruhi hasilnya.
+     */
+    public function hasPassedAllTestingTracks(): bool
+    {
+        return $this->qaTrackStatus()->isPassed() && $this->cyberTrackStatus()->isPassed();
     }
 
     /**

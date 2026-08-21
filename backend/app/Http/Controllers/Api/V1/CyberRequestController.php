@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api\V1;
 
 use App\Enums\ProjectStatus;
 use App\Enums\TestResult;
+use App\Enums\TrackStatus;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\TestReport\StoreTestReportRequest;
 use App\Http\Resources\TestReportResource;
@@ -67,6 +68,15 @@ class CyberRequestController extends Controller
                 $request->user(),
                 "Cyber Security Test Result: {$result->value}. " . ($request->notes ?? '')
             );
+
+            // Jalur Keamanan Siber wajib mencatat hasil akhirnya sendiri, terlepas
+            // dari status utama proyek. Ditulis setelah transisi lolos supaya hasil
+            // audit tidak pernah tercatat oleh pengguna yang tidak berwenang.
+            $project->update([
+                'cyber_status' => ($result === TestResult::PASS)
+                    ? TrackStatus::PASSED->value
+                    : TrackStatus::FAILED->value,
+            ]);
         } catch (Throwable $e) {
             return response()->json([
                 'status'  => 'success',

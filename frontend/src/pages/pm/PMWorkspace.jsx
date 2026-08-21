@@ -34,7 +34,7 @@ import {
     FileCheck,
     Rocket,
 } from 'lucide-react';
-import toast from 'react-hot-toast';
+import toast from 'react-hot-toast' ;
 
 export default function PMWorkspace() {
     const { user } = useAuth();
@@ -712,4 +712,4 @@ export default function PMWorkspace() {
             </div>
         </div>
     );
-}
+}

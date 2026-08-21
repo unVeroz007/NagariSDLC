@@ -8,6 +8,7 @@ import RBBBadge from '../../components/RBBBadge';
 import ProjectTypeBadge from '../../components/ProjectTypeBadge';
 import toast from 'react-hot-toast';
 import { generateDocumentName, DOCUMENT_TYPES, formatFileSize } from '../../utils/documentNaming';
+import { PROJECT_STATUS, canRequestFinalUat } from '../../constants/projectStatus';
 import {
     Rocket,
     Search,
@@ -36,18 +37,16 @@ export default function ReleaseRequest() {
     const { projects, updateProject, isLoading } = useProjects();
     const rightPanelRef = useRef(null);
 
-    // Filter proyek siap diajukan ke Grup INFRA:
-    // Syarat: QA PASSED && Cyber PASSED (status = TESTING_PASSED atau CYBER_PASSED dengan qaStatus=PASSED)
-    // - TESTING_PASSED: kedua jalur QA & Cyber sudah lulus semua
-    // - CYBER_PASSED: Cyber lulus, QA lulus (dicek secara manual pada qaStatus)
-    // - PENDING_GOLIVE: sudah diajukan ke INFRA, menunggu proses quality gate
+    // Filter proyek siap diajukan ke Grup INFRA.
+    // Syarat: kedua jalur pengujian (QA & Keamanan Siber) sudah dinyatakan lulus,
+    // dibaca dari kolom jalur qa_status/cyber_status — bukan dari status utama —
+    // supaya urutan siapa yang sign-off lebih dulu tidak mengubah hasilnya.
+    // PENDING_GOLIVE tetap ditampilkan karena sudah diajukan ke INFRA dan sedang
+    // menunggu proses quality gate.
     const readyProjects = useMemo(() => {
         let list = projects.filter(p => {
             const st = String(p.status || '').toUpperCase();
-            const qaSt = String(p.qaStatus || p.qa_status || '').toUpperCase();
-            const cyberSt = String(p.cyberStatus || p.cyber_status || '').toUpperCase();
-            const bothPassed = qaSt === 'PASSED' && cyberSt === 'PASSED';
-            return bothPassed || st === 'TESTING_PASSED' || st === 'PENDING_GOLIVE';
+            return canRequestFinalUat(p) || st === PROJECT_STATUS.PENDING_GOLIVE;
         });
 
         const isPrivileged = user?.role && ['super_admin', 'lead_group', 'head_of_it', 'development_lead'].includes(user.role);
@@ -147,7 +146,7 @@ export default function ReleaseRequest() {
         setIsSubmitting(true);
         try {
             await updateProject(selectedProject.id, {
-                status: 'PENDING_GOLIVE',
+                status: PROJECT_STATUS.PENDING_GOLIVE,
                 releaseDate: formData.releaseDate,
                 downtime: formData.downtime,
                 rollbackPlan: formData.rollbackProcedure,

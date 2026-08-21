@@ -1,7 +1,7 @@
 import { createContext, useState, useContext, useEffect, useCallback, useRef } from 'react';
 import { projectService, documentService } from '../services/api';
 import { useAuth } from './AuthContext';
-import { generateDocumentName } from '../utils/documentNaming';
+import { generateDocumentName, isEvidenceDocumentType } from '../utils/documentNaming';
 import toast from 'react-hot-toast';
 
 const ProjectContext = createContext();
@@ -26,21 +26,32 @@ export const getFileFromStore = (key) => {
 /**
  * Ekstrak dokumen dari objek proyek untuk ditampilkan di antarmuka.
  * Backend mengembalikan dokumen via relasi `documents` pada ProjectResource.
+ *
+ * Lampiran bukti per task/skenario SIT & UAT (SIT_TASK_EVIDENCE, UAT_EVIDENCE)
+ * dikecualikan secara default karena hanya bermakna di konteks task/skenario-nya
+ * (panel eksekusi SIT & wizard SIT/UAT). Daftar ini dipakai sebagai dokumen
+ * per fase/aktivitas — BRD, MEMO, FSD, Berita Acara SIT/UAT, dsb.
+ *
+ * @param {object|null} project
+ * @param {{ includeEvidence?: boolean }} [options] - set includeEvidence: true
+ *        bila pemanggil memang perlu menampilkan lampiran bukti SIT/UAT.
  */
-export const getProjectRealDocuments = (project) => {
+export const getProjectRealDocuments = (project, { includeEvidence = false } = {}) => {
     if (!project) return [];
-    
+
     // API mode: documents already embedded in project from backend
     if (Array.isArray(project.documents)) {
-        return project.documents.map(d => ({
-            id: d.id || `doc-${Math.random()}`,
-            name: d.file_name || d.name || 'Dokumen_SDLC.pdf',
-            type: d.document_type || d.type || 'Dokumen SDLC',
-            size: d.file_size || d.size || 'N/A',
-            uploadedAt: d.created_at || d.uploaded_at || 'Terverifikasi',
-            author: d.uploader?.name || d.author || 'Tim SDLC',
-            url: d.id && !d.url ? `${import.meta.env.VITE_API_URL}/documents/${d.id}/download` : (d.url || null),
-        }));
+        return project.documents
+            .filter(d => includeEvidence || !isEvidenceDocumentType(d.document_type || d.type))
+            .map(d => ({
+                id: d.id || `doc-${Math.random()}`,
+                name: d.file_name || d.name || 'Dokumen_SDLC.pdf',
+                type: d.document_type || d.type || 'Dokumen SDLC',
+                size: d.file_size || d.size || 'N/A',
+                uploadedAt: d.created_at || d.uploaded_at || 'Terverifikasi',
+                author: d.uploader?.name || d.author || 'Tim SDLC',
+                url: d.id && !d.url ? `${import.meta.env.VITE_API_URL}/documents/${d.id}/download` : (d.url || null),
+            }));
     }
     return [];
 };

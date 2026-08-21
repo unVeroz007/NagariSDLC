@@ -6,6 +6,16 @@ import LoadingSpinner from '../../components/LoadingSpinner';
 import DocumentViewerModal from '../../components/DocumentViewerModal';
 import toast from 'react-hot-toast';
 import { generateDocumentName, DOCUMENT_TYPES, formatFileSize } from '../../utils/documentNaming';
+import { documentService } from '../../services/api';
+import {
+  PROJECT_STATUS,
+  TRACK_STATUS,
+  canAdvanceStatusToReadyForQa,
+  canStartQaTrack,
+  getQaTrackStatus,
+  isTrackActive,
+  isTrackPassed,
+} from '../../constants/projectStatus';
 
 import { useNavigate } from 'react-router-dom';
 import RBBBadge from '../../components/RBBBadge';
@@ -63,17 +73,21 @@ export default function QARequest() {
 
   // Filter proyek yang bisa diajukan ke QA oleh PM.
   // Mendukung 3 skenario alur kerja paralel yang fleksibel:
-  // 1. QA Dulu: PM ajukan ke QA dari IN_DEVELOPMENT atau READY_FOR_QA
+  // 1. QA Dulu: PM ajukan ke QA dari IN_DEVELOPMENT atau DEV_COMPLETED
   // 2. Serentak (Paralel): PM ajukan ke QA bersamaan dengan Cyber (saat CYBER_IN_PROGRESS)
   // 3. Cyber Dulu: PM ajukan ke QA setelah Cyber selesai (CYBER_PASSED)
   // + RETURN_TO_DEV: PM bisa resubmit ke QA setelah perbaikan defect
   const readyProjects = useMemo(() => {
     let list = projects.filter(p => {
-      const qaSt = String(p.qaStatus || p.qa_status || '').toUpperCase();
+      const qaSt = getQaTrackStatus(p);
       const st = String(p.status || '').toUpperCase();
-      const isEligibleStage = ['DEV_COMPLETED', 'SIT_PASSED', 'UAT_PASSED', 'IN_DEVELOPMENT', 'CYBER_IN_PROGRESS', 'CYBER_PASSED', 'RETURN_TO_DEV'].includes(st);
-      const isAlreadySubmittedQA = ['SUBMITTED', 'IN_PROGRESS', 'PASSED'].includes(qaSt) || st === 'READY_FOR_QA' || st === 'QA_IN_PROGRESS';
-      return isEligibleStage && !isAlreadySubmittedQA;
+      // Jalur QA yang sudah berjalan (termasuk menunggu review Lead) atau sudah
+      // lulus tidak boleh diajukan ulang supaya tidak ada pengajuan ganda.
+      const isAlreadySubmittedQA = isTrackActive(qaSt) || isTrackPassed(qaSt)
+        || st === PROJECT_STATUS.READY_FOR_QA
+        || st === PROJECT_STATUS.QA_IN_PROGRESS
+        || st === PROJECT_STATUS.QA_PASSED;
+      return canStartQaTrack(st) && !isAlreadySubmittedQA;
     });
 
     const isPrivileged = user?.role && ['super_admin', 'lead_group', 'head_of_it', 'development_lead'].includes(user.role);
@@ -186,30 +200,53 @@ export default function QARequest() {
     setIsSubmitting(true);
     try {
       const liveProj = (projects || []).find(p => String(p.id) === String(selectedProject.id)) || selectedProject;
-      const isCyberActive = ['SUBMITTED', 'IN_PROGRESS'].includes(String(liveProj.cyberStatus || liveProj.cyber_status || '').toUpperCase()) || liveProj.status === 'CYBER_IN_PROGRESS';
 
-      const newUploadedDocs = uploadedFiles.map(f => ({
-        id: `qa-doc-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
-        name: f.name,
-        type: 'Dokumen Tambahan Pengajuan QA',
-        size: f.size,
-        uploadedAt: new Date().toISOString(),
-        author: user?.name || 'Project Manager',
-        url: f.url
-      }));
+      // Unggah dokumen pendukung ke document vault supaya benar-benar tersimpan
+      // dan namanya di-masking oleh backend. Payload `documents` pada endpoint
+      // update proyek tidak pernah dibaca backend, jadi tidak dipakai lagi.
+      const failedUploads = [];
+      for (const uploadedFile of uploadedFiles) {
+        if (!uploadedFile.rawFile) continue;
+        try {
+          await documentService.upload(uploadedFile.rawFile, {
+            project_id: selectedProject.id,
+            document_type: DOCUMENT_TYPES.QA_REPORT.code,
+            original_filename: uploadedFile.originalName || uploadedFile.rawFile.name,
+          });
+        } catch (uploadErr) {
+          failedUploads.push(uploadedFile.originalName || uploadedFile.name);
+          toast.error(`Gagal mengunggah "${uploadedFile.originalName || uploadedFile.name}": ${uploadErr.message}`);
+        }
+      }
 
-      const existingDocs = Array.isArray(liveProj.documents) ? liveProj.documents : [];
-      const updatedDocs = [...existingDocs, ...newUploadedDocs];
+      if (failedUploads.length > 0 && failedUploads.length === uploadedFiles.filter(f => f.rawFile).length) {
+        throw new Error('Seluruh dokumen pendukung gagal diunggah. Pengajuan QA dibatalkan.');
+      }
+
+      // qa_status adalah satu-satunya penanda pengajuan jalur QA. Status utama
+      // hanya dinaikkan bila transisi READY_FOR_QA memang sah dari status saat ini,
+      // sehingga jalur Siber yang sedang berjalan tidak tertimpa.
+      //
+      // Detail pengajuan disimpan pada kolom yang benar-benar ada: target selesai
+      // ke current_stage_deadline dan staging ke staging_url. Prioritas & catatan
+      // teknis dikirim sebagai catatan transisi supaya tetap terekam pada
+      // project_status_histories dan activity_logs (belum ada kolom khususnya).
+      const submissionNote = [
+        `Pengajuan Pengujian QA oleh ${user?.name || 'Project Manager'}.`,
+        `Prioritas pengujian: ${formData.testPriority}.`,
+        `Target selesai: ${formData.targetDate}.`,
+        formData.stagingUrl ? `Staging URL: ${formData.stagingUrl}.` : null,
+        formData.technicalNotes ? `Catatan teknis: ${formData.technicalNotes}` : null,
+      ].filter(Boolean).join(' ');
 
       await updateProject(selectedProject.id, {
-        status: isCyberActive ? 'TESTING_IN_PROGRESS' : 'READY_FOR_QA',
-        qaStatus: 'SUBMITTED',
-        ...(liveProj.cyberStatus ? { cyberStatus: liveProj.cyberStatus } : {}),
-        qaSubmittedAt: new Date().toISOString(),
-        qaTargetDate: formData.targetDate,
-        qaStagingUrl: formData.stagingUrl,
-        qaNotes: formData.technicalNotes,
-        documents: updatedDocs
+        qa_status: TRACK_STATUS.SUBMITTED,
+        ...(canAdvanceStatusToReadyForQa(liveProj.status)
+          ? { status: PROJECT_STATUS.READY_FOR_QA }
+          : {}),
+        staging_url: formData.stagingUrl,
+        current_stage_deadline: formData.targetDate,
+        notes: submissionNote,
       });
 
       addNotification(
@@ -236,6 +273,9 @@ export default function QARequest() {
     toast.success('Staging URL berhasil disalin ke clipboard!');
   };
 
+  // Dokumen prasyarat per fase/aktivitas: BRD, MEMO, FSD, Berita Acara SIT/UAT, dsb.
+  // Lampiran bukti per task/skenario SIT & UAT sengaja tidak ikut (dikecualikan di
+  // getProjectRealDocuments) karena QA memverifikasi dokumen fase, bukan bukti per task.
   const projectDocsList = useMemo(() => {
     return getProjectRealDocuments(selectedProject);
   }, [selectedProject]);

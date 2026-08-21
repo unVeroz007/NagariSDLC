@@ -8,23 +8,44 @@ use App\Models\Project;
 use App\Services\FileUploadService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use Symfony\Component\HttpFoundation\BinaryFileResponse;
 
 class DocumentController extends Controller
 {
+    /**
+     * Tipe dokumen bukti (evidence) yang secara alami diunggah berkali-kali
+     * dalam satu proyek pada tanggal yang sama (bukti per task SIT, bukti per
+     * skenario UAT). Nama dokumen tipe ini wajib diberi penanda unik agar
+     * tidak kembar dan tetap dapat dilacak ke baris document vault-nya.
+     */
+    protected const UNIQUELY_NAMED_DOC_TYPES = [
+        DocumentVault::SIT_TASK_EVIDENCE_TYPE,
+        DocumentVault::UAT_EVIDENCE_TYPE,
+    ];
+
     public function __construct(
         protected FileUploadService $uploadService
     ) {}
 
     /**
      * Format nama dokumen sesuai konvensi Bank Nagari:
-     * XXX/GPTD/TIPE/DD-BulanYYYY_NamaProyek
+     * XXX/GPTD/TIPE/DD-BulanYYYY_NamaProyek[_PENANDA...]
      *   XXX = nomor urut dari req_id (contoh: REQ-2026-001 → 001)
      *   TIPE = kode tipe dokumen (BRD, MEMO, FSD, dll)
+     *   PENANDA = pembeda opsional untuk dokumen bukti, mis. konteks
+     *             ("TASK-42") dan nomor dokumen ("DOC-0091").
+     *
+     * @param  list<string>  $discriminators  Penanda tambahan yang sudah bersih.
      */
-    protected function generateDocumentFileName(Project $project, string $docType, ?string $originalName = null, ?string $mimeType = null): string
-    {
+    protected function generateDocumentFileName(
+        Project $project,
+        string $docType,
+        ?string $originalName = null,
+        ?string $mimeType = null,
+        array $discriminators = []
+    ): string {
         // Nomor proyek dari req_id
         $nomor = '001';
         if ($project->req_id && preg_match('/(\d+)$/', $project->req_id, $m)) {
@@ -44,6 +65,13 @@ class DocumentController extends Controller
         $pp = trim(preg_replace('/\s+/', '_', mb_substr($pp, 0, 30)));
 
         $prefix = "{$nomor}/GPTD/{$docType}/{$dd}-{$bl}{$th}_{$pp}";
+
+        // Penanda pembeda (konteks + nomor dokumen) untuk lampiran bukti.
+        foreach ($discriminators as $discriminator) {
+            if ($discriminator !== null && $discriminator !== '') {
+                $prefix .= '_' . $discriminator;
+            }
+        }
 
         // Ekstensi dari original filename
         $ext = '';
@@ -69,6 +97,21 @@ class DocumentController extends Controller
         return $prefix . $ext;
     }
 
+    /**
+     * Bersihkan label konteks dari klien (mis. "TASK-42", "PERMINTAAN-3") agar
+     * aman dipakai di nama dokumen: hanya huruf, angka, dan tanda hubung.
+     */
+    protected function sanitizeContextLabel(?string $label): ?string
+    {
+        if ($label === null) {
+            return null;
+        }
+
+        $clean = trim((string) preg_replace('/[^A-Za-z0-9\-]/', '', $label), '-');
+
+        return $clean === '' ? null : mb_strtoupper(mb_substr($clean, 0, 24));
+    }
+
     public function index(Request $request): JsonResponse
     {
         $query = DocumentVault::with(['project', 'uploader']);
@@ -92,6 +135,7 @@ class DocumentController extends Controller
             'document_type' => ['required', 'string'],
             'file' => ['required', 'file', 'max:5120', 'mimes:pdf,xls,xlsx,jpg,jpeg,png,zip'],
             'original_filename' => ['nullable', 'string', 'max:255'],
+            'context_label' => ['nullable', 'string', 'max:40'],
         ], [
             'file.max' => 'Ukuran berkas dokumen melebihi batas maksimal 5 MB.',
             'file.mimes' => 'Format yang diizinkan: PDF, Excel (.xls/.xlsx), Gambar (.jpg/.jpeg/.png), ZIP.',
@@ -101,18 +145,37 @@ class DocumentController extends Controller
         $file = $request->file('file');
         $fileInfo = $this->uploadService->upload($file);
         $originalName = $request->original_filename ?? $file->getClientOriginalName();
-        $docName = $this->generateDocumentFileName($project, $request->document_type, $originalName, $fileInfo['mime_type']);
+        $docType = $request->document_type;
 
-        $document = DocumentVault::create([
-            'project_id' => $project->id,
-            'uploaded_by' => $request->user()->id,
-            'document_type' => $request->document_type,
-            'original_filename' => $originalName,
-            'file_path' => $fileInfo['file_path'],
-            'file_name' => $docName,
-            'file_size' => $fileInfo['file_size'],
-            'mime_type' => $fileInfo['mime_type'],
-        ]);
+        // Penanda konteks opsional dari pengunggah (mis. "TASK-42") supaya
+        // lampiran bukti bisa dibedakan langsung dari namanya.
+        $discriminators = array_values(array_filter([
+            $this->sanitizeContextLabel($request->context_label),
+        ]));
+
+        $document = DB::transaction(function () use ($project, $request, $fileInfo, $originalName, $docType, $discriminators) {
+            $document = DocumentVault::create([
+                'project_id' => $project->id,
+                'uploaded_by' => $request->user()->id,
+                'document_type' => $docType,
+                'original_filename' => $originalName,
+                'file_path' => $fileInfo['file_path'],
+                'file_name' => $this->generateDocumentFileName($project, $docType, $originalName, $fileInfo['mime_type'], $discriminators),
+                'file_size' => $fileInfo['file_size'],
+                'mime_type' => $fileInfo['mime_type'],
+            ]);
+
+            // Nomor dokumen dipakai sebagai pembeda final untuk tipe bukti.
+            // Diambil dari primary key agar dijamin unik walau beberapa berkas
+            // diunggah paralel, dan tetap bisa dirujuk saat audit.
+            if (in_array($docType, self::UNIQUELY_NAMED_DOC_TYPES, true)) {
+                $discriminators[] = 'DOC-' . str_pad((string) $document->id, 4, '0', STR_PAD_LEFT);
+                $document->file_name = $this->generateDocumentFileName($project, $docType, $originalName, $fileInfo['mime_type'], $discriminators);
+                $document->save();
+            }
+
+            return $document;
+        });
 
         return response()->json([
             'status' => 'success',

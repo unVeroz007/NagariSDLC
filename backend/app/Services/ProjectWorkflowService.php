@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Enums\ProjectStatus;
 use App\Enums\TaskStatus;
+use App\Enums\TrackStatus;
 use App\Enums\UserRole;
 use App\Models\DocumentVault;
 use App\Models\Project;
@@ -98,23 +99,31 @@ class ProjectWorkflowService
             ProjectStatus::IN_DEVELOPMENT->value,
             ProjectStatus::READY_FOR_DEVELOPMENT->value,
             ProjectStatus::READY_FOR_QA->value,
+            ProjectStatus::QA_IN_PROGRESS->value, // Disposisi ulang QA tanpa lewat READY_FOR_QA
             ProjectStatus::CYBER_IN_PROGRESS->value,
         ],
         ProjectStatus::READY_FOR_QA->value => [
             ProjectStatus::QA_IN_PROGRESS->value,
             ProjectStatus::CYBER_IN_PROGRESS->value,
             ProjectStatus::DEV_COMPLETED->value,
+            ProjectStatus::RETURN_TO_DEV->value, // Mundur (jalur Siber gagal lebih dulu)
             ProjectStatus::IN_DEVELOPMENT->value, // Mundur
         ],
         ProjectStatus::QA_IN_PROGRESS->value => [
             ProjectStatus::QA_PASSED->value,
             ProjectStatus::CYBER_IN_PROGRESS->value, // Paralel Cyber Audit
+            ProjectStatus::CYBER_PASSED->value, // Sign-off Siber menyusul saat QA masih berjalan
             ProjectStatus::RETURN_TO_DEV->value, // Mundur (Defect QA)
             ProjectStatus::READY_FOR_QA->value,
         ],
+        // QA_PASSED & CYBER_PASSED sengaja dibuat simetris: dua jalur pengujian
+        // berjalan paralel, jadi jalur mana pun yang sign-off lebih dulu harus
+        // tetap bisa menerima sign-off jalur lain, maju ke UAT final, atau mundur.
         ProjectStatus::QA_PASSED->value => [
             ProjectStatus::CYBER_IN_PROGRESS->value,
             ProjectStatus::CYBER_PASSED->value,
+            ProjectStatus::READY_FOR_UAT->value, // Dua jalur lulus, PM ajukan UAT final
+            ProjectStatus::RETURN_TO_DEV->value, // Mundur (Vulnerability Defect menyusul)
             ProjectStatus::QA_IN_PROGRESS->value, // Mundur
         ],
         ProjectStatus::CYBER_IN_PROGRESS->value => [
@@ -125,6 +134,9 @@ class ProjectWorkflowService
         ],
         ProjectStatus::CYBER_PASSED->value => [
             ProjectStatus::READY_FOR_UAT->value,
+            ProjectStatus::QA_IN_PROGRESS->value, // Paralel QA baru mulai
+            ProjectStatus::QA_PASSED->value, // Sign-off QA menyusul
+            ProjectStatus::RETURN_TO_DEV->value, // Mundur (Defect QA menyusul)
             ProjectStatus::CYBER_IN_PROGRESS->value, // Mundur
         ],
         ProjectStatus::READY_FOR_UAT->value => [
@@ -223,6 +235,19 @@ class ProjectWorkflowService
             throw new Exception("User dengan role '{$roleLabel}' tidak memiliki wewenang untuk mengubah status ke '{$nextStatus}'.");
         }
 
+        // 3b. Validasi penugasan personal untuk System Analyst.
+        //
+        // Matriks role di atas hanya menjawab "role apa yang boleh", bukan "orang mana
+        // yang boleh". Tanpa pemeriksaan ini, seorang analis dapat menyetujui atau
+        // menolak hasil analisis proyek yang didisposisikan kepada analis lain, dan
+        // jejaknya tercatat di `status_histories` atas namanya — merusak audit trail.
+        //
+        // Sengaja hanya diterapkan pada role analyst: hanya role itulah yang punya
+        // kolom penugasan personal (`projects.analyst_id`) pada fase yang ia kelola.
+        if ($userRoleName === UserRole::ANALYST->value && (int) $project->analyst_id !== (int) $user->id) {
+            throw new Exception('Proyek ini tidak didisposisikan kepada Anda, sehingga statusnya tidak dapat Anda ubah.');
+        }
+
         // 4. Validasi prasyarat bisnis yang tidak boleh dilewati melalui API.
         $this->validateTransitionPrerequisites($project, $targetStatus);
 
@@ -300,6 +325,8 @@ class ProjectWorkflowService
                 }
             }
 
+            $this->syncTestingTrackStatuses($project, $targetStatus);
+
             $project->status = $targetStatus;
 
             if ($targetStatus === ProjectStatus::REJECTED) {
@@ -354,10 +381,80 @@ class ProjectWorkflowService
     }
 
     /**
+     * Selaraskan kolom jalur pengujian dengan status utama yang sedang dituju.
+     *
+     * Backend adalah satu-satunya pemilik nilai `qa_status` / `cyber_status` untuk
+     * transisi fase QA & Siber, supaya endpoint mana pun yang memicu transisi
+     * (pengajuan PM, laporan tester, sign-off Lead) selalu meninggalkan kedua
+     * kolom dalam keadaan konsisten. Dipanggil di dalam transaction `transition()`,
+     * sebelum `$project->save()`, jadi tidak menambah query tulis.
+     *
+     * Hanya jalur yang relevan dengan status tujuan yang disentuh — jalur lain
+     * dibiarkan apa adanya supaya dua jalur paralel tidak saling menimpa.
+     */
+    private function syncTestingTrackStatuses(Project $project, ProjectStatus $targetStatus): void
+    {
+        switch ($targetStatus) {
+            case ProjectStatus::READY_FOR_QA:
+                // PM mengajukan pengujian QA; jalur Siber tidak tersentuh.
+                if (! $project->qaTrackStatus()->isActive()) {
+                    $project->qa_status = TrackStatus::SUBMITTED->value;
+                }
+                break;
+
+            case ProjectStatus::QA_IN_PROGRESS:
+                $project->qa_status = TrackStatus::IN_PROGRESS->value;
+                break;
+
+            case ProjectStatus::QA_PASSED:
+                $project->qa_status = TrackStatus::PASSED->value;
+                break;
+
+            case ProjectStatus::CYBER_IN_PROGRESS:
+                $project->cyber_status = TrackStatus::IN_PROGRESS->value;
+                break;
+
+            case ProjectStatus::CYBER_PASSED:
+                $project->cyber_status = TrackStatus::PASSED->value;
+                break;
+
+            case ProjectStatus::RETURN_TO_DEV:
+                // Ada defect: kelulusan yang sudah didapat tidak lagi berlaku
+                // karena kode akan berubah. Tanda FAILED dibiarkan utuh sebagai
+                // jejak audit siapa yang menolak.
+                foreach (['qa_status', 'cyber_status'] as $column) {
+                    if (TrackStatus::normalize($project->{$column})->isPassed()) {
+                        $project->{$column} = TrackStatus::NOT_SUBMITTED->value;
+                    }
+                }
+                break;
+
+            default:
+                // Fase di luar QA / Siber tidak mengubah kolom jalur.
+                break;
+        }
+    }
+
+    /**
      * Validasi gate bisnis lintas endpoint sebelum status proyek berubah.
      */
     private function validateTransitionPrerequisites(Project $project, ProjectStatus $targetStatus): void
     {
+        if ($targetStatus === ProjectStatus::READY_FOR_UAT && ! $project->hasPassedAllTestingTracks()) {
+            $pendingTracks = collect([
+                'Pengujian QA' => $project->qaTrackStatus(),
+                'Audit Keamanan Siber' => $project->cyberTrackStatus(),
+            ])
+                ->reject(fn (TrackStatus $status): bool => $status->isPassed())
+                ->map(fn (TrackStatus $status, string $label): string => "{$label} ({$status->label()})")
+                ->values()
+                ->implode(' dan ');
+
+            throw new Exception(
+                "UAT final hanya dapat diajukan setelah Pengujian QA dan Audit Keamanan Siber dinyatakan lulus. Belum lulus: {$pendingTracks}."
+            );
+        }
+
         if ($targetStatus === ProjectStatus::SIT_PASSED && ! $project->hasSitSignOffDocument()) {
             throw new Exception(
                 'Dokumen Hasil Review / Berita Acara SIT wajib diunggah sebelum SIT dapat dinyatakan lulus.'

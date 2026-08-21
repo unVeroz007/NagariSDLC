@@ -31,6 +31,7 @@ import { useNotifications } from '../../contexts/NotificationContext';
 import LoadingSpinner from '../../components/LoadingSpinner';
 import EmptyState from '../../components/EmptyState';
 import DocumentViewerModal from '../../components/DocumentViewerModal';
+import ProjectDetailModal from '../../components/ProjectDetailModal';
 import toast from 'react-hot-toast';
 import { getDocExtLabel, getDocIconStyle } from '../../utils/documentNaming';
 
@@ -440,6 +441,11 @@ export default function WorkspaceLead() {
         }
     };
 
+    // Referensi fungsi harus stabil: ProjectDetailModal memakainya sebagai dependency
+    // effect (Escape + lock scroll body), jadi callback inline akan memasang ulang
+    // listener setiap render induk.
+    const handleClosePreviewModal = useCallback(() => setIsPreviewModalOpen(false), []);
+
     const getFileIcon = (type) => {
         if (!type) return 'bg-gray-100 text-gray-600';
         const icons = {
@@ -458,6 +464,28 @@ export default function WorkspaceLead() {
         const key = String(type).toLowerCase();
         return labels[key] || String(type).toUpperCase();
     };
+
+    // Teks empty state daftar antrean. Kata kunci pencarian diprioritaskan supaya
+    // hasil nol tidak terbaca sebagai "antrean memang kosong".
+    const queueEmptyCopy = projectSearch.trim()
+        ? {
+            title: 'Proyek tidak ditemukan',
+            description: `Tidak ada proyek pada antrean ini yang cocok dengan "${projectSearch.trim()}".`,
+        }
+        : activeTab === 'disposition'
+            ? {
+                title: 'Antrean bersih',
+                description: 'Belum ada proyek baru yang menunggu penugasan analis.',
+            }
+            : activeTab === 'analyzing'
+                ? {
+                    title: 'Tidak ada kajian aktif',
+                    description: 'Belum ada proyek yang sedang dikaji System Analyst.',
+                }
+                : {
+                    title: 'Tidak ada verifikasi tertunda',
+                    description: 'Belum ada hasil analisis yang menunggu verifikasi Anda.',
+                };
 
     // Hapus full-screen empty state return
 
@@ -507,12 +535,18 @@ export default function WorkspaceLead() {
 
             {/* Split Layout */}
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                {/* LEFT PANEL: Antrean */}
-                <div className="flex flex-col overflow-hidden bg-white border border-gray-100 rounded-2xl shadow-sm lg:col-span-1 lg:max-h-[calc(100vh-160px)]">
-                    <div className="p-4 border-b border-gray-100 shrink-0">
-
-
-                        <div>
+                {/* LEFT PANEL: Antrean
+                    Wrapper luar hanya berperan sebagai kotak ukur. Pada layar lg panel di
+                    dalamnya dipasang absolute + inset-0, sehingga tingginya tidak lagi ikut
+                    menentukan tinggi baris grid: tinggi baris murni ditentukan panel kanan
+                    (detail & form), lalu panel antrean menyalin tinggi itu. Hasilnya kedua
+                    kolom selalu rata atas-bawah, dan ketika daftar proyek lebih panjang yang
+                    men-scroll adalah area daftarnya — bukan panelnya yang memanjang.
+                    Di bawah lg layout menumpuk satu kolom, jadi panel kembali mengalir normal
+                    dengan batas max-h-[70vh] agar daftar tetap punya scroll sendiri. */}
+                <div className="lg:col-span-1 lg:relative">
+                    <div className="flex flex-col overflow-hidden bg-white border border-gray-100 rounded-2xl shadow-sm max-h-[70vh] lg:max-h-none lg:absolute lg:inset-0">
+                        <div className="p-4 border-b border-gray-100 shrink-0">
                             <h2 className="text-base font-bold text-gray-800">
                                 {activeTab === 'disposition' && 'Antrean Disposisi Baru'}
                                 {activeTab === 'analyzing' && 'Proyek Sedang Dikaji Analyst'}
@@ -524,91 +558,110 @@ export default function WorkspaceLead() {
                                 {activeTab === 'verification' && `${activeQueue.length} proyek menunggu verifikasi FSD`}
                             </p>
                         </div>
-                    </div>
-                    <div className="p-3 border-b border-gray-100 shrink-0">
-                        <div className="relative">
-                            <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-                            <input
-                                type="text"
-                                value={projectSearch}
-                                onChange={(e) => setProjectSearch(e.target.value)}
-                                placeholder="Cari proyek (ID, nama, divisi)..."
-                                className="w-full pl-9 pr-3 py-2 rounded-lg border border-gray-200 bg-gray-50 text-xs focus:ring-2 focus:ring-[#00529C]/20 focus:border-[#00529C] outline-none transition-all"
-                            />
-                        </div>
-                    </div>
-                    <div className="flex-1 overflow-y-auto p-3 space-y-2.5 bg-gray-50/40">
-                        {activeQueue.map((project) => (
-                            <div
-                                key={project.id}
-                                onClick={() => {
-                                    setSelectedProject(project);
-                                    // Reset deadline: gunakan nilai dari proyek jika ada, jika tidak kosongkan
-                                    if (project.deadline || project.current_stage_deadline) {
-                                        setDeadline((project.deadline || project.current_stage_deadline).split('T')[0]);
-                                    } else {
-                                        setDeadline('');
-                                    }
-                                    setSelectedAnalyst('');
-                                    setNotes('');
-                                    setAnalystSearch('');
-                                }}
-                                className={`p-4 rounded-xl cursor-pointer transition-all relative overflow-hidden group ${
-                                    selectedProject?.id === project.id
-                                        ? 'bg-white border-2 border-[#00529C] shadow-md'
-                                        : 'bg-white border border-gray-200 hover:border-[#00529C]/40 hover:shadow-md'
-                                }`}
-                            >
-                                {selectedProject?.id === project.id && (
-                                    <div className="absolute left-0 top-0 w-1 h-full bg-[#00529C] rounded-l-xl" />
-                                )}
-                                <div className="flex justify-between items-start mb-2">
-                                    <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold border ${getPriorityColor(project.priority)}`}>
-                                        {project.priority === 'High' ? '🔴 Tinggi' : project.priority === 'Medium' ? '🟡 Sedang' : '🟢 Rendah'}
-                                    </span>
-                                    <span className="text-[10px] text-gray-400">
-                                        {new Date(project.submittedAt).toLocaleDateString('id-ID', { day: 'numeric', month: 'short' })}
-                                    </span>
-                                </div>
-                                <div className="mb-2"><div className="flex items-center gap-1.5 flex-wrap"><RBBBadge type={project.type} deadline={project.rbbDeadline} status={project.status} /><ProjectTypeBadge type={project.project_type} /></div></div>
-                                <h3 className="font-semibold text-gray-800 text-sm mb-1 group-hover:text-[#00529C] transition-colors">{project.title || project.name}</h3>
-                                <div className="flex items-center gap-1 text-xs text-gray-500">
-                                    <Users size={13} />
-                                    <span>{project.division}</span>
-                                </div>
-
-                                {/* Info Status Analis — sesuai tab aktif */}
-                                {activeTab === 'disposition' && (
-                                    <div className="flex items-center gap-1.5 mt-2.5 bg-gray-50 border border-gray-200 rounded-lg px-2.5 py-1.5">
-                                        <UserX size={13} className="text-gray-400 shrink-0" />
-                                        <span className="text-[11px] text-gray-500 font-medium">
-                                            Belum didisposisi ke analis
-                                        </span>
-                                    </div>
-                                )}
-                                {activeTab === 'analyzing' && (
-                                    <div className="flex items-center gap-1.5 mt-2.5 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-1.5">
-                                        <UserCheck size={13} className="text-amber-600 shrink-0" />
-                                        <span className="text-[11px] text-amber-700 font-medium truncate">
-                                            Analis: {analystName(project) || 'Belum ditugaskan'}
-                                        </span>
-                                    </div>
-                                )}
-                                {activeTab === 'verification' && (
-                                    <div className="flex items-center gap-1.5 mt-2.5 bg-emerald-50 border border-emerald-200 rounded-lg px-2.5 py-1.5">
-                                        <CheckCircle2 size={13} className="text-emerald-600 shrink-0" />
-                                        <span className="text-[11px] text-emerald-700 font-medium truncate">
-                                            Hasil dari: {analystName(project) || 'Analis'}
-                                        </span>
-                                    </div>
-                                )}
-
-                                <div className="flex justify-between items-center pt-2.5 mt-2.5 border-t border-gray-100">
-                                    <span className="text-[10px] font-bold text-[#00529C] bg-blue-50 px-2 py-0.5 rounded">{project.reqId || project.req_id || project.id}</span>
-                                    <span className="text-[10px] text-gray-400">{project.status}</span>
-                                </div>
+                        <div className="p-3 border-b border-gray-100 shrink-0">
+                            <div className="relative">
+                                <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                                <input
+                                    type="text"
+                                    value={projectSearch}
+                                    onChange={(e) => setProjectSearch(e.target.value)}
+                                    placeholder="Cari proyek (ID, nama, divisi)..."
+                                    className="w-full pl-9 pr-3 py-2 rounded-lg border border-gray-200 bg-gray-50 text-xs focus:ring-2 focus:ring-[#00529C]/20 focus:border-[#00529C] outline-none transition-all"
+                                />
                             </div>
-                        ))}
+                        </div>
+                        {/* Satu-satunya area yang men-scroll. min-h-0 wajib agar flex item boleh
+                            menyusut di bawah tinggi kontennya, syarat overflow-y-auto bekerja. */}
+                        <div className="flex-1 min-h-0 overflow-y-auto p-3 bg-gray-50/40">
+                            {isLoading && activeQueue.length === 0 ? (
+                                <div className="h-full flex flex-col items-center justify-center gap-2 py-10">
+                                    <LoadingSpinner size="sm" />
+                                    <p className="text-xs font-medium text-gray-500">Memuat antrean proyek...</p>
+                                </div>
+                            ) : activeQueue.length === 0 ? (
+                                <div className="h-full flex items-center justify-center">
+                                    <EmptyState
+                                        icon={projectSearch.trim() ? Search : undefined}
+                                        title={queueEmptyCopy.title}
+                                        description={queueEmptyCopy.description}
+                                    />
+                                </div>
+                            ) : (
+                                <div className="space-y-2.5">
+                                    {activeQueue.map((project) => (
+                                        <div
+                                            key={project.id}
+                                            onClick={() => {
+                                                setSelectedProject(project);
+                                                // Reset deadline: gunakan nilai dari proyek jika ada, jika tidak kosongkan
+                                                if (project.deadline || project.current_stage_deadline) {
+                                                    setDeadline((project.deadline || project.current_stage_deadline).split('T')[0]);
+                                                } else {
+                                                    setDeadline('');
+                                                }
+                                                setSelectedAnalyst('');
+                                                setNotes('');
+                                                setAnalystSearch('');
+                                            }}
+                                            className={`p-4 rounded-xl cursor-pointer transition-all relative overflow-hidden group ${
+                                                selectedProject?.id === project.id
+                                                    ? 'bg-white border-2 border-[#00529C] shadow-md'
+                                                    : 'bg-white border border-gray-200 hover:border-[#00529C]/40 hover:shadow-md'
+                                            }`}
+                                        >
+                                            {selectedProject?.id === project.id && (
+                                                <div className="absolute left-0 top-0 w-1 h-full bg-[#00529C] rounded-l-xl" />
+                                            )}
+                                            <div className="flex justify-between items-start mb-2">
+                                                <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold border ${getPriorityColor(project.priority)}`}>
+                                                    {project.priority === 'High' ? '🔴 Tinggi' : project.priority === 'Medium' ? '🟡 Sedang' : '🟢 Rendah'}
+                                                </span>
+                                                <span className="text-[10px] text-gray-400">
+                                                    {new Date(project.submittedAt).toLocaleDateString('id-ID', { day: 'numeric', month: 'short' })}
+                                                </span>
+                                            </div>
+                                            <div className="mb-2"><div className="flex items-center gap-1.5 flex-wrap"><RBBBadge type={project.type} deadline={project.rbbDeadline} status={project.status} /><ProjectTypeBadge type={project.project_type} /></div></div>
+                                            <h3 className="font-semibold text-gray-800 text-sm mb-1 group-hover:text-[#00529C] transition-colors">{project.title || project.name}</h3>
+                                            <div className="flex items-center gap-1 text-xs text-gray-500">
+                                                <Users size={13} />
+                                                <span>{project.division}</span>
+                                            </div>
+
+                                            {/* Info Status Analis — sesuai tab aktif */}
+                                            {activeTab === 'disposition' && (
+                                                <div className="flex items-center gap-1.5 mt-2.5 bg-gray-50 border border-gray-200 rounded-lg px-2.5 py-1.5">
+                                                    <UserX size={13} className="text-gray-400 shrink-0" />
+                                                    <span className="text-[11px] text-gray-500 font-medium">
+                                                        Belum didisposisi ke analis
+                                                    </span>
+                                                </div>
+                                            )}
+                                            {activeTab === 'analyzing' && (
+                                                <div className="flex items-center gap-1.5 mt-2.5 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-1.5">
+                                                    <UserCheck size={13} className="text-amber-600 shrink-0" />
+                                                    <span className="text-[11px] text-amber-700 font-medium truncate">
+                                                        Analis: {analystName(project) || 'Belum ditugaskan'}
+                                                    </span>
+                                                </div>
+                                            )}
+                                            {activeTab === 'verification' && (
+                                                <div className="flex items-center gap-1.5 mt-2.5 bg-emerald-50 border border-emerald-200 rounded-lg px-2.5 py-1.5">
+                                                    <CheckCircle2 size={13} className="text-emerald-600 shrink-0" />
+                                                    <span className="text-[11px] text-emerald-700 font-medium truncate">
+                                                        Hasil dari: {analystName(project) || 'Analis'}
+                                                    </span>
+                                                </div>
+                                            )}
+
+                                            <div className="flex justify-between items-center pt-2.5 mt-2.5 border-t border-gray-100">
+                                                <span className="text-[10px] font-bold text-[#00529C] bg-blue-50 px-2 py-0.5 rounded">{project.reqId || project.req_id || project.id}</span>
+                                                <span className="text-[10px] text-gray-400">{project.status}</span>
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
                     </div>
                 </div>
 
@@ -1123,73 +1176,17 @@ export default function WorkspaceLead() {
                 </div>
             </div>
 
-            {/* ── MODAL: Detail Preview Proyek (Tombol Mata) ── */}
-                {isPreviewModalOpen && currentSelected && (
-                <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-50 flex items-center justify-center p-4">
-                    <div className="bg-white rounded-2xl max-w-xl w-full max-h-[85vh] overflow-y-auto p-6 shadow-2xl animate-scale-up border border-gray-100">
-                        <div className="flex justify-between items-start mb-4 border-b border-gray-100 pb-3">
-                            <div>
-                                <div className="flex items-center gap-2 mb-1">
-                                    <span className="text-xs font-bold text-[#00529C] bg-blue-50 px-2 py-0.5 rounded border border-blue-100">
-                                        {currentSelected.reqId || currentSelected.req_id || currentSelected.id}
-                                    </span>
-                                    <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold border ${getPriorityColor(currentSelected.priority)}`}>
-                                        {currentSelected.priority === 'High' ? '🔴 High Priority' : currentSelected.priority === 'Medium' ? '🟡 Medium' : '🟢 Low'}
-                                    </span>
-                                </div>
-                                <h3 className="text-lg font-bold text-gray-800">{currentSelected.title || currentSelected.name}</h3>
-                            </div>
-                            <button onClick={() => setIsPreviewModalOpen(false)} className="text-gray-400 hover:text-gray-600 p-1 rounded-lg">
-                                <X size={18} />
-                            </button>
-                        </div>
-                        
-                        <div className="space-y-4 text-sm max-h-[70vh] overflow-y-auto pr-1">
-                            <div>
-                                <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-1">Deskripsi Proyek</p>
-                                <p className="text-gray-700 bg-gray-50 p-3 rounded-xl border border-gray-100 text-xs sm:text-sm">
-                                    {currentSelected.description || 'Pengajuan proyek SDLC baru Bank Nagari.'}
-                                </p>
-                            </div>
-
-                            <div className="grid grid-cols-2 gap-3 text-xs">
-                                <div className="bg-gray-50 p-3 rounded-xl border border-gray-100">
-                                    <p className="font-bold text-gray-400 uppercase">Divisi Inisiator</p>
-                                    <p className="font-semibold text-gray-800 mt-0.5">{currentSelected.division}</p>
-                                </div>
-                                <div className="bg-gray-50 p-3 rounded-xl border border-gray-100">
-                                    <p className="font-bold text-gray-400 uppercase">Target Selesai</p>
-                                    <p className="font-semibold text-gray-800 mt-0.5">{currentSelected.targetDate}</p>
-                                </div>
-                                <div className="bg-gray-50 p-3 rounded-xl border border-gray-100 col-span-2">
-                                    <p className="font-bold text-gray-400 uppercase">Pemohon</p>
-                                    <p className="font-semibold text-gray-800 mt-0.5">
-                                        {typeof currentSelected.creator === 'object'
-                                            ? (currentSelected.creator?.name || '—')
-                                            : (currentSelected.creator || currentSelected.createdBy || '—')}
-                                    </p>
-                                </div>
-                            </div>
-
-                            {currentSelected.analystResult && (
-                                <div className="bg-emerald-50 p-3.5 rounded-xl border border-emerald-100 text-xs space-y-1">
-                                    <p className="font-bold text-emerald-800 uppercase">Hasil Analisis System Analyst</p>
-                                    <p className="font-semibold text-emerald-900">Keputusan: {currentSelected.analystResult.decision}</p>
-                                    <p className="text-emerald-700">Catatan: {currentSelected.analystResult.notes}</p>
-                                </div>
-                            )}
-                        </div>
-
-                        <div className="flex justify-end mt-5 pt-3 border-t border-gray-100">
-                            <button
-                                onClick={() => setIsPreviewModalOpen(false)}
-                                className="px-5 py-2 bg-[#003a73] text-white font-bold rounded-xl text-sm hover:bg-[#002a5a] transition-all cursor-pointer"
-                            >
-                                Tutup
-                            </button>
-                        </div>
-                    </div>
-                </div>
+            {/* ── MODAL: Detail Preview Proyek (Tombol Mata) ──
+                Dirender oleh komponen terpisah yang memakai portal ke document.body.
+                Wajib portal: kontainer halaman ini memakai `.animate-slide-up`, dan
+                animasi itu meninggalkan `transform` permanen (animation-fill-mode: both),
+                sehingga elemen `position: fixed` di dalamnya terpusat pada kotak halaman
+                yang ter-scroll, bukan pada viewport. */}
+            {isPreviewModalOpen && currentSelected && (
+                <ProjectDetailModal
+                    project={currentSelected}
+                    onClose={handleClosePreviewModal}
+                />
             )}
 
             {/* ── MODAL VIEWER DOKUMEN FSD (Lead Perencanaan) ── */}

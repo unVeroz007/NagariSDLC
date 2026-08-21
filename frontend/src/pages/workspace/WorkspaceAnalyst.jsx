@@ -51,10 +51,15 @@ export default function WorkspaceAnalyst() {
         return st === 'SIT_IN_PROGRESS' || st === 'SIT_REVISION';
     });
 
-    const [selectedAnalystFilter, setSelectedAnalystFilter] = useState(() => {
-        if (user?.role === 'super_admin' || user?.role === 'lead_group') return 'ALL';
-        return 'ALL'; // All analysts can see all team tasks
-    });
+    // Role pengawas: berwenang melihat antrean seluruh analis dan menyaringnya.
+    // Analis biasa tidak punya kendali ini karena backend sudah membatasi datanya
+    // pada proyek yang didisposisikan kepadanya (ProjectAccessService).
+    const canFilterAcrossAnalysts = user?.role === 'super_admin' || user?.role === 'lead_group';
+
+    // 'ALL' berarti "seluruh data yang dikirim backend", bukan "seluruh proyek".
+    // Untuk analis biasa, backend hanya mengirim proyek miliknya, sehingga nilai ini
+    // tidak lagi membocorkan antrean analis lain.
+    const [selectedAnalystFilter, setSelectedAnalystFilter] = useState('ALL');
 
     // Helper to safely extract analyst name from string or object
     const getAnalystName = (p) => {
@@ -68,13 +73,28 @@ export default function WorkspaceAnalyst() {
         return name;
     };
 
+    // Antrean dasar: proyek fase review, belum disaring per analis.
+    // Dipisah dari reviewQueue supaya daftar pilihan analis tidak menyusut setiap kali
+    // satu analis dipilih — kalau diturunkan dari hasil penyaringan, opsi lain hilang
+    // dan filter tidak bisa dikembalikan lewat dropdown.
+    const reviewQueueBase = useMemo(() => projects.filter(p =>
+        p.status === 'IN_REVIEW' ||
+        p.status === 'PLANNING_ANALYSIS' ||
+        p.status === 'ANALYSIS_IN_PROGRESS'
+    ), [projects]);
+
+    // Nama analis untuk dropdown filter, diambil dari data nyata — bukan daftar tetap —
+    // agar analis baru langsung muncul dan analis nonaktif tidak tertinggal di UI.
+    const analystOptions = useMemo(() => {
+        const names = reviewQueueBase
+            .map(getAnalystName)
+            .filter(Boolean);
+        return [...new Set(names)].sort((a, b) => a.localeCompare(b, 'id'));
+    }, [reviewQueueBase]);
+
     // Filter antrean proyek yang HANYA SUDAH ditugaskan oleh Lead Perencanaan (Status IN_REVIEW)
     const reviewQueue = useMemo(() => {
-        let list = projects.filter(p =>
-            p.status === 'IN_REVIEW' ||
-            p.status === 'PLANNING_ANALYSIS' ||
-            p.status === 'ANALYSIS_IN_PROGRESS'
-        );
+        let list = reviewQueueBase;
 
         if (selectedAnalystFilter === 'MY_PROJECTS') {
             list = list.filter(p => {
@@ -91,7 +111,7 @@ export default function WorkspaceAnalyst() {
         }
 
         return list;
-    }, [projects, selectedAnalystFilter, user]);
+    }, [reviewQueueBase, selectedAnalystFilter, user]);
 
 
     const [selectedProjectState, setSelectedProject] = useState(null);
@@ -108,6 +128,21 @@ export default function WorkspaceAnalyst() {
     };
 
     const selectedProject = selectedProjectState || reviewQueue[0] || null;
+
+    // Hasil filter dipakai dua kali (render kartu + teks empty state), jadi dihitung sekali.
+    const visibleQueue = applyProjectSearch(reviewQueue);
+
+    // Teks empty state antrean. Kata kunci pencarian diprioritaskan supaya hasil nol
+    // tidak terbaca sebagai "antrean memang kosong".
+    const queueEmptyCopy = projectSearch.trim()
+        ? {
+            title: 'Proyek tidak ditemukan',
+            description: `Tidak ada proyek pada antrean ini yang cocok dengan "${projectSearch.trim()}".`,
+        }
+        : {
+            title: 'Antrean bersih',
+            description: 'Tidak ada tugas review yang menunggu di antrean Anda saat ini.',
+        };
 
     const [decision, setDecision] = useState('');
     const [projectType, setProjectType] = useState('NON_RBB');
@@ -441,7 +476,7 @@ export default function WorkspaceAnalyst() {
 
                 <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
                     {/* Hanya super_admin & lead_group yang bisa filter antar analyst */}
-                    {(user?.role === 'super_admin' || user?.role === 'lead_group') && (
+                    {canFilterAcrossAnalysts && (
                         <>
                             <button
                                 onClick={() => setSelectedAnalystFilter('ALL')}
@@ -460,98 +495,133 @@ export default function WorkspaceAnalyst() {
                                 className="px-3 py-1.5 rounded-xl text-xs font-semibold border border-gray-200 bg-white text-gray-700 outline-none focus:border-[#00529C]"
                             >
                                 <option value="">-- Filter Per System Analyst --</option>
-                                <option value="Citra Kirana">Citra Kirana</option>
-                                <option value="Mustafa Fathur Rahman">Mustafa Fathur Rahman</option>
-                                <option value="Fajar Ramadhan">Fajar Ramadhan</option>
-                                <option value="Ahmad Fauzi">Ahmad Fauzi</option>
+                                {analystOptions.map(name => (
+                                    <option key={name} value={name}>{name}</option>
+                                ))}
                             </select>
                         </>
                     )}
 
-                    {/* Analyst biasa hanya lihat proyek tugas sendiri */}
-                    <span className="px-3.5 py-1.5 rounded-xl text-xs font-bold bg-[#00529C] text-white shadow-xs">
-                        👤 Proyek Tugas Saya
-                    </span>
+                    {/* Analis biasa: penanda bahwa antrean yang tampil memang hanya miliknya.
+                        Tidak ditampilkan untuk role pengawas karena antrean mereka lintas analis. */}
+                    {! canFilterAcrossAnalysts && (
+                        <span className="px-3.5 py-1.5 rounded-xl text-xs font-bold bg-[#00529C] text-white shadow-xs">
+                            👤 Proyek Tugas Saya
+                        </span>
+                    )}
                 </div>
             </div>
 
-            {/* Split Layout - Equalized Height */}
-            <div className="flex flex-col lg:flex-row gap-6 items-stretch min-h-[650px]">
-                {/* LEFT PANEL: Inbox */}
-                <div className="w-full lg:w-1/3 flex flex-col bg-white border border-gray-200 rounded-2xl shadow-sm overflow-hidden shrink-0 min-h-[600px] flex-1">
-                    <div className="p-4 border-b border-gray-100 flex justify-between items-center shrink-0 bg-slate-50/60">
-                        <div>
-                            <h2 className="text-base font-bold text-gray-800">Tugas Review</h2>
-                            <p className="text-xs text-gray-500 mt-0.5">{reviewQueue.length} proyek dalam antrean</p>
-                        </div>
-                    </div>
-                    <div className="p-3 border-b border-gray-100 shrink-0">
-                        <div className="relative">
-                            <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-                            <input
-                                type="text"
-                                value={projectSearch}
-                                onChange={(e) => setProjectSearch(e.target.value)}
-                                placeholder="Cari proyek..."
-                                className="w-full pl-9 pr-3 py-2 rounded-lg border border-gray-200 bg-gray-50 text-xs focus:ring-2 focus:ring-[#00529C]/20 focus:border-[#00529C] outline-none transition-all"
-                            />
-                        </div>
-                    </div>
-                    <div className="flex-1 overflow-y-auto p-3 space-y-2.5 bg-gray-50/40 min-h-[500px]">
-                        {applyProjectSearch(reviewQueue).map((project) => (
-                            <div
-                                key={project.id}
-                                onClick={() => {
-                                    setSelectedProject(project);
-                                    setEstimationDays('');
-                                    setDecision('');
-                                    setNotes('');
-                                    setUploadedFiles([]);
-                                }}
-                                className={`p-4 rounded-xl cursor-pointer transition-all relative overflow-hidden group ${
-                                    selectedProject?.id === project.id
-                                        ? 'bg-white border-2 border-[#00529C] shadow-md'
-                                        : 'bg-white border border-gray-200 hover:border-[#00529C]/40 hover:shadow-md'
-                                }`}
-                            >
-                                {selectedProject?.id === project.id && (
-                                    <div className="absolute left-0 top-0 w-1 h-full bg-[#00529C] rounded-l-xl" />
-                                )}
-                                <div className="flex justify-between items-start mb-2.5">
-                                    <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold border ${getStatusBadge(project.status)}`}>
-                                        {project.status}
-                                    </span>
-                                    <span className="text-[10px] flex items-center gap-1 font-bold text-amber-700">
-                                        <Clock size={11} className="text-amber-600" />
-                                        {(() => {
-                                            if (project.deadline || project.current_stage_deadline) {
-                                                return `Deadline: ${formatDate(project.deadline || project.current_stage_deadline)}`;
-                                            }
-                                            // Fallback: 14 hari sejak di-submit jika lead tidak mengisi deadline eksplisit
-                                            const baseDate = new Date(project.assignedAnalystAt || project.submittedAt || Date.now());
-                                            const autoDeadline = new Date(baseDate.setDate(baseDate.getDate() + 14)).toISOString();
-                                            return `Deadline: ${formatDate(autoDeadline)}`;
-                                        })()}
-                                    </span>
-                                </div>
-                                <div className="mb-2"><div className="flex items-center gap-1.5 flex-wrap"><RBBBadge type={project.type} deadline={project.rbbDeadline} /><ProjectTypeBadge type={project.project_type} /></div></div>
-                                <h4 className="font-semibold text-gray-800 text-sm mb-1 group-hover:text-[#00529C] transition-colors">{project.name}</h4>
-                                <p className="text-xs text-gray-500 mb-2.5">Peminta: {project.division}</p>
-                                {(project.leadNote || project.leadNotes || project.notes || project.dispositionNotes || project.assignmentNote || project.latest_note) && (
-                                    <div className="bg-amber-50/90 p-2.5 rounded-lg border border-amber-200 text-xs">
-                                        <p className="text-[11px] italic text-amber-900 flex items-start gap-1.5 font-medium leading-relaxed">
-                                            <MessageSquare size={13} className="text-amber-600 shrink-0 mt-0.5" />
-                                            "{project.leadNote || project.leadNotes || project.notes || project.dispositionNotes || project.assignmentNote || project.latest_note}"
-                                        </p>
-                                    </div>
-                                )}
+            {/* Split Layout
+                Grid, bukan flex-row: lebar kolom diatur track (1fr + 2fr) sehingga gap
+                dipotong otomatis dan tidak perlu aritmetika w-1/3 + w-2/3 yang saling
+                menarik ketika salah satu panel memanjang. */}
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                {/* LEFT PANEL: Inbox
+                    Wrapper luar hanya berperan sebagai kotak ukur. Pada layar lg panel di
+                    dalamnya dipasang absolute + inset-0, sehingga tingginya tidak lagi ikut
+                    menentukan tinggi baris grid: tinggi baris murni ditentukan panel kanan
+                    (form review), lalu panel antrean menyalin tinggi itu. Hasilnya kedua
+                    kolom selalu rata atas-bawah — berhenti tepat di bawah tombol Simpan
+                    Draft / Kirim & Lanjutkan — dan ketika daftar proyek lebih panjang yang
+                    men-scroll adalah area daftarnya, bukan panel atau lamannya.
+                    Di bawah lg layout menumpuk satu kolom, jadi panel kembali mengalir
+                    normal dengan batas max-h-[70vh] agar daftar tetap punya scroll sendiri. */}
+                <div className="lg:col-span-1 lg:relative">
+                    <div className="flex flex-col overflow-hidden bg-white border border-gray-200 rounded-2xl shadow-sm max-h-[70vh] lg:max-h-none lg:absolute lg:inset-0">
+                        <div className="p-4 border-b border-gray-100 flex justify-between items-center shrink-0 bg-slate-50/60">
+                            <div>
+                                <h2 className="text-base font-bold text-gray-800">Tugas Review</h2>
+                                <p className="text-xs text-gray-500 mt-0.5">{reviewQueue.length} proyek dalam antrean</p>
                             </div>
-                        ))}
+                        </div>
+                        <div className="p-3 border-b border-gray-100 shrink-0">
+                            <div className="relative">
+                                <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                                <input
+                                    type="text"
+                                    value={projectSearch}
+                                    onChange={(e) => setProjectSearch(e.target.value)}
+                                    placeholder="Cari proyek..."
+                                    className="w-full pl-9 pr-3 py-2 rounded-lg border border-gray-200 bg-gray-50 text-xs focus:ring-2 focus:ring-[#00529C]/20 focus:border-[#00529C] outline-none transition-all"
+                                />
+                            </div>
+                        </div>
+                        {/* Satu-satunya area yang men-scroll. min-h-0 wajib agar flex item boleh
+                            menyusut di bawah tinggi kontennya, syarat overflow-y-auto bekerja. */}
+                        <div className="flex-1 min-h-0 overflow-y-auto p-3 bg-gray-50/40">
+                            {isLoading && visibleQueue.length === 0 ? (
+                                <div className="h-full flex flex-col items-center justify-center gap-2 py-10">
+                                    <LoadingSpinner size="sm" />
+                                    <p className="text-xs font-medium text-gray-500">Memuat antrean proyek...</p>
+                                </div>
+                            ) : visibleQueue.length === 0 ? (
+                                <div className="h-full flex items-center justify-center">
+                                    <EmptyState
+                                        icon={projectSearch.trim() ? Search : undefined}
+                                        title={queueEmptyCopy.title}
+                                        description={queueEmptyCopy.description}
+                                    />
+                                </div>
+                            ) : (
+                                <div className="space-y-2.5">
+                                    {visibleQueue.map((project) => (
+                                        <div
+                                            key={project.id}
+                                            onClick={() => {
+                                                setSelectedProject(project);
+                                                setEstimationDays('');
+                                                setDecision('');
+                                                setNotes('');
+                                                setUploadedFiles([]);
+                                            }}
+                                            className={`p-4 rounded-xl cursor-pointer transition-all relative overflow-hidden group ${
+                                                selectedProject?.id === project.id
+                                                    ? 'bg-white border-2 border-[#00529C] shadow-md'
+                                                    : 'bg-white border border-gray-200 hover:border-[#00529C]/40 hover:shadow-md'
+                                            }`}
+                                        >
+                                            {selectedProject?.id === project.id && (
+                                                <div className="absolute left-0 top-0 w-1 h-full bg-[#00529C] rounded-l-xl" />
+                                            )}
+                                            <div className="flex justify-between items-start mb-2.5">
+                                                <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold border ${getStatusBadge(project.status)}`}>
+                                                    {project.status}
+                                                </span>
+                                                <span className="text-[10px] flex items-center gap-1 font-bold text-amber-700">
+                                                    <Clock size={11} className="text-amber-600" />
+                                                    {(() => {
+                                                        if (project.deadline || project.current_stage_deadline) {
+                                                            return `Deadline: ${formatDate(project.deadline || project.current_stage_deadline)}`;
+                                                        }
+                                                        // Fallback: 14 hari sejak di-submit jika lead tidak mengisi deadline eksplisit
+                                                        const baseDate = new Date(project.assignedAnalystAt || project.submittedAt || Date.now());
+                                                        const autoDeadline = new Date(baseDate.setDate(baseDate.getDate() + 14)).toISOString();
+                                                        return `Deadline: ${formatDate(autoDeadline)}`;
+                                                    })()}
+                                                </span>
+                                            </div>
+                                            <div className="mb-2"><div className="flex items-center gap-1.5 flex-wrap"><RBBBadge type={project.type} deadline={project.rbbDeadline} /><ProjectTypeBadge type={project.project_type} /></div></div>
+                                            <h4 className="font-semibold text-gray-800 text-sm mb-1 group-hover:text-[#00529C] transition-colors">{project.name}</h4>
+                                            <p className="text-xs text-gray-500 mb-2.5">Peminta: {project.division}</p>
+                                            {(project.leadNote || project.leadNotes || project.notes || project.dispositionNotes || project.assignmentNote || project.latest_note) && (
+                                                <div className="bg-amber-50/90 p-2.5 rounded-lg border border-amber-200 text-xs">
+                                                    <p className="text-[11px] italic text-amber-900 flex items-start gap-1.5 font-medium leading-relaxed">
+                                                        <MessageSquare size={13} className="text-amber-600 shrink-0 mt-0.5" />
+                                                        "{project.leadNote || project.leadNotes || project.notes || project.dispositionNotes || project.assignmentNote || project.latest_note}"
+                                                    </p>
+                                                </div>
+                                            )}
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
                     </div>
                 </div>
 
-                {/* RIGHT PANEL: Review Form */}
-                <div className="w-full lg:w-2/3 bg-white border border-gray-200 rounded-xl shadow-sm flex flex-col">
+                {/* RIGHT PANEL: Review Form — penentu tinggi baris grid */}
+                <div className="lg:col-span-2 bg-white border border-gray-200 rounded-xl shadow-sm flex flex-col">
                     {!selectedProject ? (
                         <div className="flex-1 flex flex-col items-center justify-center p-8 text-center animate-scale-in min-h-[400px]">
                             <div className="w-24 h-24 rounded-3xl bg-emerald-100 text-emerald-600 flex items-center justify-center mb-6 shadow-sm">

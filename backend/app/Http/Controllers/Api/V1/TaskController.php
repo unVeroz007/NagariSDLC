@@ -10,6 +10,7 @@ use App\Http\Resources\ProjectTaskResource;
 use App\Models\ActivityLog;
 use App\Models\Project;
 use App\Models\ProjectTask;
+use App\Services\ProjectAccessService;
 use App\Traits\LogsActivity;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -17,6 +18,8 @@ use Illuminate\Http\Request;
 class TaskController extends Controller
 {
     use LogsActivity;
+
+    public function __construct(protected ProjectAccessService $accessService) {}
 
     private function logTaskActivity(string $action, string $label, string $description, Project $project, ?ProjectTask $task, array $metadata = []): void
     {
@@ -36,6 +39,19 @@ class TaskController extends Controller
     {
         $project = Project::findOrFail($projectId);
 
+        $user = $request->user();
+        $user->loadMissing('role');
+
+        // Daftar task memuat rincian kerja proyek, jadi gerbangnya harus sama dengan
+        // gerbang baca proyeknya. Tanpa ini, membaca task proyek milik orang lain cukup
+        // dengan menebak ID proyek pada URL.
+        if (! $this->accessService->canView($user, $project)) {
+            return response()->json([
+                'status'  => 'error',
+                'message' => 'Anda tidak memiliki akses ke proyek ini.',
+            ], 403);
+        }
+
         $tasks = $project->tasks()
             ->with(['assignee.role'])
             ->orderBy('created_at', 'desc')
@@ -50,6 +66,19 @@ class TaskController extends Controller
     public function store(StoreTaskRequest $request, int $projectId): JsonResponse
     {
         $project = Project::findOrFail($projectId);
+
+        $user = $request->user();
+        $user->loadMissing('role');
+
+        // Membuat task berarti menulis ke proyek, sehingga gerbangnya mengikuti gerbang
+        // ubah proyek — sejalan dengan canModifyTask() yang sudah menjaga update dan
+        // destroy. Sebelumnya endpoint ini tidak memeriksa apa pun.
+        if (! $this->accessService->canUpdate($user, $project)) {
+            return response()->json([
+                'status'  => 'error',
+                'message' => 'Anda tidak memiliki wewenang untuk membuat task pada proyek ini.',
+            ], 403);
+        }
 
         $assigneeId = $request->assignee_id;
         if ($assigneeId && ! $this->isProjectMember($project, (int) $assigneeId)) {

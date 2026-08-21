@@ -8,6 +8,13 @@ import ProjectTypeBadge from '../../components/ProjectTypeBadge';
 import LoadingSpinner from '../../components/LoadingSpinner';
 import DocumentViewerModal from '../../components/DocumentViewerModal';
 import toast from 'react-hot-toast';
+import {
+    PROJECT_STATUS,
+    TRACK_STATUS,
+    TRACK_STATUS_LABEL,
+    getQaTrackStatus,
+    isTrackPassed,
+} from '../../constants/projectStatus';
 
 import {
     Shield,
@@ -82,8 +89,8 @@ export default function WorkspaceQA() {
         return (qaTeamMembers || []).map(a => {
             const activeCount = (projects || []).filter(p => {
                 if (terminalStatuses.has(p.status)) return false;
-                const qaSt = String(p.qaStatus || p.qa_status || '').toUpperCase();
-                if (qaSt === 'PASSED' || qaSt === 'REVIEW') return false;
+                const qaSt = getQaTrackStatus(p);
+                if (qaSt === TRACK_STATUS.PASSED || qaSt === TRACK_STATUS.REVIEW) return false;
                 const assigneeName = String(p.qaAssignee || p.qa_assignee || '').toLowerCase();
                 return assigneeName && a.name && assigneeName === a.name.toLowerCase();
             }).length;
@@ -107,9 +114,12 @@ export default function WorkspaceQA() {
     // Tab 1 (Disposisi): proyek dari PM yang sudah diajukan ke QA Lead untuk ditunjuk testernya
     const qaProjects = useMemo(() => {
         let list = (projects || []).filter(p => {
-            const qaSt = String(p.qaStatus || p.qa_status || '').toUpperCase();
+            const qaSt = getQaTrackStatus(p);
             const st = String(p.status || '').toUpperCase();
-            return (qaSt === 'SUBMITTED' || st === 'READY_FOR_QA') && qaSt !== 'IN_PROGRESS' && qaSt !== 'PASSED';
+            return (qaSt === TRACK_STATUS.SUBMITTED || st === PROJECT_STATUS.READY_FOR_QA)
+                && qaSt !== TRACK_STATUS.IN_PROGRESS
+                && qaSt !== TRACK_STATUS.REVIEW
+                && !isTrackPassed(qaSt);
         });
         const isPrivileged = user?.role && ['super_admin', 'lead_group', 'head_of_it', 'development_lead'].includes(user.role);
         if (!isPrivileged && user?.name) {
@@ -118,12 +128,9 @@ export default function WorkspaceQA() {
         return list;
     }, [projects, user]);
 
-    // Tab 2 (Review Lead): proyek yang laporan Analis-nya sudah masuk (qaStatus === 'REVIEW')
+    // Tab 2 (Review Lead): proyek yang laporan Analis-nya sudah masuk (qa_status === 'REVIEW')
     const reviewLeadProjects = useMemo(() => {
-        let list = (projects || []).filter(p => {
-            const qaSt = String(p.qaStatus || p.qa_status || '').toUpperCase();
-            return qaSt === 'REVIEW';
-        });
+        let list = (projects || []).filter(p => getQaTrackStatus(p) === TRACK_STATUS.REVIEW);
         const isPrivileged = user?.role && ['super_admin', 'lead_group', 'head_of_it', 'development_lead'].includes(user.role);
         if (!isPrivileged && user?.name) {
             list = list.filter(p => String(p.qaAssignee || '').toLowerCase().includes(user.name.toLowerCase()));
@@ -171,12 +178,14 @@ export default function WorkspaceQA() {
         }
         setIsSubmitting(true);
         try {
+            // Disposisi QA Lead: jalur QA masuk pengerjaan dan status utama naik ke
+            // QA_IN_PROGRESS. QA Lead-lah pemilik transisi ini, bukan PM.
+            // Nama tester dititipkan ke catatan transisi karena belum ada kolom
+            // penugasan tester pada tabel projects.
             await updateProject(activeProject.id, {
-                qaStatus: 'IN_PROGRESS',
-                qaAssignee: assignee,
-                qaLeadNotes: notes,
-                qa_lead_notes: notes,
-                status: activeProject.status === 'READY_FOR_QA' ? 'QA_IN_PROGRESS' : activeProject.status
+                qa_status: TRACK_STATUS.IN_PROGRESS,
+                status: PROJECT_STATUS.QA_IN_PROGRESS,
+                notes: [`Disposisi Pengujian QA kepada ${assignee}.`, notes].filter(Boolean).join(' '),
             });
             toast.success(`Proyek ${activeProject.name} berhasil didisposisikan ke QA Tester (${assignee})!`);
             addNotification('Disposisi QA', `Proyek ${activeProject.name} telah didisposisikan ke ${assignee}.`, 'info');
@@ -193,24 +202,24 @@ export default function WorkspaceQA() {
         if (!activeProject) return;
         setIsSubmitting(true);
         try {
-            const isCyberPassed = String(activeProject.cyberStatus || '').toUpperCase() === 'PASSED';
             const testerIsPass = activeProject.testerResult?.isPass !== false;
-            const newQaStatus = testerIsPass ? 'PASSED' : 'FAILED';
-            const newStatus = !testerIsPass
-                ? 'RETURN_TO_DEV'
-                : isCyberPassed ? 'TESTING_PASSED' : 'QA_PASSED';
+
+            // Kelulusan jalur QA ditetapkan backend dari transisi QA_PASSED, jadi
+            // qa_status tidak dikirim saat lulus. Saat tidak lulus, penetapan FAILED
+            // wajib menyertai RETURN_TO_DEV — backend menolak salah satunya saja.
             await updateProject(activeProject.id, {
-                qaStatus: newQaStatus,
-                qa_status: newQaStatus,
-                qaPassedAt: new Date().toISOString(),
-                qaLeadApprovalNote: leadApprovalNote,
-                qa_lead_approval_note: leadApprovalNote,
-                status: newStatus
+                status: testerIsPass ? PROJECT_STATUS.QA_PASSED : PROJECT_STATUS.RETURN_TO_DEV,
+                ...(testerIsPass ? {} : { qa_status: TRACK_STATUS.FAILED }),
+                notes: [
+                    `Sign-off Pengujian QA oleh ${user?.name || 'QA Lead'}: ${testerIsPass ? 'LULUS' : 'TIDAK LULUS'}.`,
+                    leadApprovalNote,
+                ].filter(Boolean).join(' '),
             });
-            toast.success(`Sign-off Lead QA untuk proyek "${activeProject.name}" berhasil! Status: ${newQaStatus}.`);
+            const resultLabel = testerIsPass ? TRACK_STATUS_LABEL.PASSED : TRACK_STATUS_LABEL.FAILED;
+            toast.success(`Sign-off Lead QA untuk proyek "${activeProject.name}" berhasil! Status: ${resultLabel}.`);
             addNotification(
                 'Sign-off Lead QA Disetujui',
-                `Proyek ${activeProject.name} mendapat sign-off Lead QA (${newQaStatus}). Hasil dikembalikan ke PM.`,
+                `Proyek ${activeProject.name} mendapat sign-off Lead QA (${resultLabel}). Hasil dikembalikan ke PM.`,
                 testerIsPass ? 'success' : 'warning',
                 '/pm/release-request'
             );

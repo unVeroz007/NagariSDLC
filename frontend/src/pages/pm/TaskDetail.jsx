@@ -100,8 +100,12 @@ export default function TaskDetail() {
             };
         }
 
-        // 2. Fallback default project
-        return (projects && projects[0]) || null;
+        // 2. Tidak ditemukan berarti tidak ditemukan.
+        //    Sebelumnya di sini ada fallback ke projects[0], sehingga membuka URL task
+        //    proyek yang tidak ada — atau yang tidak boleh diakses pengguna — malah
+        //    menampilkan data proyek lain, dan aksi task di halaman ini akan tertulis ke
+        //    proyek yang salah. Pemanggil sudah punya penanganan "Proyek tidak ditemukan".
+        return null;
     }, [projectId, projects]);
 
     // ── Data SIT/UAT: ambil selalu segar dari API saat project berubah,
