@@ -397,6 +397,31 @@ Pemisahan langkah 3 dan 4 disengaja: pelaksana melaporkan temuan (boleh
 `conditional_pass`), Lead yang memutuskan lulus atau kembali ke development, dan
 keputusan Lead selalu biner (`pass` / `fail`).
 
+### Layar pelaksanaan tugas (My Tasks QA / Siber)
+
+Langkah 3 dikerjakan pelaksana pada dua layar khusus — `MyTasksQA.jsx` (`/my-tasks/qa`)
+dan `MyTasksCyber.jsx` (`/my-tasks/cyber`) — yang menampilkan tugas jalur berstatus
+`IN_PROGRESS`. Cakupan daftarnya mengikuti model isolasi yang sama dengan backend:
+
+- **Pelaksana biasa** hanya melihat proyek yang `qa_assignee_id` / `cyber_assignee_id`-nya
+  menunjuk dirinya — disposisi miliknya sendiri.
+- **Peran pengawas jalur** melihat seluruh antrean `IN_PROGRESS`. Untuk QA yaitu
+  `qa_lead`, `lead_group`, dan `super_admin`; untuk Siber yaitu `cyber_lead` dan
+  `super_admin`. `lead_group` sengaja tidak termasuk pada jalur Siber, mengikuti matriks
+  wewenang `TestingTrackService::assertActorMaySubmitReport()`.
+
+Untuk kenyamanan pada antrean yang panjang, kedua layar menyediakan dua penyaring daftar,
+meniru pola papan Kanban Fase 2 (`pm/Kanban.jsx`):
+
+- **Kotak pencarian** (semua peran): mencocokkan ID kebutuhan, nama proyek, atau divisi.
+- **Filter per pelaksana** (hanya peran pengawas): tombol "Semua" beserta dropdown
+  pelaksana yang isinya diturunkan dari tugas yang sedang berjalan dan berkunci pada ID
+  penerima disposisi — bukan nama, yang bisa sama antar pegawai.
+
+Kedua penyaring hanya **mempersempit** daftar yang sudah menjadi hak pengguna; tidak satu
+pun melebarkan visibilitas. Penyaringannya sepenuhnya di sisi klien dan tidak mengubah
+kontrak API mana pun — isolasi data tetap ditegakkan `ProjectAccessService` di backend.
+
 ### Gerbang masuk fase pengujian
 
 Pengujian QA dan Keamanan Siber adalah fase **sesudah** pengembangan. Proyek hanya

@@ -251,6 +251,18 @@ Stack aktual:
   laporan Siber kembali mencatat cakupan pengujian yang benar-benar dijalankan. Sebelumnya
   jalur Siber hanya kehilangan daftar tetapnya tanpa pengganti dan tidak pernah mengirim
   field itu sama sekali.
+- **Layar My Tasks QA/Siber punya pencarian dan filter per pelaksana (26 Agustus 2026).**
+  `MyTasksQA.jsx` (`/my-tasks/qa`) dan `MyTasksCyber.jsx` (`/my-tasks/cyber`) kini
+  memiliki kotak pencarian (cocokkan ID kebutuhan / nama proyek / divisi, tersedia untuk
+  semua peran) dan — khusus peran pengawas jalur — tombol "Semua" beserta dropdown per
+  pelaksana, meniru pola papan Kanban Fase 2 (`pm/Kanban.jsx`). Peran pengawasnya berbeda
+  antar jalur: QA memakai `QA_PRIVILEGED_ROLES = ['qa_lead','lead_group','super_admin']`,
+  Siber memakai `CYBER_PRIVILEGED_ROLES = ['cyber_lead','super_admin']` — `lead_group`
+  sengaja dikecualikan pada Siber, mengikuti matriks `TestingTrackService`. Dropdown
+  berkunci pada ID penerima disposisi (`qa_assignee_id` / `cyber_assignee_id`), bukan
+  nama. Kedua penyaring murni di sisi klien dan hanya mempersempit daftar yang sudah
+  discope peran; tidak ada perubahan kontrak API, skema, maupun aturan visibilitas
+  backend. Alur lengkapnya di `docs/WORKFLOW.md` §5, subseksi "Layar pelaksanaan tugas".
 - Kolom jalur pengujian hanya boleh ditulis oleh empat endpoint jalur
   (`/qa-requests/*`, `/cyber-requests/*`) dan oleh
   `ProjectWorkflowService::syncTestingTrackStatuses()`. `PATCH /projects/{id}`
