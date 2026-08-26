@@ -4,18 +4,28 @@ namespace App\Http\Controllers\Api\V1;
 
 use App\Http\Controllers\Controller;
 use App\Models\ActivityLog;
+use App\Models\Project;
+use App\Services\ProjectAccessService;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 
 class ActivityLogController extends Controller
 {
+    public function __construct(
+        protected ProjectAccessService $access
+    ) {}
+
     /**
-     * Daftar seluruh log aktivitas dengan filter & pagination.
+     * Daftar log aktivitas dengan filter & pagination, disaring per pengguna.
      */
     public function index(Request $request): JsonResponse
     {
         $query = ActivityLog::with('user:id,name')
             ->orderBy('created_at', 'desc');
+
+        $this->applyVisibilityScope($query, $request);
 
         // Filter by user
         if ($request->filled('user_id')) {
@@ -97,10 +107,54 @@ class ActivityLogController extends Controller
     }
 
     /**
+     * Batasi log pada jejak yang boleh dibaca pengguna.
+     *
+     * Endpoint ini terbuka untuk semua pengguna terautentikasi karena dipakai juga
+     * sebagai riwayat proyek dan riwayat task di layar kerja. Tanpa penyaringan,
+     * satu permintaan tanpa filter mengembalikan seluruh jejak audit bank —
+     * termasuk `description` dan `metadata` proyek milik divisi lain.
+     *
+     * Dua jalan masuk, digabung dengan OR:
+     *
+     *   1. log tindakan pengguna itu sendiri — riwayat pribadi selalu boleh dibaca;
+     *   2. log yang menyebut proyek yang boleh ia lihat, memakai penyaring yang
+     *      sama dengan daftar proyek sehingga tidak ada dua definisi visibilitas.
+     *
+     * `metadata.project_id` pernah ditulis sebagai angka maupun string, jadi
+     * pencocokannya dilakukan atas nilai yang sudah di-unquote.
+     *
+     * @param  Builder<ActivityLog>  $query
+     */
+    private function applyVisibilityScope(Builder $query, Request $request): void
+    {
+        $user = $request->user();
+
+        if ($this->access->hasOversightAccess($user)) {
+            return;
+        }
+
+        $visibleProjectIds = $this->access
+            ->applyVisibilityScope(Project::query(), $user)
+            ->pluck('id')
+            ->map(static fn ($id): string => (string) $id)
+            ->all();
+
+        $query->where(function (Builder $scoped) use ($user, $visibleProjectIds): void {
+            $scoped->where('user_id', $user->id);
+
+            if ($visibleProjectIds !== []) {
+                $scoped->orWhereIn(
+                    DB::raw("JSON_UNQUOTE(JSON_EXTRACT(metadata, '$.project_id'))"),
+                    $visibleProjectIds
+                );
+            }
+        });
+    }
+
+    /**
      * Ringkasan statistik activity log.
      */
-    public function summary(): JsonResponse
-    {
+    public function summary(): JsonResponse    {
         $today = now()->startOfDay();
         $thisWeek = now()->startOfWeek();
 

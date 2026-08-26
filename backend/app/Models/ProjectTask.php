@@ -22,6 +22,9 @@ class ProjectTask extends Model
         'revision_note',
         'revision_requested_at',
         'revision_requested_by',
+        // Putaran pengembalian QA / Keamanan Siber yang meminta task ini. Terisi hanya
+        // pada task perbaikan; task pengembangan biasa membiarkannya kosong.
+        'return_round_id',
     ];
 
     protected function casts(): array
@@ -46,5 +49,16 @@ class ProjectTask extends Model
     public function revisionRequester(): BelongsTo
     {
         return $this->belongsTo(User::class, 'revision_requested_by');
+    }
+
+    /**
+     * Putaran pengembalian yang menjadi asal task perbaikan ini.
+     *
+     * Kosong berarti task lahir dari perencanaan pengembangan biasa, bukan dari
+     * pengembalian oleh QA maupun Keamanan Siber.
+     */
+    public function returnRound(): BelongsTo
+    {
+        return $this->belongsTo(ProjectReturnRound::class, 'return_round_id');
     }
 }

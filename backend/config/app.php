@@ -56,6 +56,22 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Frontend URL
+    |--------------------------------------------------------------------------
+    |
+    | Alamat SPA React yang mengonsumsi API ini. Dipakai untuk membangun tautan
+    | yang harus mendarat di halaman frontend, bukan di endpoint backend —
+    | misalnya tautan reset password pada ResetPasswordNotification.
+    |
+    | Dibaca lewat config (bukan env() langsung) supaya nilainya tetap tersedia
+    | setelah `php artisan config:cache` dijalankan di produksi.
+    |
+    */
+
+    'frontend_url' => env('FRONTEND_URL', 'http://localhost:5173'),
+
+    /*
+    |--------------------------------------------------------------------------
     | Application Timezone
     |--------------------------------------------------------------------------
     |

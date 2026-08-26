@@ -3,18 +3,32 @@
 namespace App\Http\Controllers\Api\V1;
 
 use App\Http\Controllers\Controller;
+use App\Http\Requests\Role\StoreRoleRequest;
+use App\Http\Requests\Role\UpdateRoleRequest;
 use App\Models\Role;
 use App\Traits\LogsActivity;
 use Illuminate\Http\JsonResponse;
-use Illuminate\Http\Request;
 
+/**
+ * Pengelolaan role oleh Super Admin.
+ *
+ * Dua field selain identitas role ikut diatur di sini:
+ *
+ *   - `group_id` — grup kerja yang menaungi role. Mengubahnya mengubah pengelompokan
+ *     dan tampilan, BUKAN hak transisi status: otorisasi fase tetap milik
+ *     `ProjectWorkflowService::$rolePermissions`, `ProjectAccessService`, dan
+ *     `TestingTrack::testerRoles()`, yang semuanya bekerja pada nama role.
+ *   - `menu_access` — daftar path menu yang boleh dilihat role. Hanya membatasi
+ *     tampilan sidebar; gerbang keamanan tetap `ProtectedRoute` di frontend serta
+ *     middleware `role:` dan service otorisasi di backend.
+ */
 class RoleController extends Controller
 {
     use LogsActivity;
 
     public function index(): JsonResponse
     {
-        $roles = Role::withCount('users')->orderBy('name')->get();
+        $roles = Role::with('group')->withCount('users')->orderBy('name')->get();
 
         return response()->json([
             'status' => 'success',
@@ -22,18 +36,16 @@ class RoleController extends Controller
         ]);
     }
 
-    public function store(Request $request): JsonResponse
+    public function store(StoreRoleRequest $request): JsonResponse
     {
-        $request->validate([
-            'name'         => ['required', 'string', 'max:100', 'unique:roles,name'],
-            'display_name' => ['required', 'string', 'max:255'],
-            'description'  => ['nullable', 'string'],
-        ]);
+        $data = $request->validated();
 
         $role = Role::create([
-            'name'         => $request->name,
-            'display_name' => $request->display_name,
-            'description'  => $request->description,
+            'name'         => $data['name'],
+            'display_name' => $data['display_name'],
+            'description'  => $data['description'] ?? null,
+            'group_id'     => $data['group_id'] ?? null,
+            'menu_access'  => $this->normalizeMenuAccess($data['menu_access'] ?? null),
         ]);
 
         $this->logActivity(
@@ -46,22 +58,21 @@ class RoleController extends Controller
         return response()->json([
             'status'  => 'success',
             'message' => 'Role berhasil dibuat.',
-            'data'    => $role->loadCount('users'),
+            'data'    => $role->load('group')->loadCount('users'),
         ], 201);
     }
 
-    public function update(Request $request, int $id): JsonResponse
+    public function update(UpdateRoleRequest $request, int $id): JsonResponse
     {
         $role = Role::findOrFail($id);
+        $data = $request->validated();
 
-        $request->validate([
-            'name'         => ['sometimes', 'string', 'max:100', "unique:roles,name,{$id}"],
-            'display_name' => ['sometimes', 'string', 'max:255'],
-            'description'  => ['nullable', 'string'],
-        ]);
+        if (array_key_exists('menu_access', $data)) {
+            $data['menu_access'] = $this->normalizeMenuAccess($data['menu_access']);
+        }
 
         $oldName = $role->display_name;
-        $role->update($request->only(['name', 'display_name', 'description']));
+        $role->update($data);
 
         $this->logActivity(
             'update_role',
@@ -73,7 +84,7 @@ class RoleController extends Controller
         return response()->json([
             'status'  => 'success',
             'message' => 'Role berhasil diperbarui.',
-            'data'    => $role->fresh()->loadCount('users'),
+            'data'    => $role->fresh()->load('group')->loadCount('users'),
         ]);
     }
 
@@ -110,5 +121,32 @@ class RoleController extends Controller
             'status'  => 'success',
             'message' => "Role \"{$name}\" berhasil dihapus.",
         ]);
+    }
+
+    /**
+     * Rapikan daftar path menu, dan simpan `null` untuk daftar kosong.
+     *
+     * Daftar kosong dan `null` sengaja diperlakukan sama, yaitu "tanpa pembatasan".
+     * Menyimpan daftar kosong sebagai pembatasan nyata berarti role tersebut kehilangan
+     * seluruh menunya hanya karena Super Admin lupa mencentang apa pun — dan bagi role
+     * yang tidak punya akses Administrasi, keadaan itu tidak bisa dibatalkan sendiri.
+     *
+     * @param  mixed  $menuAccess
+     * @return list<string>|null
+     */
+    private function normalizeMenuAccess($menuAccess): ?array
+    {
+        if (! is_array($menuAccess)) {
+            return null;
+        }
+
+        $paths = collect($menuAccess)
+            ->filter(fn ($path): bool => is_string($path) && trim($path) !== '')
+            ->map(fn (string $path): string => trim($path))
+            ->unique()
+            ->values()
+            ->all();
+
+        return $paths === [] ? null : $paths;
     }
 }

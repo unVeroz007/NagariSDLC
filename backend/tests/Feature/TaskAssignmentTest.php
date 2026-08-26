@@ -420,7 +420,13 @@ class TaskAssignmentTest extends TestCase
     public function test_sit_approval_by_developer()
     {
         $project = $this->makeProject();
-        $project->update(['status' => ProjectStatus::SIT_IN_PROGRESS->value]);
+        $project->update([
+            'status' => ProjectStatus::SIT_IN_PROGRESS->value,
+            // Formulir persetujuan SIT baru terbuka pada Tahap 3. Gerbang
+            // `POST /projects/{id}/sit-approval` sekarang memakai predikat yang sama
+            // dengan inbox `GET /me/sit-approvals`, jadi tahapnya harus disiapkan.
+            'sit_uat_data' => ['activeSitStep' => 3],
+        ]);
         $dev = $this->makeDeveloper('Dimas Anggara', 'dev1@nagari.co.id');
         $project->teamMembers()->create(['user_id' => $dev->id, 'role_in_project' => 'Backend']);
 
@@ -451,7 +457,13 @@ class TaskAssignmentTest extends TestCase
     public function test_sit_approval_rejects_non_member_developer()
     {
         $project = $this->makeProject();
-        $project->update(['status' => ProjectStatus::SIT_IN_PROGRESS->value]);
+        $project->update([
+            'status' => ProjectStatus::SIT_IN_PROGRESS->value,
+            // Formulir persetujuan SIT baru terbuka pada Tahap 3. Gerbang
+            // `POST /projects/{id}/sit-approval` sekarang memakai predikat yang sama
+            // dengan inbox `GET /me/sit-approvals`, jadi tahapnya harus disiapkan.
+            'sit_uat_data' => ['activeSitStep' => 3],
+        ]);
         $otherDev = $this->makeDeveloper('Orang Lain', 'other@nagari.co.id');
 
         $response = $this->actingAs($otherDev)->postJson("/api/v1/projects/{$project->id}/sit-approval");
@@ -475,6 +487,7 @@ class TaskAssignmentTest extends TestCase
         $project->update([
             'status' => ProjectStatus::SIT_IN_PROGRESS->value,
             'pm_id' => $pm->id,
+            'sit_uat_data' => ['activeSitStep' => 3],
         ]);
 
         $response = $this->actingAs($pm)->postJson("/api/v1/projects/{$project->id}/sit-approval", [
@@ -491,7 +504,13 @@ class TaskAssignmentTest extends TestCase
     public function test_sit_approval_requires_all_developers()
     {
         $project = $this->makeProject();
-        $project->update(['status' => ProjectStatus::SIT_IN_PROGRESS->value]);
+        $project->update([
+            'status' => ProjectStatus::SIT_IN_PROGRESS->value,
+            // Formulir persetujuan SIT baru terbuka pada Tahap 3. Gerbang
+            // `POST /projects/{id}/sit-approval` sekarang memakai predikat yang sama
+            // dengan inbox `GET /me/sit-approvals`, jadi tahapnya harus disiapkan.
+            'sit_uat_data' => ['activeSitStep' => 3],
+        ]);
         $dev1 = $this->makeDeveloper('Dev Satu', 'dev1@nagari.co.id');
         $dev2 = $this->makeDeveloper('Dev Dua', 'dev2@nagari.co.id');
         $project->teamMembers()->create(['user_id' => $dev1->id, 'role_in_project' => 'Backend']);
@@ -535,6 +554,130 @@ class TaskAssignmentTest extends TestCase
         $this->assertCount(2, $fresh->sit_uat_data['sit3_approvals']['developer']['developers']);
     }
 
+    /**
+     * Seluruh developer pada tim proyek wajib menyetujui SIT, termasuk yang tidak
+     * memegang satu pun task.
+     *
+     * Sebelumnya daftar wajib diambil dari `assignee_id` task scope SIT, sehingga
+     * developer yang berada pada tim namun tidak menerima task revisi tidak pernah
+     * dapat memberikan persetujuan — permintaannya ditolak 403 dan namanya juga tidak
+     * ikut dihitung sebagai prasyarat kelulusan SIT.
+     */
+    public function test_sit_approval_includes_team_developer_without_task()
+    {
+        $project = $this->makeProject();
+        $project->update([
+            'status' => ProjectStatus::SIT_IN_PROGRESS->value,
+            // Formulir persetujuan SIT baru terbuka pada Tahap 3. Gerbang
+            // `POST /projects/{id}/sit-approval` sekarang memakai predikat yang sama
+            // dengan inbox `GET /me/sit-approvals`, jadi tahapnya harus disiapkan.
+            'sit_uat_data' => ['activeSitStep' => 3],
+        ]);
+        $assignedDev = $this->makeDeveloper('Dev Bertugas', 'dev-assigned@nagari.co.id');
+        $idleDev = $this->makeDeveloper('Dev Tanpa Task', 'dev-idle@nagari.co.id');
+        $project->teamMembers()->create(['user_id' => $assignedDev->id, 'role_in_project' => 'Backend']);
+        $project->teamMembers()->create(['user_id' => $idleDev->id, 'role_in_project' => 'Frontend']);
+
+        // Hanya satu developer yang menerima task.
+        $this->actingAs($this->admin)->postJson("/api/v1/projects/{$project->id}/tasks", [
+            'title' => 'Task Revisi',
+            'assignee_id' => $assignedDev->id,
+            'status' => 'done',
+        ])->assertStatus(201);
+
+        $this->actingAs($idleDev)->postJson("/api/v1/projects/{$project->id}/sit-approval", [
+            'note' => 'Ikut menyetujui sebagai anggota tim.',
+        ])->assertStatus(200);
+
+        $devApproval = $project->fresh()->sit_uat_data['sit3_approvals']['developer'];
+
+        $this->assertEquals(2, $devApproval['required']);
+        $this->assertEquals(1, $devApproval['approvedCount']);
+        $this->assertEqualsCanonicalizing(
+            [$assignedDev->id, $idleDev->id],
+            $devApproval['requiredDeveloperIds']
+        );
+    }
+
+    /**
+     * Penerima task pada scope SIT tetap wajib menyetujui walau namanya sudah tidak
+     * tercatat pada tim proyek.
+     *
+     * `TaskController::store` mengharuskan assignee merupakan anggota tim, jadi kondisi
+     * ini muncul ketika susunan tim diubah setelah task dibagikan: tanggung jawab atas
+     * task yang sudah dipegang tidak hilang hanya karena baris keanggotaannya dihapus.
+     */
+    public function test_sit_approval_includes_task_assignee_removed_from_team()
+    {
+        $project = $this->makeProject();
+        $project->update([
+            'status' => ProjectStatus::SIT_IN_PROGRESS->value,
+            // Formulir persetujuan SIT baru terbuka pada Tahap 3. Gerbang
+            // `POST /projects/{id}/sit-approval` sekarang memakai predikat yang sama
+            // dengan inbox `GET /me/sit-approvals`, jadi tahapnya harus disiapkan.
+            'sit_uat_data' => ['activeSitStep' => 3],
+        ]);
+        $dev = $this->makeDeveloper('Dev Pemegang Task', 'dev-task-holder@nagari.co.id');
+        $project->teamMembers()->create(['user_id' => $dev->id, 'role_in_project' => 'Backend']);
+
+        $this->actingAs($this->admin)->postJson("/api/v1/projects/{$project->id}/tasks", [
+            'title' => 'Task Masih Dipegang',
+            'assignee_id' => $dev->id,
+            'status' => 'done',
+        ])->assertStatus(201);
+
+        // Keanggotaan tim dicabut, task tetap tercatat atas namanya.
+        $project->teamMembers()->where('user_id', $dev->id)->delete();
+
+        $this->actingAs($dev)->postJson("/api/v1/projects/{$project->id}/sit-approval")
+            ->assertStatus(200);
+
+        $devApproval = $project->fresh()->sit_uat_data['sit3_approvals']['developer'];
+
+        $this->assertEquals(1, $devApproval['required']);
+        $this->assertEquals(1, $devApproval['approvedCount']);
+    }
+
+    /**
+     * Persetujuan yang sudah tercatat tidak pernah dibuang saat daftar wajib berubah.
+     *
+     * Daftar `developers[]` adalah jejak audit: ia menyatakan siapa yang benar-benar
+     * pernah menyetujui. Sebelumnya daftar itu disaring ulang terhadap daftar wajib
+     * setiap kali ada persetujuan baru, sehingga satu pengalihan task cukup untuk
+     * menghapus catatan persetujuan seseorang. Kelengkapan tetap dinilai dari
+     * `approvedCount`, yang hanya menimbang penyetuju yang masih wajib.
+     */
+    public function test_sit_approval_keeps_history_of_developer_removed_from_team()
+    {
+        $project = $this->makeProject();
+        $project->update([
+            'status' => ProjectStatus::SIT_IN_PROGRESS->value,
+            // Formulir persetujuan SIT baru terbuka pada Tahap 3. Gerbang
+            // `POST /projects/{id}/sit-approval` sekarang memakai predikat yang sama
+            // dengan inbox `GET /me/sit-approvals`, jadi tahapnya harus disiapkan.
+            'sit_uat_data' => ['activeSitStep' => 3],
+        ]);
+        $leavingDev = $this->makeDeveloper('Dev Pindah', 'dev-leaving@nagari.co.id');
+        $stayingDev = $this->makeDeveloper('Dev Tetap', 'dev-staying@nagari.co.id');
+        $project->teamMembers()->create(['user_id' => $leavingDev->id, 'role_in_project' => 'Backend']);
+        $project->teamMembers()->create(['user_id' => $stayingDev->id, 'role_in_project' => 'Frontend']);
+
+        $this->actingAs($leavingDev)->postJson("/api/v1/projects/{$project->id}/sit-approval")
+            ->assertStatus(200);
+
+        // Developer pertama keluar dari tim proyek.
+        $project->teamMembers()->where('user_id', $leavingDev->id)->delete();
+
+        $this->actingAs($stayingDev)->postJson("/api/v1/projects/{$project->id}/sit-approval")
+            ->assertStatus(200);
+
+        $devApproval = $project->fresh()->sit_uat_data['sit3_approvals']['developer'];
+
+        $this->assertCount(2, $devApproval['developers']);
+        $this->assertEquals(1, $devApproval['required']);
+        $this->assertEquals(1, $devApproval['approvedCount']);
+    }
+
     public function test_uat_approval_by_business_user()
     {
         $bizRole = Role::create(['name' => UserRole::BUSINESS_USER->value, 'display_name' => 'Business User']);
@@ -569,7 +712,21 @@ class TaskAssignmentTest extends TestCase
         ]);
     }
 
-    public function test_uat_change_request_major_returns_to_development()
+    /**
+     * Change Request mayor lahir dari Eksekusi UAT dan mengembalikan proyek ke developer.
+     *
+     * Pengganti pengujian lama yang mengajukan CR lewat `POST /projects/{id}/uat-change-request`.
+     * Endpoint itu sudah pensiun: tidak ada satu pun komponen frontend yang memanggilnya, dan
+     * CR yang dihasilkannya tidak membawa `cycle` sehingga tidak pernah terlihat oleh gerbang
+     * `UAT_REVISION_DEV -> SIT_IN_PROGRESS` yang menyaring
+     * `type === 'mayor' && cycle === siklus berjalan`. Perilaku yang diuji tetap sama —
+     * CR mayor tercatat dan proyek kembali ke pengembangan — hanya pintunya yang kini pintu
+     * yang benar-benar dipakai UI.
+     *
+     * `cycle` dan `origin` ikut ditegaskan karena keduanyalah yang membuat CR ini dapat
+     * dibaca gerbang siklus; tanpa keduanya CR hanya menjadi baris riwayat yang mati.
+     */
+    public function test_uat_execution_major_records_change_request_and_returns_to_development()
     {
         $bizRole = Role::create(['name' => UserRole::BUSINESS_USER->value, 'display_name' => 'Business User']);
         $biz = User::create([
@@ -580,35 +737,132 @@ class TaskAssignmentTest extends TestCase
             'division_id' => $this->division->id,
             'is_active' => true,
         ]);
+        $dev = $this->makeDeveloper('Dev Revisi Mayor', 'dev-mayor@nagari.co.id');
 
         $project = $this->makeProject();
         $project->update([
             'status' => ProjectStatus::UAT_IN_PROGRESS->value,
             'created_by' => $biz->id,
+            // Eksekusi hasil UAT hanya dapat dikirim setelah persiapan skenario selesai.
+            'sit_uat_data' => ['activeUatStep' => 2],
+        ]);
+        $task = ProjectTask::create([
+            'project_id' => $project->id,
+            'title' => 'Alur transaksi utama',
+            'assignee_id' => $dev->id,
+            'status' => TaskStatus::DONE,
         ]);
 
-        // Pemohon mengajukan change request mayor
-        $this->actingAs($biz)->postJson("/api/v1/projects/{$project->id}/uat-change-request", [
-            'type' => 'mayor',
-            'title' => 'Perubahan alur utama',
-            'detail' => 'Perlu perubahan besar pada logika transaksi.',
+        // Pemohon mencatat temuan mayor pada eksekusi UAT Tahap 2.
+        $this->actingAs($biz)->postJson("/api/v1/projects/{$project->id}/uat-execution", [
+            'scenarios' => [[
+                'id' => 'sc-mayor-1',
+                'task_id' => $task->id,
+                'scenario' => 'Perubahan alur utama',
+                'result' => 'revision',
+                'change_type' => 'mayor',
+                'request' => 'Perlu perubahan besar pada logika transaksi.',
+            ]],
         ])->assertStatus(200);
 
         $fresh = $project->fresh();
         $crs = $fresh->sit_uat_data['uat_change_requests'];
+
         $this->assertCount(1, $crs);
         $this->assertEquals('mayor', $crs[0]['type']);
-        $this->assertEquals('pending', $crs[0]['status']);
+        $this->assertEquals('uat_execution', $crs[0]['origin']);
+        $this->assertEquals(1, $crs[0]['cycle']);
+        $this->assertEquals(
+            ProjectStatus::UAT_REVISION_DEV->value,
+            $fresh->status instanceof \BackedEnum ? $fresh->status->value : $fresh->status
+        );
+        // Task yang direvisi dibuka kembali agar developer punya pekerjaan yang jelas.
+        $this->assertEquals(TaskStatus::IN_PROGRESS->value, $task->fresh()->status->value);
+    }
 
-        // Admin menyetujui → kembali ke UAT_REVISION_DEV (kembali ke development)
+    /**
+     * Keputusan atas Change Request mayor tetap memindahkan proyek ke pengembangan.
+     *
+     * `POST /projects/{id}/uat-change-request/decision` sengaja dipertahankan walau
+     * endpoint pengajuannya dihapus: ia memutuskan CR yang sudah ada, dan transisi
+     * "CR mayor disetujui -> UAT_REVISION_DEV" adalah perilaku yang sedang dipakai.
+     * CR-nya disemai langsung ke `sit_uat_data` karena yang diuji di sini adalah paruh
+     * keputusan, bukan paruh pengajuan — dan pengajuan lewat endpoint yang sudah pensiun
+     * bukan lagi cara CR terbentuk.
+     */
+    public function test_uat_change_request_major_decision_returns_to_development()
+    {
+        $project = $this->makeProject();
+        $project->update([
+            'status' => ProjectStatus::UAT_IN_PROGRESS->value,
+            'sit_uat_data' => [
+                'activeUatStep' => 3,
+                'uat_change_requests' => [[
+                    'id' => 'cr_legacy_0001',
+                    'type' => 'mayor',
+                    'title' => 'Perubahan alur utama',
+                    'detail' => 'Perlu perubahan besar pada logika transaksi.',
+                    'status' => 'pending',
+                    'submittedBy' => $this->admin->name,
+                    'submittedById' => $this->admin->id,
+                    'at' => now()->toIso8601String(),
+                ]],
+            ],
+        ]);
+
         $this->actingAs($this->admin)->postJson("/api/v1/projects/{$project->id}/uat-change-request/decision", [
-            'cr_id' => $crs[0]['id'],
+            'cr_id' => 'cr_legacy_0001',
             'decision' => 'approved',
             'note' => 'Disetujui.',
         ])->assertStatus(200);
 
         $fresh = $project->fresh();
-        $this->assertEquals(ProjectStatus::UAT_REVISION_DEV->value, $fresh->status instanceof \BackedEnum ? $fresh->status->value : $fresh->status);
+
+        $this->assertEquals(
+            ProjectStatus::UAT_REVISION_DEV->value,
+            $fresh->status instanceof \BackedEnum ? $fresh->status->value : $fresh->status
+        );
         $this->assertEquals('approved', $fresh->sit_uat_data['uat_change_requests'][0]['status']);
+        $this->assertEquals('Disetujui.', $fresh->sit_uat_data['uat_change_requests'][0]['decisionNote']);
+    }
+
+    /**
+     * Role tanpa wewenang tidak dapat memutuskan Change Request UAT.
+     *
+     * Ditegaskan juga bahwa status CR tidak berubah: penolakan yang membiarkan sebagian
+     * data tertulis akan meninggalkan jejak audit yang menyatakan keputusan pernah
+     * diambil oleh orang yang justru ditolak.
+     */
+    public function test_developer_cannot_decide_uat_change_request()
+    {
+        $dev = $this->makeDeveloper('Dev Tanpa Wewenang', 'dev-no-cr@nagari.co.id');
+
+        $project = $this->makeProject();
+        $project->update([
+            'status' => ProjectStatus::UAT_IN_PROGRESS->value,
+            'sit_uat_data' => [
+                'activeUatStep' => 3,
+                'uat_change_requests' => [[
+                    'id' => 'cr_legacy_0002',
+                    'type' => 'mayor',
+                    'title' => 'Perubahan alur utama',
+                    'detail' => 'Perlu perubahan besar pada logika transaksi.',
+                    'status' => 'pending',
+                ]],
+            ],
+        ]);
+
+        $this->actingAs($dev)->postJson("/api/v1/projects/{$project->id}/uat-change-request/decision", [
+            'cr_id' => 'cr_legacy_0002',
+            'decision' => 'approved',
+        ])->assertStatus(403);
+
+        $fresh = $project->fresh();
+
+        $this->assertEquals('pending', $fresh->sit_uat_data['uat_change_requests'][0]['status']);
+        $this->assertEquals(
+            ProjectStatus::UAT_IN_PROGRESS->value,
+            $fresh->status instanceof \BackedEnum ? $fresh->status->value : $fresh->status
+        );
     }
 }

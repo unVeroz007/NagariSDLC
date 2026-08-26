@@ -22,6 +22,37 @@ enum UatApprovalRole: string
         };
     }
 
+    /**
+     * Metode approval yang wajib dipakai posisi ini.
+     *
+     * Pemohon proyek selalu memiliki akun aplikasi — dialah yang menginisiasi
+     * proyek — sehingga persetujuannya dikerjakan langsung di dalam aplikasi dan
+     * tidak perlu link pribadi. Pimpinan grup dan pimpinan divisi pemohon belum
+     * tentu memiliki akun, jadi keduanya tetap memakai link pribadi berverifikasi
+     * nomor HP. Seluruh pihak IT wajib memakai akun internal.
+     */
+    public function requiredMode(): UatApproverMode
+    {
+        return match ($this) {
+            self::REQUESTER_GROUP_LEAD,
+            self::REQUESTER_DIVISION_LEAD => UatApproverMode::EXTERNAL_LINK,
+            default => UatApproverMode::INTERNAL_ACCOUNT,
+        };
+    }
+
+    /**
+     * Hanya pihak IT yang boleh menolak hasil UAT.
+     *
+     * Seluruh penolakan dan permintaan revisi dari sisi pemohon sudah dicatat serta
+     * diaudit saat eksekusi UAT (Tahap 2) melalui skenario dan permintaan tambahan.
+     * Pada tahap persetujuan, pemohon beserta pimpinannya hanya memeriksa hasil lalu
+     * menyetujui, sehingga tidak ada jalur penolakan ganda atas temuan yang sama.
+     */
+    public function canReject(): bool
+    {
+        return $this->side() === 'it';
+    }
+
     public function label(): string
     {
         return match ($this) {

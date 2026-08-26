@@ -1,8 +1,16 @@
 *.log
 .DS_Store
-.env
-.env.backup
-.env.production
+# Daftar nama file env tidak pernah bisa lengkap. `.env.backup` dan
+# `.env.production` dulu ditulis satu per satu, dan sebuah backup bernama
+# `.env.bak-<tanggal>` lolos begitu saja: tidak terlacak, tetapi juga tidak
+# terabaikan, sehingga satu `git add .` sudah cukup untuk men-stage seluruh
+# secret. Karena itu polanya dibalik: apa pun yang berawalan `.env` diabaikan,
+# lalu hanya template `*.example` yang dikecualikan secara eksplisit. Pola
+# `.env*` (bukan `.env.*`) dipakai agar nama tanpa titik seperti `.env~`
+# hasil simpanan editor juga tertangkap.
+.env*
+!.env.example
+!.env.production.example
 .phpactor.json
 .phpunit.result.cache
 /.codex

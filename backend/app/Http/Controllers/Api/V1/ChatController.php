@@ -3,16 +3,23 @@
 namespace App\Http\Controllers\Api\V1;
 
 use App\Http\Controllers\Controller;
+use App\Http\Requests\Chat\StoreChatMessageRequest;
 use App\Models\ChatMessage;
 use App\Models\Project;
+use App\Models\User;
+use App\Services\ProjectAccessService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
 class ChatController extends Controller
 {
+    public function __construct(
+        protected ProjectAccessService $accessService
+    ) {}
+
     /**
      * Ambil pesan chat untuk satu proyek (terbaru ke bawah, paginated).
-     * User harus memiliki akses ke proyek (anggota tim / PM / analyst / pemohon / admin).
+     * User harus memiliki akses baca ke proyek tersebut.
      */
     public function index(Request $request, int $projectId): JsonResponse
     {
@@ -56,7 +63,7 @@ class ChatController extends Controller
     /**
      * Kirim pesan baru untuk satu proyek.
      */
-    public function store(Request $request, int $projectId): JsonResponse
+    public function store(StoreChatMessageRequest $request, int $projectId): JsonResponse
     {
         $project = Project::findOrFail($projectId);
         $user = $request->user();
@@ -68,16 +75,13 @@ class ChatController extends Controller
             ], 403);
         }
 
-        $request->validate([
-            'message' => ['required', 'string', 'max:2000'],
-            'type'    => ['nullable', 'string', 'in:text,system'],
-        ]);
-
         $message = ChatMessage::create([
             'project_id' => $projectId,
             'user_id'    => $user->id,
-            'message'    => trim($request->message),
-            'type'       => $request->type ?? 'text',
+            'message'    => trim($request->input('message')),
+            // Tipe ditetapkan server. Lihat StoreChatMessageRequest: pesan bertipe
+            // `system` tidak boleh berasal dari klien.
+            'type'       => 'text',
             'created_at' => now(),
         ]);
 
@@ -95,35 +99,24 @@ class ChatController extends Controller
         ], 201);
     }
 
-    private function canAccessProject($user, Project $project): bool
+    /**
+     * Hak baca ruang diskusi satu proyek.
+     *
+     * Diturunkan dari `ProjectAccessService::canView()` — sumber kebenaran yang sama
+     * dengan daftar proyek, `show()`, dan daftar dokumen. Sebelumnya controller ini
+     * menulis aturannya sendiri, dan aturan itu jauh lebih longgar: setiap akun jalur
+     * pengujian (QA maupun Siber) lolos tanpa syarat, sehingga seorang QA Tester dapat
+     * membaca seluruh percakapan proyek yang belum pernah masuk fase pengujian —
+     * termasuk pengajuan Fase 1 yang masih dalam kajian Kadiv. Sebaliknya developer
+     * penerima task yang belum tercatat sebagai anggota tim justru tertutup.
+     *
+     * Berdiskusi pada proyek yang tidak boleh dibuka tidak punya arti, jadi tidak ada
+     * alasan mempertahankan definisi akses kedua yang dapat menyimpang dari yang pertama.
+     */
+    private function canAccessProject(User $user, Project $project): bool
     {
-        $roleName = $user->role?->name;
+        $user->loadMissing('role');
 
-        // Admin/Head of IT/Lead Group/Dev Lead: akses penuh
-        if (in_array($roleName, ['super_admin', 'head_of_it', 'lead_group', 'development_lead'])) {
-            return true;
-        }
-
-        // Pemohon proyek
-        if ((int) $project->created_by === (int) $user->id) {
-            return true;
-        }
-
-        // PM / Analyst proyek
-        if ((int) $project->pm_id === (int) $user->id || (int) $project->analyst_id === (int) $user->id) {
-            return true;
-        }
-
-        // Anggota tim proyek
-        if ($project->teamMembers()->where('user_id', $user->id)->exists()) {
-            return true;
-        }
-
-        // QA / Cyber yang terlibat
-        if (in_array($roleName, ['qa_lead', 'qa_tester', 'cyber_lead', 'pentester'])) {
-            return true;
-        }
-
-        return false;
+        return $this->accessService->canView($user, $project);
     }
 }

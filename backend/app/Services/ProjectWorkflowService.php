@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Enums\ProjectStatus;
 use App\Enums\TaskStatus;
+use App\Enums\TestingTrack;
 use App\Enums\TrackStatus;
 use App\Enums\UserRole;
 use App\Models\DocumentVault;
@@ -16,7 +17,10 @@ use Illuminate\Support\Facades\Broadcast;
 
 class ProjectWorkflowService
 {
-    public function __construct(private readonly UatApprovalService $uatApprovalService) {}
+    public function __construct(
+        private readonly UatApprovalService $uatApprovalService,
+        private readonly ProjectReturnRoundService $returnRoundService,
+    ) {}
 
     /**
      * Matriks Transisi Status yang diperbolehkan (Maju & Mundur / Rollback).
@@ -54,9 +58,11 @@ class ProjectWorkflowService
         ProjectStatus::IN_DEVELOPMENT->value => [
             ProjectStatus::SIT_IN_PROGRESS->value,
             ProjectStatus::DEV_COMPLETED->value,
-            ProjectStatus::READY_FOR_QA->value,
-            ProjectStatus::CYBER_IN_PROGRESS->value,
-            ProjectStatus::QA_IN_PROGRESS->value,
+            // READY_FOR_QA, QA_IN_PROGRESS, dan CYBER_IN_PROGRESS sengaja tidak ada di
+            // sini. Pengujian QA dan Keamanan Siber baru boleh dimulai setelah seluruh
+            // pekerjaan pengembangan — termasuk SIT dan UAT Internal — dinyatakan
+            // selesai lewat DEV_COMPLETED. Sebelumnya proyek yang masih dikembangkan
+            // bisa melompat langsung ke antrean QA/Siber.
             ProjectStatus::DEV_ANALYSIS_DONE->value, // Mundur
             ProjectStatus::ON_HOLD->value,
         ],
@@ -118,11 +124,16 @@ class ProjectWorkflowService
         ],
         // QA_PASSED & CYBER_PASSED sengaja dibuat simetris: dua jalur pengujian
         // berjalan paralel, jadi jalur mana pun yang sign-off lebih dulu harus
-        // tetap bisa menerima sign-off jalur lain, maju ke UAT final, atau mundur.
+        // tetap bisa menerima sign-off jalur lain, mengajukan go-live, atau mundur.
+        //
+        // Matriks ini hanya mengizinkan bentuk transisinya. Syarat "kedua jalur
+        // wajib lulus" dijaga `validateTransitionPrerequisites()` pada
+        // PENDING_GOLIVE, sehingga pengajuan go-live dari satu jalur yang lulus
+        // sendirian tetap ditolak.
         ProjectStatus::QA_PASSED->value => [
             ProjectStatus::CYBER_IN_PROGRESS->value,
             ProjectStatus::CYBER_PASSED->value,
-            ProjectStatus::READY_FOR_UAT->value, // Dua jalur lulus, PM ajukan UAT final
+            ProjectStatus::PENDING_GOLIVE->value, // Dua jalur lulus, PM ajukan go-live ke Infra
             ProjectStatus::RETURN_TO_DEV->value, // Mundur (Vulnerability Defect menyusul)
             ProjectStatus::QA_IN_PROGRESS->value, // Mundur
         ],
@@ -133,27 +144,37 @@ class ProjectWorkflowService
             ProjectStatus::RETURN_TO_DEV->value, // Mundur (Vulnerability Defect)
         ],
         ProjectStatus::CYBER_PASSED->value => [
-            ProjectStatus::READY_FOR_UAT->value,
+            ProjectStatus::PENDING_GOLIVE->value, // Dua jalur lulus, PM ajukan go-live ke Infra
             ProjectStatus::QA_IN_PROGRESS->value, // Paralel QA baru mulai
             ProjectStatus::QA_PASSED->value, // Sign-off QA menyusul
             ProjectStatus::RETURN_TO_DEV->value, // Mundur (Defect QA menyusul)
             ProjectStatus::CYBER_IN_PROGRESS->value, // Mundur
         ],
-        ProjectStatus::READY_FOR_UAT->value => [
-            ProjectStatus::UAT_PASSED->value,
-            ProjectStatus::RETURN_TO_DEV->value, // Mundur
-            ProjectStatus::CYBER_PASSED->value,
-        ],
+        // READY_FOR_UAT sengaja tidak punya transisi keluar maupun masuk.
+        //
+        // Alur bisnis tidak lagi menjalankan UAT final setelah QA & Siber: begitu
+        // kedua jalur pengujian lulus, PM langsung mengajukan go-live ke Grup
+        // Infrastruktur. Case enum-nya dipertahankan supaya baris lama pada
+        // `project_status_histories` tetap dapat dibaca dan label statusnya tidak
+        // hilang dari jejak audit.
+        //
+        // UAT_PASSED masih menjadi keluaran opsional UAT internal (dari
+        // UAT_IN_PROGRESS), karena itu tetap memiliki jalur maju ke DEV_COMPLETED.
+        // Yang dihapus adalah jalurnya ke PENDING_GOLIVE: go-live wajib melewati
+        // sign-off QA dan Siber, tidak boleh dipintas dari UAT internal.
         ProjectStatus::UAT_PASSED->value => [
-            ProjectStatus::PENDING_GOLIVE->value,
-            ProjectStatus::READY_FOR_UAT->value, // Mundur
+            ProjectStatus::DEV_COMPLETED->value,
             ProjectStatus::RETURN_TO_DEV->value, // Mundur
         ],
         ProjectStatus::PENDING_GOLIVE->value => [
-            ProjectStatus::LIVE_PRODUCTION->value,
-            ProjectStatus::UAT_PASSED->value, // Mundur
-            ProjectStatus::RETURN_TO_DEV->value, // Mundur (Quality Gate Reject)
-            ProjectStatus::REJECTED->value,
+            ProjectStatus::LIVE_PRODUCTION->value, // Quality Gate disetujui Head of IT
+            ProjectStatus::QA_PASSED->value, // Mundur ke sign-off jalur QA
+            ProjectStatus::CYBER_PASSED->value, // Mundur ke sign-off jalur Siber
+            // Temuan terlambat dari QA/Siber saat proyek sudah di antrean rilis.
+            // Wewenangnya ada pada role jalur pengujian; Head of IT yang menolak
+            // pada Quality Gate memakai REJECTED, bukan jalur ini.
+            ProjectStatus::RETURN_TO_DEV->value,
+            ProjectStatus::REJECTED->value, // Quality Gate ditolak Head of IT
         ],
         ProjectStatus::REJECTED->value => [
             ProjectStatus::PENDING->value, // Re-open
@@ -167,37 +188,97 @@ class ProjectWorkflowService
 
     /**
      * Matriks Otorisasi Role per Transisi.
+     *
+     * Catatan Fase 2: Project Manager adalah Analis Pengembangan (satu orang, satu
+     * role). Kajian teknis pengembangan (DEV_ANALYSIS_DONE) karena itu menjadi
+     * wewenang `project_manager`, bukan `analyst` yang memegang analisis perencanaan
+     * di Fase 1. Nama role `dev_analyst` disertakan karena router/menu frontend masih
+     * memakai sebutan itu untuk role yang sama.
+     *
+     * Catatan Grup Perencanaan dan Quality Assurance: `analyst` dan `qa_tester` adalah
+     * kumpulan analis yang sama pada dua fase berbeda (lihat
+     * `UserRole::PLANNING_QA_ANALYST_ROLES`). Karena itu keduanya muncul berpasangan
+     * pada transisi Fase 1 (ANALYSIS_APPROVED, REJECTED) maupun Fase 3 jalur QA
+     * (QA_PASSED, RETURN_TO_DEV). Menghapus salah satunya membuat anggota grup lolos
+     * gerbang penugasan tetapi gagal saat menyimpan hasil kerjanya.
      */
     protected array $rolePermissions = [
         ProjectStatus::PENDING->value => [UserRole::BUSINESS_USER->value, UserRole::SUPER_ADMIN->value],
         ProjectStatus::IN_REVIEW->value => [UserRole::LEAD_GROUP->value, UserRole::SUPER_ADMIN->value],
-        ProjectStatus::ANALYSIS_APPROVED->value => [UserRole::LEAD_GROUP->value, UserRole::ANALYST->value, UserRole::SUPER_ADMIN->value],
-        ProjectStatus::REJECTED->value => [UserRole::LEAD_GROUP->value, UserRole::ANALYST->value, UserRole::HEAD_OF_IT->value, UserRole::SUPER_ADMIN->value],
+        ProjectStatus::ANALYSIS_APPROVED->value => [UserRole::LEAD_GROUP->value, ...UserRole::PLANNING_QA_ANALYST_ROLES, UserRole::SUPER_ADMIN->value],
+        ProjectStatus::REJECTED->value => [UserRole::LEAD_GROUP->value, ...UserRole::PLANNING_QA_ANALYST_ROLES, UserRole::HEAD_OF_IT->value, UserRole::SUPER_ADMIN->value],
         ProjectStatus::READY_FOR_DEVELOPMENT->value => [UserRole::LEAD_GROUP->value, UserRole::DEVELOPMENT_LEAD->value, UserRole::SUPER_ADMIN->value],
-        ProjectStatus::DEV_ANALYSIS->value => [UserRole::DEVELOPMENT_LEAD->value, UserRole::ANALYST->value, UserRole::SUPER_ADMIN->value],
-        ProjectStatus::DEV_ANALYSIS_DONE->value => [UserRole::ANALYST->value, UserRole::SUPER_ADMIN->value],
+        ProjectStatus::DEV_ANALYSIS->value => [UserRole::DEVELOPMENT_LEAD->value, UserRole::SUPER_ADMIN->value],
+        ProjectStatus::DEV_ANALYSIS_DONE->value => [UserRole::PROJECT_MANAGER->value, 'dev_analyst', UserRole::SUPER_ADMIN->value],
         ProjectStatus::IN_DEVELOPMENT->value => [UserRole::PROJECT_MANAGER->value, UserRole::DEVELOPER->value, UserRole::DEVELOPMENT_LEAD->value, UserRole::SUPER_ADMIN->value],
         ProjectStatus::SIT_IN_PROGRESS->value => [UserRole::PROJECT_MANAGER->value, 'dev_analyst', UserRole::DEVELOPMENT_LEAD->value, UserRole::DEVELOPER->value, UserRole::SUPER_ADMIN->value],
         ProjectStatus::SIT_PASSED->value => [UserRole::PROJECT_MANAGER->value, 'dev_analyst', UserRole::DEVELOPMENT_LEAD->value, UserRole::SUPER_ADMIN->value],
         ProjectStatus::SIT_REVISION->value => [UserRole::PROJECT_MANAGER->value, 'dev_analyst', UserRole::DEVELOPMENT_LEAD->value, UserRole::SUPER_ADMIN->value],
         ProjectStatus::UAT_IN_PROGRESS->value => [UserRole::PROJECT_MANAGER->value, 'dev_analyst', UserRole::BUSINESS_USER->value, UserRole::SUPER_ADMIN->value],
+        // Kedua arah revisi UAT dipicu oleh alur eksekusi UAT (pihak peminta menolak
+        // hasil, PM menindaklanjuti), jadi wewenangnya sengaja identik. `head_of_it`
+        // bukan aktor revisi UAT — perannya ada di Quality Gate go-live — sehingga tidak
+        // disertakan pada keduanya.
         ProjectStatus::UAT_REVISION_SIT->value => [UserRole::PROJECT_MANAGER->value, 'dev_analyst', UserRole::BUSINESS_USER->value, UserRole::SUPER_ADMIN->value],
-        ProjectStatus::UAT_REVISION_DEV->value => [UserRole::PROJECT_MANAGER->value, 'dev_analyst', UserRole::BUSINESS_USER->value, UserRole::HEAD_OF_IT->value, UserRole::SUPER_ADMIN->value],
+        ProjectStatus::UAT_REVISION_DEV->value => [UserRole::PROJECT_MANAGER->value, 'dev_analyst', UserRole::BUSINESS_USER->value, UserRole::SUPER_ADMIN->value],
         ProjectStatus::DEV_COMPLETED->value => [UserRole::PROJECT_MANAGER->value, 'dev_analyst', UserRole::DEVELOPMENT_LEAD->value, UserRole::DEVELOPER->value, UserRole::SUPER_ADMIN->value],
-        ProjectStatus::RETURN_TO_DEV->value => [UserRole::QA_LEAD->value, UserRole::QA_TESTER->value, UserRole::CYBER_LEAD->value, UserRole::PENTESTER->value, UserRole::SUPER_ADMIN->value],
-        ProjectStatus::READY_FOR_QA->value => [UserRole::PROJECT_MANAGER->value, UserRole::SUPER_ADMIN->value],
+        // Pengembalian proyek ke pengembangan adalah wewenang jalur pengujian.
+        // `lead_group` disertakan karena ia sudah berwenang menyatakan QA lulus
+        // (QA_PASSED); tanpa baris ini ia bisa meloloskan tetapi tidak bisa
+        // mengembalikan — wewenang setengah yang justru berisiko.
+        ProjectStatus::RETURN_TO_DEV->value => [UserRole::QA_LEAD->value, ...UserRole::PLANNING_QA_ANALYST_ROLES, UserRole::CYBER_LEAD->value, UserRole::PENTESTER->value, UserRole::LEAD_GROUP->value, UserRole::SUPER_ADMIN->value],
+        // Pengajuan pengujian QA adalah wewenang PM (Analis Pengembangan). Alias
+        // `dev_analyst` disertakan seperti transisi PM lainnya.
+        ProjectStatus::READY_FOR_QA->value => [UserRole::PROJECT_MANAGER->value, 'dev_analyst', UserRole::SUPER_ADMIN->value],
         ProjectStatus::QA_IN_PROGRESS->value => [UserRole::QA_LEAD->value, UserRole::LEAD_GROUP->value, UserRole::SUPER_ADMIN->value],
-        ProjectStatus::QA_PASSED->value => [UserRole::QA_TESTER->value, UserRole::QA_LEAD->value, UserRole::LEAD_GROUP->value, UserRole::SUPER_ADMIN->value],
+        ProjectStatus::QA_PASSED->value => [...UserRole::PLANNING_QA_ANALYST_ROLES, UserRole::QA_LEAD->value, UserRole::LEAD_GROUP->value, UserRole::SUPER_ADMIN->value],
         ProjectStatus::CYBER_IN_PROGRESS->value => [UserRole::CYBER_LEAD->value, UserRole::SUPER_ADMIN->value],
         ProjectStatus::CYBER_PASSED->value => [UserRole::PENTESTER->value, UserRole::CYBER_LEAD->value, UserRole::SUPER_ADMIN->value],
-        ProjectStatus::READY_FOR_UAT->value => [UserRole::PROJECT_MANAGER->value, UserRole::SUPER_ADMIN->value],
-        ProjectStatus::UAT_PASSED->value => [UserRole::BUSINESS_USER->value, UserRole::PROJECT_MANAGER->value, UserRole::SUPER_ADMIN->value],
-        ProjectStatus::PENDING_GOLIVE->value => [UserRole::PROJECT_MANAGER->value, UserRole::SUPER_ADMIN->value],
+        // READY_FOR_UAT tidak lagi punya transisi masuk, jadi tidak ada role yang
+        // perlu diberi wewenang. Lihat catatan pada $allowedTransitions.
+        ProjectStatus::UAT_PASSED->value => [UserRole::BUSINESS_USER->value, UserRole::PROJECT_MANAGER->value, 'dev_analyst', UserRole::SUPER_ADMIN->value],
+        // Pengajuan go-live ke Grup Infrastruktur adalah wewenang PM (Analis
+        // Pengembangan). Alias `dev_analyst` ikut disertakan seperti transisi PM lain.
+        ProjectStatus::PENDING_GOLIVE->value => [UserRole::PROJECT_MANAGER->value, 'dev_analyst', UserRole::SUPER_ADMIN->value],
         ProjectStatus::LIVE_PRODUCTION->value => [UserRole::HEAD_OF_IT->value, UserRole::SUPER_ADMIN->value],
         ProjectStatus::ON_HOLD->value => [UserRole::PROJECT_MANAGER->value, UserRole::DEVELOPMENT_LEAD->value, UserRole::SUPER_ADMIN->value],
         ProjectStatus::CANCELLED->value => [UserRole::LEAD_GROUP->value, UserRole::HEAD_OF_IT->value, UserRole::SUPER_ADMIN->value],
     ];
 
+
+    /**
+     * Apakah bentuk transisi ini dikenal matriks state machine?
+     *
+     * Hanya memeriksa BENTUK transisi — bukan wewenang role, bukan prasyarat bisnis.
+     * Disediakan untuk pemanggil yang perubahan utamanya ada di tempat lain dan
+     * pemindahan penunjuk `projects.status` sifatnya menyusul bila memungkinkan.
+     *
+     * Kasus nyatanya adalah dua jalur pengujian paralel: kolom `qa_status` dan
+     * `cyber_status` adalah kebenaran jalurnya masing-masing, sedangkan
+     * `projects.status` hanya satu penunjuk siklus yang dipegang bergiliran. Ketika
+     * jalur QA didisposisikan sementara penunjuk itu sedang dipegang jalur Siber,
+     * disposisi QA tetap harus berhasil — status utama cukup dibiarkan.
+     *
+     * Tanpa pemeriksaan ini pemanggil hanya punya dua pilihan buruk: memaksa
+     * transisi lalu gagal seluruh operasinya, atau menelan exception secara buta
+     * sehingga kegagalan wewenang yang sesungguhnya ikut tersembunyi.
+     */
+    public function canTransition(Project $project, ProjectStatus $targetStatus): bool
+    {
+        $currentStatus = $project->status instanceof ProjectStatus
+            ? $project->status->value
+            : (string) $project->status;
+
+        if ($currentStatus === $targetStatus->value) {
+            return true;
+        }
+
+        if (in_array($targetStatus->value, [ProjectStatus::ON_HOLD->value, ProjectStatus::CANCELLED->value], true)) {
+            return $currentStatus !== ProjectStatus::LIVE_PRODUCTION->value;
+        }
+
+        return in_array($targetStatus->value, $this->allowedTransitions[$currentStatus] ?? [], true);
+    }
 
     /**
      * Eksekusi transisi status secara aman.
@@ -235,16 +316,25 @@ class ProjectWorkflowService
             throw new Exception("User dengan role '{$roleLabel}' tidak memiliki wewenang untuk mengubah status ke '{$nextStatus}'.");
         }
 
-        // 3b. Validasi penugasan personal untuk System Analyst.
+        // 3b. Validasi penugasan personal pada role yang punya kolom penugasan.
         //
         // Matriks role di atas hanya menjawab "role apa yang boleh", bukan "orang mana
         // yang boleh". Tanpa pemeriksaan ini, seorang analis dapat menyetujui atau
         // menolak hasil analisis proyek yang didisposisikan kepada analis lain, dan
         // jejaknya tercatat di `status_histories` atas namanya — merusak audit trail.
         //
-        // Sengaja hanya diterapkan pada role analyst: hanya role itulah yang punya
-        // kolom penugasan personal (`projects.analyst_id`) pada fase yang ia kelola.
-        if ($userRoleName === UserRole::ANALYST->value && (int) $project->analyst_id !== (int) $user->id) {
+        // Dua role punya kolom penugasan personal pada fase yang mereka kelola:
+        // System Analyst (Fase 1) lewat `analyst_id`, dan Project Manager alias Analis
+        // Pengembangan (Fase 2 sampai rilis) lewat `pm_id`. Role lain — Lead Group,
+        // Development Lead, jalur QA dan Keamanan Siber — memang bekerja lintas proyek
+        // sehingga tidak punya kolom pembanding dan tidak diperiksa di sini.
+        $assignmentColumn = match ($userRoleName) {
+            UserRole::ANALYST->value => 'analyst_id',
+            UserRole::PROJECT_MANAGER->value, 'dev_analyst' => 'pm_id',
+            default => null,
+        };
+
+        if ($assignmentColumn !== null && (int) $project->{$assignmentColumn} !== (int) $user->id) {
             throw new Exception('Proyek ini tidak didisposisikan kepada Anda, sehingga statusnya tidak dapat Anda ubah.');
         }
 
@@ -270,7 +360,7 @@ class ProjectWorkflowService
             if (
                 $currentStatus === ProjectStatus::SIT_IN_PROGRESS->value
                 && $targetStatus === ProjectStatus::SIT_PASSED
-                && $project->isTargetedSitRetest()
+                && $project->isSitRetestCycle()
             ) {
                 $sitUatData = (array) $project->sit_uat_data;
                 $sitUatData['sit_retest_scope'] = [
@@ -287,41 +377,59 @@ class ProjectWorkflowService
                 && $targetStatus === ProjectStatus::UAT_IN_PROGRESS
             ) {
                 $sitUatData = (array) $project->sit_uat_data;
-                if (($sitUatData['uat2_resume_after_sit'] ?? false) === true) {
-                    // UAT yang ditahan dilanjutkan di Tahap 2 dalam mode verifikasi.
-                    // Hanya item Mayor yang dibuka kembali, bukan seluruh UAT.
-                    $sitUatData['activeUatStep'] = 2;
-                    $sitUatData['uat2_resume_after_sit'] = false;
-                    $sitUatData['uat2_verification_mode'] = true;
-                    $sitUatData['uat2_sit_retest_passed_at'] = now()->toIso8601String();
-                    foreach (['uat2_scenarios', 'uat2_additional_requests'] as $key) {
-                        $sitUatData[$key] = collect($sitUatData[$key] ?? [])
-                            ->map(fn (array $item): array => ($item['changeType'] ?? null) === 'mayor'
-                                && ($item['verificationStatus'] ?? null) !== 'verified'
-                                    ? [
-                                        ...$item,
-                                        'verificationStatus' => 'pending',
-                                        'verificationResult' => null,
-                                        'verificationComment' => null,
-                                        'verificationAttachments' => [],
-                                        'verifiedAt' => null,
-                                    ]
-                                    : $item)
-                            ->values()
-                            ->all();
-                    }
+                // Mencerminkan `Project::isUatRestartPending()`; di sini yang dimutasi
+                // adalah array-nya, bukan modelnya, jadi flagnya dibaca langsung.
+                $isUatRestartPending = ($sitUatData['uat_restart_after_sit']
+                    ?? $sitUatData['uat2_resume_after_sit']
+                    ?? false) === true;
+
+                if ($isUatRestartPending) {
+                    // Revisi Mayor mengulang dua siklus sekaligus. SIT ulang yang baru
+                    // lulus mencakup seluruh task, dan UAT dimulai kembali dari Tahap 1:
+                    // skenario disusun ulang, seluruhnya dieksekusi ulang, lalu putaran
+                    // persetujuan baru dibuka lewat Tahap 3 seperti biasa.
+                    //
+                    // Sebelumnya UAT hanya "dilanjutkan" di Tahap 2 dan cuma item Mayor
+                    // yang diperiksa ulang. Kesimpulan UAT yang keluar dari cara itu
+                    // adalah gabungan hasil lama dengan tambalan — bukan penilaian atas
+                    // aplikasi versi yang benar-benar akan dirilis.
+                    $now = now()->toIso8601String();
+                    $sitUatData['activeUatStep'] = 1;
+                    $sitUatData['uat_restart_after_sit'] = false;
+                    unset($sitUatData['uat2_resume_after_sit'], $sitUatData['uat2_verification_mode']);
+                    $sitUatData['uat_sit_retest_passed_at'] = $now;
+                    // Jejak Change Request mencatat bahwa perbaikannya sudah divalidasi
+                    // SIT. Penerimaan oleh pengguna menyusul saat UAT dijalankan ulang.
                     $sitUatData['uat_change_requests'] = collect($sitUatData['uat_change_requests'] ?? [])
                         ->map(fn (array $request): array => ($request['status'] ?? null) === 'resolved'
-                            ? [...$request, 'status' => 'sit_verified', 'sitVerifiedAt' => now()->toIso8601String()]
+                            ? [...$request, 'status' => 'sit_verified', 'sitVerifiedAt' => $now]
                             : $request)
                         ->values()
                         ->all();
                     $sitUatData['uat_hold'] = [
                         ...(array) ($sitUatData['uat_hold'] ?? []),
-                        'status' => 'uat_verification',
-                        'sitPassedAt' => now()->toIso8601String(),
+                        'status' => 'uat_restart',
+                        'sitPassedAt' => $now,
                     ];
                     $project->sit_uat_data = $sitUatData;
+                }
+            }
+
+            // Keluar dari UAT untuk revisi membatalkan putaran persetujuan yang sedang
+            // berjalan. Tanpa ini baris `approved` dari sebelum revisi tetap hidup,
+            // sehingga `allRequiredApproved()` dapat lolos memakai tanda tangan atas
+            // hasil UAT yang sudah tidak berlaku. Panggilannya berada di dalam
+            // transaksi agar ikut dibatalkan bila transisinya gagal, dan aman diulang
+            // karena pemanggil lain sudah men-supersede lebih dulu.
+            if ($currentStatus === ProjectStatus::UAT_IN_PROGRESS->value) {
+                $supersedeReason = match ($targetStatus) {
+                    ProjectStatus::UAT_REVISION_DEV => 'UAT dikembalikan ke pengembangan untuk revisi Mayor; persetujuan atas hasil UAT sebelumnya tidak lagi berlaku.',
+                    ProjectStatus::UAT_REVISION_SIT => 'UAT dikembalikan ke pengujian SIT; persetujuan atas hasil UAT sebelumnya tidak lagi berlaku.',
+                    default => null,
+                };
+
+                if ($supersedeReason !== null) {
+                    $this->uatApprovalService->supersedeActiveRounds($project, $supersedeReason);
                 }
             }
 
@@ -436,11 +544,78 @@ class ProjectWorkflowService
     }
 
     /**
+     * Ambil satu baris `sit2_task_approvals` tanpa bergantung pada bentuk kuncinya.
+     *
+     * Produksi menyimpan tiga bentuk kunci sekaligus: integer, string angka, dan
+     * berawalan `task_`. Bentuk keempat tidak boleh ditambahkan — pembacaan yang sama
+     * dipakai `SitApprovalService::taskApproval()` untuk inbox.
+     *
+     * @param  array<array-key, mixed>  $taskApprovals
+     * @return array<string, mixed>
+     */
+    private static function sitTaskApproval(array $taskApprovals, int|string $taskId): array
+    {
+        $approval = $taskApprovals[$taskId]
+            ?? $taskApprovals[(string) $taskId]
+            ?? $taskApprovals['task_'.$taskId]
+            ?? null;
+
+        return is_array($approval) ? $approval : [];
+    }
+
+    /**
+     * Id task pada scope SIT yang belum disetujui pada Eksekusi Pengujian (Tahap 2).
+     *
+     * Dipakai gerbang SIT putaran pertama maupun gerbang SIT ulang supaya keduanya tidak
+     * pernah menyimpang soal apa yang dihitung "sudah disetujui".
+     *
+     * @param  array<array-key, mixed>  $taskApprovals
+     * @return \Illuminate\Support\Collection<int, int>
+     */
+    private static function unapprovedSitTaskIds(\Illuminate\Support\Enumerable $scopeTasks, array $taskApprovals): \Illuminate\Support\Collection
+    {
+        return collect($scopeTasks->pluck('id')->all())
+            ->filter(fn ($taskId): bool => (self::sitTaskApproval($taskApprovals, $taskId)['approved'] ?? false) !== true)
+            ->map(fn ($taskId): int => (int) $taskId)
+            ->values();
+    }
+
+    /**
+     * Id developer wajib yang belum menandatangani persetujuan SIT Tahap 3.
+     *
+     * Baris approval lama memakai `approvedById`, yang baru memakai `userId`; keduanya
+     * harus tetap dihormati agar proyek berjalan tidak mendadak dianggap belum lengkap.
+     *
+     * @param  \Illuminate\Support\Enumerable<int, int>  $requiredDeveloperIds
+     * @param  array<string, mixed>  $approvals
+     * @return \Illuminate\Support\Collection<int, int>
+     */
+    private static function missingSitDeveloperApprovalIds(\Illuminate\Support\Enumerable $requiredDeveloperIds, array $approvals): \Illuminate\Support\Collection
+    {
+        $approvedDeveloperIds = collect($approvals['developer']['developers'] ?? [])
+            ->map(fn ($approval): int => is_array($approval)
+                ? (int) ($approval['userId'] ?? $approval['approvedById'] ?? 0)
+                : 0)
+            ->filter()
+            ->unique();
+
+        return collect($requiredDeveloperIds->all())
+            ->map(fn ($id): int => (int) $id)
+            ->diff($approvedDeveloperIds)
+            ->values();
+    }
+
+    /**
      * Validasi gate bisnis lintas endpoint sebelum status proyek berubah.
      */
     private function validateTransitionPrerequisites(Project $project, ProjectStatus $targetStatus): void
     {
-        if ($targetStatus === ProjectStatus::READY_FOR_UAT && ! $project->hasPassedAllTestingTracks()) {
+        // Gerbang go-live: pengajuan rilis ke Grup Infrastruktur hanya sah setelah
+        // KEDUA jalur pengujian paralel dinyatakan lulus. Gate dipasang di sini,
+        // bukan di matriks transisi, karena `allowedTransitions` hanya mengenal
+        // bentuk transisi (QA_PASSED atau CYBER_PASSED menuju PENDING_GOLIVE) dan
+        // tidak dapat melihat status jalur yang satunya.
+        if ($targetStatus === ProjectStatus::PENDING_GOLIVE && ! $project->hasPassedAllTestingTracks()) {
             $pendingTracks = collect([
                 'Pengujian QA' => $project->qaTrackStatus(),
                 'Audit Keamanan Siber' => $project->cyberTrackStatus(),
@@ -451,7 +626,7 @@ class ProjectWorkflowService
                 ->implode(' dan ');
 
             throw new Exception(
-                "UAT final hanya dapat diajukan setelah Pengujian QA dan Audit Keamanan Siber dinyatakan lulus. Belum lulus: {$pendingTracks}."
+                "Pengajuan go-live ke Grup Infrastruktur hanya dapat dilakukan setelah Pengujian QA dan Audit Keamanan Siber dinyatakan lulus. Belum lulus: {$pendingTracks}."
             );
         }
 
@@ -461,10 +636,77 @@ class ProjectWorkflowService
             );
         }
 
-        if ($targetStatus === ProjectStatus::SIT_PASSED && $project->isTargetedSitRetest()) {
+        // Kelengkapan persetujuan Tahap 3 pada SIT putaran pertama.
+        //
+        // Sebelumnya kelengkapan ini hanya dijaga tombol di `SITUATWizard.jsx`, sehingga
+        // `PATCH /projects/{id}/status` bisa meluluskan SIT tanpa satu pun tanda tangan
+        // asalkan berita acaranya sudah diunggah. Berita acara adalah bukti dokumen, bukan
+        // bukti bahwa developer, PM, dan Pimpinan Grup Pengembangan benar-benar menyetujui.
+        // Gerbang SIT ulang (blok di bawah) sudah menuntut hal yang sama, jadi tanpa gerbang
+        // ini justru putaran pertama yang paling longgar.
+        //
+        // Pemeriksaan bukti baru per task dari document vault sengaja TIDAK ditiru di sini:
+        // itu memang pembeda SIT ulang, sesuai `docs/AI_HANDOFF.md` bagian 3.
+        if ($targetStatus === ProjectStatus::SIT_PASSED && ! $project->isSitRetestCycle()) {
+            $sitUatData = (array) $project->sit_uat_data;
+            $taskApprovals = (array) ($sitUatData['sit2_task_approvals'] ?? []);
+            $approvals = (array) ($sitUatData['sit3_approvals'] ?? []);
+            $scopeTasks = $project->sitScopeTasks();
+
+            $unapprovedTaskIds = self::unapprovedSitTaskIds($scopeTasks, $taskApprovals);
+            if ($unapprovedTaskIds->isNotEmpty()) {
+                throw new Exception(
+                    'Semua task dalam scope SIT harus disetujui pada Eksekusi Pengujian sebelum SIT dinyatakan lulus. Task yang belum disetujui: '
+                    .$unapprovedTaskIds->implode(', ').'.'
+                );
+            }
+
+            // Nol developer wajib bukan keadaan sah untuk meluluskan SIT: artinya tidak
+            // ada satu pun task ber-assignee developer, jadi tidak ada pihak yang
+            // bertanggung jawab atas hasil pengujian. `ProjectController::sitApprovalStatus()`
+            // sudah memakai aturan yang sama (`$requiredDevCount > 0 && ...`) untuk
+            // menyalakan tombol di frontend; server kini menegakkannya juga.
+            $requiredDeveloperIds = collect($project->sitApprovalDeveloperIds());
+            if ($requiredDeveloperIds->isEmpty()) {
+                throw new Exception(
+                    'SIT tidak dapat diluluskan karena proyek belum memiliki developer penanggung jawab task yang dapat memberikan persetujuan.'
+                );
+            }
+
+            $missingDeveloperIds = self::missingSitDeveloperApprovalIds($requiredDeveloperIds, $approvals);
+            if ($missingDeveloperIds->isNotEmpty()) {
+                throw new Exception(
+                    'Semua developer pada tim proyek wajib memberikan persetujuan SIT. Developer yang belum menyetujui: '
+                    .$missingDeveloperIds->implode(', ').'.'
+                );
+            }
+
+            // PM dan Pimpinan Grup Pengembangan dipisah agar pesannya menyebut slot yang
+            // benar-benar kosong; gerbang SIT ulang menggabungkannya dan itu menyulitkan
+            // pengguna menebak tanda tangan siapa yang kurang.
+            if (($approvals['pm']['approved'] ?? false) !== true) {
+                throw new Exception('Persetujuan Analyst / Project Manager wajib ada sebelum SIT dinyatakan lulus.');
+            }
+            if (($approvals['development_lead']['approved'] ?? false) !== true) {
+                throw new Exception('Persetujuan Pimpinan Grup Pengembangan wajib ada sebelum SIT dinyatakan lulus.');
+            }
+        }
+
+        // Tujuh prasyarat berikut hanya berlaku pada SIT yang merupakan bagian dari
+        // siklus revisi Mayor UAT. Cakupannya kini PENUH — sama seperti SIT pertama,
+        // seluruh task aktif proyek diuji ulang — karena UAT juga dijalankan ulang dari
+        // Tahap 1. Yang membedakannya dari SIT pertama bukan daftar task, melainkan
+        // ketatnya bukti: setiap task wajib selesai, disetujui pada Eksekusi Pengujian,
+        // punya lampiran bukti baru dari document vault, dan seluruh persetujuan Tahap 3
+        // harus lengkap. Perbaikan yang lolos tanpa bukti baru akan dinilai pengguna
+        // sebagai UAT yang gagal untuk kedua kalinya.
+        if ($targetStatus === ProjectStatus::SIT_PASSED && $project->isSitRetestCycle()) {
             $scopeTasks = $project->sitScopeTasks();
             if ($scopeTasks->isEmpty()) {
-                throw new Exception('Scope SIT ulang tidak memiliki task Change Request Mayor yang valid.');
+                // Scope SIT ulang kini seluruh task aktif, jadi kosong berarti proyek
+                // memang tidak punya satu pun task yang dapat diuji — bukan soal
+                // daftar Change Request.
+                throw new Exception('Scope SIT ulang kosong: proyek tidak memiliki task aktif yang dapat diuji.');
             }
 
             $incompleteTasks = $scopeTasks->filter(function ($task): bool {
@@ -480,29 +722,18 @@ class ProjectWorkflowService
 
             $sitUatData = (array) $project->sit_uat_data;
             $taskApprovals = (array) ($sitUatData['sit2_task_approvals'] ?? []);
-            $unapprovedTaskIds = $scopeTasks->pluck('id')->filter(function ($taskId) use ($taskApprovals): bool {
-                $approval = $taskApprovals[$taskId]
-                    ?? $taskApprovals[(string) $taskId]
-                    ?? $taskApprovals['task_'.$taskId]
-                    ?? null;
-
-                return ! is_array($approval) || ($approval['approved'] ?? false) !== true;
-            });
+            $unapprovedTaskIds = self::unapprovedSitTaskIds($scopeTasks, $taskApprovals);
             if ($unapprovedTaskIds->isNotEmpty()) {
                 throw new Exception('Semua task dalam scope SIT ulang harus disetujui pada Eksekusi Pengujian.');
             }
 
             $tasksWithoutEvidence = $scopeTasks->pluck('id')->filter(function ($taskId) use ($taskApprovals): bool {
-                $approval = $taskApprovals[$taskId]
-                    ?? $taskApprovals[(string) $taskId]
-                    ?? $taskApprovals['task_'.$taskId]
-                    ?? null;
+                $approval = self::sitTaskApproval($taskApprovals, $taskId);
 
-                return ! is_array($approval)
-                    || collect($approval['attachments'] ?? [])->doesntContain(
-                        fn ($attachment): bool => is_array($attachment)
-                            && is_numeric($attachment['docId'] ?? null)
-                    );
+                return collect($approval['attachments'] ?? [])->doesntContain(
+                    fn ($attachment): bool => is_array($attachment)
+                        && is_numeric($attachment['docId'] ?? null)
+                );
             });
             if ($tasksWithoutEvidence->isNotEmpty()) {
                 throw new Exception('Setiap task dalam scope SIT ulang wajib memiliki lampiran bukti pengujian baru.');
@@ -510,10 +741,7 @@ class ProjectWorkflowService
 
             $evidenceDocumentIds = $scopeTasks->pluck('id')
                 ->flatMap(function ($taskId) use ($taskApprovals) {
-                    $approval = $taskApprovals[$taskId]
-                        ?? $taskApprovals[(string) $taskId]
-                        ?? $taskApprovals['task_'.$taskId]
-                        ?? [];
+                    $approval = self::sitTaskApproval($taskApprovals, $taskId);
 
                     return collect($approval['attachments'] ?? [])->pluck('docId');
                 })
@@ -530,16 +758,12 @@ class ProjectWorkflowService
             }
 
             $approvals = (array) ($sitUatData['sit3_approvals'] ?? []);
-            $requiredDeveloperIds = $scopeTasks->pluck('assignee_id')
-                ->filter()
-                ->map(fn ($id) => (int) $id)
-                ->unique();
-            $approvedDeveloperIds = collect($approvals['developer']['developers'] ?? [])
-                ->map(fn (array $approval): int => (int) ($approval['userId'] ?? $approval['approvedById'] ?? 0))
-                ->filter()
-                ->unique();
-            if ($requiredDeveloperIds->diff($approvedDeveloperIds)->isNotEmpty()) {
-                throw new Exception('Semua developer dalam scope SIT ulang wajib memberikan persetujuan.');
+
+            // Daftar wajibnya seluruh developer tim proyek, bukan hanya penerima task
+            // pada scope SIT ulang — satu sumber dengan `ProjectController::sitApproval`.
+            $requiredDeveloperIds = collect($project->sitApprovalDeveloperIds());
+            if (self::missingSitDeveloperApprovalIds($requiredDeveloperIds, $approvals)->isNotEmpty()) {
+                throw new Exception('Semua developer pada tim proyek wajib memberikan persetujuan SIT ulang.');
             }
             if (
                 ($approvals['pm']['approved'] ?? false) !== true
@@ -581,7 +805,86 @@ class ProjectWorkflowService
             }
         }
 
-        if ($targetStatus !== ProjectStatus::DEV_COMPLETED || $currentStatus !== ProjectStatus::UAT_IN_PROGRESS->value) {
+        // Gerbang keras pengajuan ulang setelah proyek dikembalikan QA / Keamanan Siber.
+        //
+        // Jalan masuk resminya `TestingTrackService::submitRequest()`, dan gerbang yang
+        // sama sudah dipasang di sana. Gerbang ini menutup jalan masuk kedua:
+        // `PATCH /projects/{id}/status` dapat mendorong status utama langsung ke fase
+        // pengujian tanpa melewati service jalur, sehingga tanpa pemeriksaan di sini
+        // proyek yang perbaikannya belum selesai tetap bisa masuk antrean pengujian.
+        //
+        // Aturannya dinyatakan sebagai invarian atas status TUJUAN, bukan atas status
+        // sekarang. Pembatasan pada `RETURN_TO_DEV` saja tidak cukup karena matriks
+        // transisi juga mengizinkan masuk fase pengujian dari `READY_FOR_QA`,
+        // `QA_IN_PROGRESS`, `QA_PASSED`, `CYBER_IN_PROGRESS`, dan `CYBER_PASSED`.
+        // Contoh nyatanya: QA mengembalikan proyek, lalu Lead Keamanan Siber
+        // mendisposisikan jalurnya sehingga status utama pindah ke `CYBER_IN_PROGRESS`
+        // secara sah — sejak titik itu proyeknya tidak lagi berstatus `RETURN_TO_DEV`,
+        // dan gerbang yang mensyaratkan status tersebut tidak akan pernah menyala lagi
+        // meski perbaikan QA-nya belum satu pun selesai.
+        //
+        // Sengaja dinilai per jalur — dua jalur berjalan paralel, jadi proyek yang
+        // dikembalikan Keamanan Siber tetap boleh memulai Pengujian QA yang belum jalan.
+        // Jalur yang tidak memiliki putaran terbuka selalu lolos tanpa efek samping.
+        // `QA_PASSED` dan `CYBER_PASSED` WAJIB ikut dinilai, bukan hanya status masuk
+        // antrean. `syncTestingTrackStatuses()` menulis kolom jalur menjadi PASSED tanpa
+        // syarat pada kedua status itu, sehingga tanpa keduanya di sini kelulusan dapat
+        // dicetak dalam dua langkah yang masing-masing sah:
+        //
+        //   1. Lead QA sign-off TIDAK LULUS. Proyek RETURN_TO_DEV, qa_status FAILED,
+        //      putaran QA terbuka, nol task perbaikan.
+        //   2. Lead Keamanan Siber pindah ke CYBER_IN_PROGRESS — lolos, karena jalur
+        //      Siber memang tidak punya putaran terbuka.
+        //   3. Lead QA pindah ke QA_PASSED dari CYBER_IN_PROGRESS — matriks
+        //      mengizinkannya, role-nya berwenang, dan sebelumnya gerbang ini tidak
+        //      menyala. qa_status menjadi PASSED sementara putaran QA-nya tetap
+        //      terbuka selamanya (`close()` hanya berjalan dari `submitRequest()`),
+        //      lalu `hasPassedAllTestingTracks()` meloloskan PENDING_GOLIVE.
+        //
+        // Hasilnya kode yang belum pernah diuji ulang naik ke produksi dengan catatan
+        // kegagalannya masih menganga. Rute kebalikannya ada untuk jalur Siber dengan
+        // QA_PASSED sebagai langkah perantara, jadi keduanya ditutup bersamaan.
+        $resubmittedTrack = match ($targetStatus) {
+            ProjectStatus::READY_FOR_QA, ProjectStatus::QA_IN_PROGRESS, ProjectStatus::QA_PASSED => TestingTrack::QA,
+            ProjectStatus::CYBER_IN_PROGRESS, ProjectStatus::CYBER_PASSED => TestingTrack::CYBER,
+            default => null,
+        };
+
+        if ($resubmittedTrack) {
+            $this->returnRoundService->assertResubmitAllowed($project, $resubmittedTrack);
+        }
+
+        if ($targetStatus !== ProjectStatus::DEV_COMPLETED) {
+            return;
+        }
+
+        // Gerbang siklus revisi dinilai sebagai invarian atas status TUJUAN
+        // DEV_COMPLETED, bukan atas status sekarang. Matriks mengizinkan DEV_COMPLETED
+        // dari SIT_PASSED, UAT_PASSED, READY_FOR_QA, dan IN_DEVELOPMENT; membatasi
+        // gerbang ke asal UAT_IN_PROGRESS saja membuat proyek yang siklus revisi
+        // Mayor/Minor-nya belum tuntas dapat dinyatakan selesai lewat salah satu jalur
+        // itu tanpa UAT dijalankan ulang. Selama restart Mayor masih tertunda — SIT
+        // ulang belum lulus atau UAT belum dijalankan kembali dari awal — kesimpulan
+        // UAT yang ada belum menilai versi aplikasi yang akan dirilis. Contoh nyatanya:
+        // proyek di tengah restart Mayor berada di SIT_PASSED dengan `uat_restart_after_sit`
+        // masih benar, lalu didorong SIT_PASSED -> DEV_COMPLETED yang bentuknya sah.
+        if ($project->isUatRestartPending()) {
+            throw new Exception('Revisi Mayor UAT belum selesai. Selesaikan SIT ulang dan jalankan UAT dari awal sebelum proyek dapat dinyatakan DEV_COMPLETED.');
+        }
+
+        // Revisi Minor tidak memundurkan siklus, tetapi tetap menahan penutupan UAT.
+        // Berita acara UAT menjadi dasar rilis, jadi menutupnya sebelum perbaikan Minor
+        // dikerjakan berarti menyatakan lulus atas versi aplikasi yang sudah diketahui
+        // salah. Hold-nya lepas sendiri begitu seluruh Change Request Minor selesai.
+        if ($project->isUatMinorRevisionPending()) {
+            throw new Exception('Revisi Minor UAT belum selesai. Selesaikan seluruh Change Request Minor sebelum proyek dapat dinyatakan DEV_COMPLETED.');
+        }
+
+        // Gerbang di bawah menutup sesi UAT internal yang sedang berjalan, jadi hanya
+        // relevan bila DEV_COMPLETED datang dari UAT_IN_PROGRESS. Dari status lain
+        // (mis. proyek yang tidak menjalankan UAT internal) tidak ada Tahap 2 untuk
+        // diselesaikan maupun putaran persetujuan untuk dinilai.
+        if ($currentStatus !== ProjectStatus::UAT_IN_PROGRESS->value) {
             return;
         }
 
@@ -590,14 +893,6 @@ class ProjectWorkflowService
 
         if ((int) ($sitUatData['activeUatStep'] ?? 1) < 3 || empty($summary['conclusion'])) {
             throw new Exception('Eksekusi UAT Tahap 2 wajib diselesaikan sebelum proyek dinyatakan DEV_COMPLETED.');
-        }
-
-        if (($sitUatData['uat2_resume_after_sit'] ?? false) === true) {
-            throw new Exception('Revisi mayor UAT dan pengujian SIT ulang harus diselesaikan terlebih dahulu.');
-        }
-
-        if (($sitUatData['uat2_verification_mode'] ?? false) === true) {
-            throw new Exception('Verifikasi user atas perbaikan Mayor UAT harus diselesaikan terlebih dahulu.');
         }
 
         if (! $this->uatApprovalService->allRequiredApproved($project)) {
@@ -633,8 +928,8 @@ class ProjectWorkflowService
             ProjectStatus::QA_PASSED->value                             => $rolesToNotify = ['project_manager', 'super_admin'],
             ProjectStatus::CYBER_IN_PROGRESS->value                     => $rolesToNotify = ['cyber_lead', 'super_admin'],
             ProjectStatus::CYBER_PASSED->value                          => $rolesToNotify = ['project_manager', 'super_admin'],
-            ProjectStatus::READY_FOR_UAT->value                         => $rolesToNotify = ['business_user', 'project_manager', 'super_admin'],
             ProjectStatus::UAT_PASSED->value                            => $rolesToNotify = ['project_manager', 'super_admin'],
+            // Pengajuan go-live: keputusan ada di Head of IT / Grup Infrastruktur.
             ProjectStatus::PENDING_GOLIVE->value                        => $rolesToNotify = ['head_of_it', 'super_admin'],
             ProjectStatus::RETURN_TO_DEV->value                         => $rolesToNotify = ['developer', 'project_manager', 'super_admin'],
             ProjectStatus::ON_HOLD->value                               => $rolesToNotify = ['lead_group', 'super_admin'],

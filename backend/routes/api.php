@@ -7,6 +7,7 @@ use App\Http\Controllers\Api\V1\CyberRequestController;
 use App\Http\Controllers\Api\V1\DashboardController;
 use App\Http\Controllers\Api\V1\DivisionController;
 use App\Http\Controllers\Api\V1\DocumentController;
+use App\Http\Controllers\Api\V1\GroupController;
 use App\Http\Controllers\Api\V1\HealthCheckController;
 use App\Http\Controllers\Api\V1\NotificationController;
 use App\Http\Controllers\Api\V1\ProjectController;
@@ -14,10 +15,10 @@ use App\Http\Controllers\Api\V1\QARequestController;
 use App\Http\Controllers\Api\V1\QualityGateController;
 use App\Http\Controllers\Api\V1\ReleaseRequestController;
 use App\Http\Controllers\Api\V1\RoleController;
+use App\Http\Controllers\Api\V1\SitApprovalController;
 use App\Http\Controllers\Api\V1\TaskController;
 use App\Http\Controllers\Api\V1\UserController;
 use App\Http\Controllers\Api\V1\UatApprovalController;
-use App\Http\Controllers\Api\V1\WorkspaceController;
 use Illuminate\Support\Facades\Route;
 
 Route::prefix('v1')->group(function () {
@@ -29,6 +30,22 @@ Route::prefix('v1')->group(function () {
         ->middleware('throttle:5,1');
     Route::post('/auth/login', [AuthController::class, 'login'])
         ->middleware('throttle:5,1'); // 5 login attempts per minute
+
+    // Daftar divisi resmi untuk dropdown formulir pendaftaran. Publik karena
+    // formulirnya berada di luar sesi, hanya mengembalikan id dan nama, dan
+    // dibatasi laju permintaannya. Tanpa endpoint ini formulir harus menghafal
+    // nama divisi sendiri, dan pilihan yang tidak cocok dengan master data itulah
+    // yang dahulu memaksa registrasi membuat baris `divisions` baru.
+    Route::get('/auth/divisions', [AuthController::class, 'divisions'])
+        ->middleware('throttle:30,1');
+
+    // Pemulihan akses akun. Dibatasi ketat karena keduanya publik: pengiriman tautan
+    // dibatasi juga oleh throttle broker password (`auth.passwords.users.throttle`),
+    // dan penyetelan password baru dibatasi agar token tidak bisa dicoba berulang.
+    Route::post('/auth/forgot-password', [AuthController::class, 'forgotPassword'])
+        ->middleware('throttle:5,1');
+    Route::post('/auth/reset-password', [AuthController::class, 'resetPassword'])
+        ->middleware('throttle:5,1');
 
     // Link persetujuan UAT non-IT. Token pribadi + pencocokan nomor HP.
     Route::get('/uat-approvals/{token}', [UatApprovalController::class, 'preview'])
@@ -53,10 +70,21 @@ Route::prefix('v1')->group(function () {
 
         // ----- DASHBOARD -----
         Route::get('/dashboard/summary', [DashboardController::class, 'summary']);
-        Route::get('/dashboard/analytics', [DashboardController::class, 'analytics']);
 
-        // ----- REFERENCE DATA (Roles & Divisions) — Admin Only (write) -----
+        // Analitik SDLC adalah agregat lintas seluruh portofolio: distribusi status
+        // semua proyek, beban tiap developer, dan komposisi role seluruh akun. Tidak
+        // ada penyaringan per pengguna yang masuk akal untuk angka seperti itu, jadi
+        // gerbangnya route. Sebelumnya halaman ini dijaga hanya oleh router frontend
+        // (`ADMIN_ROLES`), sementara endpointnya terbuka bagi setiap akun yang login.
+        Route::get('/dashboard/analytics', [DashboardController::class, 'analytics'])
+            ->middleware('role:super_admin');
+
+        // ----- REFERENCE DATA (Groups, Roles & Divisions) — Admin Only (write) -----
         Route::middleware('role:super_admin')->group(function () {
+            Route::post('/groups', [GroupController::class, 'store']);
+            Route::patch('/groups/{id}', [GroupController::class, 'update']);
+            Route::delete('/groups/{id}', [GroupController::class, 'destroy']);
+
             Route::post('/roles', [RoleController::class, 'store']);
             Route::patch('/roles/{id}', [RoleController::class, 'update']);
             Route::delete('/roles/{id}', [RoleController::class, 'destroy']);
@@ -75,8 +103,12 @@ Route::prefix('v1')->group(function () {
         });
 
         // Master data — read access available to all authenticated users
+        Route::get('/groups', [GroupController::class, 'index']);
         Route::get('/roles', [RoleController::class, 'index']);
         Route::get('/divisions', [DivisionController::class, 'index']);
+        // Beban aktif lintas-fase per pengguna (dropdown disposisi QA & Siber). Harus
+        // sebelum rute /users apa pun yang berpola parameter agar tidak tertangkap.
+        Route::get('/users/workload', [UserController::class, 'workload']);
         Route::get('/users', [UserController::class, 'index']);
 
         // Activity log — read untuk semua user terautentikasi (dipakai juga utk log proyek per PM)
@@ -84,6 +116,10 @@ Route::prefix('v1')->group(function () {
 
         // Inbox personal approval UAT untuk Developer, Analyst/PM, Lead, dan Head of IT.
         Route::get('/me/uat-approvals', [UatApprovalController::class, 'myAssignments']);
+
+        // Inbox personal approval SIT untuk Developer, Analyst/PM, dan Development Lead.
+        // Keputusannya tetap dikirim ke POST /projects/{id}/sit-approval.
+        Route::get('/me/sit-approvals', [SitApprovalController::class, 'myAssignments']);
 
         // ----- PROJECT ROUTES -----
         Route::get('/projects', [ProjectController::class, 'index']);
@@ -99,7 +135,6 @@ Route::prefix('v1')->group(function () {
         Route::post('/projects/{id}/sit-approval', [ProjectController::class, 'sitApproval']);
         Route::post('/projects/{id}/uat-execution', [ProjectController::class, 'submitUatExecution']);
         Route::put('/projects/{id}/uat-execution/draft', [ProjectController::class, 'saveUatExecutionDraft']);
-        Route::post('/projects/{id}/uat-major-verification', [ProjectController::class, 'submitUatMajorVerification']);
         // Kompatibilitas client lama; UI baru memakai approver individual di bawah.
         Route::post('/projects/{id}/uat-approval', [ProjectController::class, 'uatApproval']);
         Route::get('/projects/{id}/uat-approval-matrix', [UatApprovalController::class, 'matrix']);
@@ -107,7 +142,12 @@ Route::prefix('v1')->group(function () {
         Route::post('/projects/{id}/uat-approval-rounds', [UatApprovalController::class, 'restart']);
         Route::post('/projects/{id}/uat-approvers/{approver}/link', [UatApprovalController::class, 'generateLink']);
         Route::post('/projects/{id}/uat-approvers/{approver}/decision', [UatApprovalController::class, 'internalDecision']);
-        Route::post('/projects/{id}/uat-change-request', [ProjectController::class, 'uatChangeRequest']);
+        // Change Request UAT sekarang HANYA lahir dari eksekusi UAT Tahap 2
+        // (`POST /projects/{id}/uat-execution` → `UatExecutionService::holdForMajorRevision()`),
+        // yang menuliskan `cycle`, `source`, dan `origin` pada tiap CR. Endpoint pengajuan
+        // manual lama sudah dihapus: UI-nya tidak ada lagi dan CR yang dihasilkannya tanpa
+        // `cycle` tidak pernah terlihat oleh gerbang `UAT_REVISION_DEV → SIT_IN_PROGRESS`.
+        // Endpoint keputusan tetap dipakai untuk memutuskan CR hasil eksekusi.
         Route::post('/projects/{id}/uat-change-request/decision', [ProjectController::class, 'uatChangeRequestDecision']);
         Route::post('/projects/{id}/team', [ProjectController::class, 'allocateTeam']);
 
@@ -118,17 +158,30 @@ Route::prefix('v1')->group(function () {
         Route::delete('/tasks/{taskId}', [TaskController::class, 'destroy']);
         Route::post('/tasks/{taskId}/request-revision', [TaskController::class, 'requestRevision']);
 
-        // ----- WORKSPACE ROUTES -----
-        Route::get('/workspace/{role}', [WorkspaceController::class, 'show']);
-
         // ----- QA & CYBER TESTING ROUTES -----
+        //
+        // Empat langkah satu jalur pengujian, satu endpoint per langkah, dan urutannya
+        // dijaga `TestingTrackService`:
+        //
+        //   submit    PM mengajukan pengujian
+        //   assign    Lead mendisposisikan ke pelaksana
+        //   report    pelaksana mengirim laporan (berhenti di REVIEW)
+        //   sign-off  Lead memutuskan lulus atau kembalikan ke pengembangan
+        //
+        // Laporan dan sign-off sengaja terpisah. Endpoint `POST /qa-requests` yang lama
+        // menggabungkan keduanya: laporan pelaksana langsung memindahkan status utama
+        // proyek, sehingga sign-off Lead tidak pernah menjadi keputusan tersendiri.
         Route::get('/qa-requests', [QARequestController::class, 'index']);
-        Route::post('/qa-requests', [QARequestController::class, 'store']);
-        Route::patch('/qa-requests/{id}/status', [QARequestController::class, 'updateStatus']);
+        Route::post('/qa-requests/submit', [QARequestController::class, 'submitRequest']);
+        Route::post('/qa-requests/assign', [QARequestController::class, 'assign']);
+        Route::post('/qa-requests/report', [QARequestController::class, 'storeReport']);
+        Route::post('/qa-requests/sign-off', [QARequestController::class, 'signOff']);
 
         Route::get('/cyber-requests', [CyberRequestController::class, 'index']);
-        Route::post('/cyber-requests', [CyberRequestController::class, 'store']);
-        Route::patch('/cyber-requests/{id}/status', [CyberRequestController::class, 'updateStatus']);
+        Route::post('/cyber-requests/submit', [CyberRequestController::class, 'submitRequest']);
+        Route::post('/cyber-requests/assign', [CyberRequestController::class, 'assign']);
+        Route::post('/cyber-requests/report', [CyberRequestController::class, 'storeReport']);
+        Route::post('/cyber-requests/sign-off', [CyberRequestController::class, 'signOff']);
 
         // ----- RELEASE REQUEST & QUALITY GATE -----
         Route::get('/release-requests', [ReleaseRequestController::class, 'index']);
@@ -138,6 +191,7 @@ Route::prefix('v1')->group(function () {
         Route::middleware('role:super_admin,head_of_it')->group(function () {
             Route::get('/quality-gate/queue', [QualityGateController::class, 'queue']);
             Route::post('/quality-gate/approve', [QualityGateController::class, 'approve']);
+            Route::post('/quality-gate/reject', [QualityGateController::class, 'reject']);
         });
 
         // ----- DOCUMENT VAULT -----

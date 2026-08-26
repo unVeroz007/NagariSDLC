@@ -3,10 +3,11 @@
 namespace App\Http\Controllers\Api\V1;
 
 use App\Http\Controllers\Controller;
+use App\Http\Requests\Division\StoreDivisionRequest;
+use App\Http\Requests\Division\UpdateDivisionRequest;
 use App\Models\Division;
 use App\Traits\LogsActivity;
 use Illuminate\Http\JsonResponse;
-use Illuminate\Http\Request;
 
 class DivisionController extends Controller
 {
@@ -22,18 +23,14 @@ class DivisionController extends Controller
         ]);
     }
 
-    public function store(Request $request): JsonResponse
+    public function store(StoreDivisionRequest $request): JsonResponse
     {
-        $request->validate([
-            'code' => ['required', 'string', 'max:20', 'unique:divisions,code'],
-            'name' => ['required', 'string', 'max:255'],
-            'description' => ['nullable', 'string'],
-        ]);
+        $data = $request->validated();
 
         $division = Division::create([
-            'code' => $request->code,
-            'name' => $request->name,
-            'description' => $request->description,
+            'code' => $data['code'],
+            'name' => $data['name'],
+            'description' => $data['description'] ?? null,
         ]);
 
         $this->logActivity(
@@ -50,18 +47,12 @@ class DivisionController extends Controller
         ], 201);
     }
 
-    public function update(Request $request, int $id): JsonResponse
+    public function update(UpdateDivisionRequest $request, int $id): JsonResponse
     {
         $division = Division::findOrFail($id);
 
-        $request->validate([
-            'code' => ['sometimes', 'string', 'max:20', "unique:divisions,code,{$id}"],
-            'name' => ['sometimes', 'string', 'max:255'],
-            'description' => ['nullable', 'string'],
-        ]);
-
         $oldName = $division->name;
-        $division->update($request->only(['code', 'name', 'description']));
+        $division->update($request->validated());
 
         $this->logActivity(
             'update_division',
@@ -77,15 +68,41 @@ class DivisionController extends Controller
         ]);
     }
 
+    /**
+     * Hapus divisi (penghapusan lunak), setelah dipastikan tidak ada yang bergantung.
+     *
+     * Dua penghalang diperiksa:
+     *
+     *   1. pengguna terkait — `users.division_id` bersifat `SET NULL`, jadi penghapusan
+     *      tidak gagal tetapi seluruh anggotanya diam-diam kehilangan divisi;
+     *   2. proyek terkait — `projects.division_id` bersifat `NOT NULL` dan kini
+     *      `RESTRICT`. Sebelumnya kolom ini ber-CASCADE, sehingga menghapus satu divisi
+     *      yang tidak punya pengguna namun masih punya proyek memusnahkan seluruh proyek
+     *      itu berikut riwayat status, dokumen, dan approval-nya.
+     *
+     * Proyek dihitung dengan `withTrashed()` karena `Project` memakai penghapusan lunak:
+     * barisnya masih menempati tabel, jadi kunci asing `RESTRICT` tetap berlaku atasnya.
+     */
     public function destroy(int $id): JsonResponse
     {
         $division = Division::findOrFail($id);
 
         // Cegah hapus jika masih ada user terkait
-        if ($division->users()->count() > 0) {
+        $userCount = $division->users()->count();
+        if ($userCount > 0) {
             return response()->json([
                 'status'  => 'error',
-                'message' => "Divisi \"{$division->name}\" tidak dapat dihapus karena masih memiliki {$division->users()->count()} pengguna terkait.",
+                'message' => "Divisi \"{$division->name}\" tidak dapat dihapus karena masih memiliki {$userCount} pengguna terkait.",
+            ], 422);
+        }
+
+        // Cegah hapus jika masih ada proyek terkait, termasuk yang sudah dihapus lunak
+        $projectCount = $division->projects()->withTrashed()->count();
+        if ($projectCount > 0) {
+            return response()->json([
+                'status'  => 'error',
+                'message' => "Divisi \"{$division->name}\" tidak dapat dihapus karena masih memiliki {$projectCount} proyek terkait. "
+                    . 'Riwayat proyek merupakan bagian dari jejak audit dan tidak boleh ikut terhapus.',
             ], 422);
         }
 

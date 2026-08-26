@@ -3,10 +3,13 @@
 namespace Tests\Feature;
 
 use App\Enums\ProjectStatus;
+use App\Enums\TaskStatus;
 use App\Enums\UserRole;
 use App\Models\Division;
 use App\Models\DocumentVault;
 use App\Models\Project;
+use App\Models\ProjectTask;
+use App\Models\ProjectTeamMember;
 use App\Models\Role;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -17,6 +20,17 @@ class ProjectWorkflowTest extends TestCase
     use RefreshDatabase;
 
     protected User $admin;
+
+    /**
+     * Developer penanggung jawab task, dibutuhkan gerbang kelulusan SIT.
+     *
+     * `ProjectWorkflowService` menuntut setiap developer pada
+     * `Project::sitApprovalDeveloperIds()` menandatangani persetujuan Tahap 3, dan
+     * daftar itu kosong bila proyek tidak punya satu pun task ber-assignee. Nol
+     * developer wajib bukan keadaan sah untuk meluluskan SIT karena berarti tidak ada
+     * pihak yang bertanggung jawab atas hasil pengujian.
+     */
+    protected User $developer;
 
     protected Division $division;
 
@@ -29,6 +43,11 @@ class ProjectWorkflowTest extends TestCase
             'display_name' => 'Super Admin',
         ]);
 
+        $developerRole = Role::create([
+            'name' => UserRole::DEVELOPER->value,
+            'display_name' => 'Developer',
+        ]);
+
         $this->division = Division::create([
             'code' => 'IT-DEV',
             'name' => 'Divisi Pengembangan TI',
@@ -39,6 +58,15 @@ class ProjectWorkflowTest extends TestCase
             'email' => 'admin@nagari.co.id',
             'password' => bcrypt('password123'),
             'role_id' => $adminRole->id,
+            'division_id' => $this->division->id,
+            'is_active' => true,
+        ]);
+
+        $this->developer = User::create([
+            'name' => 'Developer SIT',
+            'email' => 'developer-sit@nagari.co.id',
+            'password' => bcrypt('password123'),
+            'role_id' => $developerRole->id,
             'division_id' => $this->division->id,
             'is_active' => true,
         ]);
@@ -174,8 +202,10 @@ class ProjectWorkflowTest extends TestCase
     public function test_sit_can_pass_with_uploaded_sign_off_document(): void
     {
         $project = $this->makeSitProject('Proyek SIT Dengan Berita Acara');
+        $task = $this->makeSitTask($project, 'Perbaikan alur transfer');
         $document = $this->createDocument($project, 'SIT_SIGNOFF');
         $this->linkDocumentToSitReview($project, $document);
+        $this->completeSitApprovals($project, [$task]);
 
         $response = $this->actingAs($this->admin)->patchJson("/api/v1/projects/{$project->id}/status", [
             'status' => ProjectStatus::SIT_PASSED->value,
@@ -193,14 +223,128 @@ class ProjectWorkflowTest extends TestCase
         ]);
     }
 
+    /**
+     * Berita acara adalah bukti dokumen, bukan bukti persetujuan.
+     *
+     * Sebelum gerbang kelengkapan Tahap 3 dipasang di `ProjectWorkflowService`,
+     * kelengkapan tanda tangan hanya dijaga tombol pada `SITUATWizard.jsx`. Satu
+     * permintaan langsung ke `PATCH /projects/{id}/status` karena itu dapat
+     * meluluskan SIT tanpa satu pun tanda tangan developer, PM, maupun Pimpinan
+     * Grup Pengembangan asalkan berkas berita acaranya sudah tertaut.
+     */
+    public function test_sit_cannot_pass_when_stage_three_approvals_are_incomplete(): void
+    {
+        $project = $this->makeSitProject('Proyek SIT Tanpa Tanda Tangan');
+        $task = $this->makeSitTask($project, 'Perbaikan alur transfer');
+        $document = $this->createDocument($project, 'SIT_SIGNOFF');
+        $this->linkDocumentToSitReview($project, $document);
+
+        // Task sudah disetujui pada Eksekusi Pengujian, tetapi seluruh slot tanda tangan
+        // Tahap 3 masih kosong — inilah celah yang ditutup gerbang tersebut.
+        $project->update([
+            'sit_uat_data' => [
+                ...(array) $project->sit_uat_data,
+                'sit2_task_approvals' => ["task_{$task->id}" => ['approved' => true]],
+            ],
+        ]);
+
+        $this->actingAs($this->admin)->patchJson("/api/v1/projects/{$project->id}/status", [
+            'status' => ProjectStatus::SIT_PASSED->value,
+        ])
+            ->assertStatus(422)
+            ->assertJsonPath('status', 'error');
+
+        $this->assertDatabaseHas('projects', [
+            'id' => $project->id,
+            'status' => ProjectStatus::SIT_IN_PROGRESS->value,
+        ]);
+    }
+
     private function makeSitProject(string $title): Project
     {
         return Project::create([
             'req_id' => Project::generateReqId(),
             'title' => $title,
             'created_by' => $this->admin->id,
+            'pm_id' => $this->admin->id,
             'division_id' => $this->division->id,
             'status' => ProjectStatus::SIT_IN_PROGRESS->value,
+        ]);
+    }
+
+    /**
+     * Task SIT beserta keanggotaan timnya.
+     *
+     * `Project::sitApprovalDeveloperIds()` menggabungkan assignee task dengan anggota
+     * tim berperan developer, jadi keduanya dibuat sekaligus supaya daftar developer
+     * wajib tetap satu orang dan fixture tidak menuntut tanda tangan yang tak terduga.
+     */
+    private function makeSitTask(Project $project, string $title): ProjectTask
+    {
+        ProjectTeamMember::firstOrCreate([
+            'project_id' => $project->id,
+            'user_id' => $this->developer->id,
+        ], [
+            'role_in_project' => 'developer',
+            'assigned_by' => $this->admin->id,
+        ]);
+
+        return ProjectTask::create([
+            'project_id' => $project->id,
+            'title' => $title,
+            'status' => TaskStatus::DONE->value,
+            'assignee_id' => $this->developer->id,
+        ]);
+    }
+
+    /**
+     * Isi seluruh prasyarat persetujuan SIT putaran pertama.
+     *
+     * Empat hal yang dituntut `ProjectWorkflowService`: setiap task pada scope SIT
+     * disetujui di Eksekusi Pengujian (`sit2_task_approvals`), setiap developer wajib
+     * menandatangani (`sit3_approvals.developer.developers`), lalu slot PM dan
+     * Pimpinan Grup Pengembangan terisi.
+     *
+     * @param  array<int, ProjectTask>  $tasks
+     */
+    private function completeSitApprovals(Project $project, array $tasks): void
+    {
+        $taskApprovals = [];
+        foreach ($tasks as $task) {
+            // Prefix `task_` adalah bentuk yang ditulis `SITUATWizard.jsx`; pembacanya
+            // (`ProjectWorkflowService::sitTaskApproval()`) menerima ketiga bentuk kunci,
+            // dan fixture memakai bentuk yang benar-benar diproduksi frontend.
+            $taskApprovals["task_{$task->id}"] = [
+                'approved' => true,
+                'approvedAt' => now()->toIso8601String(),
+                'approvedById' => $this->developer->id,
+            ];
+        }
+
+        $project->update([
+            'sit_uat_data' => [
+                ...(array) $project->sit_uat_data,
+                'sit2_task_approvals' => $taskApprovals,
+                'sit3_approvals' => [
+                    'developer' => [
+                        'developers' => [[
+                            'userId' => $this->developer->id,
+                            'name' => $this->developer->name,
+                            'approvedAt' => now()->toIso8601String(),
+                        ]],
+                    ],
+                    'pm' => [
+                        'approved' => true,
+                        'userId' => $this->admin->id,
+                        'approvedAt' => now()->toIso8601String(),
+                    ],
+                    'development_lead' => [
+                        'approved' => true,
+                        'userId' => $this->admin->id,
+                        'approvedAt' => now()->toIso8601String(),
+                    ],
+                ],
+            ],
         ]);
     }
 

@@ -94,6 +94,72 @@ class ProjectCrudTest extends TestCase
             ->assertJsonPath('status', 'success');
     }
 
+    /**
+     * Prioritas pilihan pengaju tersimpan pada baris proyek.
+     *
+     * Sebelum kolom `projects.priority` ada, nilai ini dikirim form inisiasi tetapi
+     * tidak pernah divalidasi maupun ditulis, sehingga setiap proyek tampil dengan
+     * prioritas terendah di layar Lead.
+     */
+    public function test_create_project_saves_priority()
+    {
+        $response = $this->actingAs($this->admin)->postJson('/api/v1/projects', [
+            'title' => 'Proyek Prioritas',
+            'division_id' => $this->division->id,
+            'priority' => 'High',
+        ]);
+
+        $response->assertStatus(201)
+            ->assertJsonPath('data.priority', 'High');
+
+        $this->assertDatabaseHas('projects', [
+            'title' => 'Proyek Prioritas',
+            'priority' => 'High',
+        ]);
+    }
+
+    /**
+     * Label prioritas versi lama tetap diterima dan dipetakan ke nilai kanonis.
+     *
+     * Form inisiasi pernah mengirim `Rendah|Medium|Urgent` sementara seluruh layar
+     * pembaca membandingkan dengan `High|Medium|Low`. Klien versi lama tidak boleh
+     * ditolak validasi hanya karena memakai label lamanya.
+     */
+    public function test_create_project_maps_legacy_priority_labels()
+    {
+        $this->actingAs($this->admin)->postJson('/api/v1/projects', [
+            'title' => 'Proyek Urgent',
+            'division_id' => $this->division->id,
+            'priority' => 'Urgent',
+        ])->assertStatus(201)->assertJsonPath('data.priority', 'High');
+
+        $this->actingAs($this->admin)->postJson('/api/v1/projects', [
+            'title' => 'Proyek Rendah',
+            'division_id' => $this->division->id,
+            'priority' => 'Rendah',
+        ])->assertStatus(201)->assertJsonPath('data.priority', 'Low');
+    }
+
+    public function test_create_project_rejects_unknown_priority()
+    {
+        $this->actingAs($this->admin)->postJson('/api/v1/projects', [
+            'title' => 'Proyek Prioritas Ngawur',
+            'division_id' => $this->division->id,
+            'priority' => 'Sangat Sangat Penting',
+        ])->assertStatus(422)->assertJsonValidationErrors('priority');
+    }
+
+    /**
+     * Pengajuan tanpa prioritas tetap sah dan memakai nilai bawaan.
+     */
+    public function test_create_project_defaults_priority_to_medium()
+    {
+        $this->actingAs($this->admin)->postJson('/api/v1/projects', [
+            'title' => 'Proyek Tanpa Prioritas',
+            'division_id' => $this->division->id,
+        ])->assertStatus(201)->assertJsonPath('data.priority', 'Medium');
+    }
+
     public function test_create_project_saves_contact_phone()
     {
         $response = $this->actingAs($this->admin)->postJson('/api/v1/projects', [
@@ -220,6 +286,73 @@ class ProjectCrudTest extends TestCase
         $this->assertEquals(2, $fresh->sit_uat_data['activeSitStep']);
         $this->assertTrue($fresh->sit_uat_data['sit2_task_approvals'][10]['approved']);
         $this->assertEquals('bukti.png', $fresh->sit_uat_data['sit2_task_approvals'][10]['attachments'][0]['name']);
+    }
+
+    public function test_sit_task_approvals_are_frozen_after_sit_passed()
+    {
+        // Berita acara SIT sudah final begitu proyek melewati SIT. Kiriman PATCH yang
+        // mencoba mengubah `sit2_task_approvals` pada status pasca-SIT harus diabaikan,
+        // menyisakan bukti yang tersimpan apa adanya.
+        $project = Project::create([
+            'req_id' => Project::generateReqId(),
+            'title' => 'Proyek SIT Beku',
+            'created_by' => $this->admin->id,
+            'division_id' => $this->division->id,
+            'status' => ProjectStatus::SIT_PASSED->value,
+            'sit_uat_data' => [
+                'activeSitStep' => 3,
+                'sit2_task_approvals' => [
+                    'task_10' => ['approved' => true, 'comment' => 'Lolos final', 'attachments' => []],
+                ],
+            ],
+        ]);
+
+        $response = $this->actingAs($this->admin)->patchJson("/api/v1/projects/{$project->id}", [
+            'sitUatData' => [
+                'sit2_task_approvals' => [
+                    'task_10' => ['approved' => false, 'comment' => 'Diubah setelah beku', 'attachments' => []],
+                ],
+            ],
+        ]);
+
+        $response->assertStatus(200)->assertJsonPath('status', 'success');
+
+        // Nilai tersimpan dipertahankan, bukan nilai kiriman.
+        $fresh = $project->fresh();
+        $this->assertTrue($fresh->sit_uat_data['sit2_task_approvals']['task_10']['approved']);
+        $this->assertEquals('Lolos final', $fresh->sit_uat_data['sit2_task_approvals']['task_10']['comment']);
+    }
+
+    public function test_sit_task_approvals_writable_during_sit_in_progress()
+    {
+        // Selama SIT masih berjalan, layar Eksekusi SIT sah menulis persetujuan task.
+        $project = Project::create([
+            'req_id' => Project::generateReqId(),
+            'title' => 'Proyek SIT Berjalan',
+            'created_by' => $this->admin->id,
+            'division_id' => $this->division->id,
+            'status' => ProjectStatus::SIT_IN_PROGRESS->value,
+            'sit_uat_data' => [
+                'activeSitStep' => 2,
+                'sit2_task_approvals' => [
+                    'task_10' => ['approved' => false, 'comment' => '', 'attachments' => []],
+                ],
+            ],
+        ]);
+
+        $response = $this->actingAs($this->admin)->patchJson("/api/v1/projects/{$project->id}", [
+            'sitUatData' => [
+                'sit2_task_approvals' => [
+                    'task_10' => ['approved' => true, 'comment' => 'Lolos SIT', 'attachments' => []],
+                ],
+            ],
+        ]);
+
+        $response->assertStatus(200)->assertJsonPath('status', 'success');
+
+        $fresh = $project->fresh();
+        $this->assertTrue($fresh->sit_uat_data['sit2_task_approvals']['task_10']['approved']);
+        $this->assertEquals('Lolos SIT', $fresh->sit_uat_data['sit2_task_approvals']['task_10']['comment']);
     }
 
     public function test_pm_sees_only_projects_they_manage_in_development()

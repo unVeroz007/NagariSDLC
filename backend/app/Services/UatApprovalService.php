@@ -56,9 +56,11 @@ class UatApprovalService
 
                 return [
                     'id' => $approver->id,
+                    'kind' => 'uat',
                     'status' => $approver->status->value,
                     'approval_role' => $approver->approval_role->value,
                     'approval_role_label' => $approver->approval_role->label(),
+                    'can_reject' => $approver->approval_role->canReject(),
                     'position' => $approver->position,
                     'decision_note' => $approver->decision_note,
                     'decided_at' => $approver->decided_at?->toIso8601String(),
@@ -90,8 +92,7 @@ class UatApprovalService
             if ($status !== ProjectStatus::UAT_IN_PROGRESS->value
                 || (int) ($uatData['activeUatStep'] ?? 1) < 3
                 || empty($uatData['uat2_summary']['conclusion'] ?? null)
-                || ($uatData['uat2_resume_after_sit'] ?? false) === true
-                || ($uatData['uat2_verification_mode'] ?? false) === true) {
+                || $project->isUatRestartPending()) {
                 throw ValidationException::withMessages([
                     'project' => 'Putaran approval hanya dapat dibuat setelah hasil UAT final dan seluruh revisi Mayor selesai.',
                 ]);
@@ -294,24 +295,73 @@ class UatApprovalService
         ];
     }
 
+    /**
+     * Verifikasi nomor HP pemilik link approval eksternal.
+     *
+     * Link eksternal hanya dijaga oleh nomor HP, jadi rate limit-nya adalah satu-satunya
+     * penghalang percobaan tebak. Sebelumnya percobaan ke-5 menyetel
+     * `verification_attempts` kembali ke 0 sambil memasang masa kunci: begitu kuncinya
+     * habis, penghitungnya sudah bersih sehingga kuota penuh kembali tersedia dan siklus
+     * itu dapat diulang tanpa batas — jumlah percobaan seumur link tidak pernah benar-benar
+     * dibatasi. Selain itu, selama terkunci baris tersebut melaporkan `attempts = 0`,
+     * sehingga tidak ada jejak bahwa kunci sedang berlaku.
+     *
+     * Sekarang penghitungnya monoton: hanya verifikasi yang **berhasil** (atau pembuatan
+     * ulang link oleh PM) yang mengembalikannya ke 0. Setiap kelipatan `max_attempts`
+     * kegagalan memasang masa kunci baru yang durasinya bertambah (15, 30, 45 menit, …),
+     * dibatasi 24 jam, sehingga penebak berulang melambat sendiri sementara approver yang
+     * hanya salah ketik tetap bisa mencoba lagi setelah menunggu.
+     *
+     * Catatan penting tentang transaksinya: `ValidationException` tidak boleh lagi
+     * dilempar dari dalam closure `DB::transaction()`. Dulu justru begitu, dan akibatnya
+     * seluruh rate limit ini tidak pernah bekerja sama sekali — `DB::transaction()`
+     * me-rollback saat closure-nya melempar exception, jadi kenaikan
+     * `verification_attempts` selalu ikut dibatalkan bersama pesan errornya dan setiap
+     * percobaan gagal selalu dimulai dari nol. Karena itu closure hanya mengembalikan
+     * hasil, dan exception dilempar setelah transaksinya commit.
+     */
     public function verifyPhone(string $token, string $phone): array
     {
-        return DB::transaction(function () use ($token, $phone): array {
+        $outcome = DB::transaction(function () use ($token, $phone): array {
             $approver = $this->approverFromLink($token, true);
+            $maxAttempts = max(1, (int) config('uat.verification.max_attempts', 5));
+            $lockoutMinutes = max(1, (int) config('uat.verification.lockout_minutes', 15));
+
+            // Selama terkunci, baris tidak disentuh sama sekali. Menulis apa pun di sini
+            // membuka jalan untuk mereset — atau justru memperpanjang tanpa batas — masa
+            // kunci hanya dengan mengirim permintaan berulang.
             if ($approver->verification_locked_until?->isFuture()) {
-                throw ValidationException::withMessages([
-                    'phone' => 'Terlalu banyak percobaan. Silakan coba kembali beberapa menit lagi.',
-                ]);
+                return ['error' => 'Terlalu banyak percobaan. '.$this->retryHint($approver->verification_locked_until)];
             }
 
             $matches = hash_equals((string) $approver->phone_hash, $this->phoneHash($this->normalizePhone($phone)));
             if (! $matches) {
-                $attempts = $approver->verification_attempts + 1;
+                // `verification_attempts` adalah TINYINT unsigned (maks 255). Penghitung
+                // dibatasi pada kelipatan `max_attempts` terbesar yang masih muat: MySQL
+                // strict mode akan menolak nilai di atas 255, dan berhenti tepat di
+                // kelipatan menjaga agar setiap kegagalan selanjutnya tetap memasang kunci
+                // (durasi maksimum) alih-alih lolos karena sisa modulo yang tidak nol.
+                $attempts = min((int) $approver->verification_attempts + 1, intdiv(255, $maxAttempts) * $maxAttempts);
+                $lockNow = $attempts % $maxAttempts === 0;
+                // Masa kunci bertambah panjang setiap blok kegagalan berikutnya. Pembagian
+                // memakai penghitung monoton, jadi blok ke-2 mengunci dua kali lebih lama.
+                $lockedUntil = $lockNow
+                    ? now()->addMinutes(min($lockoutMinutes * intdiv($attempts, $maxAttempts), 24 * 60))
+                    : $approver->verification_locked_until;
                 $approver->update([
-                    'verification_attempts' => $attempts >= 5 ? 0 : $attempts,
-                    'verification_locked_until' => $attempts >= 5 ? now()->addMinutes(15) : null,
+                    'verification_attempts' => $attempts,
+                    // Timestamp kunci yang sudah kedaluwarsa dibiarkan apa adanya sebagai
+                    // jejak kapan kunci terakhir berlaku; gerbang di atas hanya melihat
+                    // yang masih `isFuture()`.
+                    'verification_locked_until' => $lockedUntil,
                 ]);
-                throw ValidationException::withMessages(['phone' => 'Data verifikasi tidak sesuai.']);
+
+                return [
+                    'error' => $lockNow
+                        ? 'Data verifikasi tidak sesuai. Batas percobaan tercapai. '.$this->retryHint($lockedUntil)
+                        : 'Data verifikasi tidak sesuai. Sisa percobaan sebelum akses dikunci: '
+                            .($maxAttempts - ($attempts % $maxAttempts)).'.',
+                ];
             }
 
             $accessToken = Str::random(80);
@@ -328,7 +378,36 @@ class UatApprovalService
                 'expires_at' => $approver->access_expires_at?->toIso8601String(),
             ];
         });
+
+        if (isset($outcome['error'])) {
+            throw ValidationException::withMessages(['phone' => $outcome['error']]);
+        }
+
+        return $outcome;
     }
+
+    /**
+     * Petunjuk kapan approver boleh mencoba lagi.
+     *
+     * Disampaikan relatif (menit) karena `app.timezone` adalah UTC: menampilkan jam
+     * dinding di sini justru menyesatkan approver yang membaca waktu WIB.
+     */
+    private function retryHint(?\Carbon\CarbonInterface $lockedUntil): string
+    {
+        // Selisih dihitung dari timestamp mentah, bukan `diffInMinutes()`, agar tidak
+        // bergantung pada konvensi tanda argumen `absolute` milik Carbon.
+        $seconds = $lockedUntil ? $lockedUntil->getTimestamp() - now()->getTimestamp() : 0;
+        $minutes = (int) ceil(max(0, $seconds) / 60);
+        if ($minutes < 1) {
+            return 'Silakan coba kembali sekarang.';
+        }
+        if ($minutes < 60) {
+            return "Silakan coba kembali dalam {$minutes} menit.";
+        }
+
+        return 'Silakan coba kembali dalam '.(int) ceil($minutes / 60).' jam.';
+    }
+
 
     public function publicDetail(string $token, string $accessToken): array
     {
@@ -366,6 +445,23 @@ class UatApprovalService
         return $this->serializeApprover($approver->fresh());
     }
 
+    /**
+     * Keputusan approver internal (in-app).
+     *
+     * Jejak auditnya sepenuhnya ditulis oleh `recordDecision()`. Dahulu method ini
+     * menambah satu baris `ActivityLog` lagi (`uat_internal_decision`) sehingga satu
+     * keputusan menghasilkan dua baris audit dengan isi yang hampir sama. Baris kedua
+     * itu dibuang, bukan yang di `recordDecision()`, karena: baris `recordDecision()`
+     * lebih lengkap (menyimpan `ip_address` dan `metadata.mode`), berlaku untuk jalur
+     * internal maupun eksternal sehingga pembacanya tidak perlu menggabungkan dua nama
+     * action, dan ditulis di dalam transaksi yang sama dengan perubahan statusnya —
+     * sedangkan `log()` di sini berjalan setelah transaksi tersebut selesai, jadi
+     * kegagalannya menghasilkan keputusan tanpa jejak.
+     *
+     * Satu-satunya field yang hanya dimiliki baris lama, `metadata.project_id`,
+     * dipindahkan ke baris yang tetap ada karena `ActivityLogController::index()`
+     * memakainya untuk filter `?project_id=`.
+     */
     public function decideInternal(Project $project, UatApprover $approver, User $actor, string $decision, ?string $note, Request $request): array
     {
         $this->assertActiveApprover($project, $approver);
@@ -373,9 +469,6 @@ class UatApprovalService
             throw ValidationException::withMessages(['approver' => 'Approval ini tidak ditugaskan kepada akun Anda.']);
         }
         $this->recordDecision($approver, $decision, $note, $request);
-        $this->log($actor, $project, 'uat_internal_decision', 'Keputusan Persetujuan UAT',
-            "{$actor->name} memberikan keputusan {$decision} untuk UAT.",
-            ['round' => $approver->round->round_number, 'approver_id' => $approver->id, 'decision' => $decision]);
 
         return $this->serializeApprover($approver->fresh());
     }
@@ -414,6 +507,38 @@ class UatApprovalService
             && $requiredApprovers->every(fn (UatApprover $approver): bool => $approver->status === UatApprovalStatus::APPROVED);
     }
 
+    /**
+     * ID user penanda tangan internal pada putaran persetujuan yang sedang berjalan.
+     *
+     * Dipakai untuk memberi tahu penanda tangan bahwa penahanan persetujuan sudah
+     * lepas. Penanda tangan eksternal tidak memiliki akun, jadi tidak dapat menerima
+     * notifikasi dalam aplikasi — jalur pemberitahuannya adalah tautan publik.
+     * Baris `REVOKED` dilewati karena orangnya sudah tidak lagi diminta menyetujui.
+     *
+     * @return list<int>
+     */
+    public function activeInternalApproverUserIds(Project $project): array
+    {
+        $round = UatApprovalRound::query()
+            ->with('approvers')
+            ->where('project_id', $project->id)
+            ->whereIn('status', [
+                UatApprovalRoundStatus::ACTIVE->value,
+                UatApprovalRoundStatus::COMPLETED->value,
+            ])
+            ->latest('round_number')
+            ->first();
+
+        return $round?->approvers
+            ->reject(fn (UatApprover $approver): bool => $approver->status === UatApprovalStatus::REVOKED)
+            ->pluck('user_id')
+            ->filter()
+            ->map(fn ($userId): int => (int) $userId)
+            ->unique()
+            ->values()
+            ->all() ?? [];
+    }
+
     public function supersedeActiveRounds(Project $project, string $reason): void
     {
         UatApprovalRound::query()
@@ -426,6 +551,18 @@ class UatApprovalService
             ->each(fn (UatApprovalRound $round) => $this->supersedeRound($round, $reason));
     }
 
+    /**
+     * Validasi roster approver sebelum sebuah putaran dibuat atau disinkronkan.
+     *
+     * Prasyarat: `$participants` sudah disaring `isApprover === true` dan di-reindex
+     * (`values()`), sebagaimana dilakukan `startNewRound()` dan `syncActiveRound()`.
+     * Peserta non-approver (observer) tidak pernah sampai ke sini, sehingga orang yang
+     * sama boleh muncul sebagai observer di samping satu entri approver.
+     *
+     * Semua aturan di sini disengaja berada di satu tempat: kedua pintu masuk putaran
+     * memanggil method ini, jadi aturan baru otomatis berlaku untuk pembuatan putaran
+     * maupun sinkronisasi peserta.
+     */
     private function validateParticipants(Project $project, array $participants): void
     {
         $errors = [];
@@ -446,9 +583,36 @@ class UatApprovalService
         }
 
         $seenUsers = [];
+        $seenKeys = [];
+        $seenItUsers = [];
         foreach ($participants as $index => $participant) {
             $prefix = "participants.{$index}";
+            // Pesan validasi selalu menyebut nama peserta: PM-lah yang menyunting roster
+            // di UAT Tahap 1, jadi ia harus tahu baris mana yang harus diperbaiki, bukan
+            // sekadar bahwa "roster tidak valid".
+            $label = trim((string) ($participant['name'] ?? '')) ?: 'peserta ke-'.($index + 1);
             if (blank($participant['name'] ?? null)) $errors[$prefix.'.name'][] = 'Nama approver wajib diisi.';
+
+            // `participant_key` sebelumnya hanya dijaga oleh unique komposit
+            // `(uat_approval_round_id, participant_key)`. Roster dengan dua `id` kembar
+            // baru meledak saat `INSERT` approver kedua — sebagai integrity error driver,
+            // setelah baris putaran dibuat di dalam transaksi — sehingga PM hanya melihat
+            // kegagalan mentah tanpa petunjuk peserta mana yang bermasalah.
+            //
+            // `id` kosong sama berbahayanya walaupun tidak melanggar constraint:
+            // `approverAttributes()` akan membuat UUID baru setiap kali, jadi kuncinya
+            // tidak stabil antar putaran, `syncActiveRound()` tidak pernah dapat
+            // mencocokkannya, dan `activeMatrix()` menandai putaran itu selamanya
+            // `is_out_of_sync`.
+            $participantKey = trim((string) ($participant['id'] ?? ''));
+            if ($participantKey === '') {
+                $errors[$prefix.'.id'][] = "Peserta \"{$label}\" belum memiliki penanda unik (id). Buka UAT Tahap 1, hapus lalu tambahkan kembali baris peserta ini, kemudian simpan.";
+            } elseif (isset($seenKeys[$participantKey])) {
+                $errors[$prefix.'.id'][] = "Peserta \"{$label}\" memakai id yang sama dengan \"{$seenKeys[$participantKey]}\". Setiap peserta UAT wajib memiliki id unik — hapus salah satu baris kembar di UAT Tahap 1 lalu tambahkan kembali sebagai peserta baru.";
+            } else {
+                $seenKeys[$participantKey] = $label;
+            }
+
             try {
                 $role = UatApprovalRole::from((string) ($participant['approvalRole'] ?? ''));
                 $mode = UatApproverMode::from((string) ($participant['approvalMode'] ?? ''));
@@ -456,17 +620,15 @@ class UatApprovalService
                 $errors[$prefix][] = 'Jenis atau metode approval tidak valid.';
                 continue;
             }
-            if ($role->side() === 'requester' && $mode !== UatApproverMode::EXTERNAL_LINK) {
-                $errors[$prefix.'.approvalMode'][] = 'Pihak peminta menggunakan link approval eksternal.';
-            }
-            if ($role->side() === 'it' && $mode !== UatApproverMode::INTERNAL_ACCOUNT) {
-                $errors[$prefix.'.approvalMode'][] = 'Pihak IT wajib menggunakan akun internal.';
+            if ($mode !== $role->requiredMode()) {
+                $errors[$prefix.'.approvalMode'][] = $role->requiredMode() === UatApproverMode::EXTERNAL_LINK
+                    ? 'Pimpinan grup dan pimpinan divisi pemohon menggunakan link approval eksternal.'
+                    : 'Posisi ini wajib menggunakan akun internal aplikasi.';
             }
             if ($mode === UatApproverMode::EXTERNAL_LINK) {
                 try { $this->normalizePhone((string) ($participant['phone'] ?? '')); }
                 catch (ValidationException) {
-                    $participantName = trim((string) ($participant['name'] ?? '')) ?: 'peserta ke-'.($index + 1);
-                    $errors[$prefix.'.phone'][] = "Nomor HP {$participantName} tidak valid. Gunakan format 08... atau +62...";
+                    $errors[$prefix.'.phone'][] = "Nomor HP {$label} tidak valid. Gunakan format 08... atau +62...";
                 }
             } else {
                 $userId = (int) ($participant['userId'] ?? 0);
@@ -474,11 +636,41 @@ class UatApprovalService
                     $errors[$prefix.'.userId'][] = 'Approver internal wajib terhubung ke akun aktif.';
                 } elseif (isset($seenUsers[$role->value.':'.$userId])) {
                     $errors[$prefix.'.userId'][] = 'Akun yang sama tidak boleh diduplikasi pada posisi approval yang sama.';
+                } elseif ($role->side() === 'it' && isset($seenItUsers[$userId])) {
+                    // Prinsip empat mata. Bila satu akun menempati dua slot approval sisi IT
+                    // — misalnya Pimpinan Grup Pengembangan sekaligus Pimpinan Divisi
+                    // Teknologi — maka satu klik orang yang sama memenuhi dua persetujuan
+                    // wajib, dan `required_count` hanya tampak terpenuhi tanpa kontrol nyata.
+                    //
+                    // Yang sengaja TIDAK ditolak:
+                    // - slot pemohon (`side() === 'requester'`), lihat catatan di bawah;
+                    // - approver eksternal, yang memang tidak punya `userId`;
+                    // - orang yang sama sebagai peserta non-approver (observer) — roster
+                    //   sudah disaring `isApprover === true` sebelum masuk method ini.
+                    $errors[$prefix.'.userId'][] = "{$label} sudah ditetapkan sebagai {$seenItUsers[$userId]} pada putaran ini. Satu akun tidak boleh mengisi dua posisi approval sisi IT; tetapkan akun lain untuk {$role->label()}.";
                 }
                 if ($role === UatApprovalRole::DEVELOPER && ! $projectDeveloperIds->contains($userId)) {
                     $errors[$prefix.'.userId'][] = 'Developer approver harus merupakan developer yang mengerjakan task pada proyek ini.';
                 }
+                // Slot pemohon harus akun yang benar-benar mengajukan proyek. Tanpa
+                // ikatan ini, persetujuan pemohon dapat dilimpahkan ke akun lain,
+                // sementara gerbang baca matriks (`created_by`) dan gerbang keputusan
+                // in-app (`user_id`) mengacu pada dua orang yang berbeda.
+                //
+                // Ikatan itu juga alasan slot pemohon dikecualikan dari aturan empat mata
+                // di atas: `created_by` tidak dapat diubah oleh PM, jadi bila pemohon
+                // proyek kebetulan orang IT yang juga wajib mengisi slot Analyst/PM,
+                // aturan tanpa pengecualian akan membuat putaran approval mustahil dibuka
+                // dan PM tidak punya cara apa pun untuk memperbaikinya. Pemohon pun bukan
+                // kontrol IT: ia sisi peminta, dan tumpang tindihnya terlihat jelas pada
+                // matriks karena kolom `side` berbeda.
+                if ($role === UatApprovalRole::REQUESTER && $userId !== (int) $project->created_by) {
+                    $errors[$prefix.'.userId'][] = 'Approver pemohon harus akun yang mengajukan proyek ini.';
+                }
                 $seenUsers[$role->value.':'.$userId] = true;
+                if ($userId && $role->side() === 'it') {
+                    $seenItUsers[$userId] ??= $role->label();
+                }
             }
         }
         if ($errors) throw ValidationException::withMessages($errors);
@@ -532,37 +724,74 @@ class UatApprovalService
         ]);
     }
 
+    /**
+     * Catat keputusan seorang approver beserta jejak auditnya.
+     *
+     * Seluruh tulisan berada dalam satu transaksi. Sebelumnya pembaruan status
+     * approver, penyegaran status putaran, dan pembuatan `ActivityLog` berjalan
+     * terpisah: bila pembuatan log gagal, keputusan tetap tersimpan — bahkan putaran
+     * dapat berpindah ke COMPLETED — tanpa satu pun baris audit. Untuk aplikasi tata
+     * kelola SDLC, keputusan approval tanpa jejak audit sama buruknya dengan
+     * keputusan yang hilang.
+     */
     private function recordDecision(UatApprover $approver, string $decision, ?string $note, Request $request): void
     {
         $this->assertActiveApprover($approver->round->project, $approver);
         if ($approver->status !== UatApprovalStatus::PENDING) {
             throw ValidationException::withMessages(['decision' => 'Keputusan untuk approval ini sudah diberikan.']);
         }
+        if ($decision === 'rejected' && ! $approver->approval_role->canReject()) {
+            throw ValidationException::withMessages([
+                'decision' => 'Posisi approval ini hanya dapat menyetujui. Penolakan dan permintaan revisi dilakukan pada saat eksekusi UAT.',
+            ]);
+        }
         if ($decision === 'rejected' && blank($note)) {
             throw ValidationException::withMessages(['note' => 'Alasan penolakan wajib diisi.']);
         }
 
-        $approver->update([
-            'status' => UatApprovalStatus::from($decision),
-            'decision_note' => filled($note) ? trim($note) : null,
-            'decided_at' => now(),
-            'decision_ip' => $request->ip(),
-            'decision_user_agent' => Str::limit((string) $request->userAgent(), 1000, ''),
-        ]);
+        DB::transaction(function () use ($approver, $decision, $note, $request): void {
+            // Baris approval dikunci lalu statusnya diperiksa ulang di dalam transaksi.
+            // Pemeriksaan di luar transaksi saja tidak cukup: dua permintaan yang tiba
+            // bersamaan — tombol diklik dua kali, atau satu link dibuka pada dua
+            // perangkat — sama-sama membaca status PENDING, sehingga keputusannya
+            // tercatat dua kali beserta dua baris audit.
+            $locked = UatApprover::query()->lockForUpdate()->findOrFail($approver->getKey());
+            if ($locked->status !== UatApprovalStatus::PENDING) {
+                throw ValidationException::withMessages(['decision' => 'Keputusan untuk approval ini sudah diberikan.']);
+            }
 
-        $round = $approver->round()->with('approvers')->firstOrFail();
-        $this->refreshRoundCompletion($round);
+            $locked->update([
+                'status' => UatApprovalStatus::from($decision),
+                'decision_note' => filled($note) ? trim($note) : null,
+                'decided_at' => now(),
+                'decision_ip' => $request->ip(),
+                'decision_user_agent' => Str::limit((string) $request->userAgent(), 1000, ''),
+            ]);
 
-        ActivityLog::create([
-            'user_id' => $approver->user_id,
-            'action' => 'uat_approval_decision',
-            'action_label' => 'Keputusan Persetujuan UAT',
-            'description' => "{$approver->name} memberikan keputusan {$decision} pada UAT proyek \"{$round->project->title}\".",
-            'subject_type' => Project::class,
-            'subject_id' => $round->project_id,
-            'metadata' => ['round' => $round->round_number, 'approver_id' => $approver->id, 'decision' => $decision, 'mode' => $approver->approval_mode->value],
-            'ip_address' => $request->ip(),
-        ]);
+            $round = $locked->round()->with(['approvers', 'project'])->firstOrFail();
+            $this->refreshRoundCompletion($round);
+
+            ActivityLog::create([
+                'user_id' => $locked->user_id,
+                'action' => 'uat_approval_decision',
+                'action_label' => 'Keputusan Persetujuan UAT',
+                'description' => "{$locked->name} memberikan keputusan {$decision} pada UAT proyek \"{$round->project->title}\".",
+                'subject_type' => Project::class,
+                'subject_id' => $round->project_id,
+                // `project_id` diwarisi dari baris `uat_internal_decision` yang dulu ditulis
+                // ganda: `ActivityLogController::index()` menyaring `?project_id=` lewat
+                // metadata, bukan lewat `subject_id`, jadi tanpa key ini keputusan UAT
+                // hilang dari linimasa proyek.
+                'metadata' => [
+                    'project_id' => $round->project_id,
+                    'round' => $round->round_number,
+                    'approver_id' => $locked->id,
+                    'decision' => $decision,
+                    'mode' => $locked->approval_mode->value,
+                ],
+                'ip_address' => $request->ip(),
+            ]);
+        });
     }
 
     private function approverFromLink(string $token, bool $lock = false): UatApprover
@@ -609,8 +838,19 @@ class UatApprovalService
         $status = $project->status instanceof ProjectStatus ? $project->status->value : (string) $project->status;
         $data = (array) $project->sit_uat_data;
         if ($status !== ProjectStatus::UAT_IN_PROGRESS->value || (int) ($data['activeUatStep'] ?? 1) < 3
-            || ($data['uat2_resume_after_sit'] ?? false) === true || ($data['uat2_verification_mode'] ?? false) === true) {
+            || $project->isUatRestartPending()) {
             throw ValidationException::withMessages(['project' => 'Persetujuan UAT belum tersedia atau sedang di-hold.']);
+        }
+
+        // Revisi Minor membiarkan putaran persetujuan terbuka — roster dan berita
+        // acaranya tetap sama — tetapi keputusannya ditahan sampai perbaikan selesai.
+        // Tanpa penahanan ini, tanda tangan jatuh pada versi aplikasi yang perbaikannya
+        // belum dikerjakan. Pesannya dibedakan agar penanda tangan tahu ia hanya perlu
+        // menunggu, bukan mencari tahap yang belum diselesaikan.
+        if ($project->isUatMinorRevisionPending()) {
+            throw ValidationException::withMessages([
+                'project' => 'Persetujuan UAT ditahan sampai perbaikan revisi Minor diselesaikan tim pengembangan.',
+            ]);
         }
     }
 
@@ -652,9 +892,23 @@ class UatApprovalService
         return $digits;
     }
 
+    /**
+     * Keyed hash nomor HP approver eksternal.
+     *
+     * Kuncinya dipisahkan dari `APP_KEY` lewat `config('uat.phone_hash_key')`.
+     * Rotasi `APP_KEY` adalah operasi keamanan rutin, tetapi dulu efek sampingnya
+     * membatalkan seluruh `phone_hash` yang tersimpan sekaligus — setiap approver
+     * eksternal terkunci dari link-nya tanpa error yang menunjuk penyebabnya.
+     *
+     * Fallback ke `APP_KEY` disengaja dan wajib dipertahankan: hash yang sudah ada
+     * di basis data produksi dihitung dengan `APP_KEY`, jadi deployment yang belum
+     * menyetel `UAT_PHONE_HASH_KEY` harus tetap dapat memverifikasinya.
+     */
     private function phoneHash(string $phone): string
     {
-        return hash_hmac('sha256', $phone, (string) config('app.key'));
+        $key = (string) config('uat.phone_hash_key');
+
+        return hash_hmac('sha256', $phone, $key !== '' ? $key : (string) config('app.key'));
     }
 
     private function maskPhone(string $phone): string
@@ -677,13 +931,22 @@ class UatApprovalService
             ->merge(collect($data['uat2_additional_requests'] ?? [])->flatMap(fn ($item) => collect($item['verificationAttachments'] ?? [])->pluck('docId')))
             ->filter(fn ($id) => is_numeric($id))->map(fn ($id) => (int) $id)->unique();
 
-        return $project->documents()->whereKey($ids->all())->get()->map(fn (DocumentVault $document): array => [
-            'id' => $document->id,
-            'name' => $document->file_name,
-            'type' => $document->document_type,
-            'size' => $document->file_size,
-            'category' => $finalApprovalIds->contains((int) $document->id) ? 'final_approval' : 'supporting',
-        ])->values()->all();
+        // Approver eksternal — pimpinan grup dan pimpinan divisi pemohon — hanya boleh
+        // melihat berkas yang juga terlihat oleh pemohon proyek. Daftar tipe diambil
+        // dari `DocumentVault` agar tampilan pemohon dan halaman link memakai satu
+        // sumber kebenaran; berkas internal seperti laporan cyber atau lampiran kerja
+        // tidak pernah bocor melalui link yang dibagikan ke luar tim IT.
+        return $project->documents()
+            ->whereKey($ids->all())
+            ->whereIn('document_type', DocumentVault::REQUESTER_VISIBLE_TYPES)
+            ->get()
+            ->map(fn (DocumentVault $document): array => [
+                'id' => $document->id,
+                'name' => $document->file_name,
+                'type' => $document->document_type,
+                'size' => $document->file_size,
+                'category' => $finalApprovalIds->contains((int) $document->id) ? 'final_approval' : 'supporting',
+            ])->values()->all();
     }
 
     private function serializeRound(UatApprovalRound $round): array
@@ -715,6 +978,9 @@ class UatApprovalService
             'approval_role' => $approver->approval_role->value,
             'approval_role_label' => $approver->approval_role->label(),
             'approval_mode' => $approver->approval_mode->value,
+            // Dipakai frontend untuk menyembunyikan tombol tolak. Aturannya tetap
+            // ditegakkan di `recordDecision`; nilai ini hanya menyelaraskan tampilan.
+            'can_reject' => $approver->approval_role->canReject(),
             'name' => $approver->name,
             'position' => $approver->position,
             'unit' => $approver->unit,
