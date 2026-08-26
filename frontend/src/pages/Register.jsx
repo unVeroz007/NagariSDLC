@@ -10,6 +10,7 @@ import {
     Eye,
     EyeOff,
     Building,
+    Phone,
     Shield,
     CheckCircle,
     AlertCircle,
@@ -37,6 +38,7 @@ export default function Register() {
         password: '',
         password_confirmation: '',
         division_id: '',
+        phone_number: '',
         terms: false,
     });
 
@@ -125,6 +127,17 @@ export default function Register() {
             newErrors.division_id = 'Pilih divisi';
         }
 
+        // Nomor handphone wajib (backend: required|string|min:8|max:20). Dipakai
+        // sebagai faktor verifikasi approval UAT non-IT, jadi tidak boleh kosong.
+        const phone = formData.phone_number.trim();
+        if (!phone) {
+            newErrors.phone_number = 'Nomor handphone wajib diisi';
+        } else if (phone.length > 20) {
+            newErrors.phone_number = 'Nomor handphone maksimal 20 karakter';
+        } else if (!/^[\d+\-\s()]{8,20}$/.test(phone)) {
+            newErrors.phone_number = 'Format nomor handphone tidak valid';
+        }
+
         if (!formData.terms) {
             newErrors.terms = 'Anda harus menyetujui syarat dan ketentuan';
         }
@@ -152,6 +165,7 @@ export default function Register() {
                 password: formData.password,
                 password_confirmation: formData.password_confirmation,
                 division_id: Number(formData.division_id),
+                phone_number: formData.phone_number.trim(),
             });
 
             if (!result.success) {
@@ -409,6 +423,31 @@ export default function Register() {
                                 <p className="mt-1.5 text-xs text-red-500 flex items-center gap-1">
                                     <AlertCircle size={12} />
                                     {errors.division_id}
+                                </p>
+                            )}
+                        </div>
+
+                        {/* No. Handphone (opsional) */}
+                        <div>
+                            <label className="block text-xs font-semibold text-gray-600 uppercase tracking-wider mb-2">
+                                No. Handphone <span className="text-red-500">*</span>
+                            </label>
+                            <div className="relative">
+                                <Phone size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                                <input
+                                    type="tel"
+                                    name="phone_number"
+                                    value={formData.phone_number}
+                                    onChange={handleChange}
+                                    placeholder="08xxxxxxxxxx"
+                                    className={`w-full pl-10 pr-4 py-3 border rounded-lg bg-gray-50 text-sm focus:ring-2 focus:ring-[#00529C] focus:border-[#00529C] outline-none transition-all ${errors.phone_number ? 'border-red-400' : 'border-gray-200'
+                                        }`}
+                                />
+                            </div>
+                            {errors.phone_number && (
+                                <p className="mt-1.5 text-xs text-red-500 flex items-center gap-1">
+                                    <AlertCircle size={12} />
+                                    {errors.phone_number}
                                 </p>
                             )}
                         </div>

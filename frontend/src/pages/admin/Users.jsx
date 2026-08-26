@@ -18,6 +18,17 @@ import {
     RefreshCw,
 } from 'lucide-react';
 
+/**
+ * Ubah nilai <select> (selalu string) menjadi id integer positif, atau null bila
+ * kosong/tidak sah. Tanpa ini `parseInt('')` menghasilkan NaN yang diserialisasi
+ * JSON menjadi `null`, dan backend menolak `role_id: null` dengan pesan
+ * "The role id field must be an integer."
+ */
+const toOptionalId = (value) => {
+    const parsed = Number(value);
+    return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
+};
+
 export default function UsersManagement() {
     const { roles: masterRoles, divisions: masterDivisions } = useMasterData();
 
@@ -37,15 +48,21 @@ export default function UsersManagement() {
         try {
             const res = await userService.getAll();
             if (res && res.data && Array.isArray(res.data)) {
+                // UserResource memaparkan `role`/`division` sebagai string nama, dan
+                // menaruh id-nya di `role_detail`/`division_detail`. Membaca `u.role.id`
+                // (seolah objek) selalu menghasilkan undefined, sehingga id role/divisi
+                // tidak pernah terisi — modal edit gagal memilih nilai awal dan submit
+                // mengirim `role_id: null` yang ditolak backend ("The role id field must
+                // be an integer.").
                 const formatted = res.data.map(u => ({
                     id: u.id,
                     name: u.name,
                     email: u.email,
-                    role: u.role?.name || 'developer',
-                    roleLabel: u.role?.display_name || u.role?.name || 'Developer',
-                    roleId: u.role?.id || null,
-                    department: u.division?.name || '-',
-                    divisionId: u.division?.id || null,
+                    role: u.role || 'developer',
+                    roleLabel: u.role_detail?.display_name || u.role_detail?.name || u.role || 'Developer',
+                    roleId: u.role_detail?.id ?? null,
+                    department: u.division || '-',
+                    divisionId: u.division_detail?.id ?? null,
                     status: u.is_active ? 'active' : 'inactive',
                     initial: u.name?.split(' ').map(n => n.charAt(0)).join('').toUpperCase().slice(0, 2) || 'U',
                     phoneNumber: u.phone_number || '',
@@ -124,16 +141,21 @@ export default function UsersManagement() {
             toast.error(passwordError);
             return;
         }
+        const roleId = toOptionalId(formData.role_id);
+        if (!roleId) {
+            toast.error('Peran (role) wajib dipilih.');
+            return;
+        }
 
         setIsSaving(true);
         try {
             const payload = {
-                name: formData.name,
-                email: formData.email,
+                name: formData.name.trim(),
+                email: formData.email.trim(),
                 password: formData.password,
-                role_id: parseInt(formData.role_id),
-                division_id: formData.division_id ? parseInt(formData.division_id) : null,
-                phone_number: formData.phone_number || null,
+                role_id: roleId,
+                division_id: toOptionalId(formData.division_id),
+                phone_number: formData.phone_number.trim() || null,
             };
             await userService.create(payload);
             toast.success(`Pengguna "${formData.name}" berhasil ditambahkan & tersimpan ke database!`);
@@ -163,14 +185,19 @@ export default function UsersManagement() {
             toast.error(passwordError);
             return;
         }
+        const roleId = toOptionalId(formData.role_id);
+        if (!roleId) {
+            toast.error('Peran (role) wajib dipilih.');
+            return;
+        }
 
         setIsSaving(true);
         try {
             const payload = {
-                name: formData.name,
-                role_id: parseInt(formData.role_id),
-                division_id: formData.division_id ? parseInt(formData.division_id) : null,
-                phone_number: formData.phone_number || null,
+                name: formData.name.trim(),
+                role_id: roleId,
+                division_id: toOptionalId(formData.division_id),
+                phone_number: formData.phone_number.trim() || null,
                 is_active: formData.is_active,
             };
             if (formData.password) {

@@ -73,7 +73,10 @@ class RegisterRequest extends FormRequest
                 Rule::exists('divisions', 'name'),
             ],
 
-            'phone_number' => ['nullable', 'string', 'max:20'],
+            // Wajib diisi: nomor telepon dipakai sebagai faktor verifikasi pada
+            // approval UAT non-IT, jadi setiap akun harus punya satu sejak dibuat.
+            // Batas atas 20 mengikuti lebar kolom `users.phone_number`.
+            'phone_number' => ['required', 'string', 'min:8', 'max:20'],
 
             // Ditolak secara eksplisit, bukan diabaikan diam-diam, supaya upaya
             // menaikkan hak akses lewat pendaftaran mandiri terlihat sebagai
@@ -96,6 +99,9 @@ class RegisterRequest extends FormRequest
             'division_id.required_without' => 'Divisi wajib dipilih.',
             'department.exists' => 'Divisi yang dipilih tidak terdaftar.',
             'department.required_without' => 'Divisi wajib dipilih.',
+            'phone_number.required' => 'Nomor handphone wajib diisi.',
+            'phone_number.min' => 'Nomor handphone minimal 8 karakter.',
+            'phone_number.max' => 'Nomor handphone maksimal 20 karakter.',
             'role.prohibited' => 'Peran akun tidak dapat ditentukan sendiri saat mendaftar. Semua pendaftaran mandiri terdaftar sebagai Business User.',
             'role_id.prohibited' => 'Peran akun tidak dapat ditentukan sendiri saat mendaftar. Semua pendaftaran mandiri terdaftar sebagai Business User.',
             'is_active.prohibited' => 'Status aktif akun tidak dapat ditentukan sendiri saat mendaftar.',
