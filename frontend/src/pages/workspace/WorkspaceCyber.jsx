@@ -1,75 +1,65 @@
 import { useState, useMemo, useEffect, useRef } from 'react';
-import { useAuth } from '../../contexts/AuthContext';
-import { useProjects, getProjectRealDocuments } from '../../contexts/ProjectContext';
+import { useProjects } from '../../contexts/ProjectContext';
+import { getProjectRealDocuments } from '../../utils/projectDocuments';
 import { useNotifications } from '../../contexts/NotificationContext';
-import { userService } from '../../services/api';
+import { userService, cyberRequestService } from '../../services/api';
 import RBBBadge from '../../components/RBBBadge';
 import ProjectTypeBadge from '../../components/ProjectTypeBadge';
-import LoadingSpinner from '../../components/LoadingSpinner';
 import DocumentViewerModal from '../../components/DocumentViewerModal';
+import TestReportReviewCard from '../../components/TestReportReviewCard';
 import {
-    PROJECT_STATUS,
     TRACK_STATUS,
     TRACK_STATUS_LABEL,
     getCyberTrackStatus,
-    isTrackPassed,
 } from '../../constants/projectStatus';
+import { CYBER_CHECK_TYPE, getCyberCheckTypeOption } from '../../constants/cyberCheckType';
+import { TEST_RESULT } from '../../constants/testResult';
+import { isCyberDispositionEligible } from '../../constants/cyberRoles';
 import toast from 'react-hot-toast';
 
 import {
-    Shield,
     FolderOpen,
-    Link as LinkIcon,
     Copy,
     Send,
     Ban,
-    User,
-    Clock,
     Calendar,
-    ChevronRight,
     Search,
     FileText,
-    CheckCircle,
-    AlertCircle,
     Eye,
-    Users,
-    Filter,
     Inbox,
     ShieldAlert,
-    AlertTriangle,
     UserCheck,
-    X,
     Building,
-    Download,
-    Check,
     FileCheck,
     ShieldCheck,
-    CheckCircle2,
     Info,
-    Paperclip,
 } from 'lucide-react';
 
 export default function WorkspaceCyber() {
-    const { user } = useAuth();
-    const { projects, updateProjectStatus } = useProjects();
+    const { projects, refreshData } = useProjects();
     const { addNotification } = useNotifications();
 
-    // 🔄 Anggota Pentester diambil dari user API (role cyber_lead / pentester), bukan hardcode.
+    // 🔄 Anggota audit Keamanan Siber diambil dari user API, bukan hardcode.
     // Beban aktif dihitung realtime dari proyek nyata.
+    //
+    // Penyaringnya `isCyberDispositionEligible` (`constants/cyberRoles.js`, cermin
+    // `TestingTrack::CYBER->testerRoles()`). Uji substring `'cyber'`/`'pentest'` yang
+    // dipakai sebelumnya bisa ikut meloloskan role baru mana pun yang namanya kebetulan
+    // memuat kata itu — anti-pattern yang sama sudah dibetulkan di Workspace QA.
     const [pentestAuditors, setPentestAuditors] = useState([]);
     const [isCyberLoading, setIsCyberLoading] = useState(true);
 
+    // Beban aktif per pengguna: { [userId]: jumlah }. Dihitung server-side
+    // (`GET /users/workload`), lihat catatan panjang di `cyberWorkloads` di bawah.
+    const [workloadMap, setWorkloadMap] = useState({});
+
     useEffect(() => {
         let isMounted = true;
-        setIsCyberLoading(true);
         userService.getAll()
             .then(res => {
                 if (!isMounted) return;
                 const usersList = Array.isArray(res) ? res : res?.data || [];
-                const cyberUsers = usersList.filter(u => {
-                    const r = (u.role_detail?.name || u.role || '').toString().toLowerCase();
-                    return r.includes('cyber') || r.includes('pentest');
-                });
+                const cyberUsers = usersList.filter(isCyberDispositionEligible);
                 setPentestAuditors(cyberUsers.map(u => ({
                     id: u.id,
                     name: u.name,
@@ -83,20 +73,34 @@ export default function WorkspaceCyber() {
         return () => { isMounted = false; };
     }, []);
 
-    // 🔢 Beban aktif per pentester (proyek yang cyberAssignee-nya = nama user & status aktif)
-    const cyberWorkloads = useMemo(() => {
-        const terminalStatuses = new Set(['LIVE_PRODUCTION', 'CANCELLED', 'REJECTED']);
-        return (pentestAuditors || []).map(a => {
-            const activeCount = (projects || []).filter(p => {
-                if (terminalStatuses.has(p.status)) return false;
-                const cyberSt = getCyberTrackStatus(p);
-                if (cyberSt === TRACK_STATUS.PASSED || cyberSt === TRACK_STATUS.REVIEW) return false;
-                const assigneeName = String(p.cyberAssignee || p.cyber_assignee || '').toLowerCase();
-                return assigneeName && a.name && assigneeName === a.name.toLowerCase();
-            }).length;
-            return { ...a, activeLoad: activeCount };
-        });
-    }, [pentestAuditors, projects]);
+    // Beban di-refetch setiap daftar proyek context berubah (tik polling atau sesudah
+    // aksi disposisi memuat ulang proyek), sehingga angka dropdown tetap terkini.
+    useEffect(() => {
+        let isMounted = true;
+        userService.workload()
+            .then(res => {
+                if (!isMounted) return;
+                const list = Array.isArray(res) ? res : res?.data || [];
+                const map = {};
+                list.forEach(u => { map[u.id] = u.active_load; });
+                setWorkloadMap(map);
+            })
+            .catch(() => { /* biarkan map apa adanya: beban tampil 0, bukan crash */ });
+        return () => { isMounted = false; };
+    }, [projects]);
+
+    // 🔢 Beban aktif per pentester — total lintas fase dari backend.
+    //
+    // Dulu dihitung di klien dari `projects`, tetapi `applyVisibilityScope()` membatasi
+    // proyek yang diterima Cyber Lead pada fase pengujian saja. Angka kini datang dari
+    // `GET /users/workload` (gabungan Perencanaan + QA + Siber dari SELURUH proyek),
+    // dicocokkan per id — bukan nama. Untuk pentester murni komponen Perencanaan & QA
+    // biasanya nol sehingga angkanya sama dengan beban audit; endpoint tetap dipakai agar
+    // definisi beban seragam dengan layar QA dan lepas dari batas visibilitas Lead.
+    const cyberWorkloads = useMemo(
+        () => (pentestAuditors || []).map(a => ({ ...a, activeLoad: workloadMap[a.id] ?? 0 })),
+        [pentestAuditors, workloadMap]
+    );
 
     const [activeTab, setActiveTab] = useState('DISPOSITION');
     const [projectSearch, setProjectSearch] = useState('');
@@ -111,32 +115,21 @@ export default function WorkspaceCyber() {
         );
     }; // 'DISPOSITION' | 'REVIEW_LEAD'
 
-    // Tab 1 (Disposisi): proyek yang sudah diajukan PM ke Cyber Lead
-    const cyberProjects = useMemo(() => {
-        let list = (projects || []).filter(p => {
-            const cyberSt = getCyberTrackStatus(p);
-            const st = String(p.status || '').toUpperCase();
-            return (cyberSt === TRACK_STATUS.SUBMITTED || st === PROJECT_STATUS.CYBER_IN_PROGRESS)
-                && cyberSt !== TRACK_STATUS.IN_PROGRESS
-                && cyberSt !== TRACK_STATUS.REVIEW
-                && !isTrackPassed(cyberSt);
-        });
-        const isPrivileged = user?.role && ['super_admin', 'lead_group', 'head_of_it', 'development_lead'].includes(user.role);
-        if (!isPrivileged && user?.name) {
-            list = list.filter(p => String(p.cyberAssignee || '').toLowerCase().includes(user.name.toLowerCase()));
-        }
-        return list;
-    }, [projects, user]);
+    // Tab 1 (Disposisi): proyek yang sudah diajukan PM dan menunggu penunjukan pentester.
+    //
+    // Disaring dari kolom jalur saja. Sebelumnya daftar ini juga mencocokkan
+    // `cyberAssignee` dengan nama pengguna — padahal proyek yang belum didisposisikan
+    // memang belum punya penerima, sehingga antrean Lead selalu tampak kosong.
+    const cyberProjects = useMemo(
+        () => (projects || []).filter(p => getCyberTrackStatus(p) === TRACK_STATUS.SUBMITTED),
+        [projects]
+    );
 
-    // Tab 2 (Review Lead): laporan pentest dari Pentester sudah masuk (cyber_status === 'REVIEW')
-    const reviewLeadProjects = useMemo(() => {
-        let list = (projects || []).filter(p => getCyberTrackStatus(p) === TRACK_STATUS.REVIEW);
-        const isPrivileged = user?.role && ['super_admin', 'lead_group', 'head_of_it', 'development_lead'].includes(user.role);
-        if (!isPrivileged && user?.name) {
-            list = list.filter(p => String(p.cyberAssignee || '').toLowerCase().includes(user.name.toLowerCase()));
-        }
-        return list;
-    }, [projects, user]);
+    // Tab 2 (Review Lead): laporan pentester sudah masuk dan menunggu sign-off.
+    const reviewLeadProjects = useMemo(
+        () => (projects || []).filter(p => getCyberTrackStatus(p) === TRACK_STATUS.REVIEW),
+        [projects]
+    );
 
     const activeList = activeTab === 'DISPOSITION' ? cyberProjects : reviewLeadProjects;
     const [selectedProject, setSelectedProject] = useState(null);
@@ -161,13 +154,23 @@ export default function WorkspaceCyber() {
         window.scrollTo({ top: 0, behavior: 'smooth' });
     };
 
+    // Gulir ke atas saat proyek yang dibuka atau tab-nya berganti. Yang dipantau
+    // id proyeknya, bukan objeknya: objek dibuat ulang setiap polling.
+    const activeProjectId = activeProject?.id ?? null;
     useEffect(() => {
-        if (activeProject) {
+        if (activeProjectId) {
             scrollPageToTop();
         }
-    }, [activeProject?.id, activeTab]);
+    }, [activeProjectId, activeTab]);
 
-    const { updateProject } = useProjects();
+    // Laporan pentester yang sudah tersimpan di database.
+    const cyberReport = activeProject?.cyberReport || null;
+
+    // Jenis pemeriksaan pilihan PM menentukan istilah dan masukan yang ditampilkan.
+    const checkTypeOption = getCyberCheckTypeOption(activeProject?.cyberCheckType);
+    const checkTypeInputValue = activeProject?.cyberCheckType === CYBER_CHECK_TYPE.SECURE_CODE
+        ? activeProject?.cyberSourceCodeRef
+        : activeProject?.cyberTargetUrl;
 
     const handleAssign = async () => {
         if (!activeProject) return;
@@ -177,18 +180,23 @@ export default function WorkspaceCyber() {
         }
         setIsSubmitting(true);
         try {
-            // Disposisi Cyber Lead: jalur Siber masuk pengerjaan dan status utama naik
-            // ke CYBER_IN_PROGRESS. Kenaikan status ini memang wewenang Cyber Lead —
-            // PM hanya menandai pengajuan pada kolom cyber_status.
-            // Nama auditor dititipkan ke catatan transisi karena belum ada kolom
-            // penugasan auditor pada tabel projects.
-            await updateProject(activeProject.id, {
-                cyber_status: TRACK_STATUS.IN_PROGRESS,
-                status: PROJECT_STATUS.CYBER_IN_PROGRESS,
-                notes: [`Disposisi Audit Keamanan Siber kepada ${selectedPentester}.`, instructions].filter(Boolean).join(' '),
+            // Disposisi dikirim ke endpoint jalur Siber, bukan lewat pembaruan proyek umum.
+            // Endpoint inilah yang menuliskan `cyber_assignee_id`, memindahkan status jalur
+            // ke IN_PROGRESS, mencatat audit, dan memberi tahu pentester yang ditunjuk.
+            const assigneeName = cyberWorkloads.find(a => Number(a.id) === Number(selectedPentester))?.name
+                || 'Security Auditor';
+
+            await cyberRequestService.assign({
+                project_id: activeProject.id,
+                assignee_id: Number(selectedPentester),
+                notes: instructions || null,
             });
-            toast.success(`Proyek ${activeProject.name} berhasil didisposisikan ke Security Auditor (${selectedPentester})!`);
-            addNotification('Disposisi Pentest', `Proyek ${activeProject.name} telah didisposisikan ke ${selectedPentester}.`, 'info');
+
+            toast.success(`Proyek ${activeProject.name} berhasil didisposisikan ke Security Auditor (${assigneeName})!`);
+            addNotification('Disposisi Pentest', `Proyek ${activeProject.name} telah didisposisikan ke ${assigneeName}.`, 'info');
+            setSelectedPentester('');
+            setInstructions('');
+            refreshData();
         } catch (err) {
             toast.error(err.message || 'Gagal menyimpan disposisi Pentester.');
         } finally {
@@ -196,36 +204,46 @@ export default function WorkspaceCyber() {
         }
     };
 
-
-    // Lead Cyber menyetujui & mengembalikan hasil Pentest ke Tim Pengembangan / PM
-    const handleApproveCyberByLead = async () => {
+    /**
+     * Sign-off Lead Siber — keputusan diambil Lead, bukan disimpulkan dari hasil pentester.
+     *
+     * Sebelumnya satu tombol menyimpulkan keputusan dari `auditorResult.isPass`, sehingga
+     * Lead tidak punya cara mengembalikan proyek ketika ia tidak setuju dengan penilaian
+     * pelaksana. Sekarang keputusannya eksplisit: lulus, atau kembalikan ke pengembangan.
+     */
+    const handleSignOff = async (decision) => {
         if (!activeProject) return;
+
+        const isPass = decision === TEST_RESULT.PASS;
+
+        if (!isPass && !leadApprovalNote.trim()) {
+            toast.error('Alasan pengembalian wajib diisi agar tim pengembang tahu apa yang harus diperbaiki.');
+            return;
+        }
+
         setIsSubmitting(true);
         try {
-            const auditorIsPass = activeProject.auditorResult?.isPass !== false;
-
-            // Kelulusan jalur Siber ditetapkan backend dari transisi CYBER_PASSED, jadi
-            // cyber_status tidak dikirim saat lulus. Saat tidak lulus, penetapan FAILED
-            // wajib menyertai RETURN_TO_DEV — backend menolak salah satunya saja.
-            await updateProject(activeProject.id, {
-                status: auditorIsPass ? PROJECT_STATUS.CYBER_PASSED : PROJECT_STATUS.RETURN_TO_DEV,
-                ...(auditorIsPass ? {} : { cyber_status: TRACK_STATUS.FAILED }),
-                notes: [
-                    `Sign-off Audit Keamanan Siber oleh ${user?.name || 'Cyber Lead'}: ${auditorIsPass ? 'LULUS' : 'TIDAK LULUS'}.`,
-                    leadApprovalNote,
-                ].filter(Boolean).join(' '),
+            await cyberRequestService.signOff({
+                project_id: activeProject.id,
+                result: decision,
+                notes: leadApprovalNote || null,
             });
-            const resultLabel = auditorIsPass ? TRACK_STATUS_LABEL.PASSED : TRACK_STATUS_LABEL.FAILED;
-            toast.success(`Sign-off Lead Cyber untuk proyek "${activeProject.name}" berhasil! Status: ${resultLabel}.`);
+
+            const resultLabel = isPass ? TRACK_STATUS_LABEL.PASSED : TRACK_STATUS_LABEL.FAILED;
+            toast.success(`Sign-off Lead Siber untuk proyek "${activeProject.name}" berhasil! Status: ${resultLabel}.`);
             addNotification(
-                'Sign-off Lead Cyber Disetujui',
-                `Proyek ${activeProject.name} mendapat sign-off Lead Cyber (${resultLabel}). Hasil dikembalikan ke PM.`,
-                auditorIsPass ? 'success' : 'warning',
+                isPass ? 'Sign-off Lead Siber: LULUS' : 'Sign-off Lead Siber: Dikembalikan',
+                isPass
+                    ? `Proyek ${activeProject.name} lulus Audit Keamanan Siber. Hasil dikembalikan ke PM.`
+                    : `Proyek ${activeProject.name} dikembalikan ke pengembangan oleh Lead Siber.`,
+                isPass ? 'success' : 'warning',
                 '/pm/release-request'
             );
             setLeadApprovalNote('');
+            setSelectedProject(null);
+            refreshData();
         } catch (err) {
-            toast.error(err.message || 'Gagal memproses approval Lead Cyber.');
+            toast.error(err.message || 'Gagal memproses sign-off Lead Siber.');
         } finally {
             setIsSubmitting(false);
         }
@@ -237,9 +255,24 @@ export default function WorkspaceCyber() {
         return getProjectRealDocuments(activeProject);
     }, [activeProject]);
 
-    const handleCopyStagingUrl = (url) => {
-        navigator.clipboard.writeText(url);
-        toast.success('Staging URL berhasil disalin!');
+    // Papan klip bisa tidak tersedia (konteks non-HTTPS) atau ditolak izinnya, jadi
+    // keberhasilannya harus dipastikan sebelum memberi tahu pengguna — bukan melaporkan
+    // sukses secara buta atas salinan kosong/gagal. Cermin pola di `pm/QARequest.jsx`.
+    const handleCopyValue = async (value) => {
+        const text = String(value || '').trim();
+        if (!text) {
+            toast.error('Nilai yang akan disalin masih kosong.');
+            return;
+        }
+        try {
+            if (!navigator.clipboard?.writeText) {
+                throw new Error('Peramban tidak mengizinkan akses papan klip pada halaman ini.');
+            }
+            await navigator.clipboard.writeText(text);
+            toast.success('Berhasil disalin ke papan klip!');
+        } catch (err) {
+            toast.error(`Gagal menyalin: ${err.message}`);
+        }
     };
 
     return (
@@ -374,21 +407,53 @@ export default function WorkspaceCyber() {
                                 </p>
                             </div>
 
-                            {/* Staging URL */}
-                            <div className="bg-orange-50/60 border border-orange-200 p-3.5 rounded-xl flex items-center justify-between gap-2">
-                                <div className="overflow-hidden">
-                                    <div className="text-[10px] font-bold text-orange-800 uppercase tracking-wider">Target Staging URL Penetration Test</div>
-                                    <div className="text-xs font-mono text-orange-600 truncate font-semibold">
-                                        {activeProject.stagingUrl || import.meta.env.VITE_STAGING_URL}
+                            {/*
+                              Jenis pemeriksaan yang dipilih PM beserta masukannya.
+                              Pentest menguji aplikasi yang berjalan (butuh alamat web),
+                              Secure Code Review menelaah kode (butuh rujukan kode sumber),
+                              jadi blok ini menampilkan tepat satu di antaranya.
+                            */}
+                            <div className="bg-orange-50/60 border border-orange-200 p-3.5 rounded-xl space-y-2">
+                                <div className="flex items-center justify-between gap-2">
+                                    <div className="text-[10px] font-bold text-orange-800 uppercase tracking-wider">
+                                        Jenis Pemeriksaan Keamanan Siber
                                     </div>
+                                    <span className="bg-orange-600 text-white text-[10px] font-extrabold px-2.5 py-0.5 rounded-full shrink-0">
+                                        {checkTypeOption?.label || 'Belum Ditentukan'}
+                                    </span>
                                 </div>
-                                <button
-                                    onClick={() => handleCopyStagingUrl(activeProject.stagingUrl || import.meta.env.VITE_STAGING_URL)}
-                                    className="p-1.5 bg-white text-orange-600 hover:bg-orange-100 rounded-lg transition-colors shrink-0 shadow-xs cursor-pointer"
-                                    title="Salin Target URL"
-                                >
-                                    <Copy size={14} />
-                                </button>
+
+                                {checkTypeOption ? (
+                                    <>
+                                        <p className="text-[11px] text-orange-950/80 leading-relaxed">
+                                            {checkTypeOption.description}
+                                        </p>
+                                        <div className="flex items-center justify-between gap-2 bg-white border border-orange-200 rounded-lg px-3 py-2">
+                                            <div className="overflow-hidden">
+                                                <div className="text-[10px] font-bold text-orange-800 uppercase tracking-wider">
+                                                    {checkTypeOption.inputLabel}
+                                                </div>
+                                                <div className="text-xs font-mono text-orange-700 truncate font-semibold">
+                                                    {checkTypeInputValue || 'Belum diisi PM'}
+                                                </div>
+                                            </div>
+                                            {checkTypeInputValue && (
+                                                <button
+                                                    onClick={() => handleCopyValue(checkTypeInputValue)}
+                                                    className="p-1.5 bg-orange-50 text-orange-600 hover:bg-orange-100 rounded-lg transition-colors shrink-0 cursor-pointer"
+                                                    title={`Salin ${checkTypeOption.inputLabel}`}
+                                                >
+                                                    <Copy size={14} />
+                                                </button>
+                                            )}
+                                        </div>
+                                    </>
+                                ) : (
+                                    <p className="text-[11px] text-orange-950/80 leading-relaxed">
+                                        PM belum memilih jenis pemeriksaan pada pengajuan ini. Konfirmasikan ke PM
+                                        sebelum disposisi agar pentester menguji hal yang benar.
+                                    </p>
+                                )}
                             </div>
 
                             {/* Deskripsi & Scope System */}
@@ -447,7 +512,8 @@ export default function WorkspaceCyber() {
                                                 <div className="overflow-hidden">
                                                     <h5 className="font-bold text-gray-800 text-xs truncate">{doc.name}</h5>
                                                     <p className="text-[10px] text-gray-500 mt-0.5">
-                                                        {doc.type} • {doc.size} • Penulis: {doc.author}
+                                                        {doc.type} • {doc.size}
+                                                        {doc.author ? ` • Penulis: ${doc.author}` : ''}
                                                     </p>
                                                 </div>
                                             </div>
@@ -490,8 +556,8 @@ export default function WorkspaceCyber() {
                                                     <option value="" disabled>Belum ada user Cyber terdaftar</option>
                                                 ) : (
                                                     cyberWorkloads.map(a => (
-                                                        <option key={a.id} value={a.name}>
-                                                            {a.name} - {a.role} (Beban: {a.activeLoad} Audit Aktif)
+                                                        <option key={a.id} value={a.id}>
+                                                            {a.name} - {a.role} (Beban: {a.activeLoad} Proyek Aktif)
                                                         </option>
                                                     ))
                                                 )}
@@ -532,65 +598,16 @@ export default function WorkspaceCyber() {
                                         </span>
                                     </div>
 
-                                    {/* Laporan Nyata dari Pentester */}
-                                    {activeProject.auditorResult ? (
-                                        <div className="space-y-3">
-                                            <div className="bg-white p-4 rounded-xl border border-emerald-200 space-y-2.5">
-                                                <div className="flex items-center justify-between text-xs">
-                                                    <span className="font-bold text-gray-700 flex items-center gap-1.5"><User size={13} className="text-emerald-600" /> Auditor: <strong>{activeProject.auditorResult.auditorName}</strong></span>
-                                                    <span className={`px-2.5 py-0.5 rounded-full font-extrabold text-[11px] ${activeProject.auditorResult.isPass ? 'bg-emerald-100 text-emerald-800' : 'bg-red-100 text-red-800'}`}>
-                                                        {activeProject.auditorResult.decision}
-                                                    </span>
-                                                </div>
-                                                <div className="flex items-center gap-3 text-[10px] text-gray-500">
-                                                    <span>Risk: <strong className="text-gray-700">{activeProject.auditorResult.riskLevel}</strong></span>
-                                                    <span>•</span>
-                                                    <span>Checklist: <strong className="text-gray-700">{activeProject.auditorResult.checklistSummary}</strong></span>
-                                                    <span>•</span>
-                                                    <span>Dikirim: <strong className="text-gray-700">{activeProject.auditorResult.submittedAt ? new Date(activeProject.auditorResult.submittedAt).toLocaleString('id-ID') : '-'}</strong></span>
-                                                </div>
-                                                <div className="bg-gray-50 p-3 rounded-lg border border-gray-100">
-                                                    <p className="text-xs font-bold text-gray-600 mb-1">Catatan Temuan Kerentanan:</p>
-                                                    <p className="text-xs text-gray-700 leading-relaxed whitespace-pre-wrap">{activeProject.auditorResult.notes}</p>
-                                                </div>
-                                            </div>
-
-                                            {activeProject.auditorResult.evidence?.length > 0 && (
-                                                <div>
-                                                    <h5 className="text-xs font-extrabold text-gray-700 uppercase tracking-wider mb-2 flex items-center gap-1.5">
-                                                        <Paperclip size={13} className="text-emerald-600" /> Laporan &amp; Evidence Pentest ({activeProject.auditorResult.evidence.length})
-                                                    </h5>
-                                                    <div className="space-y-2">
-                                                        {activeProject.auditorResult.evidence.map(ev => (
-                                                            <div key={ev.id} className="flex items-center justify-between p-2.5 bg-white border border-gray-200 rounded-xl">
-                                                                <div className="flex items-center gap-2 overflow-hidden">
-                                                                    <Paperclip size={13} className="text-emerald-600 shrink-0" />
-                                                                    <div className="overflow-hidden">
-                                                                        <p className="text-xs font-bold text-gray-800 truncate">{ev.name}</p>
-                                                                        <p className="text-[10px] text-gray-400">{ev.size} • {ev.uploadedAt}</p>
-                                                                    </div>
-                                                                </div>
-                                                                <div className="flex items-center gap-1.5 shrink-0">
-                                                                    <button onClick={() => setSelectedDocPreview(ev)}
-                                                                        className="px-2 py-1 bg-[#1a365d] text-white rounded-lg text-xs font-bold hover:bg-[#0f2342] transition-all flex items-center gap-1 cursor-pointer">
-                                                                        <Eye size={11} /> Lihat
-                                                                    </button>
-                                                                    <button onClick={() => { if (ev.url) { const a = document.createElement('a'); a.href = ev.url; a.download = ev.name; a.click(); } else toast.error('File tidak tersedia untuk diunduh.'); }}
-                                                                        className="px-2 py-1 bg-emerald-600 text-white rounded-lg text-xs font-bold hover:bg-emerald-700 transition-all flex items-center gap-1 cursor-pointer">
-                                                                        <Download size={11} /> Unduh
-                                                                    </button>
-                                                                </div>
-                                                            </div>
-                                                        ))}
-                                                    </div>
-                                                </div>
-                                            )}
-                                        </div>
-                                    ) : (
-                                        <div className="p-4 bg-gray-50 border border-gray-200 rounded-xl text-center text-xs text-gray-400 italic">
-                                            Laporan dari Pentester belum masuk. Proyek ini belum selesai diaudit.
-                                        </div>
-                                    )}
+                                    {/* Laporan pentester, dibaca dari baris test_reports */}
+                                    <TestReportReviewCard
+                                        report={cyberReport}
+                                        testerLabel="Auditor"
+                                        severityLabel="Tingkat Risiko"
+                                        notesLabel="Catatan Temuan Kerentanan"
+                                        evidenceLabel="Laporan & Evidence Pentest"
+                                        emptyMessage="Laporan dari Pentester belum masuk. Proyek ini belum selesai diaudit."
+                                        onPreview={setSelectedDocPreview}
+                                    />
 
                                     {/* Action Review Lead Cyber */}
                                     <div className="space-y-3 pt-2 border-t border-emerald-200">
@@ -605,15 +622,35 @@ export default function WorkspaceCyber() {
                                             />
                                         </div>
 
-                                        <button
-                                            onClick={handleApproveCyberByLead}
-                                            disabled={isSubmitting || !activeProject.auditorResult}
-                                            className="w-full py-3.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-extrabold text-xs md:text-sm shadow-md transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
-                                        >
-                                            <ShieldCheck size={18} />
-                                            <span>Sign-Off Lead Cyber &amp; Kembalikan Hasil ke PM</span>
-                                        </button>
-                                        <p className="text-[10px] text-gray-400 text-center">Hasil akan diteruskan ke PM Proyek. Jika keduanya (QA &amp; Cyber) PASSED, PM bisa ajukan ke Infrastruktur.</p>
+                                        {/*
+                                          Dua tombol terpisah, bukan satu tombol yang menyimpulkan keputusan
+                                          dari penilaian pelaksana. Lead memang berwenang menolak laporan yang
+                                          menyatakan LULUS, dan tanpa tombol kedua ia tidak punya cara
+                                          mengembalikan proyek ke pengembangan.
+                                        */}
+                                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                                            <button
+                                                onClick={() => handleSignOff(TEST_RESULT.PASS)}
+                                                disabled={isSubmitting || !cyberReport}
+                                                className="w-full py-3.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-extrabold text-xs md:text-sm shadow-md transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
+                                            >
+                                                <ShieldCheck size={18} />
+                                                <span>Sign-Off LULUS Audit Keamanan</span>
+                                            </button>
+                                            <button
+                                                onClick={() => handleSignOff(TEST_RESULT.FAIL)}
+                                                disabled={isSubmitting || !cyberReport}
+                                                className="w-full py-3.5 bg-red-600 hover:bg-red-700 text-white rounded-xl font-extrabold text-xs md:text-sm shadow-md transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
+                                            >
+                                                <Ban size={18} />
+                                                <span>Kembalikan ke Development</span>
+                                            </button>
+                                        </div>
+                                        <p className="text-[10px] text-gray-400 text-center">
+                                            Sign-off LULUS diteruskan ke PM Proyek; jika jalur QA dan Audit Keamanan Siber
+                                            keduanya LULUS, PM bisa ajukan ke Infrastruktur. Pengembalian wajib menyertakan
+                                            alasan agar tim pengembang tahu apa yang harus diperbaiki.
+                                        </p>
                                     </div>
                                 </div>
                             )}

@@ -9,38 +9,37 @@ import {
     Eye,
     CheckCircle,
     Clock,
-    AlertCircle,
     Send,
     Save,
     FileText,
-    Users,
     Filter,
     Search,
-    Calendar,
-    ChevronRight,
     Upload,
     CloudUpload,
     Trash2,
-    File,
-    X,
     MessageSquare,
-    UserCheck,
     ShieldCheck,
-    CheckCircle2,
 } from 'lucide-react';
-import { useProjects, saveFileToStore, getProjectRealDocuments } from '../../contexts/ProjectContext';
-import { documentService, projectService } from '../../services/api';
+import { useProjects } from '../../contexts/ProjectContext';
+import { saveFileToStore, getProjectRealDocuments } from '../../utils/projectDocuments';
+import { documentService } from '../../services/api';
 import LoadingSpinner from '../../components/LoadingSpinner';
 import EmptyState from '../../components/EmptyState';
 import DocumentViewerModal from '../../components/DocumentViewerModal';
 import toast from 'react-hot-toast';
-import { generateDocumentName, DOCUMENT_TYPES, formatFileSize, getDocExtLabel, getDocIconStyle } from '../../utils/documentNaming';
+import { generateDocumentName, DOCUMENT_TYPES, formatFileSize, formatDocSizeLabel, getDocExtLabel, getDocIconStyle } from '../../utils/documentNaming';
+import { useNow } from '../../hooks/useNow';
+import { PLANNING_QA_GROUP_LABEL } from '../../constants/roles';
 
 export default function WorkspaceAnalyst() {
     const { user } = useAuth();
-    const { projects, updateProject, isLoading, refreshDataSilent } = useProjects();
+    const { projects, updateProject, isLoading } = useProjects();
     const navigate = useNavigate();
     const { addNotification } = useNotifications();
+
+    // Perkiraan tenggat kajian dihitung dari waktu sekarang. Nilainya diambil
+    // lewat hook agar tidak dipanggil langsung di dalam render.
+    const nowMs = useNow();
 
     const [previewDoc, setPreviewDoc] = useState(null);
 
@@ -145,10 +144,11 @@ export default function WorkspaceAnalyst() {
         };
 
     const [decision, setDecision] = useState('');
-    const [projectType, setProjectType] = useState('NON_RBB');
     const [notes, setNotes] = useState('');
     const [estimationDays, setEstimationDays] = useState('');
-    const [selectedDocType, setSelectedDocType] = useState('FSD');
+    // Unggahan dari panel review analyst selalu berjenis FSD; halaman ini tidak
+    // menyediakan pemilih jenis dokumen, jadi nilainya konstan (bukan state).
+    const selectedDocType = 'FSD';
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [uploadedFiles, setUploadedFiles] = useState([]);
     const fileInputRef = useRef(null);
@@ -187,7 +187,12 @@ export default function WorkspaceAnalyst() {
         });
         
         setUploadedFiles(prev => [...prev, ...newFiles]);
-        if (newFiles.length > 0) toast.success(`${newFiles.length} dokumen berhasil diunggah.`);
+        // Berkas baru dipilih di peramban, belum dikirim ke server. Unggahan
+        // sebenarnya terjadi di handleSubmit, jadi pesan di sini tidak boleh
+        // menyatakan "berhasil diunggah".
+        if (newFiles.length > 0) {
+            toast.success(`${newFiles.length} dokumen dipilih. Berkas diunggah saat tombol "Kirim & Lanjutkan" ditekan.`);
+        }
         e.target.value = '';
     };
 
@@ -210,32 +215,6 @@ export default function WorkspaceAnalyst() {
             };
         }));
     };
-
-    // Convert Data URL to Blob URL for inline PDF reading in Workspace Analyst
-    const previewBlobUrl = useMemo(() => {
-        if (!previewDoc) return null;
-        const rawUrl = previewDoc.url || previewDoc.fileUrl || previewDoc.dataUrl;
-        if (!rawUrl) return null;
-
-        if (rawUrl.startsWith('data:')) {
-            try {
-                const parts = rawUrl.split(',');
-                const mimeMatch = parts[0].match(/:(.*?);/);
-                const mime = mimeMatch ? mimeMatch[1] : 'application/pdf';
-                const bstr = atob(parts[1]);
-                let n = bstr.length;
-                const u8arr = new Uint8Array(n);
-                while (n--) {
-                    u8arr[n] = bstr.charCodeAt(n);
-                }
-                const blob = new Blob([u8arr], { type: mime });
-                return URL.createObjectURL(blob);
-            } catch (e) {
-                return rawUrl;
-            }
-        }
-        return rawUrl;
-    }, [previewDoc]);
 
     const handleDownloadFile = (doc) => {
         if (!doc) return;
@@ -290,8 +269,14 @@ export default function WorkspaceAnalyst() {
         setIsSubmitting(true);
         
         try {
-            const finalStatus = 'ANALYSIS_APPROVED';
+            // Status akhir mengikuti keputusan analis. "Ditolak" menjadi REJECTED, bukan
+            // ANALYSIS_APPROVED: analis berwenang menolak langsung (matriks IN_REVIEW ->
+            // REJECTED, dan rolePermissions REJECTED memuat `analyst`). Sebelumnya nilai
+            // ini di-hardcode ANALYSIS_APPROVED sehingga penolakan justru meloloskan
+            // proyek ke fase berikutnya.
+            const finalStatus = isApproved ? 'ANALYSIS_APPROVED' : 'REJECTED';
             const uploadedDocIds = [];
+            const failedUploads = [];
 
             // Upload semua dokumen ke backend
             if (uploadedFiles.length > 0 && selectedProject?.id) {
@@ -313,6 +298,7 @@ export default function WorkspaceAnalyst() {
                             });
                         }
                     } catch (uploadErr) {
+                        failedUploads.push(uf.originalName || uf.name);
                         toast.error(`Gagal mengunggah "${uf.originalName}": ${uploadErr.message}`);
                     }
                 }
@@ -323,18 +309,33 @@ export default function WorkspaceAnalyst() {
                 analystResult: {
                     decision,
                     notes,
-                    estimation: estimationDays || '30 hari pengerjaan',
+                    // Tanggal ISO dari `input type="date"`. Cadangannya dulu berupa teks
+                    // "30 hari pengerjaan" — nilai itu masuk ke field yang dibaca sebagai
+                    // tanggal oleh WorkspaceDevLead dan TaskDetail, sehingga muncul sebagai
+                    // "Invalid Date". Bila analis tidak mengisi tanggal, biarkan kosong.
+                    estimation: estimationDays || null,
                     uploadedDocs: uploadedDocIds,
                 },
             });
 
             addNotification(
-                'Kajian Analyst Selesai',
-                `Kajian teknis untuk ${selectedProject?.name} telah dirampungkan oleh Analyst (${user?.name || 'Analis SDLC'}) dan dikirim ke Lead Perencanaan untuk Verifikasi Hasil Analisis.`,
+                isApproved ? 'Kajian Analyst Selesai' : 'Proyek Ditolak Analyst',
+                isApproved
+                    ? `Kajian teknis untuk ${selectedProject?.name} telah dirampungkan oleh Analyst (${user?.name || 'Analis SDLC'}) dan dikirim ke Lead Perencanaan untuk Verifikasi Hasil Analisis.`
+                    : `Proyek ${selectedProject?.name} DITOLAK pada kajian teknis Analyst (${user?.name || 'Analis SDLC'}). Alasan penolakan dan catatan perbaikan telah dicatat untuk pengaju.`,
                 isApproved ? 'success' : 'warning',
-                '/workspace/lead?tab=verification'
+                isApproved ? '/workspace/lead?tab=verification' : '/workspace/analyst'
             );
-            toast.success(`Kajian teknis ${selectedProject?.name} selesai! Dikirim ke Lead Perencanaan untuk Verifikasi.`);
+            if (isApproved) {
+                toast.success(`Kajian teknis ${selectedProject?.name} selesai! Dikirim ke Lead Perencanaan untuk Verifikasi.`);
+            } else {
+                toast.success(`Proyek ${selectedProject?.name} ditolak. Alasan penolakan tersimpan dan pengaju diberi tahu.`);
+            }
+            // Kajian tetap terkirim meski ada berkas yang gagal diunggah, tetapi
+            // penggunanya harus tahu berkas mana yang belum masuk Document Vault.
+            if (failedUploads.length > 0) {
+                toast.error(`${failedUploads.length} dokumen belum tersimpan di Document Vault: ${failedUploads.join(', ')}. Unggah ulang dari menu Dokumen.`);
+            }
             setSelectedProject(null);
             setDecision('');
             setNotes('');
@@ -344,18 +345,6 @@ export default function WorkspaceAnalyst() {
             toast.error('Terjadi kesalahan saat pengiriman: ' + (err?.message || 'Error'));
         } finally {
             setIsSubmitting(false);
-        }
-    };
-
-    const getPriorityColor = (priority) => {
-        switch (priority) {
-            case 'High': return 'bg-red-500/10 text-red-600 border-red-200';
-            case 'Medium': return 'bg-yellow-500/10 text-yellow-600 border-yellow-200';
-            case 'Low': return 'bg-green-500/10 text-green-600 border-green-200';
-            case 'ANALYSIS_APPROVED': return 'bg-emerald-100 text-emerald-700 border-emerald-200';
-            case 'READY_FOR_DEVELOPMENT': return 'bg-cyan-100 text-cyan-700 border-cyan-200';
-            case 'IN_DEVELOPMENT': return 'bg-indigo-100 text-indigo-700 border-indigo-200';
-            default: return 'bg-gray-100 text-gray-600';
         }
     };
 
@@ -373,34 +362,23 @@ export default function WorkspaceAnalyst() {
         }
     };
 
-    const getFileIcon = (type) => {
-        if (!type) return 'bg-gray-100 text-gray-600';
-        const icons = {
-            pdf: 'bg-red-100 text-red-600',
-            docx: 'bg-blue-100 text-blue-600',
-            xlsx: 'bg-green-100 text-green-600',
-            pptx: 'bg-orange-100 text-orange-600',
-            zip: 'bg-purple-100 text-purple-600',
-        };
-        return icons[String(type).toLowerCase()] || 'bg-gray-100 text-gray-600';
-    };
-
-    const getFileLabel = (type) => {
-        if (!type) return 'DOC';
-        const labels = { pdf: 'PDF', docx: 'DOCX', xlsx: 'XLSX', pptx: 'PPTX', zip: 'ZIP' };
-        const key = String(type).toLowerCase();
-        return labels[key] || String(type).toUpperCase();
-    };
-
     // Hapus full-screen empty state return
 
     return (
         <div className="flex-1 overflow-auto px-6 py-4 md:px-8 md:py-5 bg-[#f8f9fb] animate-slide-up">
             {/* Header */}
             <div className="mb-6">
-                <h1 className="text-2xl font-extrabold text-gray-800">Workspace System Analyst</h1>
+                <div className="flex flex-wrap items-center gap-2">
+                    <h1 className="text-2xl font-extrabold text-gray-800">Workspace Analis Perencanaan</h1>
+                    {/* Nama grup ditampilkan supaya jelas halaman ini dan Workspace QA
+                        dipegang orang yang sama, hanya pada fase yang berbeda. */}
+                    <span className="px-2.5 py-1 rounded-full bg-[#00529C]/10 text-[#00529C] text-[11px] font-bold border border-[#00529C]/20">
+                        {PLANNING_QA_GROUP_LABEL}
+                    </span>
+                </div>
                 <p className="text-gray-500 mt-1 text-sm">
-                    Review kelayakan dokumen inisiasi (BRD) dan buat keputusan teknis sistem.
+                    Review kelayakan dokumen inisiasi (BRD) dan buat keputusan teknis sistem. Fase 3
+                    (Pengujian QA) untuk grup yang sama ada di menu <span className="font-semibold">Tugas QA Saya</span>.
                 </p>
             </div>
 
@@ -423,7 +401,14 @@ export default function WorkspaceAnalyst() {
                             const ap = p.sitUatData?.sit3_approvals || p.sit_uat_data?.sit3_approvals || {};
                             const devList = ap?.developer?.developers || [];
                             const requiredDev = ap?.developer?.required ?? 0;
-                            const devDone = requiredDev > 0 && devList.length >= requiredDev;
+                            // `developers[]` menyimpan seluruh persetujuan yang pernah
+                            // tercatat, termasuk milik developer yang sudah keluar dari
+                            // tim, jadi panjangnya bukan ukuran kelengkapan.
+                            // `approvedCount` dihitung backend hanya dari penyetuju yang
+                            // masih wajib. Cadangan `devList.length` dipakai untuk data
+                            // lama yang belum memuat field itu.
+                            const approvedDev = ap?.developer?.approvedCount ?? devList.length;
+                            const devDone = requiredDev > 0 && approvedDev >= requiredDev;
                             const pmDone = ap?.pm?.approved === true;
                             const leadDone = ap?.development_lead?.approved === true;
                             return (
@@ -444,7 +429,7 @@ export default function WorkspaceAnalyst() {
                                         <div className={`p-2 rounded-lg border text-center ${devDone ? 'bg-emerald-50 border-emerald-200' : 'bg-white border-gray-200'}`}>
                                             <p className="text-[9px] font-bold text-gray-500 uppercase">Developer</p>
                                             <p className={`text-[10px] font-bold mt-0.5 ${devDone ? 'text-emerald-700' : 'text-amber-700'}`}>
-                                                {devList.length}/{requiredDev} {devDone ? '✓' : ''}
+                                                {approvedDev}/{requiredDev} {devDone ? '✓' : ''}
                                             </p>
                                         </div>
                                         <div className={`p-2 rounded-lg border text-center ${pmDone ? 'bg-emerald-50 border-emerald-200' : 'bg-white border-gray-200'}`}>
@@ -595,7 +580,7 @@ export default function WorkspaceAnalyst() {
                                                             return `Deadline: ${formatDate(project.deadline || project.current_stage_deadline)}`;
                                                         }
                                                         // Fallback: 14 hari sejak di-submit jika lead tidak mengisi deadline eksplisit
-                                                        const baseDate = new Date(project.assignedAnalystAt || project.submittedAt || Date.now());
+                                                        const baseDate = new Date(project.assignedAnalystAt || project.submittedAt || nowMs);
                                                         const autoDeadline = new Date(baseDate.setDate(baseDate.getDate() + 14)).toISOString();
                                                         return `Deadline: ${formatDate(autoDeadline)}`;
                                                     })()}
@@ -655,7 +640,7 @@ export default function WorkspaceAnalyst() {
                         {(() => {
                             let dlDateStr = selectedProject.deadline || selectedProject.current_stage_deadline;
                             if (!dlDateStr) {
-                                const baseDate = new Date(selectedProject.assignedAnalystAt || selectedProject.submittedAt || Date.now());
+                                const baseDate = new Date(selectedProject.assignedAnalystAt || selectedProject.submittedAt || nowMs);
                                 dlDateStr = new Date(baseDate.setDate(baseDate.getDate() + 14)).toISOString();
                             }
                             const dl = new Date(dlDateStr);
@@ -722,7 +707,7 @@ export default function WorkspaceAnalyst() {
                                                     </div>
                                                     <div>
                                                         <p className="font-semibold text-gray-800 text-sm">{doc.name}</p>
-                                                        <p className="text-xs text-gray-500">{doc.size} • {doc.type || 'Dokumen Inisiasi'}</p>
+                                                        <p className="text-xs text-gray-500">{formatDocSizeLabel(doc)} • {doc.type || 'Dokumen Inisiasi'}</p>
                                                     </div>
                                                 </div>
                                                 <div className="flex items-center gap-2 shrink-0">

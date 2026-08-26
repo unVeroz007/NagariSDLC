@@ -1,21 +1,8 @@
 // src/components/LogTimeline.jsx
 import { Calendar, Clock, Eye } from 'lucide-react';
-import { actionMap } from '../contexts/ActivityContext';
+import { actionMap } from '../constants/activityActions';
 
 export default function LogTimeline({ activities, onViewDetail }) {
-    const getStatusColor = (status) => {
-        switch (status) {
-            case 'success': return 'bg-emerald-500';
-            case 'warning': return 'bg-amber-500';
-            case 'danger': return 'bg-red-500';
-            case 'system': return 'bg-purple-500';
-            case 'ANALYSIS_APPROVED': return 'bg-emerald-100 text-emerald-700 border-emerald-200';
-            case 'READY_FOR_DEVELOPMENT': return 'bg-cyan-100 text-cyan-700 border-cyan-200';
-            case 'IN_DEVELOPMENT': return 'bg-indigo-100 text-indigo-700 border-indigo-200';
-            default: return 'bg-blue-500';
-        }
-    };
-
     const getStatusDot = (status) => {
         const colors = {
             success: 'bg-emerald-500 ring-emerald-200',
@@ -63,9 +50,8 @@ export default function LogTimeline({ activities, onViewDetail }) {
                         Tidak ada aktivitas yang ditemukan.
                     </div>
                 ) : (
-                    activities.map((activity, index) => {
+                    activities.map((activity) => {
                         const actionConfig = actionMap[activity.action] || { icon: 'activity', color: 'text-gray-600', bg: 'bg-gray-50' };
-                        const isLast = index === activities.length - 1;
 
                         return (
                             <div key={activity.id} className="relative pl-12">

@@ -1,9 +1,21 @@
-import { useState, useRef, useEffect, useMemo } from 'react';
+import { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import { Outlet, NavLink, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { useProjects } from '../contexts/ProjectContext';
-import { menuSections, getDefaultRouteForRole } from '../data/menuConfig';
-import { internalUatApprovalService } from '../services/api';
+import { menuSections, getDefaultRouteForRole, filterSectionsByMenuAccess } from '../data/menuConfig';
+import { APPROVALS_CHANGED_EVENT, internalSitApprovalService, internalUatApprovalService } from '../services/api';
+import { useVisibilityPolling } from '../hooks/usePolling';
+import { POLLING_INTERVAL_MS } from '../constants/polling';
+import {
+    PROJECT_STATUS,
+    TRACK_STATUS,
+    getQaTrackStatus,
+    getCyberTrackStatus,
+    isTrackActive,
+    isTrackPassed,
+    canStartQaTrack,
+    canStartCyberTrack,
+} from '../constants/projectStatus';
 import NotificationBell from '../components/NotificationBell';
 import {
     Search,
@@ -20,6 +32,12 @@ const INTERNAL_UAT_APPROVER_ROLES = new Set([
     'development_lead', 'project_manager', 'dev_analyst', 'developer',
 ]);
 
+// Role yang melihat SELURUH tugas pada jalur pengujian, bukan hanya disposisinya sendiri.
+// Cermin daftar privileged pada MyTasksQA.jsx dan MyTasksCyber.jsx: jalur Keamanan Siber
+// sengaja lebih sempit (tanpa lead_group), sesuai matriks wewenang backend.
+const QA_TASK_PRIVILEGED_ROLES = new Set(['qa_lead', 'lead_group', 'super_admin']);
+const CYBER_TASK_PRIVILEGED_ROLES = new Set(['cyber_lead', 'super_admin']);
+
 export default function MainLayout() {
     const { user, logout } = useAuth();
     const { projects } = useProjects();
@@ -28,6 +46,9 @@ export default function MainLayout() {
     const [isMobileOpen, setIsMobileOpen] = useState(false);
     const [isLogoutModalOpen, setIsLogoutModalOpen] = useState(false);
     const [isProfileMenuOpen, setIsProfileMenuOpen] = useState(false);
+    // Kedua sumber persetujuan disimpan terpisah supaya kegagalan jaringan pada salah
+    // satunya tidak menghapus angka milik sumber yang lain dari lencana.
+    const [pendingSitApprovalCount, setPendingSitApprovalCount] = useState(0);
     const [pendingUatApprovalCount, setPendingUatApprovalCount] = useState(0);
     const profileMenuRef = useRef(null);
 
@@ -41,37 +62,166 @@ export default function MainLayout() {
         if (!assignedId || !user?.id) return false;
         return Number(assignedId) === Number(user.id);
     }).length, [projects, user]);
+    // Analis Pengembangan = PM. Penugasannya ada di `pm_id`, bukan `analyst_id`
+    // (kolom itu milik System Analyst Fase 1), sehingga lonceng ini hanya berbunyi
+    // untuk PM yang benar-benar memegang proyeknya.
     const devAnalystCount = useMemo(() => (projects || []).filter(p => {
         if (p.status !== 'DEV_ANALYSIS') return false;
         if (user?.role === 'super_admin' || user?.role === 'development_lead') return true;
         if (!user?.id) return false;
-        const analystId = p.analyst_id 
-            || (p.analyst && typeof p.analyst === 'object' ? p.analyst.id : null);
-        const pmId = p.pm_id 
+        const pmId = p.pm_id
             || (p.pm && typeof p.pm === 'object' ? p.pm.id : null);
-        return Number(analystId) === Number(user.id) || Number(pmId) === Number(user.id);
+        return Number(pmId) === Number(user.id);
     }).length, [projects, user]);
 
+    // ── Fase 3 (Pengujian): lencana antrean QA & Keamanan Siber ──
+    // Tiap angka memakai penyaring yang SAMA PERSIS dengan halaman tujuannya, sehingga
+    // lencana tidak pernah menjanjikan pekerjaan yang tidak ada saat halaman dibuka.
+
+    // (1) Pengajuan QA — proyek yang boleh diajukan ke jalur QA. Cermin `readyProjects`
+    // di QARequest.jsx: status utama mengizinkan mulai jalur DAN jalur QA belum berjalan
+    // atau lulus. Selain Super Admin, hanya proyek milik PM ini yang dihitung.
+    const qaRequestCount = useMemo(() => {
+        const isPrivileged = user?.role === 'super_admin';
+        return (projects || []).filter(p => {
+            const st = String(p.status || '').toUpperCase();
+            const qaSt = getQaTrackStatus(p);
+            const alreadySubmitted = isTrackActive(qaSt) || isTrackPassed(qaSt)
+                || st === PROJECT_STATUS.READY_FOR_QA
+                || st === PROJECT_STATUS.QA_IN_PROGRESS
+                || st === PROJECT_STATUS.QA_PASSED;
+            if (!canStartQaTrack(st) || alreadySubmitted) return false;
+            if (isPrivileged) return true;
+            const pmId = typeof p.pm === 'object' ? p.pm?.id : null;
+            return Boolean(pmId) && Number(pmId) === Number(user?.id);
+        }).length;
+    }, [projects, user]);
+
+    // (2) Workspace QA — proyek yang menunggu didisposisi ke analis. Cermin `qaProjects`
+    // di WorkspaceQA.jsx: jalur QA berstatus SUBMITTED.
+    const qaWorkspaceCount = useMemo(
+        () => (projects || []).filter(p => getQaTrackStatus(p) === TRACK_STATUS.SUBMITTED).length,
+        [projects]
+    );
+
+    // (3) Tugas QA Saya — tugas QA aktif milik pengguna ini. Cermin `qaTasks` di
+    // MyTasksQA.jsx: jalur QA IN_PROGRESS; role penilik melihat semuanya, selain itu hanya
+    // proyek yang didisposisikan kepadanya (`qaAssigneeId`).
+    const qaMyTasksCount = useMemo(() => {
+        const inProgress = (projects || []).filter(p => getQaTrackStatus(p) === TRACK_STATUS.IN_PROGRESS);
+        if (QA_TASK_PRIVILEGED_ROLES.has(user?.role)) return inProgress.length;
+        return inProgress.filter(p => Number(p.qaAssigneeId) === Number(user?.id)).length;
+    }, [projects, user]);
+
+    // (4) Pengajuan Cyber — kembar (1) untuk jalur Keamanan Siber. Cermin `readyProjects`
+    // di CyberRequest.jsx.
+    const cyberRequestCount = useMemo(() => {
+        const isPrivileged = user?.role === 'super_admin';
+        return (projects || []).filter(p => {
+            const st = String(p.status || '').toUpperCase();
+            const cyberSt = getCyberTrackStatus(p);
+            const alreadySubmitted = isTrackActive(cyberSt) || isTrackPassed(cyberSt)
+                || st === PROJECT_STATUS.CYBER_IN_PROGRESS
+                || st === PROJECT_STATUS.CYBER_PASSED;
+            if (!canStartCyberTrack(st) || alreadySubmitted) return false;
+            if (isPrivileged) return true;
+            const pmId = typeof p.pm === 'object' ? p.pm?.id : null;
+            return Boolean(pmId) && Number(pmId) === Number(user?.id);
+        }).length;
+    }, [projects, user]);
+
+    // (5) Workspace Cyber — kembar (2). Cermin `cyberProjects` di WorkspaceCyber.jsx:
+    // jalur Siber berstatus SUBMITTED.
+    const cyberWorkspaceCount = useMemo(
+        () => (projects || []).filter(p => getCyberTrackStatus(p) === TRACK_STATUS.SUBMITTED).length,
+        [projects]
+    );
+
+    // (6) Tugas Siber Saya — kembar (3). Cermin `cyberTasks` di MyTasksCyber.jsx; daftar
+    // penilik jalur Siber lebih sempit (tanpa lead_group).
+    const cyberMyTasksCount = useMemo(() => {
+        const inProgress = (projects || []).filter(p => getCyberTrackStatus(p) === TRACK_STATUS.IN_PROGRESS);
+        if (CYBER_TASK_PRIVILEGED_ROLES.has(user?.role)) return inProgress.length;
+        return inProgress.filter(p => Number(p.cyberAssigneeId) === Number(user?.id)).length;
+    }, [projects, user]);
+
+    // (7) Putaran Pengembalian — proyek yang punya putaran pengembalian MASIH TERBUKA,
+    // yaitu perbaikan yang belum diajukan ulang. Cermin sisi "menunggu perbaikan" pada
+    // ReturnRounds.jsx (`round.is_open`); putaran yang sudah diajukan ulang tidak lagi
+    // menahan perhatian sehingga tidak dihitung. Tidak disaring kepemilikan PM — sama
+    // seperti halamannya, yang menampilkan seluruh proyek yang boleh dibaca dan
+    // menyerahkan pembatasan cakupan pada backend.
+    const returnRoundsCount = useMemo(
+        () => (projects || []).filter(p => {
+            const rounds = Array.isArray(p.return_rounds) ? p.return_rounds : [];
+            return rounds.some(r => r.is_open);
+        }).length,
+        [projects]
+    );
+
+    // Lencana "Persetujuan Saya" hanya relevan bagi role penyetuju internal. Daftar
+    // role di atas sudah memuat seluruh penyetuju SIT (`developer`, `dev_analyst`,
+    // `project_manager`, `development_lead`), jadi penggabungan SIT ke halaman ini
+    // tidak menuntut pelebaran daftarnya.
+    // Selang polling dipusatkan di `constants/polling.js` dan berhenti otomatis
+    // saat tab tidak terlihat.
+    const isInternalApprover = Boolean(user?.role && INTERNAL_UAT_APPROVER_ROLES.has(user.role));
+
+    // Satu halaman kini memuat SIT dan UAT sekaligus, sehingga lencananya menjumlahkan
+    // keduanya. Penjumlahan dilakukan saat render, bukan disimpan sebagai satu state
+    // gabungan, agar tiap sumber tetap bisa diperbarui sendiri-sendiri.
+    const pendingApprovalCount = pendingSitApprovalCount + pendingUatApprovalCount;
+
+    const loadPendingApprovals = useCallback(async () => {
+        // `allSettled`, bukan `all`: kedua inbox berdiri sendiri, jadi satu endpoint yang
+        // gagal tidak boleh menjatuhkan angka milik endpoint lainnya. Sumber yang gagal
+        // sengaja dibiarkan memakai angka terakhir yang diketahui — mengosongkannya akan
+        // membuat lencana terlihat seolah pekerjaan sudah habis padahal hanya jaringannya
+        // yang sedang terganggu.
+        //
+        // Akun yang tidak memiliki slot pada salah satu jalur tetap dijawab sukses dengan
+        // `pending_count: 0` oleh backend, sehingga keadaan itu tidak perlu ditangani khusus.
+        const [sitResult, uatResult] = await Promise.allSettled([
+            internalSitApprovalService.getMyAssignments(),
+            internalUatApprovalService.getMyAssignments(),
+        ]);
+
+        // Bentuk kembalian kedua service memang berbeda: `internalSitApprovalService`
+        // sudah membuka envelope dan langsung memberi `{ pending_count, items }`,
+        // sementara `internalUatApprovalService` masih meneruskan seluruh envelope
+        // `{ status, message, data }`. Karena itu hanya jalur UAT yang menempuh `.data`.
+        if (sitResult.status === 'fulfilled') {
+            setPendingSitApprovalCount(sitResult.value?.pending_count || 0);
+        }
+        if (uatResult.status === 'fulfilled') {
+            setPendingUatApprovalCount(uatResult.value?.data?.pending_count || 0);
+        }
+    }, []);
+
+    // Muat sekali saat pengguna aktif berubah lalu polling berkala, supaya lencana
+    // tidak membawa jumlah milik pengguna sebelumnya. `refreshOnReturn` dipakai karena
+    // penandatangan biasanya berpindah tab untuk membaca lampiran lalu kembali —
+    // menunggu satu putaran penuh membuat lencana tampak tertinggal.
+    useVisibilityPolling(loadPendingApprovals, POLLING_INTERVAL_MS.internalApprovals, {
+        enabled: isInternalApprover,
+        immediate: true,
+        refreshOnReturn: true,
+        resetKey: user?.id ?? null,
+    });
+
+    // Selain polling, lencana disegarkan seketika begitu sebuah keputusan persetujuan
+    // tersimpan. Keputusannya dikirim dari halaman `/approvals` maupun dari wizard
+    // SIT/UAT — keduanya di luar pohon komponen ini — sehingga tanpa isyarat ini
+    // lencana masih menyala sampai putaran polling berikutnya dan terbaca sebagai
+    // pekerjaan yang belum dikerjakan.
     useEffect(() => {
-        let cancelled = false;
-        if (!user?.role || !INTERNAL_UAT_APPROVER_ROLES.has(user.role)) return undefined;
+        if (!isInternalApprover) return undefined;
 
-        const loadPendingApprovals = async () => {
-            try {
-                const response = await internalUatApprovalService.getMyAssignments();
-                if (!cancelled) setPendingUatApprovalCount(response?.data?.pending_count || 0);
-            } catch {
-                if (!cancelled) setPendingUatApprovalCount(0);
-            }
-        };
+        const onApprovalsChanged = () => { loadPendingApprovals(); };
+        window.addEventListener(APPROVALS_CHANGED_EVENT, onApprovalsChanged);
 
-        void loadPendingApprovals();
-        const refreshTimer = window.setInterval(loadPendingApprovals, 30000);
-        return () => {
-            cancelled = true;
-            window.clearInterval(refreshTimer);
-        };
-    }, [user?.role, user?.id]);
+        return () => window.removeEventListener(APPROVALS_CHANGED_EVENT, onApprovalsChanged);
+    }, [isInternalApprover, loadPendingApprovals]);
 
     useEffect(() => {
         const onDocClick = (e) => {
@@ -113,7 +263,18 @@ export default function MainLayout() {
         navigate('/login');
     };
 
-    const sections = user ? menuSections[user.role] || [] : [];
+    // Susunan menu berasal dari kode (`menuSections`), lalu disaring pembatasan menu yang
+    // disimpan Super Admin pada `roles.menu_access`. Penyaringan bersifat MENGURANGI:
+    // tidak ada path baru yang bisa muncul dari basis data, dan menyembunyikan sebuah
+    // menu tidak menutup rutenya — gerbangnya tetap `ProtectedRoute` di frontend serta
+    // middleware `role:` dan service otorisasi di backend.
+    //
+    // Daftar pembatasan yang kosong atau tidak ada berarti tanpa pembatasan, sama seperti
+    // di backend, sehingga role tidak pernah kehilangan seluruh menunya karena Super
+    // Admin tidak mencentang apa pun.
+    const sections = user
+        ? filterSectionsByMenuAccess(menuSections[user.role] || [], user.role_detail?.menu_access)
+        : [];
     const homeRoute = getDefaultRouteForRole(user?.role);
 
     // Cari section dan item yang aktif berdasarkan URL saat ini
@@ -169,6 +330,23 @@ export default function MainLayout() {
 
                 {/* Navigation (Larger Font, Balanced Spacing) */}
                 <div className="flex-1 overflow-y-auto py-4 px-4 flex flex-col gap-4 scrollbar-hide">
+                    {sections.length === 0 && (
+                        // Role tanpa peta menu. Peran adalah baris tabel `roles` yang dapat
+                        // ditambah Super Admin lewat `POST /roles`, jadi keadaan ini bisa
+                        // benar-benar terjadi. Sebelumnya sidebar-nya kosong tanpa
+                        // keterangan apa pun, dan pengguna hanya melihat panel biru hampa
+                        // tanpa tahu apa yang harus dilakukan.
+                        //
+                        // Sebab kedua yang mungkin: pembatasan `roles.menu_access` menunjuk
+                        // path yang tidak lagi ada pada peta menu role ini.
+                        <div className="rounded-xl border border-white/15 bg-white/5 px-3 py-3 text-xs leading-relaxed text-white/70">
+                            <p className="font-bold text-white/90 mb-1">Menu belum tersedia</p>
+                            <p>
+                                Peran akun Anda{user?.role ? ` (${user.role})` : ''} belum memiliki peta menu yang aktif.
+                                Hubungi Super Admin untuk penyesuaian hak akses.
+                            </p>
+                        </div>
+                    )}
                     {sections.map((section, idx) => (
                         <div key={idx} className="space-y-1">
                             <h2 className="text-xs font-bold text-white/50 uppercase tracking-wider px-2 py-0.5">
@@ -210,9 +388,44 @@ export default function MainLayout() {
                                                     {devAnalystCount}
                                                 </span>
                                             )}
-                                            {item.path === '/approvals/uat' && pendingUatApprovalCount > 0 && (
+                                            {item.path === '/approvals' && pendingApprovalCount > 0 && (
                                                 <span className="inline-flex h-5 min-w-[20px] items-center justify-center rounded-full bg-amber-500 px-1.5 text-[10px] font-extrabold leading-none text-white">
-                                                    {pendingUatApprovalCount}
+                                                    {pendingApprovalCount}
+                                                </span>
+                                            )}
+                                            {item.path === '/pm/qa-request' && qaRequestCount > 0 && (
+                                                <span className="inline-flex items-center justify-center min-w-[20px] h-5 px-1.5 rounded-full bg-purple-500 text-white text-[10px] font-extrabold leading-none animate-pulse">
+                                                    {qaRequestCount}
+                                                </span>
+                                            )}
+                                            {item.path === '/workspace/qa' && qaWorkspaceCount > 0 && (
+                                                <span className="inline-flex items-center justify-center min-w-[20px] h-5 px-1.5 rounded-full bg-purple-500 text-white text-[10px] font-extrabold leading-none animate-pulse">
+                                                    {qaWorkspaceCount}
+                                                </span>
+                                            )}
+                                            {item.path === '/my-tasks/qa' && qaMyTasksCount > 0 && (
+                                                <span className="inline-flex items-center justify-center min-w-[20px] h-5 px-1.5 rounded-full bg-purple-500 text-white text-[10px] font-extrabold leading-none animate-pulse">
+                                                    {qaMyTasksCount}
+                                                </span>
+                                            )}
+                                            {item.path === '/pm/cyber-request' && cyberRequestCount > 0 && (
+                                                <span className="inline-flex items-center justify-center min-w-[20px] h-5 px-1.5 rounded-full bg-orange-500 text-white text-[10px] font-extrabold leading-none animate-pulse">
+                                                    {cyberRequestCount}
+                                                </span>
+                                            )}
+                                            {item.path === '/workspace/cyber' && cyberWorkspaceCount > 0 && (
+                                                <span className="inline-flex items-center justify-center min-w-[20px] h-5 px-1.5 rounded-full bg-orange-500 text-white text-[10px] font-extrabold leading-none animate-pulse">
+                                                    {cyberWorkspaceCount}
+                                                </span>
+                                            )}
+                                            {item.path === '/my-tasks/cyber' && cyberMyTasksCount > 0 && (
+                                                <span className="inline-flex items-center justify-center min-w-[20px] h-5 px-1.5 rounded-full bg-orange-500 text-white text-[10px] font-extrabold leading-none animate-pulse">
+                                                    {cyberMyTasksCount}
+                                                </span>
+                                            )}
+                                            {item.path === '/pm/return-rounds' && returnRoundsCount > 0 && (
+                                                <span className="inline-flex items-center justify-center min-w-[20px] h-5 px-1.5 rounded-full bg-amber-500 text-white text-[10px] font-extrabold leading-none animate-pulse">
+                                                    {returnRoundsCount}
                                                 </span>
                                             )}
                                         </span>

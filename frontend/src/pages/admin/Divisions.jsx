@@ -8,8 +8,6 @@ import {
     Trash2,
     X,
     Calendar,
-    Code,
-    FileText,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 
@@ -155,7 +153,7 @@ export default function DivisionsManagement() {
                                         <td className="py-4 px-6 text-xs text-gray-500">
                                             <div className="flex items-center gap-1.5">
                                                 <Calendar size={13} className="text-gray-400" />
-                                                <span>{d.createdAt || '2025-01-10'}</span>
+                                                <span>{d.createdAt || '-'}</span>
                                             </div>
                                         </td>
                                         <td className="py-4 px-6 text-center">

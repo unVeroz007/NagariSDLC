@@ -35,11 +35,16 @@ export default function SITUATDocumentModal({ project, onClose }) {
 
     if (!project) return null;
 
-    const pmName = safeStr(project.pm || project.assignedPM || project.pmName, 'Tim PM TI');
-    const devLeadName = safeStr(project.devLead, 'Dev Lead TI');
-    const analystName = safeStr(project.analyst, 'System Analyst TI');
-    const divisionName = safeStr(project.division, 'Divisi TI');
-    const projectName = safeStr(project.name, 'Proyek TI');
+    // Berita acara adalah dokumen resmi, jadi tidak boleh mengarang pemegang
+    // peran. Bila data belum ada, kolomnya ditandai "(belum ditetapkan)" supaya
+    // pembaca tahu itu kekosongan data, bukan nama unit yang sebenarnya.
+    const UNSET = '(belum ditetapkan)';
+
+    const pmName = safeStr(project.pm || project.assignedPM || project.pmName, UNSET);
+    const devLeadName = safeStr(project.devLead, UNSET);
+    const analystName = safeStr(project.analyst, UNSET);
+    const divisionName = safeStr(project.division, UNSET);
+    const projectName = safeStr(project.name, UNSET);
     const projectId = safeStr(project.id, '-');
 
     const handleDownload = () => {

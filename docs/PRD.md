@@ -62,9 +62,13 @@ yang tidak transparan & sulit dilacak.
 
 ### Fase QA & Cyber
 - [x] Pengajuan QA & Cyber, pelaksanaan, sign-off.
+- [x] Dua jalur berjalan paralel dan independen; masing-masing dapat mengembalikan
+      proyek ke development (`RETURN_TO_DEV`) bila ada temuan kode atau keamanan.
 
 ### Fase Rilis
-- [x] Release request, quality gate, live production.
+- [x] Setelah **kedua** jalur pengujian lulus, PM mengajukan migrasi & rilis ke Grup
+      Infrastruktur (`PENDING_GOLIVE`). Tidak ada UAT final setelah QA & Siber.
+- [x] Quality gate oleh Head of IT, lalu live production.
 
 ### Cross-cutting
 - [x] Dokumen vault (upload/download/view, masking nama, tipe file).
@@ -93,6 +97,6 @@ yang tidak transparan & sulit dilacak.
 
 ## 8. Risiko & Catatan
 
-- `UNLOCK_ALL_STAGES = true` di `SITUATWizard.jsx` = mode dev/inspeksi.
-  **Set `false` sebelum produksi.**
+- `UNLOCK_ALL_STAGES = false` di `SITUATWizard.jsx` (mode produksi). Nilai `true`
+  hanya escape hatch debug lokal dan tidak boleh di-commit.
 - Role `dev_analyst` belum ada di enum backend (masih `project_manager`).

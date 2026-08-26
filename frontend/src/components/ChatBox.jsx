@@ -8,8 +8,6 @@ import {
     Paperclip,
     ChevronDown,
     ChevronUp,
-    Clock,
-    X,
     Zap,
 } from 'lucide-react';
 
@@ -22,7 +20,7 @@ export default function ChatBox({
     isFloating = false,
 }) {
     const { user } = useAuth();
-    const { getMessages, sendMessage, markAsRead, getUnreadCount, loadMessages } = useChat();
+    const { getMessages, sendMessage, loadMessages } = useChat();
 
     const [inputText, setInputText] = useState('');
     const [isCollapsed, setIsCollapsed] = useState(isFloating);
@@ -36,7 +34,6 @@ export default function ChatBox({
     }, [projectId, loadMessages]);
 
     const messages = getMessages(projectId);
-    const unreadCount = getUnreadCount(projectId);
 
     // Auto-scroll ke bawah di dalam wadah pesan saja (tanpa scroll halaman utama browser)
     const scrollToBottom = () => {
@@ -48,9 +45,8 @@ export default function ChatBox({
     useEffect(() => {
         if (!isCollapsed) {
             scrollToBottom();
-            markAsRead(projectId);
         }
-    }, [messages, isCollapsed, projectId]);
+    }, [messages, isCollapsed]);
 
     const handleSend = (e) => {
         e?.preventDefault();
@@ -101,17 +97,10 @@ export default function ChatBox({
     if (isFloating && isCollapsed) {
         return (
             <button
-                onClick={() => { setIsCollapsed(false); markAsRead(projectId); }}
+                onClick={() => setIsCollapsed(false)}
                 className="fixed bottom-6 right-6 z-50 bg-[#1a365d] hover:bg-[#0f2342] text-white p-4 rounded-full shadow-2xl flex items-center gap-3 transition-all hover:scale-105 border-2 border-white"
             >
-                <div className="relative">
-                    <MessageSquare size={24} />
-                    {unreadCount > 0 && (
-                        <span className="absolute -top-2 -right-2 bg-red-500 text-white text-[10px] font-extrabold w-5 h-5 rounded-full flex items-center justify-center border-2 border-white animate-pulse">
-                            {unreadCount}
-                        </span>
-                    )}
-                </div>
+                <MessageSquare size={24} />
                 <span className="font-bold text-xs hidden sm:inline">Diskusi Proyek ({projectId})</span>
             </button>
         );
@@ -137,11 +126,6 @@ export default function ChatBox({
                     </div>
 
                     <div className="flex items-center gap-2 shrink-0">
-                        {unreadCount > 0 && (
-                            <span className="bg-red-500 text-white text-[10px] font-extrabold px-2 py-0.5 rounded-full animate-pulse">
-                                {unreadCount} baru
-                            </span>
-                        )}
                         <button
                             onClick={() => setIsCollapsed(!isCollapsed)}
                             className="p-1 hover:bg-white/10 rounded-lg transition-colors text-blue-200 hover:text-white"

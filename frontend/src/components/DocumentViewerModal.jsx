@@ -9,30 +9,69 @@ import {
     Minimize2,
     X,
 } from 'lucide-react';
+import toast from 'react-hot-toast';
 import { documentService } from '../services/api';
-import { getFileFromStore } from '../contexts/ProjectContext';
+import { getFileFromStore } from '../utils/projectDocuments';
+import { formatDocSizeLabel } from '../utils/documentNaming';
+
+/**
+ * Picu unduhan berkas dengan nama aslinya.
+ *
+ * Memakai anchor `download`, bukan `window.open`. Membuka blob URL di tab baru
+ * menyimpan berkasnya dengan nama UUID milik URL tersebut — nama dokumen resmi
+ * (mis. `REQ-2026-014-BRD-Mobile-Banking.pdf`) hilang, padahal justru nama itulah
+ * yang menjadi rujukan pada berita acara.
+ */
+const triggerAnchorDownload = (url, fileName) => {
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = fileName;
+    document.body.appendChild(anchor);
+    anchor.click();
+    document.body.removeChild(anchor);
+};
 
 export default function DocumentViewerModal({ doc, project, onClose }) {
-    if (!doc) return null;
+    // React mewajibkan jumlah dan urutan hook sama pada setiap render, sehingga
+    // pemeriksaan "dokumen kosong" dilakukan setelah semua hook dipanggil. Bila
+    // early return diletakkan di atas hook, mengganti prop `doc` menjadi null
+    // tanpa melepas komponen ini akan memicu "Rendered fewer hooks than
+    // expected" dan seluruh layar ikut mati.
+    const hasDoc = Boolean(doc);
 
-    const docId = doc.id;
-    const docName = doc.name || doc.file_name || doc.title || 'Dokumen_SDLC.pdf';
-    const docType = (doc.type || doc.doc_type || doc.category || 'BRD').toUpperCase();
-    const docSize = doc.size || doc.file_size || '1.8 MB';
-    const projName = doc.project || doc.project_name || project?.name || 'Proyek SDLC Bank Nagari';
-    const uploadedBy = doc.uploadedBy || doc.uploaded_by_name || doc.author || 'System Analyst TI';
+    // Metadata dokumen tidak boleh diisi nilai karangan: ukuran, tipe, dan nama
+    // pengunggah adalah bagian dari jejak audit dokumen. Bila datanya tidak
+    // dikirim API, yang ditampilkan adalah tanda kosong, bukan contoh.
+    const docId = doc?.id ?? null;
+    const docName = doc?.name || doc?.file_name || doc?.title || 'Dokumen tanpa nama';
+    const docType = (doc?.type || doc?.doc_type || doc?.category || 'DOKUMEN').toUpperCase();
+    // Ukuran diformat lewat helper bersama. Sebagian pemanggil meneruskan
+    // `file_size` mentah dalam byte, dan sebelumnya angka itu tampil apa adanya —
+    // "2458123" alih-alih "2.34 MB".
+    const docSize = formatDocSizeLabel(doc);
+    const projName = doc?.project || doc?.project_name || project?.name || '-';
+    const uploadedBy = doc?.uploadedBy || doc?.uploaded_by_name || doc?.author || '-';
+
+    // Kunci pencarian berkas diambil sebagai nilai skalar supaya dependensi efek
+    // di bawah tidak ikut berubah setiap kali induk membuat ulang objek `doc`.
+    const embeddedUrl = doc?.url || doc?.fileUrl || doc?.dataUrl || null;
+    const docStoreKey = doc?.name ?? null;
 
     const [safeUrl, setSafeUrl] = useState(null);
     const [isLoadingUrl, setIsLoadingUrl] = useState(false);
+    const [isDownloading, setIsDownloading] = useState(false);
     const [loadError, setLoadError] = useState(false);
+    const [isFullscreen, setIsFullscreen] = useState(false);
 
     useEffect(() => {
+        if (!hasDoc) return undefined;
+
         let cancelled = false;
         let createdUrl = null;
 
         const loadUrl = async () => {
             // 1. Cek direct URL dari doc object (Blob URL, Data URL, dll dari preview)
-            const directUrl = doc.url || doc.fileUrl || doc.dataUrl || null;
+            const directUrl = embeddedUrl;
             if (directUrl && (directUrl.startsWith('blob:') || directUrl.startsWith('data:'))) {
                 if (!cancelled) {
                     setSafeUrl(directUrl);
@@ -42,7 +81,7 @@ export default function DocumentViewerModal({ doc, project, onClose }) {
             }
 
             // 2. Cek dari file store (cache lokal)
-            const storedUrl = getFileFromStore(doc.name) || getFileFromStore(doc.id);
+            const storedUrl = getFileFromStore(docStoreKey) || getFileFromStore(docId);
             if (storedUrl && (storedUrl.startsWith('blob:') || storedUrl.startsWith('data:'))) {
                 if (!cancelled) {
                     setSafeUrl(storedUrl);
@@ -76,7 +115,7 @@ export default function DocumentViewerModal({ doc, project, onClose }) {
             cancelled = true;
             if (createdUrl) URL.revokeObjectURL(createdUrl);
         };
-    }, [docId, JSON.stringify(doc)]);
+    }, [hasDoc, docId, embeddedUrl, docStoreKey]);
 
     const isImage = useMemo(() => {
         const fn = docName.toLowerCase();
@@ -96,9 +135,9 @@ export default function DocumentViewerModal({ doc, project, onClose }) {
         return /\.(xlsx|xls)$/i.test(fn) || /\.(docx|doc)$/i.test(fn) || /\.(zip|rar|7z)$/i.test(fn);
     }, [docName]);
 
-    const [isFullscreen, setIsFullscreen] = useState(false);
-
     useEffect(() => {
+        if (!hasDoc) return undefined;
+
         const handleKeyDown = (e) => {
             if (e.key === 'Escape') onClose();
         };
@@ -108,26 +147,65 @@ export default function DocumentViewerModal({ doc, project, onClose }) {
             window.removeEventListener('keydown', handleKeyDown);
             if (typeof document !== 'undefined') document.body.style.overflow = 'unset';
         };
-    }, [onClose]);
+    }, [hasDoc, onClose]);
+
+    if (!hasDoc) return null;
 
     const handleDownload = async () => {
-        if (safeUrl) {
-            window.open(safeUrl, '_blank');
+        if (isDownloading) return;
+
+        // Berkas yang pratinjaunya sudah ada di memori (hasil unggah pada sesi ini)
+        // langsung diunduh dari URL tersebut; tidak ada gunanya memanggil API untuk
+        // berkas yang belum tentu punya baris di Document Vault.
+        const localUrl = (embeddedUrl && (embeddedUrl.startsWith('blob:') || embeddedUrl.startsWith('data:')))
+            ? embeddedUrl
+            : [getFileFromStore(docStoreKey), getFileFromStore(docId)]
+                .find((url) => url && (url.startsWith('blob:') || url.startsWith('data:')));
+
+        if (localUrl) {
+            triggerAnchorDownload(localUrl, docName);
             return;
         }
-        if (!docId) return;
+
+        if (!docId) {
+            toast.error('Dokumen ini belum tersimpan di server sehingga belum dapat diunduh.');
+            return;
+        }
+
+        // Blob-nya diambil ulang di sini, bukan memakai `safeUrl`. URL pratinjau
+        // dicabut saat modal ditutup, jadi unduhan yang bergantung padanya bisa mati
+        // di tengah jalan bila pengguna menutup modal lebih dulu.
+        setIsDownloading(true);
         try {
             const blob = await documentService.download(docId);
             const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = docName;
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
+            triggerAnchorDownload(url, docName);
             URL.revokeObjectURL(url);
-        } catch {
-            // silent
+        } catch (err) {
+            // Kegagalan unduh sebelumnya ditelan diam-diam: tombolnya tampak berfungsi,
+            // tidak ada berkas yang turun, dan tidak ada satu pun keterangan alasannya.
+            toast.error(`Gagal mengunduh "${docName}": ${err.message}`);
+        } finally {
+            setIsDownloading(false);
+        }
+    };
+
+    /**
+     * Buka dokumen pada tab baru agar dapat dicetak dari penampil bawaan peramban.
+     *
+     * Tombol ini sebelumnya memanggil `window.print()`, yang mencetak halaman
+     * aplikasi — bukan dokumennya. Pratinjau berada di dalam `<object>`/`<iframe>`
+     * tersendiri, sehingga hasil cetaknya adalah tangkapan antarmuka modal berlatar
+     * gelap, lengkap dengan tombol-tombolnya.
+     */
+    const handlePrint = () => {
+        if (!safeUrl) {
+            toast.error('Dokumen belum selesai dimuat, jadi belum dapat dicetak.');
+            return;
+        }
+        const printWindow = window.open(safeUrl, '_blank', 'noopener');
+        if (!printWindow) {
+            toast.error('Peramban memblokir jendela baru. Izinkan pop-up untuk mencetak dokumen ini.');
         }
     };
 
@@ -156,15 +234,16 @@ export default function DocumentViewerModal({ doc, project, onClose }) {
                     <div className="flex items-center gap-2 shrink-0 flex-wrap">
                         <button
                             onClick={handleDownload}
-                            className="flex items-center gap-1.5 px-3.5 py-1.5 bg-[#00529C] hover:bg-blue-600 text-white rounded-xl text-xs font-bold transition-all shadow-md cursor-pointer active:scale-95"
+                            disabled={isDownloading}
+                            className="flex items-center gap-1.5 px-3.5 py-1.5 bg-[#00529C] hover:bg-blue-600 disabled:bg-slate-700 disabled:text-slate-400 disabled:cursor-not-allowed text-white rounded-xl text-xs font-bold transition-all shadow-md cursor-pointer active:scale-95"
                         >
                             <Download size={14} />
-                            <span className="hidden sm:inline">Unduh File</span>
+                            <span className="hidden sm:inline">{isDownloading ? 'Mengunduh...' : 'Unduh File'}</span>
                         </button>
                         <button
-                            onClick={() => window.print()}
+                            onClick={handlePrint}
                             className="p-2 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded-xl transition-colors cursor-pointer"
-                            title="Cetak Dokumen"
+                            title="Cetak Dokumen (dibuka di tab baru)"
                         >
                             <Printer size={16} />
                         </button>

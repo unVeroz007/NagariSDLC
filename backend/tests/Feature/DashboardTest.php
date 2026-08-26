@@ -19,10 +19,10 @@ use Tests\TestCase;
  *
  * 1. **Gerbangnya ada di server, bukan di router frontend.** `GET /dashboard/analytics`
  *    mengembalikan agregat lintas portofolio — distribusi status seluruh proyek, beban
- *    tiap developer, komposisi role tiap akun. Halaman yang memakainya dijaga
- *    `ADMIN_ROLES` di `frontend/src/router/index.jsx`, tetapi penjagaan itu hanya
- *    menyembunyikan menu; endpointnya tetap dapat dipanggil langsung dengan token
- *    akun apa pun.
+ *    tiap developer, komposisi role tiap akun. Route frontend yang memakainya dijaga
+ *    daftar role yang sama dengan middleware endpoint (`super_admin`, `head_of_it`),
+ *    tetapi penjagaan router hanya menyembunyikan menu; endpointnya tetap dapat
+ *    dipanggil langsung dengan token akun apa pun, jadi gerbang otoritatifnya server.
  *
  * 2. **Ringkasan dasbor memakai penyaring visibilitas yang sama dengan daftar proyek.**
  *    Selama `summary()` menyimpan salinan aturannya sendiri, salinan itu akan menyimpang
@@ -59,20 +59,22 @@ class DashboardTest extends TestCase
         $this->pm = $this->makeUser(UserRole::PROJECT_MANAGER->value, 'Analis Pengembangan', 'pm-dash@nagari.co.id');
     }
 
-    public function test_analytics_is_limited_to_super_admin(): void
+    public function test_analytics_open_to_super_admin_and_head_of_it_only(): void
     {
         $this->actingAs($this->superAdmin)
             ->getJson('/api/v1/dashboard/analytics')
             ->assertOk()
             ->assertJsonPath('status', 'success');
 
-        // Head of IT berwenang menyetujui go-live dan melihat seluruh proyek, tetapi
-        // analitik memuat komposisi akun dan beban personal seluruh developer —
-        // itu wewenang administrasi sistem.
+        // Keputusan tata kelola 26 Agustus 2026: Head of IT memegang pengawasan rilis
+        // lintas portofolio, sehingga analitik SDLC (distribusi status, beban developer,
+        // komposisi akun) kini termasuk wewenangnya.
         $this->actingAs($this->headOfIt)
             ->getJson('/api/v1/dashboard/analytics')
-            ->assertStatus(403);
+            ->assertOk()
+            ->assertJsonPath('status', 'success');
 
+        // Role lain tetap ditolak: angka ini agregat seluruh bank, bukan konsumsi umum.
         $businessUser = $this->makeUser(UserRole::BUSINESS_USER->value, 'Pemohon', 'pemohon-dash@nagari.co.id');
 
         $this->actingAs($businessUser)

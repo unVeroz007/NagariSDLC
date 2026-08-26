@@ -1,7 +1,12 @@
 import { useState, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useAuth } from '../../contexts/AuthContext';
 import { useProjects } from '../../contexts/ProjectContext';
+import {
+    PROJECT_STATUS,
+    PROJECT_STATUS_COLOR,
+    PROJECT_STATUS_LABEL,
+    getProjectPhaseKey,
+} from '../../constants/projectStatus';
 import {
     Search,
     User,
@@ -10,49 +15,84 @@ import {
     AlertCircle,
     ArrowUpRight,
     Briefcase,
+    Loader2,
 } from 'lucide-react';
 
+/**
+ * Urutan status untuk dropdown filter, mengikuti urutan deklarasi pada
+ * `PROJECT_STATUS` (sudah tersusun per fase). Dipakai untuk mengurutkan status
+ * yang benar-benar muncul pada data, bukan untuk menampilkan seluruh 27 status
+ * yang sebagian tidak akan pernah ada di daftar proyek yang sedang dibuka.
+ */
+const STATUS_ORDER = Object.values(PROJECT_STATUS);
+
+/**
+ * Status akhir/di luar alur. Untuk proyek berstatus ini, nomor fase tidak punya
+ * arti sebagai kemajuan — jadi indikator fase disembunyikan dan hanya badge
+ * statusnya yang ditampilkan.
+ */
+const OUT_OF_FLOW_STATUSES = [
+    PROJECT_STATUS.REJECTED,
+    PROJECT_STATUS.ON_HOLD,
+    PROJECT_STATUS.CANCELLED,
+];
+
+/** Jumlah fase yang dikenali `getProjectPhaseKey` (1..4). */
+const TOTAL_PHASES = 4;
+
 export default function Tasks() {
-    const { user } = useAuth();
-    const { projects } = useProjects();
+    const { projects, isLoading } = useProjects();
     const navigate = useNavigate();
     const [searchTerm, setSearchTerm] = useState('');
     const [statusFilter, setStatusFilter] = useState('');
 
     const mappedProjects = useMemo(() => {
         return (projects || []).map(p => ({
-            id: p.reqId || p.req_id || `REQ-${p.id}`,
+            reqId: p.reqId || p.req_id || `REQ-${p.id}`,
             realId: p.id,
             name: p.name || p.title || 'Proyek Tanpa Judul',
             pm: typeof p.pm === 'object' ? (p.pm?.name || 'Belum Dialokasi') : (p.pm || 'Belum Dialokasi'),
-            status: p.status || 'PENDING',
-            progress: p.status === 'LIVE_PRODUCTION' ? 100 : (p.status === 'IN_DEVELOPMENT' ? 50 : 25),
+            status: p.status || PROJECT_STATUS.PENDING,
+            // Nomor fase SDLC diturunkan dari status lewat pemetaan tunggal di
+            // `projectStatus.js`. Sebelumnya kolom ini berisi persentase karangan
+            // (100 untuk LIVE_PRODUCTION, 50 untuk IN_DEVELOPMENT, 25 untuk 25
+            // status lainnya) — sebuah proyek yang sudah lulus QA dan Siber tampil
+            // sama seperti pengajuan yang baru masuk.
+            phaseKey: getProjectPhaseKey(p.status),
+            isOutOfFlow: OUT_OF_FLOW_STATUSES.includes(p.status),
         }));
     }, [projects]);
 
+    // Pilihan filter dibangun dari status yang benar-benar ada pada data, bukan
+    // dari tiga status yang ditulis tangan. Dengan begitu tidak ada status yang
+    // hilang dari dropdown, dan tidak ada pilihan yang pasti berhasil nol baris.
+    const availableStatuses = useMemo(() => {
+        const present = new Set(mappedProjects.map((p) => p.status));
+        return STATUS_ORDER.filter((status) => present.has(status));
+    }, [mappedProjects]);
+
     const filteredProjects = useMemo(() => {
+        const keyword = searchTerm.trim().toLowerCase();
         return mappedProjects.filter((project) => {
-            const matchSearch =
-                project.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                String(project.id).toLowerCase().includes(searchTerm.toLowerCase());
+            const matchSearch = !keyword
+                || project.name.toLowerCase().includes(keyword)
+                || String(project.reqId).toLowerCase().includes(keyword);
             const matchStatus = statusFilter ? project.status === statusFilter : true;
             return matchSearch && matchStatus;
         });
     }, [mappedProjects, searchTerm, statusFilter]);
 
     const getStatusIcon = (status) => {
-        switch (status) {
-            case 'IN_DEVELOPMENT': return <Clock size={14} className="text-emerald-600" />;
-            case 'REJECTED': return <AlertCircle size={14} className="text-red-600" />;
-            case 'LIVE_PRODUCTION': return <CheckCircle size={14} className="text-blue-600" />;
-            default: return <Briefcase size={14} className="text-gray-500" />;
+        if (OUT_OF_FLOW_STATUSES.includes(status)) {
+            return <AlertCircle size={14} className="shrink-0" />;
         }
-    };
-
-    const getProgressColor = (pct) => {
-        if (pct === 100) return 'bg-blue-500';
-        if (pct >= 50) return 'bg-emerald-500';
-        return 'bg-amber-500';
+        if (status === PROJECT_STATUS.LIVE_PRODUCTION) {
+            return <CheckCircle size={14} className="shrink-0" />;
+        }
+        if (status === PROJECT_STATUS.PENDING || status === PROJECT_STATUS.IN_REVIEW) {
+            return <Briefcase size={14} className="shrink-0" />;
+        }
+        return <Clock size={14} className="shrink-0" />;
     };
 
     const handleSelectProject = (projectId) => {
@@ -86,46 +126,79 @@ export default function Tasks() {
                         className="border border-gray-200 rounded-xl px-4 py-2.5 bg-white text-sm focus:outline-none focus:ring-2 focus:ring-[#00529C]/20 focus:border-[#00529C] shadow-sm"
                     >
                         <option value="">Semua Status</option>
-                        <option value="PENDING">Menunggu Review</option>
-                        <option value="IN_DEVELOPMENT">Sedang Dikembangkan</option>
-                        <option value="LIVE_PRODUCTION">Live Production</option>
+                        {availableStatuses.map((status) => (
+                            <option key={status} value={status}>
+                                {PROJECT_STATUS_LABEL[status] || status}
+                            </option>
+                        ))}
                     </select>
                 </div>
             </div>
 
             {/* Cards Grid */}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
-                {filteredProjects.length === 0 ? (
+                {isLoading && mappedProjects.length === 0 ? (
+                    // Muat pertama dibedakan dari daftar kosong. Sebelumnya keduanya
+                    // menampilkan "Tidak ada proyek ditemukan di database." sehingga PM
+                    // membaca kegagalan data padahal permintaannya masih berjalan.
+                    <div className="col-span-3 bg-white p-8 rounded-2xl border border-gray-200 text-center text-gray-500 font-medium flex items-center justify-center gap-2.5">
+                        <Loader2 size={16} className="animate-spin text-[#00529C]" />
+                        Memuat daftar proyek...
+                    </div>
+                ) : filteredProjects.length === 0 ? (
                     <div className="col-span-3 bg-white p-8 rounded-2xl border border-gray-200 text-center text-gray-400 font-medium">
-                        Tidak ada proyek ditemukan di database.
+                        {mappedProjects.length === 0
+                            ? 'Belum ada proyek yang dapat Anda kelola.'
+                            : 'Tidak ada proyek yang cocok dengan pencarian atau filter status.'}
                     </div>
                 ) : (
                     filteredProjects.map((project) => (
                         <div key={project.realId} className="bg-white rounded-2xl border border-gray-200/80 p-5 shadow-xs hover:shadow-md transition-all flex flex-col justify-between">
                             <div>
-                                <div className="flex justify-between items-start mb-3">
-                                    <span className="px-2.5 py-1 bg-gray-100 text-gray-600 rounded-lg text-xs font-mono font-bold">
-                                        {project.req_id || project.reqId || project.id}
+                                <div className="flex justify-between items-start gap-2 mb-3">
+                                    <span className="px-2.5 py-1 bg-gray-100 text-gray-600 rounded-lg text-xs font-mono font-bold shrink-0">
+                                        {project.reqId}
                                     </span>
-                                    <span className="flex items-center gap-1.5 text-xs font-bold px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-700">
+                                    {/* Warna dan label badge diambil dari peta status bersama.
+                                        Sebelumnya semua status memakai satu warna hijau —
+                                        proyek DITOLAK dan DIBATALKAN pun tampil hijau, dengan
+                                        kode mentah sebagai teksnya. */}
+                                    <span className={`flex items-center gap-1.5 text-xs font-bold px-2.5 py-1 rounded-full border text-right ${PROJECT_STATUS_COLOR[project.status] || 'bg-gray-100 text-gray-600 border-gray-200'}`}>
                                         {getStatusIcon(project.status)}
-                                        {project.status}
+                                        {PROJECT_STATUS_LABEL[project.status] || project.status}
                                     </span>
                                 </div>
                                 <h3 className="font-bold text-gray-800 text-base mb-2 line-clamp-1">{project.name}</h3>
                                 <p className="text-xs text-gray-500 flex items-center gap-1.5 mb-4">
-                                    <User size={13} className="text-gray-400" /> PM: <span className="font-semibold text-gray-700">{typeof project.pm === 'object' ? (project.pm?.name || '—') : (project.pm || '—')}</span>
+                                    <User size={13} className="text-gray-400" /> PM: <span className="font-semibold text-gray-700">{project.pm}</span>
                                 </p>
                             </div>
 
                             <div>
+                                {/* Indikator fase SDLC, bukan persentase. Tidak ada sumber
+                                    kemajuan berbasis persen di aplikasi ini, jadi angka
+                                    seperti itu hanya bisa dikarang. Nomor fase sebaliknya
+                                    diturunkan langsung dari status proyek. */}
                                 <div className="mb-4">
-                                    <div className="flex justify-between text-xs font-bold text-gray-600 mb-1">
-                                        <span>Progress Proyek</span>
-                                        <span>{project.progress}%</span>
+                                    <div className="flex justify-between text-xs font-bold text-gray-600 mb-1.5">
+                                        <span>Fase SDLC</span>
+                                        <span className={project.isOutOfFlow ? 'text-gray-400' : 'text-[#00529C]'}>
+                                            {project.isOutOfFlow ? 'Di luar alur' : `Fase ${project.phaseKey} dari ${TOTAL_PHASES}`}
+                                        </span>
                                     </div>
-                                    <div className="w-full h-2 bg-gray-100 rounded-full overflow-hidden">
-                                        <div className={`h-full ${getProgressColor(project.progress)} rounded-full transition-all duration-500`} style={{ width: `${project.progress}%` }}></div>
+                                    <div className="flex gap-1">
+                                        {Array.from({ length: TOTAL_PHASES }, (_, i) => i + 1).map((phase) => (
+                                            <div
+                                                key={phase}
+                                                className={`h-2 flex-1 rounded-full ${
+                                                    project.isOutOfFlow
+                                                        ? 'bg-gray-200'
+                                                        : phase <= project.phaseKey
+                                                            ? 'bg-[#00529C]'
+                                                            : 'bg-gray-100'
+                                                }`}
+                                            ></div>
+                                        ))}
                                     </div>
                                 </div>
 

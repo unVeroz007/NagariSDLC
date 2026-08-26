@@ -1,92 +1,98 @@
 import { createContext, useState, useContext, useEffect, useCallback, useRef } from 'react';
-import { projectService, documentService } from '../services/api';
+import { projectService, documentService, sessionStore } from '../services/api';
 import { useAuth } from './AuthContext';
-import { generateDocumentName, isEvidenceDocumentType } from '../utils/documentNaming';
+import { useVisibilityPolling } from '../hooks/usePolling';
+import { POLLING_INTERVAL_MS } from '../constants/polling';
+import { generateDocumentName } from '../utils/documentNaming';
+import { TRACK_STATUS } from '../constants/projectStatus';
+import { DEFAULT_PROJECT_PRIORITY } from '../constants/projectPriority';
+import { getCyberCheckTypeLabel, normalizeCyberCheckType } from '../constants/cyberCheckType';
 import toast from 'react-hot-toast';
 
 const ProjectContext = createContext();
 
-if (typeof window !== 'undefined') {
-    window.__nagariFileStore = window.__nagariFileStore || new Map();
-}
-
-export const saveFileToStore = (key, url) => {
-    if (typeof window !== 'undefined' && window.__nagariFileStore && key && url) {
-        window.__nagariFileStore.set(String(key), url);
-    }
-};
-
-export const getFileFromStore = (key) => {
-    if (typeof window !== 'undefined' && window.__nagariFileStore && key) {
-        return window.__nagariFileStore.get(String(key));
-    }
-    return null;
-};
-
 /**
- * Ekstrak dokumen dari objek proyek untuk ditampilkan di antarmuka.
- * Backend mengembalikan dokumen via relasi `documents` pada ProjectResource.
+ * Satu bentuk proyek yang dipakai seluruh komponen.
  *
- * Lampiran bukti per task/skenario SIT & UAT (SIT_TASK_EVIDENCE, UAT_EVIDENCE)
- * dikecualikan secara default karena hanya bermakna di konteks task/skenario-nya
- * (panel eksekusi SIT & wizard SIT/UAT). Daftar ini dipakai sebagai dokumen
- * per fase/aktivitas — BRD, MEMO, FSD, Berita Acara SIT/UAT, dsb.
- *
- * @param {object|null} project
- * @param {{ includeEvidence?: boolean }} [options] - set includeEvidence: true
- *        bila pemanggil memang perlu menampilkan lampiran bukti SIT/UAT.
+ * API memaparkan snake_case; komponen memakai camelCase. Menempatkan penerjemahannya di
+ * satu fungsi mencegah tiap layar menebak sendiri nama kuncinya — persis yang membuat
+ * layar Lead sebelumnya membaca `qaAssignee` yang tidak pernah ada isinya.
  */
-export const getProjectRealDocuments = (project, { includeEvidence = false } = {}) => {
-    if (!project) return [];
+const normalizeProject = (project) => ({
+    ...project,
+    name: project.name || project.title || 'Tanpa Judul',
+    reqId: project.reqId || project.req_id || null,
+    targetDate: project.targetDate || project.target_date || 'TBD',
+    // Tenggat RBB dibaca 17 tempat sebagai `rbbDeadline`. Tidak diberi nilai bawaan
+    // 'TBD' seperti `targetDate`: dasbor menyaring dengan `p.rbbDeadline &&` lalu
+    // membangun `new Date(...)` darinya, jadi teks sentinel akan lolos filter dan
+    // menghasilkan `Invalid Date` yang tampil sebagai tenggat sungguhan.
+    rbbDeadline: project.rbbDeadline || project.rbb_deadline || null,
+    submittedAt: project.submittedAt || project.created_at || new Date().toISOString(),
+    division: typeof project.division === 'string'
+        ? project.division
+        : (project.division?.name || project.division_detail?.name || null),
+    contactPhone: project.contactPhone || project.contact_phone || '',
+    // Normalisasi key snake_case → camelCase (ProjectResource mengekspos sit_uat_data)
+    sitUatData: project.sitUatData || project.sit_uat_data || {},
 
-    // API mode: documents already embedded in project from backend
-    if (Array.isArray(project.documents)) {
-        return project.documents
-            .filter(d => includeEvidence || !isEvidenceDocumentType(d.document_type || d.type))
-            .map(d => ({
-                id: d.id || `doc-${Math.random()}`,
-                name: d.file_name || d.name || 'Dokumen_SDLC.pdf',
-                type: d.document_type || d.type || 'Dokumen SDLC',
-                size: d.file_size || d.size || 'N/A',
-                uploadedAt: d.created_at || d.uploaded_at || 'Terverifikasi',
-                author: d.uploader?.name || d.author || 'Tim SDLC',
-                url: d.id && !d.url ? `${import.meta.env.VITE_API_URL}/documents/${d.id}/download` : (d.url || null),
-            }));
-    }
-    return [];
-};
+    // ─── Dua jalur pengujian paralel ───
+    // Status jalur adalah kebenaran masing-masing jalur; `status` proyek hanyalah satu
+    // penunjuk siklus yang dipegang bergiliran, jadi layar jalur tidak boleh
+    // menyimpulkan keadaan jalurnya dari `status`.
+    qaStatus: project.qaStatus || project.qa_status || TRACK_STATUS.NOT_SUBMITTED,
+    cyberStatus: project.cyberStatus || project.cyber_status || TRACK_STATUS.NOT_SUBMITTED,
+
+    qaAssignee: project.qaAssignee ?? project.qa_assignee ?? null,
+    qaAssigneeId: project.qaAssigneeId ?? project.qa_assignee_id ?? null,
+    cyberAssignee: project.cyberAssignee ?? project.cyber_assignee ?? null,
+    cyberAssigneeId: project.cyberAssigneeId ?? project.cyber_assignee_id ?? null,
+
+    // Laporan pengujian terakhir per jalur, sudah termasuk keputusan Lead bila ada.
+    qaReport: project.qaReport ?? project.qa_report ?? null,
+    cyberReport: project.cyberReport ?? project.cyber_report ?? null,
+
+    // Jenis pemeriksaan Audit Keamanan Siber pilihan PM beserta masukannya.
+    cyberCheckType: normalizeCyberCheckType(project.cyberCheckType ?? project.cyber_check_type),
+    cyberCheckTypeLabel: project.cyberCheckTypeLabel
+        ?? project.cyber_check_type_label
+        ?? getCyberCheckTypeLabel(project.cyberCheckType ?? project.cyber_check_type),
+    cyberTargetUrl: project.cyberTargetUrl ?? project.cyber_target_url ?? null,
+    cyberSourceCodeRef: project.cyberSourceCodeRef ?? project.cyber_source_code_ref ?? null,
+
+    // ─── Fase 4: pengajuan rilis & penilaian kelayakan go-live ───
+    // Keduanya berasal dari backend: `release_request` adalah pengajuan terakhir
+    // (target rilis, estimasi downtime, prosedur rollback, keputusan Head of IT),
+    // dan `release_readiness` adalah penilaian empat pilar yang dihitung dari
+    // dokumen, laporan pengujian, serta kelengkapan rencana rilis yang tersimpan.
+    // Bernilai null berarti belum tersedia — layar tidak boleh menggantinya dengan
+    // nilai bawaan yang tampak seperti fakta.
+    releaseRequest: project.releaseRequest ?? project.release_request ?? null,
+    releaseReadiness: project.releaseReadiness ?? project.release_readiness ?? null,
+});
 
 export function ProjectProvider({ children }) {
     const { isLoggedIn } = useAuth();
     const [projects, setProjects] = useState([]);
-    const [documents, setDocuments] = useState([]);
-    const [users, setUsers] = useState([]);
     const [isLoading, setIsLoading] = useState(false);
     const [lastUpdated, setLastUpdated] = useState(null);
     const [meta, setMeta] = useState(null);
+
+    // Penanda apakah daftar proyek sudah pernah dimuat pada sesi ini. Dipakai
+    // untuk membedakan muat pertama (perlu spinner) dari tik polling (senyap).
+    const hasLoadedOnceRef = useRef(false);
 
     const loadProjects = useCallback(async (showSpinner = false, silent = false) => {
         if (!isLoggedIn) return;
         if (showSpinner) setIsLoading(true);
         try {
-            const session = localStorage.getItem('nagari_sdlc_session');
-            if (!session) return;
-            
+            // Peramban ini belum pernah masuk — tidak ada gunanya menembak API
+            // hanya untuk dijawab 401 (dan memicu pembersihan sesi).
+            if (!sessionStore.read()) return;
+
             const res = await projectService.getAll();
             if (res && res.data) {
-                // Normalize: API mengembalikan 'title', semua komponen memakai 'name'
-                const normalized = res.data.map(p => ({
-                    ...p,
-                    name: p.name || p.title || 'Tanpa Judul',
-                    reqId: p.reqId || p.req_id || null,
-                    targetDate: p.targetDate || p.target_date || 'TBD',
-                    submittedAt: p.submittedAt || p.created_at || new Date().toISOString(),
-                    division: typeof p.division === 'string' ? p.division : (p.division?.name || p.division_detail?.name || null),
-                    contactPhone: p.contactPhone || p.contact_phone || '',
-                    // Normalisasi key snake_case → camelCase (ProjectResource mengekspos sit_uat_data)
-                    sitUatData: p.sitUatData || p.sit_uat_data || {},
-                }));
-                setProjects(normalized);
+                setProjects(res.data.map(normalizeProject));
                 setMeta(res.meta || null);
             }
             setLastUpdated(new Date());
@@ -101,53 +107,50 @@ export function ProjectProvider({ children }) {
     }, [isLoggedIn]);
 
     useEffect(() => {
-        if (isLoggedIn) {
-            loadProjects(true);
-        }
-    }, [loadProjects, isLoggedIn]);
+        // Setelah logout, muat berikutnya dianggap muat pertama lagi (pakai spinner).
+        if (!isLoggedIn) hasLoadedOnceRef.current = false;
+    }, [isLoggedIn]);
 
     // ─── AUTO-SYNC DATA PROYEK (Opsi A) ─────────────────────────────
     // Polling periodik + refresh saat tab aktif kembali agar perubahan
     // status/tahapan dari user lain otomatis sinkron tanpa refresh manual.
-    const pollingRef = useRef(null);
-    const POLL_INTERVAL_MS = 30000; // 30 detik
+    // Selang waktunya dipusatkan di `constants/polling.js`, dan gerbang
+    // visibilitas tab ditangani `useVisibilityPolling` sehingga tab yang
+    // ditinggalkan tidak terus memukul API.
 
     // Silent refresh: tanpa spinner & tanpa toast error (fallback manual tetap ada).
     const refreshDataSilent = useCallback(() => {
         loadProjects(false, true);
     }, [loadProjects]);
 
-    useEffect(() => {
-        if (!isLoggedIn) {
-            if (pollingRef.current) {
-                clearInterval(pollingRef.current);
-                pollingRef.current = null;
-            }
-            return;
-        }
+    // Muat pertama memakai spinner dan melaporkan error; tik berikutnya senyap.
+    // Keduanya lewat satu jalur supaya tidak ada dua permintaan bersamaan saat
+    // aplikasi dibuka — sebelumnya efek muat awal dan tik polling pertama
+    // berjalan berdampingan.
+    const syncProjects = useCallback(() => {
+        const isFirstLoad = !hasLoadedOnceRef.current;
+        hasLoadedOnceRef.current = true;
+        return loadProjects(isFirstLoad, !isFirstLoad);
+    }, [loadProjects]);
 
-        // 1) Polling periodik di latar belakang
-        refreshDataSilent();
-        pollingRef.current = setInterval(refreshDataSilent, POLL_INTERVAL_MS);
+    useVisibilityPolling(syncProjects, POLLING_INTERVAL_MS.projects, {
+        enabled: isLoggedIn,
+        immediate: true,
+        refreshOnReturn: true,
+        resetKey: isLoggedIn,
+    });
 
-        // 2) Refresh segera saat tab kembali terlihat / window focus
-        const handleVisibility = () => {
-            if (document.visibilityState === 'visible') refreshDataSilent();
-        };
-        const handleFocus = () => refreshDataSilent();
-        document.addEventListener('visibilitychange', handleVisibility);
-        window.addEventListener('focus', handleFocus);
-
-        return () => {
-            if (pollingRef.current) {
-                clearInterval(pollingRef.current);
-                pollingRef.current = null;
-            }
-            document.removeEventListener('visibilitychange', handleVisibility);
-            window.removeEventListener('focus', handleFocus);
-        };
-    }, [isLoggedIn, refreshDataSilent]);
-
+    /**
+     * Kirim pengajuan proyek, lalu unggah dokumen pendukungnya.
+     *
+     * Nilai kembaliannya adalah respons API pembuatan proyek, ditambah ringkasan
+     * hasil unggahan pada `documentUpload` supaya pemanggil dapat menampilkan
+     * keadaan sebenarnya. Sebelumnya method ini selalu berakhir dengan
+     * `toast.success('Proyek berhasil diinisiasi!')` meskipun setiap unggahan gagal,
+     * dan bila respons API tidak memuat `data` ia selesai tanpa nilai maupun
+     * pengecualian — form pengaju menampilkan modal sukses atas proyek yang tidak
+     * pernah ia terima nomornya.
+     */
     const addProject = async (projectData) => {
         try {
             const res = await projectService.create({
@@ -157,39 +160,78 @@ export function ProjectProvider({ children }) {
                 division: projectData.division,
                 division_id: projectData.division_id,
                 target_date: projectData.targetDate || null,
+                // Tenggat RBB berdiri sendiri dari `target_date` — yang pertama komitmen
+                // Rencana Bisnis Bank, yang kedua estimasi selesai pengerjaan. Tanpa
+                // baris ini, tanggal yang diisi pengaju berhenti di browser dan panel
+                // "Proyek RBB mendekati deadline" pada dasbor tetap kosong selamanya.
+                rbb_deadline: projectData.rbb_deadline ?? projectData.rbbDeadline ?? null,
                 type: projectData.type || 'RBB',
                 project_type: projectData.project_type || 'baru',
+                // Prioritas pilihan pengaju. Sebelumnya tidak diteruskan sama sekali, jadi
+                // pilihan pada form inisiasi hilang di sini — bahkan sebelum permintaan
+                // meninggalkan browser.
+                priority: projectData.priority || DEFAULT_PROJECT_PRIORITY,
             });
-            
-            if (res && res.data) {
-                const project = res.data;
-                // Re-upload documents with correct req_id-based filenames
-                if (Array.isArray(projectData.documents) && projectData.documents.length > 0) {
-                    for (const doc of projectData.documents) {
-                        if (doc.rawFile) {
-                            try {
-                                // Regenerate final filename with real req_id
-                                const finalName = generateDocumentName(project.req_id, doc.doc_type || doc.type || 'BRD', project.title);
-                                const ext = doc.rawFile.name.split('.').pop();
-                                const finalFile = new File([doc.rawFile], `${finalName}.${ext}`, { type: doc.rawFile.type });
-                                const uploadRes = await documentService.upload(finalFile, {
-                                    project_id: project.id,
-                                    document_type: doc.doc_type || doc.type || 'BRD',
-                                });
-                                // Simpan nama final dari API untuk ditampilkan di success modal
-                                if (uploadRes?.data?.file_name) {
-                                    doc.finalName = uploadRes.data.file_name;
-                                }
-                            } catch (err) {
-                                toast.error(`Gagal upload dokumen "${doc.originalName}": ${err.message}`);
-                            }
-                        }
-                    }
-                }
-                toast.success('Proyek berhasil diinisiasi!');
-                loadProjects(false);
-                return res;
+
+            const project = res?.data;
+
+            if (!project?.id) {
+                // Tanpa id proyek tidak ada yang dapat dilanjutkan: dokumen tidak punya
+                // tujuan unggah, dan layar pengaju tidak punya proyek untuk ditelusuri.
+                throw new Error('Server tidak mengembalikan data proyek yang baru dibuat.');
             }
+
+            // Re-upload documents with correct req_id-based filenames
+            const pendingDocuments = Array.isArray(projectData.documents)
+                ? projectData.documents.filter((doc) => doc.rawFile)
+                : [];
+            const failedDocuments = [];
+
+            for (const doc of pendingDocuments) {
+                try {
+                    // Regenerate final filename with real req_id
+                    const finalName = generateDocumentName(project.req_id, doc.doc_type || doc.type || 'BRD', project.title);
+                    const ext = doc.rawFile.name.split('.').pop();
+                    const finalFile = new File([doc.rawFile], `${finalName}.${ext}`, { type: doc.rawFile.type });
+                    const uploadRes = await documentService.upload(finalFile, {
+                        project_id: project.id,
+                        document_type: doc.doc_type || doc.type || 'BRD',
+                    });
+                    // Simpan nama final dari API untuk ditampilkan di success modal
+                    if (uploadRes?.data?.file_name) {
+                        doc.finalName = uploadRes.data.file_name;
+                    }
+                } catch (err) {
+                    failedDocuments.push(doc.originalName || doc.name || 'dokumen');
+                    toast.error(`Gagal upload dokumen "${doc.originalName}": ${err.message}`);
+                }
+            }
+
+            if (failedDocuments.length === 0) {
+                toast.success('Proyek berhasil diinisiasi!');
+            } else if (failedDocuments.length === pendingDocuments.length) {
+                // Proyeknya tetap tercatat, jadi ini bukan kegagalan pengajuan — tetapi
+                // juga bukan keberhasilan yang boleh dilaporkan sebagai sukses penuh.
+                toast.error(
+                    `Proyek "${project.req_id}" tercatat, tetapi seluruh ${failedDocuments.length} dokumen gagal diunggah. `
+                    + 'Unggah ulang lewat Manajemen Dokumen.'
+                );
+            } else {
+                toast.error(
+                    `Proyek "${project.req_id}" tercatat dengan ${failedDocuments.length} dari ${pendingDocuments.length} `
+                    + 'dokumen gagal diunggah. Unggah ulang lewat Manajemen Dokumen.'
+                );
+            }
+
+            loadProjects(false);
+
+            return {
+                ...res,
+                documentUpload: {
+                    total: pendingDocuments.length,
+                    failed: failedDocuments,
+                },
+            };
         } catch (err) {
             toast.error(`Gagal membuat proyek: ${err.message}`);
             throw err;
@@ -238,8 +280,6 @@ export function ProjectProvider({ children }) {
         <ProjectContext.Provider
             value={{
                 projects,
-                documents,
-                users,
                 isLoading,
                 lastUpdated,
                 meta,

@@ -1,23 +1,23 @@
 // src/pages/pm/ProjectTracker.jsx
 import { useState, useMemo, useEffect, useRef } from 'react';
 import { useNavigate, useLocation, useSearchParams } from 'react-router-dom';
-import { useProjects, getFileFromStore } from '../../contexts/ProjectContext';
-import { useAuth } from '../../contexts/AuthContext';
+import { useProjects } from '../../contexts/ProjectContext';
+import { getFileFromStore } from '../../utils/projectDocuments';
+import { formatDocSizeLabel } from '../../utils/documentNaming';
 import toast from 'react-hot-toast';
 import LoadingSpinner from '../../components/LoadingSpinner';
 import EmptyState from '../../components/EmptyState';
 import RBBBadge from '../../components/RBBBadge';
 import ProjectTypeBadge from '../../components/ProjectTypeBadge';
 import DocumentViewerModal from '../../components/DocumentViewerModal';
+import { documentService } from '../../services/api';
 import {
     Search,
-    Filter,
     ChevronRight,
     CheckCircle2,
     Circle,
     Clock,
     XCircle,
-    AlertCircle,
     FolderOpen,
     Users,
     Bug,
@@ -36,6 +36,11 @@ import {
     PROJECT_STATUS_LABEL,
     PROJECT_STATUS_COLOR,
 } from '../../constants/projectStatus';
+import {
+    JOURNEY_DETOURS,
+    PROJECT_STATUS_SPINE,
+    getProjectProgress,
+} from '../../constants/projectJourney';
 
 // ────────────────────────────────────────────────────────────
 // Helper: Resolve seluruh dokumen ASLI proyek secara real-time
@@ -53,7 +58,11 @@ const resolveAllProjectDocs = (project) => {
                 docsMap.set(name, {
                     id: d.id || `doc-${idx}`,
                     name: name,
-                    size: d.size || d.file_size || '1.8 MB',
+                    // Ukuran apa adanya. Nilai bawaan di seluruh fungsi ini dulunya berupa
+                    // angka karangan ('1.8 MB', '2.4 MB', '3.1 MB', '1.4 MB', '1.6 MB',
+                    // '1.1 MB') yang tampil di layar seolah ukuran berkas sungguhan.
+                    // Berkas tanpa catatan ukuran ditangani saat render.
+                    size: d.size ?? d.file_size ?? null,
                     type: (d.type || d.doc_type || 'BRD').toUpperCase(),
                     category: d.category || 'Inisiasi Peminta',
                     date: d.date || d.uploaded_at || 'Terbaru',
@@ -72,7 +81,7 @@ const resolveAllProjectDocs = (project) => {
             docsMap.set(name, {
                 id: project.fsdDocument.id || 'doc-fsd-plan',
                 name: name,
-                size: project.fsdDocument.size || '2.4 MB',
+                size: project.fsdDocument.size ?? project.fsdDocument.file_size ?? null,
                 type: 'FSD (PLAN)',
                 category: 'Analisis Teknis TI',
                 url: project.fsdDocument.url || project.fsdDocument.fileUrl || getFileFromStore(name) || null
@@ -87,7 +96,7 @@ const resolveAllProjectDocs = (project) => {
             docsMap.set(name, {
                 id: project.fsdDevDocument.id || 'doc-fsd-dev',
                 name: name,
-                size: project.fsdDevDocument.size || '3.1 MB',
+                size: project.fsdDevDocument.size ?? project.fsdDevDocument.file_size ?? null,
                 type: 'FSD DEV',
                 category: 'Spesifikasi Arsitektur',
                 url: project.fsdDevDocument.url || project.fsdDevDocument.fileUrl || getFileFromStore(name) || null
@@ -103,7 +112,7 @@ const resolveAllProjectDocs = (project) => {
             docsMap.set(name, {
                 id: doc.id || 'doc-qa-pass',
                 name: name,
-                size: doc.size || '1.4 MB',
+                size: doc.size ?? doc.file_size ?? null,
                 type: 'QA SIGN-OFF',
                 category: 'Quality Assurance',
                 url: doc.url || doc.fileUrl || getFileFromStore(name) || null
@@ -119,7 +128,7 @@ const resolveAllProjectDocs = (project) => {
             docsMap.set(name, {
                 id: doc.id || 'doc-cyber-pass',
                 name: name,
-                size: doc.size || '1.6 MB',
+                size: doc.size ?? doc.file_size ?? null,
                 type: 'CYBER SIGN-OFF',
                 category: 'Audit Keamanan',
                 url: doc.url || doc.fileUrl || getFileFromStore(name) || null
@@ -135,7 +144,7 @@ const resolveAllProjectDocs = (project) => {
             docsMap.set(name, {
                 id: doc.id || 'doc-release-pass',
                 name: name,
-                size: doc.size || '1.1 MB',
+                size: doc.size ?? doc.file_size ?? null,
                 type: 'IZIN RILIS',
                 category: 'Quality Gate Production',
                 url: doc.url || doc.fileUrl || getFileFromStore(name) || null
@@ -183,6 +192,14 @@ const PHASES = [
             PROJECT_STATUS.DEV_ANALYSIS,
             PROJECT_STATUS.DEV_ANALYSIS_DONE,
             PROJECT_STATUS.IN_DEVELOPMENT,
+            // Siklus pengujian internal termasuk pekerjaan pengembangan, bukan fase
+            // tersendiri. Tanpa lima status ini, proyek yang sedang SIT atau UAT tidak
+            // punya posisi di fase mana pun.
+            PROJECT_STATUS.SIT_IN_PROGRESS,
+            PROJECT_STATUS.SIT_PASSED,
+            PROJECT_STATUS.UAT_IN_PROGRESS,
+            PROJECT_STATUS.UAT_PASSED,
+            PROJECT_STATUS.DEV_COMPLETED,
         ],
     },
     {
@@ -230,43 +247,56 @@ const PHASES = [
         borderColor: 'border-emerald-200',
         activeBg: 'bg-emerald-50',
         statuses: [
-            PROJECT_STATUS.READY_FOR_UAT,
-            PROJECT_STATUS.UAT_PASSED,
+            // UAT internal adalah keluaran Fase 2, bukan gerbang rilis. READY_FOR_UAT
+            // sudah tidak punya transisi apa pun di backend dan hanya tersisa pada
+            // riwayat lama, jadi keduanya tidak lagi ditampilkan sebagai tahap rilis.
             PROJECT_STATUS.PENDING_GOLIVE,
             PROJECT_STATUS.LIVE_PRODUCTION,
         ],
     },
 ];
 
-// Urutan semua status agar bisa menentukan posisi relatif
-const STATUS_ORDER = [
-    PROJECT_STATUS.PENDING,
-    PROJECT_STATUS.IN_REVIEW,
-    PROJECT_STATUS.ANALYSIS_APPROVED,
-    PROJECT_STATUS.REJECTED,
-    PROJECT_STATUS.READY_FOR_DEVELOPMENT,
-    PROJECT_STATUS.DEV_ANALYSIS,
-    PROJECT_STATUS.DEV_ANALYSIS_DONE,
-    PROJECT_STATUS.IN_DEVELOPMENT,
-    PROJECT_STATUS.RETURN_TO_DEV,
-    PROJECT_STATUS.READY_FOR_QA,
-    PROJECT_STATUS.QA_IN_PROGRESS,
-    PROJECT_STATUS.QA_PASSED,
-    PROJECT_STATUS.CYBER_IN_PROGRESS,
-    PROJECT_STATUS.CYBER_PASSED,
-    PROJECT_STATUS.READY_FOR_UAT,
-    PROJECT_STATUS.UAT_PASSED,
-    PROJECT_STATUS.PENDING_GOLIVE,
-    PROJECT_STATUS.LIVE_PRODUCTION,
-];
+/**
+ * Urutan semua status agar bisa menentukan posisi relatif.
+ *
+ * Urutannya diambil dari `constants/projectJourney.js` supaya tracker ini dan
+ * halaman Lacak Pengajuan milik pemohon tidak mungkin bercerita berbeda tentang
+ * proyek yang sama. Daftar lokal sebelumnya tidak memuat satu pun status SIT/UAT
+ * (SIT_IN_PROGRESS sampai UAT_REVISION_DEV) maupun DEV_COMPLETED, sehingga
+ * `indexOf` mengembalikan -1 untuk proyek yang sedang diuji internal: seluruh
+ * fasenya tampil "belum dimulai" dan progresnya 0%.
+ *
+ * Status simpangan (REJECTED, *_REVISION, RETURN_TO_DEV, ON_HOLD, CANCELLED)
+ * sengaja tidak ada di urutan maju — lihat `JOURNEY_DETOURS`. REJECTED tetap
+ * ditangani terpisah oleh kedua fungsi di bawah.
+ */
+const STATUS_ORDER = PROJECT_STATUS_SPINE;
+
+/**
+ * Posisi sebuah status pada urutan maju.
+ *
+ * Status simpangan tidak punya posisi sendiri — ia dinilai dari tahap tempat
+ * pekerjaannya kembali (`JOURNEY_DETOURS`). Tanpa pemetaan ini, proyek yang sedang
+ * direvisi tidak cocok dengan entri mana pun dan seluruh fasenya tampil "belum
+ * dimulai", padahal pekerjaannya sudah jauh berjalan.
+ */
+function spineIndexOf(status) {
+    const normalized = String(status || '').trim().toUpperCase();
+    const direct = STATUS_ORDER.indexOf(normalized);
+    if (direct >= 0) return direct;
+
+    const anchorStatus = JOURNEY_DETOURS[normalized]?.anchorStatus;
+
+    return anchorStatus ? STATUS_ORDER.indexOf(anchorStatus) : -1;
+}
 
 // Tentukan apakah status tertentu sudah dilewati oleh status saat ini
 function getStatusState(currentStatus, checkStatus) {
     if (currentStatus === PROJECT_STATUS.REJECTED) {
         return 'rejected';
     }
-    const currentIdx = STATUS_ORDER.indexOf(currentStatus);
-    const checkIdx = STATUS_ORDER.indexOf(checkStatus);
+    const currentIdx = spineIndexOf(currentStatus);
+    const checkIdx = spineIndexOf(checkStatus);
 
     if (currentIdx > checkIdx) return 'completed';
     if (currentIdx === checkIdx) return 'active';
@@ -277,9 +307,9 @@ function getStatusState(currentStatus, checkStatus) {
 function getPhaseState(currentStatus, phase) {
     if (currentStatus === PROJECT_STATUS.REJECTED) return 'rejected';
 
-    const currentIdx = STATUS_ORDER.indexOf(currentStatus);
+    const currentIdx = spineIndexOf(currentStatus);
     const phaseStatusIndices = phase.statuses
-        .map(s => STATUS_ORDER.indexOf(s))
+        .map(s => spineIndexOf(s))
         .filter(i => i >= 0);
 
     const minIdx = Math.min(...phaseStatusIndices);
@@ -297,13 +327,11 @@ function ProjectCard({ project, isSelected, onClick }) {
     const statusLabel = PROJECT_STATUS_LABEL[project.status] || project.status;
     const statusColor = PROJECT_STATUS_COLOR[project.status] || 'bg-gray-100 text-gray-600';
 
-    // Hitung % progress berdasarkan posisi status di STATUS_ORDER
-    const currentIdx = STATUS_ORDER.indexOf(project.status);
-    const progress = project.status === PROJECT_STATUS.LIVE_PRODUCTION
-        ? 100
-        : project.status === PROJECT_STATUS.REJECTED
-        ? 0
-        : Math.round(((currentIdx + 1) / STATUS_ORDER.length) * 100);
+    // Progres dihitung dari jumlah tahap yang sudah dicapai (`projectJourney`),
+    // bukan dari posisi status pada satu daftar. Perhitungan lama membagi posisi
+    // status dengan panjang daftar yang tidak memuat status SIT/UAT, sehingga
+    // proyek yang sedang diuji internal selalu dilaporkan 0%.
+    const progress = getProjectProgress(project);
 
     return (
         <div
@@ -322,7 +350,7 @@ function ProjectCard({ project, isSelected, onClick }) {
                 <div className="flex items-center gap-1.5 flex-wrap"><RBBBadge type={project.type} /><ProjectTypeBadge type={project.project_type} /></div>
             </div>
 
-            <p className="text-xs text-gray-500 mb-3">{project.division || 'Divisi TI'}</p>
+            <p className="text-xs text-gray-500 mb-3">{project.division || 'Divisi belum diatur'}</p>
 
             {/* Progress bar */}
             <div className="mb-2">
@@ -333,7 +361,10 @@ function ProjectCard({ project, isSelected, onClick }) {
                 <div className="h-1.5 bg-gray-200 rounded-full overflow-hidden">
                     <div
                         className={`h-full rounded-full transition-all duration-500 ${
-                            project.status === PROJECT_STATUS.COMPLETED
+                            // PROJECT_STATUS tidak punya anggota COMPLETED; perbandingan
+                            // sebelumnya selalu salah sehingga proyek yang sudah live pun
+                            // tetap memakai warna proyek berjalan.
+                            project.status === PROJECT_STATUS.LIVE_PRODUCTION
                                 ? 'bg-emerald-500'
                                 : project.status === PROJECT_STATUS.REJECTED
                                 ? 'bg-red-400'
@@ -493,74 +524,67 @@ function PhaseItem({ phase, currentStatus, isLast }) {
 // ────────────────────────────────────────────────────────────
 export default function ProjectTracker() {
     const { projects, isLoading } = useProjects();
-    const { user } = useAuth();
     const navigate = useNavigate();
     const location = useLocation();
     const [searchParams] = useSearchParams();
 
-    const [selectedProject, setSelectedProject] = useState(null);
+    const [selectedProjectId, setSelectedProjectId] = useState(null);
     const [searchTerm, setSearchTerm] = useState('');
     const [filterPhase, setFilterPhase] = useState('');
     const [previewDoc, setPreviewDoc] = useState(null);
     const detailPanelRef = useRef(null);
 
-    // Convert Data URL / Blob for inline PDF/Document viewing
-    const previewBlobUrl = useMemo(() => {
-        if (!previewDoc) return null;
-        let rawUrl = previewDoc.url || previewDoc.fileUrl || previewDoc.dataUrl;
-        if (!rawUrl && previewDoc.name) {
-            rawUrl = getFileFromStore(previewDoc.name) || getFileFromStore(previewDoc.id);
-        }
-        if (!rawUrl) return null;
+    /**
+     * Unduh berkas dokumen.
+     *
+     * Sumber berkas hanya dua: URL lokal hasil unggah pada sesi ini, atau endpoint
+     * unduh Document Vault memakai id dokumen. Bila keduanya tidak ada, tombol unduh
+     * dinonaktifkan lewat canDownloadFile. Versi sebelumnya membuat berkas teks di
+     * peramban berisi baris karangan "Status: Terverifikasi Quality Gate SDLC Bank
+     * Nagari Enterprise" lalu melaporkannya sebagai unduhan berhasil — dokumen palsu
+     * bertanda verifikasi yang tidak pernah terjadi.
+     */
+    const triggerBrowserDownload = (href, fileName, { revoke = false } = {}) => {
+        const link = document.createElement('a');
+        link.href = href;
+        link.download = fileName;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        if (revoke) URL.revokeObjectURL(href);
+    };
 
-        if (rawUrl.startsWith('data:')) {
-            try {
-                const parts = rawUrl.split(',');
-                const mimeMatch = parts[0].match(/:(.*?);/);
-                const mime = mimeMatch ? mimeMatch[1] : 'application/pdf';
-                const bstr = atob(parts[1]);
-                let n = bstr.length;
-                const u8arr = new Uint8Array(n);
-                while (n--) {
-                    u8arr[n] = bstr.charCodeAt(n);
-                }
-                const blob = new Blob([u8arr], { type: mime });
-                return URL.createObjectURL(blob);
-            } catch (e) {
-                return rawUrl;
-            }
-        }
-        return rawUrl;
-    }, [previewDoc]);
+    const canDownloadFile = (doc) => {
+        if (!doc) return false;
+        const localUrl = doc.url || doc.fileUrl || doc.dataUrl
+            || (doc.name ? getFileFromStore(doc.name) : null)
+            || (doc.id ? getFileFromStore(doc.id) : null);
+        return Boolean(localUrl || doc.id);
+    };
 
-    const handleDownloadFile = (doc) => {
+    const handleDownloadFile = async (doc) => {
         if (!doc) return;
-        let rawUrl = doc.url || doc.fileUrl || doc.dataUrl;
-        if (!rawUrl && doc.name) {
-            rawUrl = getFileFromStore(doc.name) || getFileFromStore(doc.id);
-        }
         const fileName = doc.name || doc.file_name || 'Dokumen_SDLC.pdf';
+        const localUrl = doc.url || doc.fileUrl || doc.dataUrl
+            || (doc.name ? getFileFromStore(doc.name) : null)
+            || (doc.id ? getFileFromStore(doc.id) : null);
 
-        if (rawUrl) {
-            const link = document.createElement('a');
-            link.href = rawUrl;
-            link.download = fileName;
-            document.body.appendChild(link);
-            link.click();
-            document.body.removeChild(link);
-            toast.success(`Mengunduh berkas "${fileName}"...`);
-        } else {
-            const textContent = `PT BANK NAGARI - DOKUMEN RESMI SDLC\n=======================================\nNama Dokumen: ${fileName}\nKategori: ${doc.category || doc.type || 'Dokumen SDLC'}\nProyek: ${selectedProject?.name || 'Proyek SDLC'}\nID Proyek: ${selectedProject?.reqId || selectedProject?.id || 'PRJ'}\nDivisi Peminta: ${selectedProject?.division || 'Divisi TI'}\nTanggal Terbit: ${new Date().toLocaleDateString('id-ID')}\nStatus: Terverifikasi Quality Gate SDLC Bank Nagari Enterprise\n=======================================\n\nDokumen ini berisi spesifikasi kebutuhan, arsitektur teknis, serta hasil pengujian dan tata kelola SDLC resmi PT Bank Nagari.`;
-            const blob = new Blob([textContent], { type: 'text/plain;charset=utf-8' });
+        if (localUrl) {
+            triggerBrowserDownload(localUrl, fileName);
+            return;
+        }
+
+        if (!doc.id) {
+            toast.error(`Berkas "${fileName}" belum tersimpan di Document Vault sehingga tidak dapat diunduh.`);
+            return;
+        }
+
+        try {
+            const blob = await documentService.download(doc.id);
             const blobUrl = URL.createObjectURL(blob);
-            const link = document.createElement('a');
-            link.href = blobUrl;
-            link.download = fileName.endsWith('.pdf') ? fileName.replace('.pdf', '_Resmi.txt') : `${fileName}.txt`;
-            document.body.appendChild(link);
-            link.click();
-            document.body.removeChild(link);
-            URL.revokeObjectURL(blobUrl);
-            toast.success(`Mengunduh berkas "${fileName}"...`);
+            triggerBrowserDownload(blobUrl, fileName, { revoke: true });
+        } catch (err) {
+            toast.error(`Gagal mengunduh "${fileName}": ${err.message}`);
         }
     };
 
@@ -576,40 +600,15 @@ export default function ProjectTracker() {
         window.scrollTo({ top: 0, behavior: 'smooth' });
     };
 
-    // Auto scroll ke paling atas panel detail & main layout saat proyek dipilih
-    useEffect(() => {
-        if (selectedProject) {
-            scrollPageToTop();
-        }
-    }, [selectedProject?.id]);
-
-    // Auto seleksi proyek berdasarkan query parameter / location state
-    useEffect(() => {
-        const targetId = location.state?.projectId || searchParams.get('projectId') || searchParams.get('id');
-        if (targetId && projects.length > 0) {
-            const found = projects.find(p =>
-                String(p.id).toLowerCase() === String(targetId).toLowerCase() ||
-                String(p.reqId || p.req_id || '').toLowerCase() === String(targetId).toLowerCase()
-            );
-            if (found) {
-                setSelectedProject(found);
-                return;
-            }
-        }
-        // Jika tidak ada ID spesifik dikirim dan selectedProject belum ada, pilih proyek pertama
-        if (!selectedProject && projects.length > 0) {
-            setSelectedProject(projects[0]);
-        }
-    }, [location.state, searchParams, projects]);
-
     // Filter proyek
     const filteredProjects = useMemo(() => {
         let result = projects;
         if (searchTerm) {
             const term = searchTerm.toLowerCase();
             result = result.filter(p =>
-                p.name.toLowerCase().includes(term) ||
-                p.id.toLowerCase().includes(term) ||
+                String(p.name || '').toLowerCase().includes(term) ||
+                String(p.reqId || '').toLowerCase().includes(term) ||
+                String(p.id).toLowerCase().includes(term) ||
                 (p.division || '').toLowerCase().includes(term)
             );
         }
@@ -622,19 +621,59 @@ export default function ProjectTracker() {
         return result;
     }, [projects, searchTerm, filterPhase]);
 
-    // Auto select & scroll
+    // Proyek tujuan dari query parameter / location state, bila ada.
+    const requestedProjectId = location.state?.projectId
+        || searchParams.get('projectId')
+        || searchParams.get('id')
+        || null;
+
+    /**
+     * Proyek aktif diturunkan dari daftar, bukan disimpan sebagai salinan objek.
+     *
+     * Panel detail sebelumnya menyimpan objek proyek di state dan mengisinya dari
+     * dalam useEffect. Akibatnya panel menampilkan potret lama: polling 30 detik
+     * mengganti isi `projects`, sementara salinan di state tidak ikut berubah,
+     * sehingga status dan laporan yang terbaca bisa tertinggal beberapa siklus.
+     */
+    const selectedProject = useMemo(() => {
+        if (projects.length === 0) return null;
+
+        if (requestedProjectId) {
+            const requested = projects.find(p =>
+                String(p.id).toLowerCase() === String(requestedProjectId).toLowerCase() ||
+                String(p.reqId || p.req_id || '').toLowerCase() === String(requestedProjectId).toLowerCase()
+            );
+            if (requested && selectedProjectId === null) return requested;
+        }
+
+        return projects.find(p => String(p.id) === String(selectedProjectId)) || projects[0];
+    }, [projects, requestedProjectId, selectedProjectId]);
+
+    const selectedProjectKey = selectedProject?.id ?? null;
+
+    // Auto scroll ke paling atas panel detail & main layout saat proyek berganti
+    useEffect(() => {
+        if (selectedProjectKey === null) return;
+        scrollPageToTop();
+    }, [selectedProjectKey]);
+
     const handleSelectProject = (project) => {
-        setSelectedProject(project);
+        setSelectedProjectId(project.id);
         scrollPageToTop();
     };
 
-    // Hitung stats for selected project
+    // Fase yang sedang berjalan untuk proyek terpilih.
+    //
+    // Dicocokkan lewat posisi urutan maju, bukan lewat kecocokan status persis:
+    // status simpangan seperti SIT_REVISION atau RETURN_TO_DEV tidak terdaftar pada
+    // fase mana pun, sehingga pencocokan persis membuat lencana fase menghilang
+    // justru saat proyeknya paling perlu diawasi.
     const projectPhaseInfo = useMemo(() => {
         if (!selectedProject) return null;
-        const currentPhase = PHASES.find(p =>
-            p.statuses.includes(selectedProject.status)
-        );
-        return currentPhase;
+
+        return PHASES.find(phase => getPhaseState(selectedProject.status, phase) === 'active')
+            || PHASES.find(phase => phase.statuses.includes(selectedProject.status))
+            || null;
     }, [selectedProject]);
 
     if (isLoading) return <LoadingSpinner text="Memuat data proyek..." />;
@@ -869,7 +908,7 @@ export default function ProjectTracker() {
                                                             {doc.type}
                                                         </span>
                                                         <span className="text-[10px] text-gray-400">•</span>
-                                                        <span className="text-[10px] text-gray-500 font-medium">{doc.size}</span>
+                                                        <span className="text-[10px] text-gray-500 font-medium">{formatDocSizeLabel(doc)}</span>
                                                     </div>
                                                 </div>
                                                 <button
@@ -877,8 +916,11 @@ export default function ProjectTracker() {
                                                         e.stopPropagation();
                                                         handleDownloadFile(doc);
                                                     }}
-                                                    title="Unduh Berkas"
-                                                    className="p-2 text-gray-400 hover:text-[#00529C] hover:bg-white rounded-lg transition-colors shrink-0 border border-transparent hover:border-blue-200 shadow-2xs cursor-pointer"
+                                                    disabled={!canDownloadFile(doc)}
+                                                    title={canDownloadFile(doc)
+                                                        ? 'Unduh Berkas'
+                                                        : 'Berkas belum tersimpan di Document Vault'}
+                                                    className="p-2 text-gray-400 hover:text-[#00529C] hover:bg-white rounded-lg transition-colors shrink-0 border border-transparent hover:border-blue-200 shadow-2xs cursor-pointer disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:text-gray-400 disabled:hover:bg-transparent disabled:hover:border-transparent"
                                                 >
                                                     <Download size={15} />
                                                 </button>

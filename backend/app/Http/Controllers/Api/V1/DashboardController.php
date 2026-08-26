@@ -99,7 +99,7 @@ class DashboardController extends Controller
     /**
      * Statistik lintas portofolio untuk halaman Analitik SDLC.
      *
-     * Dibatasi `role:super_admin` di `routes/api.php`. Isinya memang agregat seluruh
+     * Dibatasi `role:super_admin,head_of_it` di `routes/api.php`. Isinya memang agregat seluruh
      * bank — distribusi status, beban tiap developer, komposisi role — sehingga tidak
      * ada penyaringan per pengguna yang masuk akal di sini; gerbangnya adalah route.
      * Sebelum pembatasan itu ada, halaman analitik dijaga hanya oleh router frontend

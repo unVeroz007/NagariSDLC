@@ -36,7 +36,9 @@ export default function Login() {
             if (result.success) {
                 const userRole = result.user?.role || result.data?.user?.role;
                 const targetRoute = getDefaultRouteForRole(userRole);
-                navigate(targetRoute);
+                // `replace` supaya halaman login tidak tertinggal di riwayat peramban:
+                // tombol Kembali sesudah login seharusnya tidak mengarah ke form login.
+                navigate(targetRoute, { replace: true });
             } else {
                 setError(result.message || 'Login gagal. Periksa kembali email dan password Anda.');
             }
@@ -185,11 +187,17 @@ export default function Login() {
 
                         {/* Password */}
                         <div>
+                            {/*
+                              * Tautan "Lupa sandi?" yang sebelumnya berada di dalam label ini sudah
+                              * dihapus. Tautan itu adalah `<a href="#">` tanpa tujuan: menekannya
+                              * hanya melompat ke puncak halaman, sementara tautan yang benar
+                              * ("Lupa password?" ke `/forgot-password`) sudah ada di bawah form.
+                              * Menempatkan tautan di dalam `<label htmlFor="password">` juga membuat
+                              * satu klik memicu dua perilaku sekaligus, yaitu fokus ke input sandi
+                              * dan navigasi.
+                              */}
                             <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2" htmlFor="password">
-                                <div className="flex justify-between items-center">
-                                    <span>Kata Sandi</span>
-                                    <a href="#" className="text-[#00529C] hover:underline text-xs font-semibold normal-case tracking-normal">Lupa sandi?</a>
-                                </div>
+                                Kata Sandi
                             </label>
                             <div className="relative">
                                 <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none">

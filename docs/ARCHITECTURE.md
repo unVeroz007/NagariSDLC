@@ -105,11 +105,42 @@ React. Komunikasi murni REST API (JSON), auth via Bearer token.
   berbasis fase karena tabel `projects` tidak punya kolom penugasan untuk role
   itu. Keterlibatan personal (pemohon, PM, analis, anggota tim, assignee task,
   approver UAT) selalu memberi akses baca meski status sudah bergerak maju.
-  Transisi status punya lapisan tambahan di `ProjectWorkflowService`: role
-  analyst hanya boleh mentransisikan proyek dengan `analyst_id` dirinya, agar
-  jejak `status_histories` tidak tercatat atas nama orang yang bukan pemegang
-  disposisi.
+  Transisi status punya lapisan tambahan di `ProjectWorkflowService`: role dengan
+  kolom penugasan hanya boleh mentransisikan proyek yang ditugaskan kepadanya —
+  analyst dicocokkan ke `analyst_id`, project_manager ke `pm_id` — agar jejak
+  `status_histories` tidak tercatat atas nama orang yang bukan pemegang
+  disposisi. Role tanpa kolom penugasan (lead_group, development_lead, QA, Cyber)
+  tidak melewati pemeriksaan itu.
+- **Project Manager = Analis Pengembangan (Fase 2)**: satu orang, satu role, satu
+  kolom penugasan `projects.pm_id`. Nama role `dev_analyst` hanya hidup di
+  router dan menu frontend (`/workspace/dev-analyst`) dan tidak ada di
+  `App\Enums\UserRole`; backend tetap mencocokkan kedua sebutan agar hasilnya
+  identik. Kolom `projects.analyst_id` milik System Analyst Fase 1 dan tidak
+  boleh ditimpa saat Development Lead menugaskan Analis Pengembangan — jika
+  ditimpa, catatan pelaksana analisis perencanaan hilang dari baris proyek dan
+  analis tersebut kehilangan akses ke proyek yang ia analisis sendiri. Hasil
+  kajian keduanya pun terpisah: `projects.analyst_result` (Fase 1) dan
+  `projects.dev_analyst_result` (Fase 2).
 - **Input**: Form Request + `validate()`.
+- **CORS**: `backend/config/cors.php` membaca `CORS_ALLOWED_ORIGINS` (dipisah koma),
+  dengan fallback `FRONTEND_URL` lalu `APP_URL`. Saat `APP_ENV=local` origin dev
+  server Vite (5173/4173) otomatis ditambahkan; di luar local nilai `*` dibuang
+  supaya konfigurasi salah tidak membuka API ke semua origin. `allowed_headers`
+  dibatasi pada header yang dipakai frontend (termasuk `X-UAT-Approval-Access`
+  untuk approver eksternal), `exposed_headers` hanya `Content-Disposition`, dan
+  `supports_credentials` tetap `false` karena autentikasi memakai Bearer token,
+  bukan cookie. Ingat `php artisan config:cache` membekukan nilai `env()`.
+- **Gate tahapan SIT/UAT di frontend**: `SITUATWizard.jsx` memakai
+  `UNLOCK_ALL_STAGES = false` dan daftar status (`SIT_STARTABLE_STATUSES`,
+  `SIT_COMPLETED_STATUSES`, `UAT_COMPLETED_STATUSES`) yang mencerminkan
+  `allowedTransitions`. Tujuannya dua: tombol aksi tidak menawarkan transisi yang
+  pasti ditolak backend, dan berita acara SIT/UAT tetap terbaca read-only setelah
+  proyek masuk QA, Siber, atau produksi. Gate frontend hanya lapisan UX; otorisasi
+  sebenarnya tetap di `ProjectWorkflowService`.
+- **Environment**: nilai berawalan `VITE_` ikut dibundel ke berkas JavaScript
+  publik, jadi tidak boleh memuat rahasia. Template: `backend/.env.example`,
+  `backend/.env.production.example`, `frontend/.env.example`,
+  `frontend/.env.production.example`.
 
 ## 6. Penyimpanan
 

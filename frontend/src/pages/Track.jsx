@@ -5,68 +5,110 @@ import { useProjects } from '../contexts/ProjectContext';
 import ProjectTypeBadge from '../components/ProjectTypeBadge';
 import {
     Search,
-    Calendar,
     Rocket,
     CheckCircle,
     Code,
     Shield,
     Route,
     FileText,
-    User,
-    ChevronRight,
     Clock,
     Phone,
     AlertCircle,
     Check,
+    Circle,
     Eye,
+    Info,
     RotateCcw,
     Download,
+    ClipboardCheck,
 } from 'lucide-react';
 import { documentService, projectService } from '../services/api';
-import toast from 'react-hot-toast';
 import DocumentViewerModal from '../components/DocumentViewerModal';
-import { getProjectRealDocuments } from '../contexts/ProjectContext';
+import { getProjectRealDocuments } from '../utils/projectDocuments';
 import { getDocExtLabel, getDocIconStyle } from '../utils/documentNaming';
-import { PROJECT_STATUS_LABEL, PROJECT_STATUS_COLOR } from '../constants/projectStatus';
+import { PROJECT_STATUS_LABEL } from '../constants/projectStatus';
+import { getProjectJourney } from '../constants/projectJourney';
+import { CHANGE_REQUEST_STATUS_LABEL as UAT_CHANGE_REQUEST_STATUS_LABEL } from '../constants/uatChangeRequest';
+import toast from 'react-hot-toast';
 
 const statusOptions = ['Semua Status', 'Sedang Berjalan', 'Selesai', 'Ditolak'];
 
+/**
+ * Label status change request UAT untuk pemohon proyek.
+ *
+ * Tabelnya dipakai bersama wizard SIT/UAT lewat `constants/uatChangeRequest.js`:
+ * satu status tidak boleh punya dua nama di dua halaman. Sebelumnya halaman ini
+ * hanya mengenali `approved` dan `rejected`, sehingga seluruh permintaan yang lahir
+ * dari pertemuan UAT — yang justru satu-satunya jalur sekarang — selalu tampil
+ * sebagai "Menunggu" meskipun sudah dikerjakan, lulus SIT ulang, atau diverifikasi.
+ */
+const CHANGE_REQUEST_STATUS_LABEL = UAT_CHANGE_REQUEST_STATUS_LABEL;
+
+/**
+ * Label status per penandatangan pada matriks persetujuan UAT.
+ *
+ * Nilainya berasal dari `App\Enums\UatApprovalStatus`. Status `revoked` tidak
+ * pernah sampai ke sini karena backend sudah membuangnya dari matriks, jadi
+ * memetakannya di layar hanya akan menyiratkan keadaan yang tidak ada.
+ */
+const UAT_APPROVER_STATUS_LABEL = {
+    pending: { label: 'Menunggu', pillCls: 'bg-amber-100 text-amber-700 border-amber-200' },
+    approved: { label: 'Disetujui', pillCls: 'bg-emerald-100 text-emerald-700 border-emerald-200' },
+    rejected: { label: 'Ditolak', pillCls: 'bg-red-100 text-red-700 border-red-200' },
+};
+
+/**
+ * Tipe dokumen yang relevan sebagai bahan pertimbangan persetujuan UAT.
+ *
+ * Daftarnya sengaja sempit dan hanya memuat tipe yang memang dibuka untuk
+ * pemohon (`DocumentVault::REQUESTER_VISIBLE_TYPES`). Payload proyek sudah
+ * disaring backend per pengguna, sehingga saringan di sini hanya menentukan
+ * dokumen mana yang ikut ditampilkan berdampingan dengan tombol persetujuan —
+ * bukan penentu hak akses.
+ */
+const UAT_APPROVAL_DOC_TYPES = ['UNDANGAN', 'UAT_PLAN', 'UAT_RESULT', 'UAT_SIGNOFF'];
+
+/**
+ * UAT masih menunggu dijalankan ulang dari awal.
+ *
+ * Revisi Mayor kini mengulang dua siklus sekaligus: SIT ulang atas seluruh task,
+ * lalu UAT dari Tahap 1 — bukan lagi melanjutkan Tahap 2 dalam mode verifikasi.
+ * Backend menandainya dengan `uat_restart_after_sit`, sedangkan baris yang sudah
+ * ada di basis data masih menyimpan kunci lama `uat2_resume_after_sit`. Keduanya
+ * dibaca di satu tempat supaya proyek yang sedang mengulang UAT tidak pernah
+ * terlihat siap disetujui hanya karena kunci penandanya berbeda versi.
+ */
+const isUatRestartPending = (sitUatData) => sitUatData?.uat_restart_after_sit === true
+    || sitUatData?.uat2_resume_after_sit === true;
+
+/**
+ * Cap waktu tahap perjalanan, sudah dalam zona waktu pengguna.
+ *
+ * Mengembalikan null bila riwayatnya memang tidak ada — tahap yang belum pernah
+ * dijalani lebih baik tidak menampilkan apa pun daripada menampilkan "Invalid Date".
+ */
+const formatJourneyStamp = (value) => {
+    if (!value) return null;
+    const parsed = new Date(value);
+    if (Number.isNaN(parsed.getTime())) return null;
+
+    return parsed.toLocaleString('id-ID', {
+        day: '2-digit',
+        month: 'short',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+    });
+};
+
 export default function Track() {
     const { user } = useAuth();
-    const { projects } = useProjects();
+    const { projects, refreshDataSilent } = useProjects();
     const location = useLocation();
     const [searchParams] = useSearchParams();
     const [previewDoc, setPreviewDoc] = useState(null);
     const detailPanelRef = useRef(null);
     const navigate = useNavigate();
-
-    // ── Change Request UAT (business user) ──
-    const [crModalOpen, setCrModalOpen] = useState(false);
-    const [crForm, setCrForm] = useState({ type: 'minor', title: '', detail: '', category: '' });
-    const [crSubmitting, setCrSubmitting] = useState(false);
-
-    const handleCrSubmit = async (projectId) => {
-        if (!crForm.title.trim() || !crForm.detail.trim()) {
-            toast.error('Judul dan detail change request wajib diisi!');
-            return;
-        }
-        setCrSubmitting(true);
-        try {
-            await projectService.submitUatChangeRequest(projectId, {
-                type: crForm.type,
-                title: crForm.title.trim(),
-                detail: crForm.detail.trim(),
-                category: crForm.category,
-            });
-            toast.success('Change request UAT berhasil diajukan.');
-            setCrModalOpen(false);
-            setCrForm({ type: 'minor', title: '', detail: '', category: '' });
-        } catch (err) {
-            toast.error(`Gagal mengajukan change request: ${err.message}`);
-        } finally {
-            setCrSubmitting(false);
-        }
-    };
 
     const mappedTrackingProjects = useMemo(() => {
         return (projects || []).map(p => ({
@@ -82,56 +124,49 @@ export default function Track() {
             pmAvatar: (p.pm?.name || 'BD').substring(0, 2).toUpperCase(),
             description: p.description || 'Pengajuan proyek baru.',
             rejectionReason: p.rejection_reason || p.rejectionReason || null,
-            phases: p.phases || [
-                {
-                    name: 'Fase 1: Inisiasi & Persetujuan',
-                    description: 'Pengajuan disetujui oleh manajemen dan dialokasikan ke tim IT.',
-                    completed: p.statusRaw !== 'PENDING',
-                    items: [
-                        { label: 'Pengajuan Selesai', date: 'Terbaru', done: true },
-                    ],
-                },
-                {
-                    name: 'Fase 2: Desain & Arsitektur',
-                    description: 'Perancangan sistem dan infrastruktur oleh tim teknis.',
-                    completed: ['IN_DEVELOPMENT', 'QA_IN_PROGRESS', 'CYBER_IN_PROGRESS', 'LIVE_PRODUCTION'].includes(p.statusRaw),
-                    items: [],
-                },
-                {
-                    name: 'Fase 3: Pengembangan & Testing',
-                    description: 'Pembuatan kode program dan pengujian kualitas sistem.',
-                    completed: ['LIVE_PRODUCTION'].includes(p.statusRaw),
-                    isActive: ['IN_DEVELOPMENT', 'QA_IN_PROGRESS', 'CYBER_IN_PROGRESS'].includes(p.statusRaw),
-                    items: [],
-                },
-            ],
+            // Perjalanan pengajuan dibangun `constants/projectJourney.js` dari status
+            // proyek, kolom jalur pengujian, dan riwayat statusnya — sumber yang sama
+            // dengan tracker Project Manager, sehingga pemohon dan PM tidak mungkin
+            // melihat tahap yang berbeda untuk proyek yang sama. Versi sebelumnya
+            // memakai tiga fase karangan yang menilai `p.statusRaw` — kunci yang baru
+            // dibuat pada objek ini, jadi selalu undefined: Fase 1 selalu tampak
+            // selesai dan dua fase sisanya tidak pernah bergerak.
+            journey: getProjectJourney(p),
         }));
     }, [projects]);
 
-    const [selectedProject, setSelectedProject] = useState(null);
+    // Pilihan pengguna disimpan sebagai id, bukan objek hasil map. Objeknya selalu
+    // dicari ulang dari daftar terbaru supaya detail proyek ikut diperbarui saat
+    // polling. Sebelumnya pilihan berupa objek dan sebuah effect menyetel ulang
+    // pilihan ke proyek dari URL setiap kali daftar berubah identitas (tiap
+    // polling), sehingga proyek yang baru diklik pengguna terlempar kembali.
+    const [selectedProjectId, setSelectedProjectId] = useState(null);
     const [searchTerm, setSearchTerm] = useState('');
     const [filterStatus, setFilterStatus] = useState('Semua Status');
 
     const listProjects = mappedTrackingProjects;
 
-    useEffect(() => {
-        const targetId = location.state?.projectId || searchParams.get('projectId') || searchParams.get('id');
-        if (targetId && listProjects.length > 0) {
-            const found = listProjects.find(p =>
-                String(p.rawId).toLowerCase() === String(targetId).toLowerCase() ||
-                String(p.id).toLowerCase() === String(targetId).toLowerCase()
-            );
-            if (found) {
-                setSelectedProject(found);
-                return;
-            }
-        }
-        if (!selectedProject && listProjects.length > 0) {
-            setSelectedProject(listProjects[0]);
-        }
-    }, [location.state, searchParams, listProjects]);
+    // Proyek tujuan dari navigasi: state router atau query string.
+    const targetProjectId = location.state?.projectId || searchParams.get('projectId') || searchParams.get('id') || null;
 
-    const activeSelected = selectedProject || listProjects[0] || null;
+    // Navigasi baru ke proyek lain harus mengalahkan pilihan manual sebelumnya.
+    const [syncedTargetId, setSyncedTargetId] = useState(targetProjectId);
+    if (targetProjectId !== syncedTargetId) {
+        setSyncedTargetId(targetProjectId);
+        setSelectedProjectId(null);
+    }
+
+    const activeSelected = useMemo(() => {
+        const findById = (value) => listProjects.find(p =>
+            String(p.rawId).toLowerCase() === String(value).toLowerCase() ||
+            String(p.id).toLowerCase() === String(value).toLowerCase()
+        );
+        // Urutan prioritas: pilihan manual, proyek dari URL, lalu proyek pertama.
+        return (selectedProjectId ? findById(selectedProjectId) : null)
+            || (targetProjectId ? findById(targetProjectId) : null)
+            || listProjects[0]
+            || null;
+    }, [listProjects, selectedProjectId, targetProjectId]);
 
     const scrollPageToTop = () => {
         if (detailPanelRef.current) {
@@ -144,11 +179,15 @@ export default function Track() {
         window.scrollTo({ top: 0, behavior: 'smooth' });
     };
 
+    // Gulir ke atas hanya saat proyek yang dibuka berganti. Yang dipantau sengaja
+    // id-nya, bukan objek proyeknya: objek itu dibuat ulang setiap polling, dan
+    // memantaunya akan menggulirkan halaman tiap beberapa detik.
+    const activeSelectedId = activeSelected?.id ?? null;
     useEffect(() => {
-        if (activeSelected) {
+        if (activeSelectedId) {
             scrollPageToTop();
         }
-    }, [activeSelected?.id]);
+    }, [activeSelectedId]);
 
     const filteredProjects = useMemo(() => {
         let result = listProjects;
@@ -172,6 +211,12 @@ export default function Track() {
         return result;
     }, [listProjects, searchTerm, filterStatus]);
 
+    /**
+     * Warna badge status pada daftar dan kartu ringkasan.
+     *
+     * Kuncinya adalah LABEL, bukan kode status — `listProjects` sudah menerjemahkan
+     * `p.status` lewat `PROJECT_STATUS_LABEL` sebelum sampai ke sini.
+     */
     const getStatusBadge = (status) => {
         const colors = {
             'Menunggu Review': 'bg-gray-100 text-gray-700',
@@ -180,41 +225,169 @@ export default function Track() {
             'Ditolak': 'bg-red-100 text-red-700',
             'Sedang Dikembangkan': 'bg-blue-100 text-blue-700',
             'Live Production': 'bg-emerald-100 text-emerald-700',
-            'Dikembalikan ke Dev': 'bg-red-100 text-red-700',
+            // Kuncinya dibaca dari `PROJECT_STATUS_LABEL`, tidak ditulis ulang sebagai
+            // teks: pernah ada dua sebutan berbeda untuk status yang sama, dan begitu
+            // label di berkas konstanta berubah, kunci yang ditulis tangan di sini mati
+            // tanpa suara — badge-nya diam-diam jatuh ke abu-abu. Warnanya oranye,
+            // seragam dengan `PROJECT_STATUS_COLOR` dan dengan keadaan `revision` pada
+            // timeline di bawah: pengembalian ke developer adalah pekerjaan ulang, bukan
+            // penolakan. Sebelumnya merah, warna yang di halaman ini berarti ditolak.
+            [PROJECT_STATUS_LABEL.RETURN_TO_DEV]: 'bg-orange-100 text-orange-700',
         };
         return colors[status] || 'bg-gray-100 text-gray-700';
     };
 
-    const getPhaseIcon = (phase) => {
-        if (phase.completed) return <CheckCircle size={18} className="text-emerald-500" />;
-        if (phase.isActive) return <Code size={18} className="text-[#00529C]" />;
-        return <Rocket size={18} className="text-gray-400" />;
+    /**
+     * Tampilan satu keadaan pada timeline.
+     *
+     * Kuncinya sama dengan nilai `state` yang dihasilkan `getProjectJourney`, jadi
+     * penambahan keadaan baru di sana akan langsung terlihat di sini alih-alih
+     * jatuh diam-diam ke tampilan "belum dimulai".
+     */
+    const JOURNEY_STATE_STYLE = {
+        completed: {
+            icon: Check,
+            circleCls: 'bg-emerald-100 border-2 border-emerald-500',
+            iconCls: 'text-emerald-600',
+            label: 'Selesai',
+            pillCls: 'bg-emerald-100 text-emerald-700',
+            titleCls: 'text-gray-800',
+        },
+        active: {
+            icon: Code,
+            circleCls: 'bg-[#00529C] border-4 border-blue-200 shadow-md',
+            iconCls: 'text-white',
+            label: 'Sedang Berjalan',
+            pillCls: 'bg-blue-100 text-[#00529C]',
+            titleCls: 'text-[#00529C]',
+            pulse: true,
+        },
+        revision: {
+            icon: RotateCcw,
+            circleCls: 'bg-amber-100 border-2 border-amber-500',
+            iconCls: 'text-amber-600',
+            label: 'Perlu Perbaikan',
+            pillCls: 'bg-amber-100 text-amber-700',
+            titleCls: 'text-amber-700',
+        },
+        rejected: {
+            icon: AlertCircle,
+            circleCls: 'bg-red-100 border-2 border-red-500',
+            iconCls: 'text-red-600',
+            label: 'Dihentikan',
+            pillCls: 'bg-red-100 text-red-700',
+            titleCls: 'text-red-700',
+        },
+        pending: {
+            icon: Rocket,
+            circleCls: 'bg-gray-100 border-2 border-gray-300',
+            iconCls: 'text-gray-400',
+            label: 'Belum Dimulai',
+            pillCls: 'bg-gray-100 text-gray-500',
+            titleCls: 'text-gray-500',
+        },
     };
 
-    const getPhaseCircle = (phase) => {
-        if (phase.completed) {
-            return (
-                <div className="w-10 h-10 rounded-full bg-emerald-100 border-2 border-emerald-500 flex items-center justify-center shadow-sm">
-                    <Check size={20} className="text-emerald-600" />
-                </div>
-            );
-        }
-        if (phase.isActive) {
-            return (
-                <div className="w-10 h-10 rounded-full bg-[#00529C] border-4 border-blue-200 flex items-center justify-center shadow-md relative">
-                    <div className="absolute inset-0 rounded-full border-2 border-[#00529C] animate-ping opacity-50"></div>
-                    <Code size={20} className="text-white" />
-                </div>
-            );
-        }
+    const getJourneyStyle = (state) => JOURNEY_STATE_STYLE[state] || JOURNEY_STATE_STYLE.pending;
+
+    const getPhaseCircle = (state) => {
+        const style = getJourneyStyle(state);
+        const StateIcon = style.icon;
+
         return (
-            <div className="w-10 h-10 rounded-full bg-gray-100 border-2 border-gray-300 flex items-center justify-center">
-                <Rocket size={20} className="text-gray-400" />
+            <div className={`w-10 h-10 rounded-full flex items-center justify-center relative ${style.circleCls}`}>
+                {style.pulse && (
+                    <div className="absolute inset-0 rounded-full border-2 border-[#00529C] animate-ping opacity-50"></div>
+                )}
+                <StateIcon size={20} className={style.iconCls} />
             </div>
         );
     };
 
+    /** Ikon kecil untuk setiap tahap di dalam fase. */
+    const getMilestoneIcon = (state) => {
+        if (state === 'completed') return <CheckCircle size={16} className="text-emerald-500 shrink-0 mt-0.5" />;
+        if (state === 'active') return <Code size={16} className="text-[#00529C] shrink-0 mt-0.5" />;
+        if (state === 'revision') return <RotateCcw size={16} className="text-amber-600 shrink-0 mt-0.5" />;
+        if (state === 'rejected') return <AlertCircle size={16} className="text-red-500 shrink-0 mt-0.5" />;
+
+        return <Circle size={16} className="text-gray-300 shrink-0 mt-0.5" />;
+    };
+
     const activeProjectObj = projects.find(p => String(p.id) === String(activeSelected?.rawId));
+
+    // ─── Persetujuan UAT pemohon, dikerjakan langsung di aplikasi ───
+    // Pemohon proyek selalu punya akun — dialah yang menginisiasi proyeknya — maka
+    // `UatApprovalRole::requiredMode()` memaksa posisi `requester` memakai akun
+    // internal dan tidak lagi menerima link pribadi berverifikasi nomor HP.
+    // Keputusannya diberikan dari halaman yang sudah ia pakai memantau proyek.
+    //
+    // Matriks disimpan bersama id proyeknya supaya hasil permintaan proyek lain
+    // tidak sekejap tampil saat pengguna berpindah pilihan.
+    const [uatApprovalMatrix, setUatApprovalMatrix] = useState(null);
+    const [uatApprovalNote, setUatApprovalNote] = useState('');
+    const [isSubmittingUatApproval, setIsSubmittingUatApproval] = useState(false);
+    const [uatApprovalReloadKey, setUatApprovalReloadKey] = useState(0);
+
+    // Hanya proyek yang benar-benar berada pada fase persetujuan UAT yang diambil
+    // matriksnya, dan hanya proyek yang sedang dibuka — bukan seluruh daftar.
+    // Pemohon bisa memiliki puluhan pengajuan, dan satu permintaan per pengajuan
+    // pada setiap kunjungan halaman jauh lebih mahal daripada nilainya.
+    const uatApprovalProjectId = user?.role === 'business_user' && activeSelected?.statusRaw === 'UAT_IN_PROGRESS'
+        ? activeSelected.rawId
+        : null;
+
+    // Catatan opsional selalu milik satu proyek. Penyelarasan dilakukan saat render
+    // seperti `syncedTargetId` di atas, bukan lewat effect, agar catatan yang
+    // ditulis untuk satu proyek tidak pernah terkirim ke proyek lain.
+    const [notedUatProjectId, setNotedUatProjectId] = useState(uatApprovalProjectId);
+    if (uatApprovalProjectId !== notedUatProjectId) {
+        setNotedUatProjectId(uatApprovalProjectId);
+        setUatApprovalNote('');
+    }
+
+    // Yang dipantau adalah id proyek dan penanda muat ulang, bukan objek proyeknya:
+    // objek itu dibuat ulang setiap tik polling daftar proyek, dan memantaunya akan
+    // memukul endpoint matriks tiap beberapa detik.
+    useEffect(() => {
+        if (!uatApprovalProjectId) return;
+        let isStale = false;
+        (async () => {
+            try {
+                const res = await projectService.getUatApprovalMatrix(uatApprovalProjectId);
+                if (!isStale) setUatApprovalMatrix({ projectId: uatApprovalProjectId, data: res?.data || null });
+            } catch {
+                // 403 dan 404 adalah keadaan wajar, bukan kegagalan: putaran approval
+                // belum dibuat PM, atau pemohon memang bukan penandatangan pada
+                // putaran itu. Panel cukup tidak ditampilkan, tanpa notifikasi.
+                if (!isStale) setUatApprovalMatrix({ projectId: uatApprovalProjectId, data: null });
+            }
+        })();
+        return () => { isStale = true; };
+    }, [uatApprovalProjectId, uatApprovalReloadKey]);
+
+    // Pemohon hanya punya satu tindakan: menyetujui. Penolakan dan permintaan revisi
+    // sudah diajukan serta diaudit saat eksekusi UAT (Tahap 2), jadi tidak ada jalur
+    // penolakan kedua atas temuan yang sama — `UatApprovalRole::canReject()` pun
+    // menolaknya di backend.
+    const handleApproveUat = async (approverId) => {
+        if (!uatApprovalProjectId || !approverId || isSubmittingUatApproval) return;
+        setIsSubmittingUatApproval(true);
+        try {
+            await projectService.submitUatApproval(uatApprovalProjectId, approverId, 'approved', uatApprovalNote.trim());
+            setUatApprovalNote('');
+            // Matriks dimuat ulang agar slot pemohon berpindah ke `approved` dan
+            // tombolnya hilang; daftar proyek disegarkan senyap karena putaran yang
+            // lengkap dapat menggeser status proyek beserta linimasanya.
+            setUatApprovalReloadKey(key => key + 1);
+            refreshDataSilent();
+            toast.success('Persetujuan hasil UAT Anda berhasil dicatat. Terima kasih.');
+        } catch (err) {
+            toast.error(`Gagal menyimpan persetujuan: ${err.message}`);
+        } finally {
+            setIsSubmittingUatApproval(false);
+        }
+    };
 
     return (
         <div className="flex-1 flex flex-col h-screen bg-[#f8f9fb] overflow-hidden">
@@ -253,7 +426,7 @@ export default function Track() {
                             filteredProjects.map((project) => (
                                 <div
                                     key={project.id}
-                                    onClick={() => setSelectedProject(project)}
+                                    onClick={() => setSelectedProjectId(project.rawId ?? project.id)}
                                     className={`bg-white rounded-xl shadow-sm border relative overflow-hidden cursor-pointer hover:shadow-md transition-shadow group ${activeSelected?.id === project.id
                                             ? 'border-[#00529C] ring-1 ring-[#00529C]'
                                             : 'border-gray-200'
@@ -375,7 +548,10 @@ export default function Track() {
                                         const initDocs = realDocList.filter(d => {
                                             const t = (d.type || d.doc_type || '').toLowerCase();
                                             const n = (d.name || '').toLowerCase();
-                                            return t === 'brd' || n.includes('brd') || t === 'mem' || n.includes('memo')
+                                            // Kode tipe memo yang disimpan backend adalah 'MEMO' (DOCUMENT_TYPES.MEMO),
+                                            // jadi pembandingan lama dengan 'mem' tidak pernah cocok — memo hanya ikut
+                                            // terbaca bila kebetulan namanya memuat kata "memo".
+                                            return t === 'brd' || n.includes('brd') || t === 'memo' || n.includes('memo')
                                                 || t === 'fsd' || n.includes('fsd') || n.includes('kajian')
                                                 || t === 'lampiran' || n.includes('lampiran')
                                                 || t === 'lainnya';
@@ -457,60 +633,325 @@ export default function Track() {
                             </div>
 
                             <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-200">
-                                <h2 className="text-lg font-semibold text-gray-800 mb-8 flex items-center">
-                                    <Route size={20} className="mr-2 text-[#00529C]" />
-                                    Perjalanan Pengajuan
-                                </h2>
+                                <div className="flex items-start justify-between gap-3 mb-6 flex-wrap">
+                                    <h2 className="text-lg font-semibold text-gray-800 flex items-center">
+                                        <Route size={20} className="mr-2 text-[#00529C]" />
+                                        Perjalanan Pengajuan
+                                    </h2>
+                                    <div className="flex items-center gap-2 flex-wrap">
+                                        <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-bold bg-blue-100 text-[#00529C]">
+                                            Progres {activeSelected?.journey?.progress ?? 0}%
+                                        </span>
+                                        <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-bold ${getStatusBadge(activeSelected?.status)}`}>
+                                            {activeSelected?.journey?.currentStatusLabel || activeSelected?.status}
+                                        </span>
+                                    </div>
+                                </div>
+
+                                {/*
+                                  * Simpangan alur (revisi, penundaan, penolakan) diberitakan di atas
+                                  * timeline. Tanpa ini, pemohon hanya melihat sebuah tahap berubah
+                                  * warna tanpa penjelasan mengapa proyeknya berhenti bergerak.
+                                  */}
+                                {activeSelected?.journey?.detour && (
+                                    <div className="mb-6 rounded-xl border border-amber-200 bg-amber-50 p-4 flex items-start gap-3">
+                                        <RotateCcw size={18} className="text-amber-600 shrink-0 mt-0.5" />
+                                        <div className="min-w-0">
+                                            <p className="text-sm font-bold text-amber-800">{activeSelected.journey.detour.label}</p>
+                                            <p className="text-[11px] text-amber-700 leading-relaxed mt-0.5">
+                                                {activeSelected.journey.detour.description}
+                                            </p>
+                                        </div>
+                                    </div>
+                                )}
 
                                 <div className="relative px-2">
-                                    {activeSelected?.phases?.map((phase, idx) => (
-                                        <div
-                                            key={idx}
-                                            className="relative flex gap-6 pb-12 last:pb-0"
-                                        >
-                                            {idx < activeSelected.phases.length - 1 && (
-                                                <div className="absolute left-5 top-10 bottom-0 w-0.5 bg-gray-200 z-0"></div>
-                                            )}
+                                    {(activeSelected?.journey?.phases || []).map((phase, idx) => {
+                                        const phaseStyle = getJourneyStyle(phase.state);
+                                        const isLastPhase = idx === (activeSelected.journey.phases.length - 1);
 
-                                            <div className="relative flex flex-col items-center z-10">
-                                                {getPhaseCircle(phase)}
-                                            </div>
+                                        return (
+                                            <div key={phase.id} className="relative flex gap-6 pb-10 last:pb-0">
+                                                {!isLastPhase && (
+                                                    <div className="absolute left-5 top-10 bottom-0 w-0.5 bg-gray-200 z-0"></div>
+                                                )}
 
-                                            <div className="flex-1 pt-1">
-                                                <h3 className={`font-semibold text-gray-800 mb-1 ${phase.isActive ? 'text-[#00529C]' : ''}`}>
-                                                    {phase.name}
-                                                </h3>
-                                                <p className="text-sm text-gray-500 mb-4">{phase.description}</p>
+                                                <div className="relative flex flex-col items-center z-10">
+                                                    {getPhaseCircle(phase.state)}
+                                                </div>
 
-                                                {phase.items && phase.items.length > 0 && (
+                                                <div className="flex-1 pt-1 min-w-0">
+                                                    <div className="flex items-center gap-2 flex-wrap mb-1">
+                                                        <h3 className={`font-semibold ${phaseStyle.titleCls}`}>
+                                                            {phase.label}: {phase.sublabel}
+                                                        </h3>
+                                                        <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold ${phaseStyle.pillCls}`}>
+                                                            {phaseStyle.label}
+                                                        </span>
+                                                        {/*
+                                                          * Dua jalur pengujian berjalan bersamaan, bukan berurutan.
+                                                          * Penandanya dipasang di sini supaya pemohon tidak menyangka
+                                                          * Fase 3B baru dimulai setelah Fase 3A selesai.
+                                                          */}
+                                                        {phase.trackKey && (
+                                                            <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-indigo-50 text-indigo-700 border border-indigo-200">
+                                                                Paralel
+                                                            </span>
+                                                        )}
+                                                    </div>
+                                                    <p className="text-sm text-gray-500 mb-4">{phase.description}</p>
+
                                                     <div className="bg-gray-50 rounded-lg p-4 border border-gray-200 space-y-3">
-                                                        {phase.items.map((item, i) => (
-                                                            <div key={i} className="flex items-center gap-3">
-                                                                <CheckCircle size={16} className="text-emerald-500" />
-                                                                <span className="text-sm text-gray-700">
-                                                                    {item.label}
-                                                                    <span className="text-xs text-gray-400 ml-2">({item.date})</span>
-                                                                </span>
-                                                            </div>
-                                                        ))}
-                                                        {phase.isActive && phase.activeNote && (
-                                                            <div className="flex items-start gap-3 p-3 bg-white rounded border border-blue-200 shadow-sm mt-2">
-                                                                <Shield size={18} className="text-[#00529C] animate-pulse mt-0.5" />
-                                                                <div>
-                                                                    <span className="font-semibold text-sm text-gray-800 block mb-1">
-                                                                        {phase.activeNote}
-                                                                    </span>
-                                                                    <span className="text-xs text-gray-500">{phase.activeNoteDetail}</span>
+                                                        {phase.milestones.map(milestone => {
+                                                            const stamp = formatJourneyStamp(milestone.at);
+
+                                                            return (
+                                                                <div key={milestone.key} className="flex items-start gap-3">
+                                                                    {getMilestoneIcon(milestone.state)}
+                                                                    <div className="min-w-0 flex-1">
+                                                                        <p className={`text-sm font-medium ${milestone.state === 'pending' ? 'text-gray-400' : 'text-gray-700'}`}>
+                                                                            {milestone.label}
+                                                                            {stamp && <span className="text-xs text-gray-400 font-normal ml-2">({stamp})</span>}
+                                                                        </p>
+                                                                        <p className={`text-[11px] leading-relaxed mt-0.5 ${milestone.state === 'pending' ? 'text-gray-400' : 'text-gray-500'}`}>
+                                                                            {milestone.description}
+                                                                        </p>
+                                                                        {milestone.by && (
+                                                                            <p className="text-[11px] text-gray-500 mt-0.5">
+                                                                                Dicatat oleh <strong className="text-gray-600">{milestone.by}</strong>
+                                                                            </p>
+                                                                        )}
+                                                                        {/*
+                                                                          * Catatan transisi adalah alasan resmi yang ditulis
+                                                                          * pemutus — termasuk alasan penolakan dan arahan
+                                                                          * revisi. Justru inilah yang paling dicari pemohon,
+                                                                          * jadi ditampilkan apa adanya.
+                                                                          */}
+                                                                        {milestone.notes && (
+                                                                            <div className="mt-2 bg-white border border-gray-200 rounded-lg p-2.5 text-[11px] text-gray-600 leading-relaxed whitespace-pre-wrap">
+                                                                                {milestone.notes}
+                                                                            </div>
+                                                                        )}
+                                                                        {milestone.detour && (
+                                                                            <div className="mt-2 flex items-start gap-2 p-2.5 bg-white rounded-lg border border-amber-200">
+                                                                                <Shield size={14} className="text-amber-600 shrink-0 mt-0.5" />
+                                                                                <div className="min-w-0">
+                                                                                    <span className="font-bold text-[11px] text-amber-800 block">
+                                                                                        {milestone.detour.label}
+                                                                                    </span>
+                                                                                    <span className="text-[11px] text-amber-700 leading-relaxed">
+                                                                                        {milestone.detour.description}
+                                                                                    </span>
+                                                                                </div>
+                                                                            </div>
+                                                                        )}
+                                                                    </div>
                                                                 </div>
+                                                            );
+                                                        })}
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            </div>
+
+                            {/* ── Persetujuan Hasil UAT oleh pemohon, langsung di aplikasi ── */}
+                            {(() => {
+                                // Matriks yang tersimpan hanya berlaku untuk proyek yang menjadi
+                                // sumbernya. Tanpa perbandingan id ini, matriks proyek sebelumnya
+                                // akan sekejap tampil di atas proyek yang baru dipilih.
+                                const matrix = uatApprovalMatrix && String(uatApprovalMatrix.projectId) === String(activeSelected?.rawId)
+                                    ? uatApprovalMatrix.data
+                                    : null;
+                                const approvers = matrix?.approvers || [];
+
+                                // Slot milik pengguna dikenali dari sisi pemohon, mode akun internal,
+                                // dan kesamaan `user_id`. Backend sudah memastikan slot `requester`
+                                // selalu akun yang menginisiasi proyek, sehingga layar tidak perlu
+                                // menebak dari nama atau nomor telepon.
+                                const mySlot = approvers.find(approver =>
+                                    approver.side === 'requester'
+                                    && approver.approval_mode === 'internal_account'
+                                    && String(approver.user_id) === String(user?.id)
+                                );
+                                // Tidak ada slot berarti tidak ada yang perlu dikerjakan maupun
+                                // ditampilkan — panel sama sekali tidak dirender.
+                                if (!mySlot) return null;
+
+                                const sd = activeProjectObj?.sitUatData || activeProjectObj?.sit_uat_data || {};
+                                // Gerbang ini menyalin `UatApprovalService::assertActiveApprover`.
+                                // Menawarkan tombol lebih awal hanya akan memunculkan galat 422 yang
+                                // tidak dapat ditindaklanjuti pemohon. Selama UAT masih menunggu
+                                // dijalankan ulang, Tahap 3 milik putaran lama sudah tidak berlaku:
+                                // persetujuan baru terbuka lagi saat putaran baru mencapai Tahap 3.
+                                const isGateOpen = matrix.status === 'active'
+                                    && Number(sd.activeUatStep || 1) >= 3
+                                    && !isUatRestartPending(sd);
+                                const canApproveNow = isGateOpen && mySlot.status === 'pending';
+                                const mySlotStatus = UAT_APPROVER_STATUS_LABEL[mySlot.status] || UAT_APPROVER_STATUS_LABEL.pending;
+                                const otherApprovers = approvers.filter(approver => approver.id !== mySlot.id);
+                                const uatApprovalDocs = getProjectRealDocuments(activeProjectObj)
+                                    .filter(doc => UAT_APPROVAL_DOC_TYPES.includes(String(doc.type || '').toUpperCase()));
+
+                                return (
+                                    <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-200 mt-6">
+                                        <div className="flex items-start justify-between gap-3 mb-4 flex-wrap">
+                                            <h2 className="text-lg font-semibold text-gray-800 flex items-center">
+                                                <ClipboardCheck size={20} className="mr-2 text-[#00529C]" />
+                                                Persetujuan Hasil UAT
+                                            </h2>
+                                            <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-bold bg-blue-100 text-[#00529C]">
+                                                {matrix.approved_count ?? 0}/{matrix.required_count ?? 0} tanda tangan
+                                            </span>
+                                        </div>
+
+                                        {mySlot.status === 'approved' ? (
+                                            <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4">
+                                                <div className="flex items-start gap-3">
+                                                    <CheckCircle size={20} className="text-emerald-600 shrink-0 mt-0.5" />
+                                                    <div className="min-w-0">
+                                                        <p className="text-sm font-bold text-emerald-800">Anda sudah menyetujui hasil UAT ini</p>
+                                                        <p className="text-[11px] text-emerald-700 mt-1">
+                                                            Tercatat sebagai {mySlot.approval_role_label}
+                                                            {mySlot.decided_at ? ` pada ${new Date(mySlot.decided_at).toLocaleString('id-ID')}` : ''}.
+                                                        </p>
+                                                        {mySlot.decision_note && (
+                                                            <div className="mt-2 bg-white border border-emerald-200 rounded-xl p-3 text-xs text-gray-700 leading-relaxed whitespace-pre-wrap">
+                                                                {mySlot.decision_note}
                                                             </div>
                                                         )}
                                                     </div>
-                                                )}
+                                                </div>
                                             </div>
-                                        </div>
-                                    ))}
-                                </div>
-                            </div>
+                                        ) : canApproveNow ? (
+                                            <div className="rounded-xl border border-blue-200 bg-blue-50 p-4">
+                                                <p className="text-xs font-bold text-blue-800 mb-1">Persetujuan Anda sebagai {mySlot.approval_role_label}</p>
+                                                <p className="text-[11px] text-blue-800 leading-relaxed">
+                                                    Anda menyetujui langsung di halaman ini menggunakan akun Anda sendiri, tanpa link pribadi maupun verifikasi nomor HP. Periksa dokumen hasil UAT di bawah sebelum menyetujui.
+                                                </p>
+                                                {/*
+                                                  * Hanya ada satu tombol: Setujui. Penolakan dan permintaan
+                                                  * revisi dari sisi pemohon sudah diajukan serta diaudit pada
+                                                  * pertemuan UAT (Tahap 2), sehingga tidak boleh ada jalur
+                                                  * penolakan kedua atas temuan yang sama.
+                                                  */}
+                                                <p className="mt-3 text-[11px] text-blue-700 flex items-start gap-1.5">
+                                                    <Info size={13} className="shrink-0 mt-0.5" /> Penolakan dan permintaan revisi tidak lagi tersedia di tahap ini karena keduanya sudah dicatat tim penguji saat pelaksanaan UAT.
+                                                </p>
+                                                <label htmlFor="uat-approval-note" className="block text-[11px] font-bold text-blue-800 mt-4 mb-1.5">
+                                                    Catatan (opsional)
+                                                </label>
+                                                <textarea
+                                                    id="uat-approval-note"
+                                                    rows={3}
+                                                    value={uatApprovalNote}
+                                                    onChange={(e) => setUatApprovalNote(e.target.value)}
+                                                    placeholder="Tambahkan catatan bila ada hal yang perlu dicatat pada berita acara."
+                                                    className="w-full px-3 py-2.5 bg-white rounded-lg border border-blue-200 focus:ring-2 focus:ring-[#00529C] focus:border-[#00529C] outline-none transition-all text-sm resize-none"
+                                                />
+                                                <button
+                                                    type="button"
+                                                    onClick={() => handleApproveUat(mySlot.id)}
+                                                    disabled={isSubmittingUatApproval}
+                                                    className="mt-3 w-full flex items-center justify-center gap-1.5 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-white rounded-xl text-sm font-bold transition-colors cursor-pointer active:scale-95 disabled:active:scale-100"
+                                                >
+                                                    <Check size={16} />
+                                                    {isSubmittingUatApproval ? 'Menyimpan persetujuan...' : 'Setujui'}
+                                                </button>
+                                            </div>
+                                        ) : (
+                                            <div className="rounded-xl border border-amber-200 bg-amber-50 p-4">
+                                                <p className="text-xs font-bold text-amber-800 mb-1">Persetujuan Anda sebagai {mySlot.approval_role_label}</p>
+                                                <p className="text-[11px] text-amber-800 flex items-start gap-1.5">
+                                                    <Clock size={13} className="shrink-0 mt-0.5" />
+                                                    {mySlot.status === 'pending'
+                                                        ? 'Tombol persetujuan aktif setelah eksekusi UAT mencapai Tahap 3. Bila ada revisi mayor, UAT dijalankan ulang dari Tahap 1 lebih dulu.'
+                                                        : `Status persetujuan Anda saat ini: ${mySlotStatus.label}.`}
+                                                </p>
+                                            </div>
+                                        )}
+
+                                        {otherApprovers.length > 0 && (
+                                            <div className="mt-4">
+                                                {/*
+                                                  * Hanya posisi, nama, dan status yang ditampilkan. Nomor telepon
+                                                  * tersamar, kesiapan link, serta catatan keputusan pihak lain
+                                                  * memang ada di matriks, tetapi tidak ada gunanya bagi pemohon
+                                                  * dan tidak perlu keluar dari lingkup tim IT.
+                                                  */}
+                                                <p className="text-xs font-bold text-gray-700 mb-2">Penandatangan Lain</p>
+                                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                                    {otherApprovers.map(approver => {
+                                                        const approverStatus = UAT_APPROVER_STATUS_LABEL[approver.status] || UAT_APPROVER_STATUS_LABEL.pending;
+                                                        return (
+                                                            <div key={approver.id} className="p-3 rounded-xl border border-gray-200 bg-gray-50 text-xs">
+                                                                <div className="flex items-center justify-between gap-2">
+                                                                    <span className="font-bold text-gray-800 truncate">{approver.name}</span>
+                                                                    <span className={`px-2 py-0.5 rounded-full text-[9px] font-bold border shrink-0 ${approverStatus.pillCls}`}>
+                                                                        {approverStatus.label}
+                                                                    </span>
+                                                                </div>
+                                                                <p className="text-[10px] text-gray-500 mt-1">{approver.approval_role_label}</p>
+                                                            </div>
+                                                        );
+                                                    })}
+                                                </div>
+                                            </div>
+                                        )}
+
+                                        {uatApprovalDocs.length > 0 && (
+                                            <div className="mt-4 border-t border-gray-100 pt-4">
+                                                <p className="text-xs font-bold text-gray-700 mb-2">Dokumen Hasil UAT</p>
+                                                <div className="space-y-2">
+                                                    {uatApprovalDocs.map(doc => (
+                                                        <div key={doc.id} className="flex items-center justify-between p-2.5 bg-gray-50 rounded-xl border border-gray-100 text-xs">
+                                                            <div className="flex items-center gap-2 min-w-0">
+                                                                <div className={`w-8 h-8 rounded flex items-center justify-center shrink-0 font-bold text-[9px] ${getDocIconStyle(doc.name || '')}`}>
+                                                                    {getDocExtLabel(doc.name || '')}
+                                                                </div>
+                                                                <span className="font-medium text-gray-700 truncate">{doc.name}</span>
+                                                            </div>
+                                                            <div className="flex items-center gap-1 shrink-0 ml-2">
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() => setPreviewDoc(doc)}
+                                                                    className="px-2.5 py-1 bg-blue-100 hover:bg-blue-200 text-blue-700 rounded-lg text-[10px] font-bold transition-colors flex items-center gap-1 cursor-pointer"
+                                                                >
+                                                                    <Eye size={12} /> Lihat
+                                                                </button>
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={async () => {
+                                                                        if (!doc.id) return;
+                                                                        try {
+                                                                            const blob = await documentService.download(doc.id);
+                                                                            const url = URL.createObjectURL(blob);
+                                                                            const a = document.createElement('a');
+                                                                            a.href = url;
+                                                                            a.download = doc.name || 'dokumen.pdf';
+                                                                            document.body.appendChild(a);
+                                                                            a.click();
+                                                                            document.body.removeChild(a);
+                                                                            URL.revokeObjectURL(url);
+                                                                        } catch {
+                                                                            alert('Gagal mengunduh dokumen.');
+                                                                        }
+                                                                    }}
+                                                                    className="px-2.5 py-1 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg text-[10px] font-bold transition-colors flex items-center gap-1 cursor-pointer"
+                                                                >
+                                                                    <Download size={12} /> Unduh
+                                                                </button>
+                                                            </div>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            </div>
+                                        )}
+                                    </div>
+                                );
+                            })()}
 
                             {/* ── Dokumen Proyek (semua tahap) ── */}
                             <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-200 mt-6">
@@ -533,7 +974,9 @@ export default function Track() {
                                                         </div>
                                                         <div className="min-w-0">
                                                             <p className="font-medium text-gray-700 truncate">{doc.name}</p>
-                                                            <p className="text-[10px] text-gray-400">{doc.size} • {doc.author}</p>
+                                                            <p className="text-[10px] text-gray-400">
+                                                                {doc.size}{doc.author ? ` • ${doc.author}` : ''}
+                                                            </p>
                                                         </div>
                                                     </div>
                                                     <div className="flex items-center gap-1 shrink-0 ml-2">
@@ -578,7 +1021,7 @@ export default function Track() {
                                 })()}
                             </div>
 
-                            {/* ── Status Pengujian (SIT/UAT) & Change Request ── */}
+                            {/* ── Status Pengujian (SIT/UAT) & Riwayat Change Request ── */}
                             {(() => {
                                 const sd = activeProjectObj?.sitUatData || activeProjectObj?.sit_uat_data || {};
                                 const stRaw = activeSelected?.statusRaw;
@@ -600,38 +1043,49 @@ export default function Track() {
                                                 <div className="rounded-xl border border-amber-200 bg-amber-50 p-4">
                                                     <p className="text-xs font-bold text-amber-800 mb-2">Persetujuan UAT</p>
                                                     <p className="text-[11px] text-amber-800 leading-relaxed">
-                                                        Persetujuan pihak peminta dilakukan melalui link pribadi yang dibuat PM untuk setiap peserta UAT. Buka link tersebut dan verifikasi nomor HP terdaftar untuk melihat hasil serta memberikan keputusan.
+                                                        Pemohon proyek menyetujui hasil UAT langsung di halaman ini memakai akunnya sendiri, sehingga tidak lagi dibuatkan link pribadi. Pimpinan grup dan pimpinan divisi pemohon tetap menyetujui melalui link pribadi yang dibuat PM, dengan verifikasi nomor HP terdaftar.
                                                     </p>
-                                                    {user?.role === 'business_user' && (Number(sd.activeUatStep || 1) < 3 || sd.uat2_resume_after_sit === true) && (
+                                                    {user?.role === 'business_user' && (Number(sd.activeUatStep || 1) < 3 || isUatRestartPending(sd)) && (
                                                         <p className="mt-3 text-[11px] text-amber-700 font-semibold flex items-start gap-1.5">
-                                                            <Clock size={13} className="shrink-0 mt-0.5" /> Persetujuan final tersedia setelah eksekusi UAT dan seluruh revisi mayor/SIT ulang selesai.
+                                                            <Clock size={13} className="shrink-0 mt-0.5" /> Persetujuan final tersedia setelah eksekusi UAT mencapai Tahap 3. Revisi mayor membuat UAT dijalankan ulang dari Tahap 1 setelah SIT ulang lulus, jadi persetujuan baru terbuka lagi ketika pelaksanaan ulang itu sampai di Tahap 3.
                                                         </p>
                                                     )}
+                                                    {/*
+                                                      * Pemohon tidak lagi dapat membuat change request dari halaman ini.
+                                                      * Permintaan perubahan hanya sah diajukan pada pertemuan UAT dan
+                                                      * dicatat oleh penguji di Tahap 2 wizard SIT/UAT, sehingga setiap
+                                                      * permintaan selalu punya konteks skenario dan bukti yang dibahas
+                                                      * bersama. Riwayat di bawah tetap ditampilkan agar pemohon dapat
+                                                      * memantau tindak lanjut permintaannya.
+                                                      */}
                                                     {user?.role === 'business_user' && (
-                                                        <button
-                                                            onClick={() => setCrModalOpen(true)}
-                                                            className="mt-2 w-full px-4 py-2.5 bg-orange-500 hover:bg-orange-600 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition-colors cursor-pointer"
-                                                        >
-                                                            <RotateCcw size={14} /> Ajukan Change Request
-                                                        </button>
+                                                        <p className="mt-3 text-[11px] text-amber-700 flex items-start gap-1.5">
+                                                            <Info size={13} className="shrink-0 mt-0.5" /> Permintaan perubahan diajukan langsung pada pertemuan UAT dan dicatat oleh tim penguji. Hasil pencatatannya muncul pada daftar di bawah.
+                                                        </p>
                                                     )}
                                                 </div>
                                                 {crs.length > 0 && (
                                                     <div>
-                                                        <p className="text-xs font-bold text-gray-700 mb-2">Change Request</p>
+                                                        <p className="text-xs font-bold text-gray-700 mb-2">Change Request dari Pertemuan UAT</p>
                                                         <div className="space-y-2">
-                                                            {crs.map(cr => (
-                                                                <div key={cr.id} className={`p-3 rounded-xl border text-xs ${cr.status === 'approved' ? 'bg-emerald-50 border-emerald-200' : cr.status === 'rejected' ? 'bg-red-50 border-red-200' : 'bg-amber-50 border-amber-200'}`}>
-                                                                    <div className="flex items-center justify-between gap-2">
-                                                                        <span className="font-bold text-gray-800">{cr.title}</span>
-                                                                        <span className={`px-2 py-0.5 rounded-full text-[9px] font-bold border ${cr.status === 'approved' ? 'bg-emerald-100 text-emerald-700 border-emerald-200' : cr.status === 'rejected' ? 'bg-red-100 text-red-700 border-red-200' : 'bg-amber-100 text-amber-700 border-amber-200'}`}>
-                                                                            {cr.status === 'approved' ? 'Disetujui' : cr.status === 'rejected' ? 'Ditolak' : 'Menunggu'}
-                                                                        </span>
+                                                            {crs.map(cr => {
+                                                                const crStatus = CHANGE_REQUEST_STATUS_LABEL[cr.status] || CHANGE_REQUEST_STATUS_LABEL.pending;
+                                                                return (
+                                                                    <div key={cr.id} className={`p-3 rounded-xl border text-xs ${crStatus.cardCls}`}>
+                                                                        <div className="flex items-center justify-between gap-2">
+                                                                            <span className="font-bold text-gray-800">{cr.title}</span>
+                                                                            <span className={`px-2 py-0.5 rounded-full text-[9px] font-bold border ${crStatus.pillCls}`}>
+                                                                                {crStatus.label}
+                                                                            </span>
+                                                                        </div>
+                                                                        <p className="text-gray-600 mt-1">{cr.detail}</p>
+                                                                        <p className="text-[10px] text-gray-400 mt-1">
+                                                                            Oleh: {cr.submittedBy}
+                                                                            {cr.type ? ` • Tipe ${cr.type === 'mayor' ? 'Mayor' : 'Minor'}` : ''}
+                                                                        </p>
                                                                     </div>
-                                                                    <p className="text-gray-600 mt-1">{cr.detail}</p>
-                                                                    <p className="text-[10px] text-gray-400 mt-1">Oleh: {cr.submittedBy}</p>
-                                                                </div>
-                                                            ))}
+                                                                );
+                                                            })}
                                                         </div>
                                                     </div>
                                                 )}
@@ -680,67 +1134,6 @@ export default function Track() {
                 />
             )}
 
-            {/* ── Modal Ajukan Change Request UAT (business user) ── */}
-            {crModalOpen && (
-                <div className="fixed inset-0 z-[99999] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
-                    <div className="bg-white rounded-2xl shadow-2xl max-w-lg w-full p-6 border border-gray-100">
-                        <div className="flex items-center gap-3 mb-4">
-                            <div className="w-10 h-10 bg-orange-100 rounded-xl flex items-center justify-center">
-                                <RotateCcw size={20} className="text-orange-600" />
-                            </div>
-                            <div>
-                                <h3 className="font-bold text-gray-800 text-base">Ajukan Change Request UAT</h3>
-                                <p className="text-xs text-gray-500 mt-0.5">
-                                    Ajukan pembaruan, permintaan tambahan, atau perbaikan atas hasil UAT.
-                                </p>
-                            </div>
-                        </div>
-                        <div className="space-y-4">
-                            <div>
-                                <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1.5">Tipe Perubahan *</label>
-                                <div className="grid grid-cols-2 gap-2">
-                                    <button onClick={() => setCrForm(p => ({ ...p, type: 'minor' }))}
-                                        className={`px-4 py-2.5 rounded-xl border text-xs font-bold transition-all cursor-pointer ${crForm.type === 'minor' ? 'bg-orange-500 border-orange-600 text-white' : 'bg-gray-50 border-gray-200 text-gray-600 hover:bg-orange-50'}`}>
-                                        Minor — Tanpa Rollback
-                                    </button>
-                                    <button onClick={() => setCrForm(p => ({ ...p, type: 'mayor' }))}
-                                        className={`px-4 py-2.5 rounded-xl border text-xs font-bold transition-all cursor-pointer ${crForm.type === 'mayor' ? 'bg-red-500 border-red-600 text-white' : 'bg-gray-50 border-gray-200 text-gray-600 hover:bg-red-50'}`}>
-                                        Mayor — Kembali Dev &amp; SIT Ulang
-                                    </button>
-                                </div>
-                            </div>
-                            <div>
-                                <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1.5">Judul Change Request *</label>
-                                <input type="text" value={crForm.title} onChange={e => setCrForm(p => ({ ...p, title: e.target.value }))}
-                                    placeholder="Contoh: Perubahan format laporan ekspor" className="w-full px-3 py-2.5 border border-gray-300 rounded-xl text-xs focus:outline-none focus:border-orange-500" />
-                            </div>
-                            <div>
-                                <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1.5">Detail Perubahan *</label>
-                                <textarea rows={4} value={crForm.detail} onChange={e => setCrForm(p => ({ ...p, detail: e.target.value }))}
-                                    placeholder="Jelaskan secara detail apa yang ingin diubah/ditambahkan/diperbaiki..." className="w-full px-3 py-2.5 border border-gray-300 rounded-xl text-xs focus:outline-none focus:border-orange-500 resize-none" />
-                            </div>
-                            <div>
-                                <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1.5">Kategori (opsional)</label>
-                                <input type="text" value={crForm.category} onChange={e => setCrForm(p => ({ ...p, category: e.target.value }))}
-                                    placeholder="Contoh: Fungsionalitas, UI/UX, Data" className="w-full px-3 py-2.5 border border-gray-300 rounded-xl text-xs focus:outline-none focus:border-orange-500" />
-                            </div>
-                        </div>
-                        <div className="flex gap-3 justify-end mt-4">
-                            <button onClick={() => setCrModalOpen(false)} disabled={crSubmitting}
-                                className="px-4 py-2 border border-gray-300 text-gray-700 rounded-xl font-bold text-xs hover:bg-gray-50 transition-colors cursor-pointer disabled:opacity-50">
-                                Batal
-                            </button>
-                            <button
-                                onClick={() => handleCrSubmit(activeSelected?.rawId)}
-                                disabled={!crForm.title.trim() || !crForm.detail.trim() || crSubmitting}
-                                className="px-5 py-2 bg-orange-600 hover:bg-orange-700 disabled:bg-gray-300 text-white rounded-xl font-bold text-xs transition-colors cursor-pointer disabled:cursor-not-allowed"
-                            >
-                                {crSubmitting ? 'Mengirim...' : 'Ajukan Change Request'}
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            )}
         </div>
     );
 }

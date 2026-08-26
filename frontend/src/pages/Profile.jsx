@@ -1,5 +1,7 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, useMemo } from 'react';
 import { useAuth } from '../contexts/AuthContext';
+import { buildProfileFromUser } from '../utils/userProfile';
+import toast from 'react-hot-toast';
 import {
     User,
     Mail,
@@ -9,32 +11,31 @@ import {
     Camera,
     Save,
     X,
-    CheckCircle,
     Edit,
 } from 'lucide-react';
 
 export default function Profile() {
-    const { user } = useAuth();
+    const { user, updateProfile } = useAuth();
     const fileInputRef = useRef(null);
 
-    // State untuk form profil
-    const [profile, setProfile] = useState({
-        name: user?.name || 'Ahmad Fauzi',
-        email: user?.email || 'ahmad.fauzi@banknagari.co.id',
-        role: user?.role || 'Super Admin',
-        department: user?.department || 'IT',
-        phone: '+62 812 3456 7890',
-    });
+    // Data yang ditampilkan selalu dibaca ulang dari user pada context, bukan
+    // disalin ke state saat render pertama. Sesi dipulihkan secara asinkron,
+    // sehingga salinan sekali-jalan akan membeku kosong saat halaman dibuka
+    // langsung lewat URL.
+    const profile = useMemo(() => buildProfileFromUser(user), [user]);
+
+    // Draft berisi perubahan yang belum disimpan. null berarti tidak sedang
+    // mengedit, jadi tidak perlu flag isEditing terpisah yang bisa desinkron.
+    const [draft, setDraft] = useState(null);
+    const isEditing = draft !== null;
 
     const [avatar, setAvatar] = useState(null); // untuk preview
-    const [isEditing, setIsEditing] = useState(false);
     const [isSaving, setIsSaving] = useState(false);
-    const [saveSuccess, setSaveSuccess] = useState(false);
 
     // Handle input change
     const handleChange = (e) => {
         const { name, value } = e.target;
-        setProfile((prev) => ({ ...prev, [name]: value }));
+        setDraft((prev) => ({ ...prev, [name]: value }));
     };
 
     // Handle avatar upload
@@ -50,33 +51,46 @@ export default function Profile() {
     };
 
     // Handle save
-    const handleSave = () => {
+    const handleSave = async () => {
+        if (!draft) return;
+
+        if (!draft.name.trim()) {
+            toast.error('Nama lengkap wajib diisi.');
+            return;
+        }
+
         setIsSaving(true);
-        setTimeout(() => {
+        try {
+            // Hanya nama dan nomor telepon yang boleh diubah pemilik akun; role,
+            // divisi, dan email adalah kewenangan admin. Toast keberhasilan
+            // dikeluarkan oleh updateProfile agar tidak muncul dua kali.
+            const result = await updateProfile({
+                name: draft.name.trim(),
+                // Nomor kosong dikirim sebagai null, bukan string kosong, supaya
+                // kolom phone_number tetap bersih di database.
+                phone_number: draft.phone.trim() || null,
+            });
+
+            // Mode edit hanya ditutup bila penyimpanan benar-benar berhasil,
+            // supaya perubahan pengguna tidak hilang tanpa jejak saat gagal.
+            if (result?.success) {
+                setDraft(null);
+            }
+        } finally {
             setIsSaving(false);
-            setIsEditing(false);
-            setSaveSuccess(true);
-            setTimeout(() => setSaveSuccess(false), 3000);
-        }, 1000);
+        }
     };
 
     // Handle cancel
     const handleCancel = () => {
-        setIsEditing(false);
-        // Reset ke data awal (mock)
-        setProfile({
-            name: user?.name || 'Ahmad Fauzi',
-            email: user?.email || 'ahmad.fauzi@banknagari.co.id',
-            role: user?.role || 'Super Admin',
-            department: user?.department || 'IT',
-            phone: '+62 812 3456 7890',
-        });
+        setDraft(null);
         setAvatar(null);
     };
 
     // Get initial for avatar
     const getInitial = () => {
-        return profile.name.charAt(0).toUpperCase();
+        const initial = profile.name.trim().charAt(0);
+        return initial ? initial.toUpperCase() : '?';
     };
 
     // Role badge color
@@ -109,7 +123,7 @@ export default function Profile() {
             head_of_it: 'Head of IT',
             business_user: 'Business User',
         };
-        return labels[role] || role;
+        return labels[role] || role || 'Peran belum diatur';
     };
 
     return (
@@ -120,14 +134,6 @@ export default function Profile() {
                     <h2 className="text-2xl font-bold text-gray-800">Profil Saya</h2>
                     <p className="text-sm text-gray-500 mt-1">Kelola informasi akun dan preferensi pribadi Anda.</p>
                 </div>
-
-                {/* Success Alert */}
-                {saveSuccess && (
-                    <div className="mb-6 p-4 bg-emerald-50 border border-emerald-200 rounded-xl flex items-center gap-3 text-emerald-700">
-                        <CheckCircle size={20} />
-                        <span className="font-medium">Profil berhasil diperbarui!</span>
-                    </div>
-                )}
 
                 <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
                     {/* Avatar Section */}
@@ -155,12 +161,12 @@ export default function Profile() {
                             />
                         </div>
                         <div className="text-center sm:text-left">
-                            <h3 className="text-xl font-bold text-gray-800">{profile.name}</h3>
+                            <h3 className="text-xl font-bold text-gray-800">{profile.name || 'Nama belum diisi'}</h3>
                             <div className="flex flex-wrap items-center gap-2 mt-1">
-                                <span className={`px-2.5 py-1 rounded-full text-xs font-medium ${getRoleColor(user?.role)}`}>
-                                    {getRoleLabel(user?.role)}
+                                <span className={`px-2.5 py-1 rounded-full text-xs font-medium ${getRoleColor(profile.role)}`}>
+                                    {profile.roleLabel || getRoleLabel(profile.role)}
                                 </span>
-                                <span className="text-sm text-gray-500">{profile.department}</span>
+                                <span className="text-sm text-gray-500">{profile.department || 'Divisi belum diatur'}</span>
                             </div>
                             <p className="text-sm text-gray-500 mt-2">
                                 {isEditing ? 'Klik "Simpan" untuk menyimpan perubahan' : 'Klik ikon kamera untuk mengubah foto profil'}
@@ -169,7 +175,7 @@ export default function Profile() {
                         <div className="sm:ml-auto">
                             {!isEditing ? (
                                 <button
-                                    onClick={() => setIsEditing(true)}
+                                    onClick={() => setDraft(profile)}
                                     className="px-4 py-2 bg-[#003a73] text-white rounded-lg font-semibold text-sm hover:bg-[#002a5a] transition-colors flex items-center gap-2"
                                 >
                                     <Edit size={16} />
@@ -210,13 +216,14 @@ export default function Profile() {
                                     <input
                                         type="text"
                                         name="name"
-                                        value={profile.name}
+                                        value={draft.name}
                                         onChange={handleChange}
+                                        placeholder="Nama lengkap sesuai data kepegawaian"
                                         className="w-full px-4 py-2.5 rounded-lg border border-gray-300 focus:ring-2 focus:ring-[#00529C] focus:border-transparent text-sm"
                                     />
                                 ) : (
                                     <div className="px-4 py-2.5 bg-gray-50 rounded-lg border border-gray-200 text-gray-700 text-sm">
-                                        {profile.name}
+                                        {profile.name || '-'}
                                     </div>
                                 )}
                             </div>
@@ -228,7 +235,7 @@ export default function Profile() {
                                     Email
                                 </label>
                                 <div className="px-4 py-2.5 bg-gray-100 rounded-lg border border-gray-200 text-gray-500 text-sm cursor-not-allowed">
-                                    {profile.email}
+                                    {profile.email || '-'}
                                 </div>
                             </div>
 
@@ -239,7 +246,7 @@ export default function Profile() {
                                     Role
                                 </label>
                                 <div className="px-4 py-2.5 bg-gray-100 rounded-lg border border-gray-200 text-gray-500 text-sm cursor-not-allowed">
-                                    {getRoleLabel(user?.role)}
+                                    {profile.roleLabel || getRoleLabel(profile.role)}
                                 </div>
                             </div>
 
@@ -250,7 +257,7 @@ export default function Profile() {
                                     Departemen
                                 </label>
                                 <div className="px-4 py-2.5 bg-gray-100 rounded-lg border border-gray-200 text-gray-500 text-sm cursor-not-allowed">
-                                    {profile.department}
+                                    {profile.department || 'Belum diatur admin'}
                                 </div>
                             </div>
 
@@ -264,13 +271,14 @@ export default function Profile() {
                                     <input
                                         type="tel"
                                         name="phone"
-                                        value={profile.phone}
+                                        value={draft.phone}
                                         onChange={handleChange}
+                                        placeholder="Contoh: 08xxxxxxxxxx"
                                         className="w-full px-4 py-2.5 rounded-lg border border-gray-300 focus:ring-2 focus:ring-[#00529C] focus:border-transparent text-sm"
                                     />
                                 ) : (
                                     <div className="px-4 py-2.5 bg-gray-50 rounded-lg border border-gray-200 text-gray-700 text-sm">
-                                        {profile.phone}
+                                        {profile.phone || 'Belum diisi'}
                                     </div>
                                 )}
                             </div>
@@ -280,10 +288,15 @@ export default function Profile() {
                         <div className="mt-6 pt-6 border-t border-gray-200">
                             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm text-gray-500">
                                 <div>
-                                    <span className="font-semibold text-gray-700">ID User:</span> {user?.id || 'USR-001'}
+                                    <span className="font-semibold text-gray-700">ID User:</span> {user?.id ?? '-'}
                                 </div>
+                                {/* Waktu login terakhir tidak tersedia pada data user, jadi yang
+                                    ditampilkan adalah tanggal pembuatan akun yang memang dikirim API. */}
                                 <div>
-                                    <span className="font-semibold text-gray-700">Terakhir Login:</span> {new Date().toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                                    <span className="font-semibold text-gray-700">Akun Dibuat:</span>{' '}
+                                    {user?.created_at
+                                        ? new Date(user.created_at).toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' })
+                                        : '-'}
                                 </div>
                             </div>
                         </div>

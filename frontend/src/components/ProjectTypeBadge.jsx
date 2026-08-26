@@ -5,7 +5,8 @@ const PROJECT_TYPE_META = {
     update:    { label: 'Update',         bg: 'bg-emerald-50 text-emerald-800 border-emerald-200', dot: 'bg-emerald-500' },
 };
 
-export function getProjectTypeMeta(type) {
+// Tidak diekspor: satu-satunya pemakai metadata ini adalah badge di bawah.
+function getProjectTypeMeta(type) {
     return PROJECT_TYPE_META[type] || { label: 'Proyek Baru', bg: 'bg-blue-50 text-blue-800 border-blue-200', dot: 'bg-blue-500' };
 }
 

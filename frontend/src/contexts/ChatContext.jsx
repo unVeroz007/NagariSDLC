@@ -5,11 +5,13 @@
 import { createContext, useState, useContext, useEffect, useCallback, useRef } from 'react';
 import { useAuth } from './AuthContext';
 import { chatService } from '../services/api';
+import { useVisibilityPolling } from '../hooks/usePolling';
+import { POLLING_INTERVAL_MS } from '../constants/polling';
 
 const ChatContext = createContext();
 
 export function ChatProvider({ children }) {
-    const { user, isLoggedIn } = useAuth();
+    const { isLoggedIn } = useAuth();
 
     // Cache pesan per proyek: { [projectId]: Message[] }
     const [messagesMap, setMessagesMap] = useState({});
@@ -17,10 +19,16 @@ export function ChatProvider({ children }) {
     const [loadingMap, setLoadingMap] = useState({});
     // Inisialisasi chat per proyek agar tidak fetch ulang berulang
     const fetchedRef = useRef(new Set());
+    // Proyek yang chat-nya terakhir dibuka. Polling hanya menyegarkan proyek ini,
+    // bukan seluruh proyek yang pernah dimuat: setelah pengguna membuka beberapa
+    // proyek, `fetchedRef` terus bertambah dan polling lama menembakkan satu
+    // request per proyek setiap 10 detik untuk ruang chat yang tidak terlihat.
+    const activeProjectRef = useRef(null);
 
     // ── Load pesan dari backend ──
     const loadMessages = useCallback(async (projectId, { force = false } = {}) => {
         if (!projectId) return;
+        activeProjectRef.current = String(projectId);
         if (fetchedRef.current.has(String(projectId)) && !force) return;
 
         setLoadingMap(prev => ({ ...prev, [String(projectId)]: true }));
@@ -41,15 +49,14 @@ export function ChatProvider({ children }) {
         return messagesMap[String(projectId)] || [];
     };
 
-    const getUnreadCount = () => 0;
-
-    const markAsRead = () => {};
-
     // ── Kirim pesan ──
-    const sendMessage = async (projectId, text, _projectName = 'Proyek SDLC', type = 'text') => {
+    // Tipe pesan tidak lagi dikirim dari sini. Backend selalu menyimpan `text`
+    // karena pesan bertipe `system` harus berasal dari kode server; kalau klien
+    // boleh menentukannya, pengguna biasa dapat memalsukan pengumuman sistem.
+    const sendMessage = async (projectId, text) => {
         if (!text.trim() || !projectId) return;
         try {
-            const res = await chatService.send(projectId, text.trim(), type);
+            const res = await chatService.send(projectId, text.trim());
             if (res?.data) {
                 setMessagesMap(prev => ({
                     ...prev,
@@ -64,26 +71,26 @@ export function ChatProvider({ children }) {
         }
     };
 
-    const sendSystemMessage = (projectId, text) => sendMessage(projectId, text, 'Proyek SDLC', 'system');
+    // ── Polling ringan saat tab aktif agar pesan user lain muncul ──
+    // Selang waktunya dipusatkan di `constants/polling.js`.
+    const pollMessages = useCallback(() => {
+        const activeProjectId = activeProjectRef.current;
+        if (!activeProjectId) return;
+        loadMessages(activeProjectId, { force: true });
+    }, [loadMessages]);
 
-    // ── Polling ringan saat tab aktif (10 detik) agar pesan user lain muncul ──
-    useEffect(() => {
-        if (!isLoggedIn) return;
-        const poll = () => {
-            if (document.visibilityState !== 'visible') return;
-            // Refresh semua proyek yang sudah di-load
-            fetchedRef.current.forEach(pid => {
-                loadMessages(pid, { force: true });
-            });
-        };
-        const timer = setInterval(poll, 10000);
-        return () => clearInterval(timer);
-    }, [isLoggedIn, loadMessages]);
+    useVisibilityPolling(pollMessages, POLLING_INTERVAL_MS.chatMessages, {
+        enabled: isLoggedIn,
+    });
 
-    // Reset cache saat logout
+    // Reset cache saat logout. Ini sinkronisasi terhadap sesi (sumber di luar
+    // komponen), bukan turunan state yang bisa dihitung saat render, jadi setState
+    // di dalam effect memang tepat di sini.
     useEffect(() => {
         if (!isLoggedIn) {
             fetchedRef.current = new Set();
+            activeProjectRef.current = null;
+            // eslint-disable-next-line react-hooks/set-state-in-effect -- bersihkan cache pesan saat sesi berakhir
             setMessagesMap({});
         }
     }, [isLoggedIn]);
@@ -93,13 +100,9 @@ export function ChatProvider({ children }) {
             value={{
                 getMessages,
                 sendMessage,
-                sendSystemMessage,
-                markAsRead,
-                getUnreadCount,
                 loadMessages,
                 loadingMap,
                 messagesMap,
-                unreadMap: {},
             }}
         >
             {children}

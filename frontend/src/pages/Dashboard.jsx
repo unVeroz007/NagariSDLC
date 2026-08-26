@@ -27,17 +27,36 @@ import {
     Users,
     Code,
 } from 'lucide-react';
-import { useEffect, useMemo } from 'react';
+import { useCallback, useMemo } from 'react';
+import { useNow } from '../hooks/useNow';
 import { PROJECT_STATUS, PROJECT_STATUS_LABEL, PROJECT_STATUS_COLOR, getProjectPhaseKey } from '../constants/projectStatus';
+import { PROJECT_PRIORITY, isHighProjectPriority, normalizeProjectPriority } from '../constants/projectPriority';
+
+// Selisih waktu relatif terhadap penanda waktu render (`nowMs`). Fungsinya murni,
+// jadi diletakkan di lingkup modul supaya bisa dipakai di dalam useMemo tanpa
+// membuat dependency yang berubah identitas setiap render.
+const formatTimeAgo = (timestamp, nowMs) => {
+    const date = new Date(timestamp);
+    const diffMin = Math.floor((nowMs - date.getTime()) / 60000);
+
+    if (diffMin < 1) return 'Baru saja';
+    if (diffMin < 60) return `${diffMin} menit yang lalu`;
+    if (diffMin < 1440) return `${Math.floor(diffMin / 60)} jam yang lalu`;
+    return `${Math.floor(diffMin / 1440)} hari yang lalu`;
+};
 
 export default function Dashboard() {
     const { user } = useAuth();
-    const { projects, isLoading, refreshData } = useProjects();
+    const { projects, isLoading } = useProjects();
     const { notifications, unreadCount } = useNotifications();
     const navigate = useNavigate();
 
+    // Semua hitungan sisa waktu di halaman ini memakai satu penanda waktu yang
+    // sama supaya angkanya konsisten antar kartu dalam satu render.
+    const nowMs = useNow();
+
     // Helper navigasi lacak proyek langsung ke proyek yang dituju
-    const handleTrackProject = (projectId) => {
+    const handleTrackProject = useCallback((projectId) => {
         const isPmOrAdmin = ['project_manager', 'super_admin'].includes(user?.role);
         const targetPath = isPmOrAdmin ? '/pm/tracker' : '/track';
         if (projectId) {
@@ -45,7 +64,7 @@ export default function Dashboard() {
         } else {
             navigate(targetPath);
         }
-    };
+    }, [user?.role, navigate]);
 
     // 📊 Hitung metrics dari data proyek pakai PROJECT_STATUS constants & getProjectPhaseKey
     const metrics = useMemo(() => {
@@ -143,7 +162,7 @@ export default function Dashboard() {
     // 📊 Analisis risiko pakai PROJECT_STATUS constants & deadline (100% sinkron DB)
     const risks = useMemo(() => {
         const total = projects.length || 1;
-        const now = Date.now();
+        const now = nowMs;
         const sevenDays = 7 * 86400000;
 
         let high = 0;
@@ -157,7 +176,7 @@ export default function Dashboard() {
             if (
                 p.status === PROJECT_STATUS.REJECTED ||
                 p.status === PROJECT_STATUS.RETURN_TO_DEV ||
-                p.priority === 'High' ||
+                isHighProjectPriority(p.priority) ||
                 (p.type === 'RBB' && isNearDeadline) ||
                 isTargetNear
             ) {
@@ -171,7 +190,7 @@ export default function Dashboard() {
                     PROJECT_STATUS.CYBER_IN_PROGRESS,
                     PROJECT_STATUS.PENDING_GOLIVE,
                 ].includes(p.status) ||
-                p.priority === 'Medium'
+                normalizeProjectPriority(p.priority) === PROJECT_PRIORITY.MEDIUM
             ) {
                 medium++;
             } else {
@@ -184,7 +203,7 @@ export default function Dashboard() {
             { label: 'Risiko Sedang', count: medium, pct: Math.round((medium / total) * 100), color: 'bg-amber-500', textColor: 'text-amber-600', dot: 'bg-amber-500' },
             { label: 'Risiko Rendah', count: low, pct: Math.round((low / total) * 100), color: 'bg-emerald-500', textColor: 'text-emerald-600', dot: 'bg-emerald-500' },
         ];
-    }, [projects]);
+    }, [projects, nowMs]);
 
     // 📋 Proyek prioritas — diurutkan berdasarkan status kritis & jenis proyek RBB
     const priorityProjects = useMemo(() => {
@@ -211,18 +230,17 @@ export default function Dashboard() {
 
     // 📅 Proyek RBB mendekati deadline (dalam 30 hari)
     const rbbUrgentProjects = useMemo(() => {
-        const now = new Date();
-        const thirtyDays = new Date(now.getTime() + 30 * 86400000);
+        const thirtyDays = new Date(nowMs + 30 * 86400000);
         return projects
             .filter(p => p.type === 'RBB' && p.rbbDeadline && new Date(p.rbbDeadline) <= thirtyDays
                 && p.status !== PROJECT_STATUS.LIVE_PRODUCTION)
             .sort((a, b) => new Date(a.rbbDeadline) - new Date(b.rbbDeadline))
             .slice(0, 3);
-    }, [projects]);
+    }, [projects, nowMs]);
 
     // 📅 Hitung real-time proyek dengan deadline minggu ini (7 hari ke depan)
     const thisWeekDeadlineCount = useMemo(() => {
-        const now = Date.now();
+        const now = nowMs;
         const sevenDaysMs = 7 * 86400000;
         return projects.filter(p => {
             if (p.status === PROJECT_STATUS.LIVE_PRODUCTION || p.status === PROJECT_STATUS.CANCELLED) return false;
@@ -234,7 +252,7 @@ export default function Dashboard() {
             const diffMs = deadlineTime - now;
             return diffMs <= sevenDaysMs;
         }).length;
-    }, [projects]);
+    }, [projects, nowMs]);
 
     // 🎯 Quick actions berdasarkan role
     const quickActions = useMemo(() => {
@@ -249,7 +267,14 @@ export default function Dashboard() {
             { label: 'Workspace Lead', icon: Verified, action: () => navigate('/workspace/lead'), color: 'bg-amber-600' },
             { label: 'Antrean Review', icon: Clock, action: () => navigate('/queue'), color: 'bg-blue-600' },
         ];
+        // Analis Perencanaan dan analis QA satu grup, jadi keduanya mendapat pintasan ke
+        // kedua halaman kerjanya — lihat `constants/roles.js`.
         if (role === 'analyst') return [
+            { label: 'Workspace Analyst', icon: FileEdit, action: () => navigate('/workspace/analyst'), color: 'bg-blue-600' },
+            { label: 'Tugas QA Saya', icon: CheckCircle, action: () => navigate('/my-tasks/qa'), color: 'bg-indigo-600' },
+        ];
+        if (role === 'qa_tester') return [
+            { label: 'Tugas QA Saya', icon: CheckCircle, action: () => navigate('/my-tasks/qa'), color: 'bg-indigo-600' },
             { label: 'Workspace Analyst', icon: FileEdit, action: () => navigate('/workspace/analyst'), color: 'bg-blue-600' },
         ];
         if (role === 'qa_lead') return [
@@ -267,20 +292,7 @@ export default function Dashboard() {
             { label: 'Manajemen User', icon: Users, action: () => navigate('/admin/users'), color: 'bg-gray-700' },
             { label: 'Quality Gate', icon: Verified, action: () => navigate('/quality-gate'), color: 'bg-emerald-600' },
         ];
-    }, [user, navigate]);
-
-    // Helper untuk format waktu
-    const formatTimeAgo = (timestamp) => {
-        const date = new Date(timestamp);
-        const diffMs = Date.now() - date.getTime();
-        const diffMin = Math.floor(diffMs / 60000);
-
-        if (diffMin < 1) return 'Baru saja';
-        if (diffMin < 60) return `${diffMin} menit yang lalu`;
-        if (diffMin < 1440) return `${Math.floor(diffMin / 60)} jam yang lalu`;
-        const diffDays = Math.floor(diffMin / 1440);
-        return `${diffDays} hari yang lalu`;
-    };
+    }, [user, navigate, handleTrackProject]);
 
     // 🕐 Aktivitas terkini (dari notifikasi)
     const activities = useMemo(() => {
@@ -294,13 +306,13 @@ export default function Dashboard() {
                     n.type === 'danger' ? 'bg-red-50 text-red-500' :
                         'bg-blue-50 text-[#00529C]',
             text: <><span className="font-semibold">{n.title}</span> {n.message}</>,
-            time: formatTimeAgo(n.createdAt),
+            time: formatTimeAgo(n.createdAt, nowMs),
             dot: n.type === 'success' ? 'bg-emerald-500' :
                 n.type === 'warning' ? 'bg-amber-500' :
                     n.type === 'danger' ? 'bg-red-500' :
                         'bg-[#00529C]',
         }));
-    }, [notifications]);
+    }, [notifications, nowMs]);
 
     // ⏳ Loading state
     if (isLoading) {
@@ -463,7 +475,7 @@ export default function Dashboard() {
                         <div className="space-y-3">
                             {rbbUrgentProjects.map((p, i) => {
                                 const rawDeadline = p.rbbDeadline || p.targetDate || p.deadline;
-                                const daysLeft = Math.ceil((new Date(rawDeadline).getTime() - Date.now()) / 86400000);
+                                const daysLeft = Math.ceil((new Date(rawDeadline).getTime() - nowMs) / 86400000);
                                 const displayDays = isNaN(daysLeft) ? 'TBD' : (daysLeft < 0 ? `Terlewat ${Math.abs(daysLeft)}h` : (daysLeft === 0 ? 'Hari ini' : `${daysLeft}h`));
 
                                 return (
@@ -589,7 +601,7 @@ export default function Dashboard() {
                                     <td className="py-4 px-4">
                                         <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-100/80 text-slate-700 text-xs font-medium border border-slate-200/60 max-w-full">
                                             <Building2 size={13} className="text-slate-400 shrink-0" />
-                                            <span className="truncate">{proj.division || 'Divisi TI'}</span>
+                                            <span className="truncate">{proj.division || 'Divisi belum diatur'}</span>
                                         </div>
                                     </td>
                                     <td className="py-4 px-4 text-gray-500 text-sm">{proj.pm?.name || '—'}</td>

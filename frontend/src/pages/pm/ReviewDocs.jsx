@@ -1,121 +1,245 @@
-import { useState, useMemo, useRef, useEffect } from 'react';
+import { useMemo, useState, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import { useProjects } from '../../contexts/ProjectContext';
-import { useNotifications } from '../../contexts/NotificationContext';
+import { getProjectRealDocuments } from '../../utils/projectDocuments';
 import RBBBadge from '../../components/RBBBadge';
 import ProjectTypeBadge from '../../components/ProjectTypeBadge';
-import toast from 'react-hot-toast';
+import DocumentViewerModal from '../../components/DocumentViewerModal';
+import {
+    TRACK_STATUS_LABEL,
+    canRequestGoLive,
+    getCyberTrackStatus,
+    getQaTrackStatus,
+    isTrackPassed,
+} from '../../constants/projectStatus';
 import {
     FileCheck,
     ShieldCheck,
-    CheckCircle2,
-    CheckCircle,
     Inbox,
     Building,
     Calendar,
     Eye,
-    Download,
     FileText,
-    X,
     Rocket,
     Shield,
     Bug,
-    AlertTriangle,
     Clock,
     User,
     FolderOpen,
     ChevronRight,
 } from 'lucide-react';
 
-// Status badge config
-const STATUS_CONFIG = {
-    QA_PASSED:     { label: 'Lulus QA ✅', bg: 'bg-blue-100',   text: 'text-blue-800'   },
-    CYBER_PASSED:  { label: 'Lulus QA + Cyber ✅', bg: 'bg-emerald-100', text: 'text-emerald-800' },
-    QA_IN_PROGRESS: { label: 'QA Sedang Berjalan', bg: 'bg-purple-100', text: 'text-purple-800' },
-    CYBER_IN_PROGRESS: { label: 'Cyber Sedang Berjalan', bg: 'bg-orange-100', text: 'text-orange-800' },
-    RETURN_TO_DEV: { label: 'Dikembalikan ke Dev', bg: 'bg-red-100', text: 'text-red-800' },
+const formatDateTime = (value) => {
+    if (!value) return null;
+    const parsed = new Date(value);
+    if (Number.isNaN(parsed.getTime())) return String(value);
+    return parsed.toLocaleString('id-ID', {
+        day: '2-digit',
+        month: 'long',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+    });
+};
+
+/**
+ * Ringkasan satu jalur pengujian untuk kartu sign-off.
+ *
+ * Kartu ini sebelumnya membaca `project.qaSignOff` dan `project.cyberSignOff` —
+ * dua key yang tidak pernah dikirim API dan tidak pernah dibentuk normalizeProject,
+ * sehingga kartunya selalu "MENUNGGU" dan lencana kelengkapan di kotak masuk selalu
+ * kosong meski Lead sudah menandatangani laporannya. Sumber yang benar adalah kolom
+ * status jalur (`qa_status` / `cyber_status`) beserta laporan terakhirnya
+ * (`qa_report` / `cyber_report`), keduanya dipaparkan ProjectResource.
+ */
+const buildTrackSummary = (project, trackKey) => {
+    const isQa = trackKey === 'qa';
+    const status = isQa ? getQaTrackStatus(project) : getCyberTrackStatus(project);
+    const report = isQa ? project?.qaReport : project?.cyberReport;
+
+    return {
+        key: trackKey,
+        status,
+        statusLabel: TRACK_STATUS_LABEL[status] || 'Belum Diajukan',
+        isPassed: isTrackPassed(status),
+        isSignedOff: Boolean(report?.is_reviewed),
+        reviewerName: report?.reviewer_name || null,
+        reviewedAt: formatDateTime(report?.reviewed_at),
+        decisionLabel: report?.reviewed_result_label || null,
+        reviewNotes: report?.review_notes || null,
+        testerName: report?.tester_name || null,
+        testerResultLabel: report?.result_label || null,
+        severity: report?.severity || null,
+        testedScenarios: report?.tested_scenarios || null,
+
+        // Hanya terisi pada laporan sebelum cakupan pengujian diubah menjadi catatan bebas.
+        checklistSummary: report?.checklist_summary || null,
+    };
 };
 
 export default function ReviewDocs() {
     const navigate = useNavigate();
     const { user } = useAuth();
     const { projects } = useProjects();
-    const { addNotification } = useNotifications();
     const rightPanelRef = useRef(null);
 
-    const [selectedProject, setSelectedProject] = useState(null);
-    const [selectedDocPreview, setSelectedDocPreview] = useState(null);
+    const [selectedProjectId, setSelectedProjectId] = useState(null);
+    const [previewDocument, setPreviewDocument] = useState(null);
 
-    // Proyek yang dikembalikan dari QA Lead atau Cyber Lead ke Tim Dev/PM.
+    // Kotak masuk hasil pengujian: proyek yang salah satu jalurnya sudah dinyatakan
+    // lulus Lead. Filter lama memakai `status` utama (QA_PASSED / CYBER_PASSED), padahal
+    // status utama hanya memegang satu penunjuk siklus — proyek yang QA-nya lulus
+    // sementara jalur Siber masih berjalan tidak pernah muncul di sini.
     const receivedProjects = useMemo(() => {
-        let list = (projects || []).filter(p =>
-            ['QA_PASSED', 'CYBER_PASSED'].includes(p.status)
+        let list = (projects || []).filter(
+            (p) => isTrackPassed(getQaTrackStatus(p)) || isTrackPassed(getCyberTrackStatus(p))
         );
 
-        const isPrivileged = user?.role && ['super_admin', 'lead_group', 'head_of_it', 'development_lead'].includes(user.role);
+        const isPrivileged = user?.role
+            && ['super_admin', 'lead_group', 'head_of_it', 'development_lead'].includes(user.role);
+
         if (!isPrivileged && user?.id) {
-            const pmId = user.id;
-            list = list.filter(p => {
+            list = list.filter((p) => {
                 const pmObjId = typeof p.pm === 'object' ? p.pm?.id : null;
-                return pmObjId && pmObjId === pmId;
+                return pmObjId && pmObjId === user.id;
             });
         }
 
         return list;
     }, [projects, user]);
 
+    // Pilihan disimpan sebagai id supaya panel kanan selalu membaca data proyek terbaru
+    // setelah polling menyegarkan daftar, bukan salinan objek saat proyek diklik.
+    const activeProject = useMemo(() => {
+        if (receivedProjects.length === 0) return null;
 
-    const activeProject = selectedProject || receivedProjects[0] || null;
+        return receivedProjects.find((p) => String(p.id) === String(selectedProjectId))
+            || receivedProjects[0];
+    }, [receivedProjects, selectedProjectId]);
 
     const scrollToTop = () => {
         if (rightPanelRef.current) rightPanelRef.current.scrollTo({ top: 0, behavior: 'smooth' });
         window.scrollTo({ top: 0, behavior: 'smooth' });
     };
 
+    const activeProjectKey = activeProject?.id ?? null;
+
     useEffect(() => {
-        if (activeProject) scrollToTop();
-    }, [activeProject?.id]);
+        if (activeProjectKey === null) return;
+        scrollToTop();
+    }, [activeProjectKey]);
 
-    // Dokumen SDLC yang diterima bersama sign-off
-    const projectDocuments = useMemo(() => {
-        if (!activeProject) return [];
-        const docs = [
-            {
-                id: 1, name: `BRD_${activeProject.id}_Business_Requirement.pdf`,
-                type: 'BRD (Business Requirement Document)', size: '2.4 MB', author: 'Analyst TI',
-                content: `DOKUMEN BRD - ${activeProject.name}\nDivisi: ${activeProject.division || 'Divisi TI Bank Nagari'}\nStatus Terakhir: ${activeProject.status}`,
-            },
-            {
-                id: 2, name: `FSD_${activeProject.id}_Functional_Spec.pdf`,
-                type: 'FSD (Functional Specification Document)', size: '3.8 MB', author: 'System Analyst',
-                content: `DOKUMEN FSD - ${activeProject.name}\nStaging URL: ${activeProject.stagingUrl}`,
-            },
-        ];
-        if (activeProject.qaSignOff) {
-            docs.push({
-                id: 3, name: `QA_SignOff_${activeProject.id}_Approved.pdf`,
-                type: '📋 Lembar Sign-Off Resmi Lead QA', size: '1.9 MB', author: activeProject.qaSignOff.leadName,
-                content: `LEMBAR SIGN-OFF QA\nBank Nagari IT Governance\n\nProyek: ${activeProject.name}\nLead QA: ${activeProject.qaSignOff.leadName}\nTanggal Sign-Off: ${activeProject.qaSignOff.signOffDate}\nKeputusan: ${activeProject.qaSignOff.decision}\n\nCatatan:\n${activeProject.qaSignOff.notes}`,
-            });
-        }
-        if (activeProject.cyberSignOff) {
-            docs.push({
-                id: 4, name: `Cyber_SignOff_${activeProject.id}_Cleared.pdf`,
-                type: '🛡️ Lembar Sign-Off Resmi Lead Cyber Security', size: '2.1 MB', author: activeProject.cyberSignOff.leadName,
-                content: `LEMBAR SIGN-OFF CYBER SECURITY\nBank Nagari IT Governance\n\nProyek: ${activeProject.name}\nLead Cyber: ${activeProject.cyberSignOff.leadName}\nTanggal Sign-Off: ${activeProject.cyberSignOff.signOffDate}\nKeputusan: ${activeProject.cyberSignOff.decision}\nTingkat Risiko: ${activeProject.cyberSignOff.riskLevel}\n\nCatatan:\n${activeProject.cyberSignOff.notes}`,
-            });
-        }
-        return docs;
-    }, [activeProject]);
+    // Dokumen nyata milik proyek pada Document Vault.
+    //
+    // Daftar sebelumnya dikarang: nama berkas, ukuran, penulis, sampai isi dokumen
+    // dibentuk dari template di berkas ini, sehingga PM meninjau "dokumen serah terima"
+    // yang tidak pernah diunggah siapa pun.
+    const projectDocuments = useMemo(
+        () => getProjectRealDocuments(activeProject),
+        [activeProject]
+    );
 
-    const qaOk = activeProject?.qaSignOff != null;
-    const cyberOk = activeProject?.cyberSignOff != null;
-    const bothDone = qaOk && cyberOk;
-    const isReadyForInfra = activeProject?.status === 'CYBER_PASSED';
+    const qaTrack = useMemo(() => buildTrackSummary(activeProject, 'qa'), [activeProject]);
+    const cyberTrack = useMemo(() => buildTrackSummary(activeProject, 'cyber'), [activeProject]);
+
+    // Gerbang yang sama dengan backend: kedua jalur harus lulus sebelum PM boleh
+    // mengajukan migrasi ke Grup Infrastruktur.
+    const isReadyForInfra = activeProject ? canRequestGoLive(activeProject) : false;
 
     const handleSubmitToInfra = () => {
         navigate('/pm/release-request');
+    };
+
+    const renderTrackCard = (track) => {
+        const isQa = track.key === 'qa';
+        const TrackIcon = isQa ? Bug : Shield;
+        const accent = isQa
+            ? { border: 'border-blue-200 bg-blue-50/50', badge: 'bg-blue-600', chip: 'border-blue-100', note: 'bg-blue-50', value: 'text-blue-700' }
+            : { border: 'border-emerald-200 bg-emerald-50/50', badge: 'bg-emerald-600', chip: 'border-emerald-100', note: 'bg-emerald-50', value: 'text-emerald-700' };
+
+        return (
+            <div
+                className={`p-4 rounded-2xl border-2 space-y-3 ${
+                    track.isSignedOff ? accent.border : 'border-dashed border-gray-200 bg-gray-50/50'
+                }`}
+            >
+                <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                        <div
+                            className={`w-8 h-8 rounded-lg flex items-center justify-center ${
+                                track.isSignedOff ? `${accent.badge} text-white` : 'bg-gray-200 text-gray-400'
+                            }`}
+                        >
+                            <TrackIcon size={16} />
+                        </div>
+                        <span className="font-extrabold text-sm text-gray-800">
+                            {isQa ? 'Hasil Pengujian QA' : 'Hasil Audit Keamanan Siber'}
+                        </span>
+                    </div>
+                    <span
+                        className={`text-[10px] font-extrabold px-2 py-0.5 rounded-full ${
+                            track.isPassed
+                                ? `${accent.badge} text-white`
+                                : 'bg-gray-200 text-gray-600'
+                        }`}
+                    >
+                        {track.statusLabel.toUpperCase()}
+                    </span>
+                </div>
+
+                {track.isSignedOff ? (
+                    <div className={`bg-white rounded-lg p-3 border ${accent.chip} space-y-1.5 text-xs`}>
+                        <div className="text-gray-500">
+                            {isQa ? 'Lead QA' : 'Lead Keamanan Siber'}:{' '}
+                            <strong className="text-gray-800">{track.reviewerName || 'Tidak tercatat'}</strong>
+                        </div>
+                        <div className="text-gray-500">
+                            Tanggal sign-off:{' '}
+                            <strong className="text-gray-800">{track.reviewedAt || 'Tidak tercatat'}</strong>
+                        </div>
+                        <div className="text-gray-500">
+                            Keputusan Lead:{' '}
+                            <span className={`font-extrabold ${accent.value}`}>
+                                {track.decisionLabel || 'Tidak tercatat'}
+                            </span>
+                        </div>
+                        <div className="text-gray-500">
+                            Pelaksana:{' '}
+                            <strong className="text-gray-800">{track.testerName || 'Tidak tercatat'}</strong>
+                            {track.testerResultLabel ? ` — ${track.testerResultLabel}` : ''}
+                        </div>
+                        {track.severity && (
+                            <div className="text-gray-500">
+                                Tingkat severitas temuan:{' '}
+                                <span className={`font-extrabold ${accent.value}`}>{track.severity}</span>
+                            </div>
+                        )}
+                        {track.testedScenarios && (
+                            <div className="text-gray-500">
+                                Skenario yang diuji:
+                                <span className="block mt-1 text-gray-800 leading-relaxed whitespace-pre-wrap">{track.testedScenarios}</span>
+                            </div>
+                        )}
+                        {track.checklistSummary && (
+                            <div className="text-gray-500">
+                                Cakupan skenario: <strong className="text-gray-800">{track.checklistSummary}</strong>
+                            </div>
+                        )}
+                        {track.reviewNotes && (
+                            <div className={`mt-2 ${accent.note} p-2 rounded-lg text-gray-700 leading-relaxed whitespace-pre-wrap`}>
+                                {track.reviewNotes}
+                            </div>
+                        )}
+                    </div>
+                ) : (
+                    <div className="text-xs text-gray-500 text-center py-4">
+                        Belum ada sign-off {isQa ? 'Lead QA' : 'Lead Keamanan Siber'}. Status jalur saat ini:{' '}
+                        <strong>{track.statusLabel}</strong>.
+                    </div>
+                )}
+            </div>
+        );
     };
 
     return (
@@ -126,12 +250,12 @@ export default function ReviewDocs() {
                     <div className="flex items-center gap-3">
                         <h2 className="text-2xl font-extrabold text-gray-800">Penerimaan Dokumen QA &amp; Cyber</h2>
                         <span className="bg-emerald-100 text-emerald-800 text-xs font-bold px-3 py-1 rounded-full flex items-center gap-1.5">
-                            <FileCheck size={14} /> Fase 3 → Fase 4 Handover
+                            <FileCheck size={14} /> Fase 3 ke Fase 4 Handover
                         </span>
                     </div>
                     <p className="text-gray-500 text-sm mt-1">
-                        Tinjau hasil sign-off dari Lead QA &amp; Lead Cyber Security yang dikembalikan ke Tim Pengembangan,
-                        kemudian ajukan paket migrasi ke Grup INFRA bila semua dokumen sudah lengkap.
+                        Tinjau hasil sign-off dari Lead QA &amp; Lead Keamanan Siber yang dikembalikan ke Tim
+                        Pengembangan, kemudian ajukan paket migrasi ke Grup INFRA bila kedua jalur sudah lulus.
                     </p>
                 </div>
                 <div className="flex items-center gap-3 text-xs font-bold shrink-0">
@@ -161,17 +285,17 @@ export default function ReviewDocs() {
                         {receivedProjects.length === 0 ? (
                             <div className="p-8 text-center text-gray-400 text-sm border-2 border-dashed border-gray-100 rounded-xl">
                                 <Inbox size={32} className="mx-auto mb-2 text-gray-300" />
-                                Belum ada proyek yang dikembalikan dari QA/Cyber.
+                                Belum ada jalur pengujian yang dinyatakan lulus Lead.
                             </div>
                         ) : (
-                            receivedProjects.map(p => {
-                                const hasQA = !!p.qaSignOff;
-                                const hasCyber = !!p.cyberSignOff;
-                                const isActive = activeProject?.id === p.id;
+                            receivedProjects.map((p) => {
+                                const hasQA = isTrackPassed(getQaTrackStatus(p));
+                                const hasCyber = isTrackPassed(getCyberTrackStatus(p));
+                                const isActive = String(activeProject?.id) === String(p.id);
                                 return (
                                     <div
                                         key={p.id}
-                                        onClick={() => { setSelectedProject(p); scrollToTop(); }}
+                                        onClick={() => setSelectedProjectId(p.id)}
                                         className={`p-4 rounded-xl border cursor-pointer transition-all ${
                                             isActive
                                                 ? 'border-2 border-[#1a365d] bg-blue-50/40 shadow-sm'
@@ -179,18 +303,20 @@ export default function ReviewDocs() {
                                         }`}
                                     >
                                         <div className="flex justify-between items-start mb-1.5">
-                                            <span className="text-xs font-mono font-bold text-blue-600 bg-blue-50 px-2 py-0.5 rounded">{p.id}</span>
+                                            <span className="text-xs font-mono font-bold text-blue-600 bg-blue-50 px-2 py-0.5 rounded">
+                                                {p.reqId || p.id}
+                                            </span>
                                             <div className="flex items-center gap-1.5 flex-wrap"><RBBBadge type={p.type} /><ProjectTypeBadge type={p.project_type} /></div>
                                         </div>
                                         <h4 className="font-bold text-gray-800 text-sm line-clamp-1 mb-2">{p.name}</h4>
 
-                                        {/* Badge Status Kelengkapan */}
+                                        {/* Lencana kelengkapan sign-off — dibaca dari status jalur */}
                                         <div className="flex items-center gap-1.5 flex-wrap">
-                                            <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md flex items-center gap-1 ${hasQA ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-400'}`}>
-                                                <Bug size={10} /> QA {hasQA ? '✓' : '–'}
+                                            <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md flex items-center gap-1 ${hasQA ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-500'}`}>
+                                                <Bug size={10} /> QA {hasQA ? 'Lulus' : TRACK_STATUS_LABEL[getQaTrackStatus(p)]}
                                             </span>
-                                            <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md flex items-center gap-1 ${hasCyber ? 'bg-emerald-100 text-emerald-700' : 'bg-gray-100 text-gray-400'}`}>
-                                                <Shield size={10} /> Cyber {hasCyber ? '✓' : '–'}
+                                            <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md flex items-center gap-1 ${hasCyber ? 'bg-emerald-100 text-emerald-700' : 'bg-gray-100 text-gray-500'}`}>
+                                                <Shield size={10} /> Siber {hasCyber ? 'Lulus' : TRACK_STATUS_LABEL[getCyberTrackStatus(p)]}
                                             </span>
                                             {hasQA && hasCyber && (
                                                 <span className="text-[10px] font-extrabold px-2 py-0.5 rounded-md bg-[#1a365d] text-white flex items-center gap-1">
@@ -217,142 +343,95 @@ export default function ReviewDocs() {
                             {/* Header Proyek */}
                             <div className="pb-4 border-b border-gray-100">
                                 <div className="flex items-center justify-between mb-2">
-                                    <span className="text-xs font-mono font-bold text-blue-600 bg-blue-50 px-2.5 py-0.5 rounded border border-blue-100">{activeProject.id}</span>
+                                    <span className="text-xs font-mono font-bold text-blue-600 bg-blue-50 px-2.5 py-0.5 rounded border border-blue-100">
+                                        {activeProject.reqId || activeProject.id}
+                                    </span>
                                     <div className="flex items-center gap-1.5 flex-wrap"><RBBBadge type={activeProject.type} /><ProjectTypeBadge type={activeProject.project_type} /></div>
                                 </div>
                                 <h3 className="text-xl font-extrabold text-gray-800">{activeProject.name}</h3>
                                 <div className="flex items-center gap-4 text-xs text-gray-500 mt-1.5 flex-wrap">
-                                    <span className="flex items-center gap-1"><Building size={13} /> {activeProject.division}</span>
-                                    <span className="flex items-center gap-1"><Calendar size={13} /> Target: <strong className="text-gray-700">{activeProject.targetDate}</strong></span>
-                                    <span className="flex items-center gap-1"><User size={13} /> PM: <strong className="text-gray-700">{activeProject.pm?.name}</strong></span>
+                                    <span className="flex items-center gap-1">
+                                        <Building size={13} /> {activeProject.division || 'Belum ada data divisi'}
+                                    </span>
+                                    <span className="flex items-center gap-1">
+                                        <Calendar size={13} /> Target: <strong className="text-gray-700">{activeProject.targetDate}</strong>
+                                    </span>
+                                    <span className="flex items-center gap-1">
+                                        <User size={13} /> PM:{' '}
+                                        <strong className="text-gray-700">
+                                            {(typeof activeProject.pm === 'object' ? activeProject.pm?.name : activeProject.pm) || 'Belum ditugaskan'}
+                                        </strong>
+                                    </span>
                                 </div>
                             </div>
 
-                            {/* Progress Handover Banner */}
+                            {/* Banner kelengkapan handover */}
                             <div className={`p-4 rounded-2xl border-2 flex items-center gap-4 ${isReadyForInfra ? 'bg-emerald-50 border-emerald-300' : 'bg-amber-50 border-amber-200'}`}>
-                                {isReadyForInfra ? (
-                                    <>
-                                        <div className="w-11 h-11 rounded-xl bg-emerald-500 text-white flex items-center justify-center shrink-0 shadow-sm">
-                                            <Rocket size={22} />
-                                        </div>
-                                        <div>
-                                            <div className="font-extrabold text-emerald-800 text-sm">Semua Pengujian Selesai — Siap Diajukan ke Grup INFRA!</div>
-                                            <div className="text-xs text-emerald-700 mt-0.5">QA Sign-Off ✅ &amp; Cyber Security Sign-Off ✅ sudah diterima. PM dapat mengajukan paket migrasi ke Grup INFRA.</div>
-                                        </div>
-                                    </>
-                                ) : (
-                                    <>
-                                        <div className="w-11 h-11 rounded-xl bg-amber-400 text-white flex items-center justify-center shrink-0 shadow-sm">
-                                            <Clock size={22} />
-                                        </div>
-                                        <div>
-                                            <div className="font-extrabold text-amber-800 text-sm">Sebagian Pengujian Selesai — Menunggu Sisa Sign-Off</div>
-                                            <div className="text-xs text-amber-700 mt-0.5">
-                                                {qaOk ? 'QA Sign-Off ✅ sudah diterima.' : 'QA Sign-Off ⏳ belum selesai.'}
-                                                {' '}
-                                                {cyberOk ? 'Cyber Sign-Off ✅ sudah diterima.' : 'Cyber Sign-Off ⏳ belum selesai.'}
-                                            </div>
-                                        </div>
-                                    </>
-                                )}
+                                <div
+                                    className={`w-11 h-11 rounded-xl text-white flex items-center justify-center shrink-0 shadow-sm ${
+                                        isReadyForInfra ? 'bg-emerald-500' : 'bg-amber-400'
+                                    }`}
+                                >
+                                    {isReadyForInfra ? <Rocket size={22} /> : <Clock size={22} />}
+                                </div>
+                                <div>
+                                    <div className={`font-extrabold text-sm ${isReadyForInfra ? 'text-emerald-800' : 'text-amber-800'}`}>
+                                        {isReadyForInfra
+                                            ? 'Kedua jalur pengujian lulus — siap diajukan ke Grup INFRA'
+                                            : 'Menunggu kelengkapan sign-off kedua jalur pengujian'}
+                                    </div>
+                                    <div className={`text-xs mt-0.5 ${isReadyForInfra ? 'text-emerald-700' : 'text-amber-700'}`}>
+                                        Pengujian QA: <strong>{qaTrack.statusLabel}</strong>. Audit Keamanan Siber:{' '}
+                                        <strong>{cyberTrack.statusLabel}</strong>.
+                                    </div>
+                                </div>
                             </div>
 
-                            {/* QA & Cyber Sign-off Cards (Side by Side) */}
+                            {/* Kartu sign-off kedua jalur */}
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                {/* QA Sign-Off Card */}
-                                <div className={`p-4 rounded-2xl border-2 space-y-3 ${qaOk ? 'border-blue-200 bg-blue-50/50' : 'border-dashed border-gray-200 bg-gray-50/50'}`}>
-                                    <div className="flex items-center justify-between">
-                                        <div className="flex items-center gap-2">
-                                            <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${qaOk ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-400'}`}>
-                                                <Bug size={16} />
-                                            </div>
-                                            <span className="font-extrabold text-sm text-gray-800">Hasil QA Testing</span>
-                                        </div>
-                                        {qaOk ? (
-                                            <span className="text-[10px] font-extrabold bg-blue-600 text-white px-2 py-0.5 rounded-full">SIGN-OFF ✓</span>
-                                        ) : (
-                                            <span className="text-[10px] font-extrabold bg-gray-200 text-gray-500 px-2 py-0.5 rounded-full">MENUNGGU</span>
-                                        )}
-                                    </div>
-                                    {qaOk ? (
-                                        <div className="space-y-1.5 text-xs">
-                                            <div className="bg-white rounded-lg p-3 border border-blue-100 space-y-1.5">
-                                                <div className="text-gray-500">Lead QA: <strong className="text-gray-800">{activeProject.qaSignOff.leadName}</strong></div>
-                                                <div className="text-gray-500">Tanggal: <strong className="text-gray-800">{activeProject.qaSignOff.signOffDate}</strong></div>
-                                                <div className="text-gray-500">Keputusan: <span className="font-extrabold text-blue-700">{activeProject.qaSignOff.decision}</span></div>
-                                                <div className="mt-2 bg-blue-50 p-2 rounded-lg text-gray-700 leading-relaxed">
-                                                    {activeProject.qaSignOff.notes}
-                                                </div>
-                                            </div>
-                                        </div>
-                                    ) : (
-                                        <div className="text-xs text-gray-400 text-center py-4">
-                                            Belum ada sign-off dari Lead QA.
-                                        </div>
-                                    )}
-                                </div>
-
-                                {/* Cyber Sign-Off Card */}
-                                <div className={`p-4 rounded-2xl border-2 space-y-3 ${cyberOk ? 'border-emerald-200 bg-emerald-50/50' : 'border-dashed border-gray-200 bg-gray-50/50'}`}>
-                                    <div className="flex items-center justify-between">
-                                        <div className="flex items-center gap-2">
-                                            <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${cyberOk ? 'bg-emerald-600 text-white' : 'bg-gray-200 text-gray-400'}`}>
-                                                <Shield size={16} />
-                                            </div>
-                                            <span className="font-extrabold text-sm text-gray-800">Hasil Cyber Pentest</span>
-                                        </div>
-                                        {cyberOk ? (
-                                            <span className="text-[10px] font-extrabold bg-emerald-600 text-white px-2 py-0.5 rounded-full">SIGN-OFF ✓</span>
-                                        ) : (
-                                            <span className="text-[10px] font-extrabold bg-gray-200 text-gray-500 px-2 py-0.5 rounded-full">MENUNGGU</span>
-                                        )}
-                                    </div>
-                                    {cyberOk ? (
-                                        <div className="space-y-1.5 text-xs">
-                                            <div className="bg-white rounded-lg p-3 border border-emerald-100 space-y-1.5">
-                                                <div className="text-gray-500">Lead Cyber: <strong className="text-gray-800">{activeProject.cyberSignOff.leadName}</strong></div>
-                                                <div className="text-gray-500">Tanggal: <strong className="text-gray-800">{activeProject.cyberSignOff.signOffDate}</strong></div>
-                                                <div className="text-gray-500">Keputusan: <span className="font-extrabold text-emerald-700">{activeProject.cyberSignOff.decision}</span></div>
-                                                <div className="text-gray-500">Risk Level: <span className="font-extrabold text-emerald-700">{activeProject.cyberSignOff.riskLevel}</span></div>
-                                                <div className="mt-2 bg-emerald-50 p-2 rounded-lg text-gray-700 leading-relaxed">
-                                                    {activeProject.cyberSignOff.notes}
-                                                </div>
-                                            </div>
-                                        </div>
-                                    ) : (
-                                        <div className="text-xs text-gray-400 text-center py-4">
-                                            Belum ada sign-off dari Lead Cyber Security.
-                                        </div>
-                                    )}
-                                </div>
+                                {renderTrackCard(qaTrack)}
+                                {renderTrackCard(cyberTrack)}
                             </div>
 
                             {/* Dokumen SDLC yang Diterima */}
                             <div>
                                 <h4 className="text-xs font-extrabold text-gray-700 uppercase tracking-wider mb-3 flex items-center gap-1.5">
                                     <FolderOpen size={15} className="text-[#1a365d]" />
-                                    Dokumen SDLC yang Diterima ({projectDocuments.length})
+                                    Dokumen SDLC pada Document Vault ({projectDocuments.length})
                                 </h4>
                                 <div className="space-y-2.5">
-                                    {projectDocuments.map(doc => (
-                                        <div key={doc.id} className="p-3.5 bg-gray-50 border border-gray-200 rounded-xl flex items-center justify-between hover:border-blue-200 transition-all">
-                                            <div className="flex items-center gap-3 overflow-hidden">
-                                                <div className="w-9 h-9 rounded-lg bg-white border border-gray-200 text-blue-600 flex items-center justify-center shrink-0 shadow-xs">
-                                                    <FileText size={17} />
+                                    {projectDocuments.length === 0 ? (
+                                        <p className="p-3.5 bg-amber-50 border border-amber-200 rounded-xl text-[11px] text-amber-900">
+                                            Belum ada dokumen tersimpan untuk proyek ini. Laporan QA dan Audit Keamanan
+                                            Siber beserta lampirannya diunggah pelaksana pengujian melalui halaman
+                                            tugasnya masing-masing.
+                                        </p>
+                                    ) : (
+                                        projectDocuments.map((doc) => (
+                                            <div key={doc.id} className="p-3.5 bg-gray-50 border border-gray-200 rounded-xl flex items-center justify-between hover:border-blue-200 transition-all">
+                                                <div className="flex items-center gap-3 overflow-hidden">
+                                                    <div className="w-9 h-9 rounded-lg bg-white border border-gray-200 text-blue-600 flex items-center justify-center shrink-0 shadow-xs">
+                                                        <FileText size={17} />
+                                                    </div>
+                                                    <div className="overflow-hidden">
+                                                        <h5 className="font-bold text-gray-800 text-xs truncate">{doc.name}</h5>
+                                                        <p className="text-[10px] text-gray-500 mt-0.5">
+                                                            {doc.type}
+                                                            {doc.size ? ` • ${doc.size}` : ''}
+                                                            {doc.author ? ` • ${doc.author}` : ''}
+                                                        </p>
+                                                    </div>
                                                 </div>
-                                                <div className="overflow-hidden">
-                                                    <h5 className="font-bold text-gray-800 text-xs truncate">{doc.name}</h5>
-                                                    <p className="text-[10px] text-gray-500 mt-0.5">{doc.type} • {doc.size} • {doc.author}</p>
-                                                </div>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => setPreviewDocument(doc)}
+                                                    className="px-3 py-1.5 bg-[#1a365d] hover:bg-[#0f2342] text-white rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 shrink-0 shadow-xs cursor-pointer"
+                                                >
+                                                    <Eye size={13} /> Pratinjau
+                                                </button>
                                             </div>
-                                            <button
-                                                onClick={() => setSelectedDocPreview(doc)}
-                                                className="px-3 py-1.5 bg-[#1a365d] hover:bg-[#0f2342] text-white rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 shrink-0 shadow-xs cursor-pointer"
-                                            >
-                                                <Eye size={13} /> Pratinjau
-                                            </button>
-                                        </div>
-                                    ))}
+                                        ))
+                                    )}
                                 </div>
                             </div>
 
@@ -362,35 +441,35 @@ export default function ReviewDocs() {
                                     <>
                                         <div className="flex items-center gap-2 text-white">
                                             <Rocket size={18} />
-                                            <span className="font-extrabold text-sm">Langkah Berikutnya: Ajukan Paket Migrasi ke Grup INFRA</span>
+                                            <span className="font-extrabold text-sm">Langkah berikutnya: ajukan paket migrasi ke Grup INFRA</span>
                                         </div>
                                         <p className="text-blue-100 text-xs leading-relaxed">
-                                            Semua dokumen sign-off QA dan Cyber Security telah diterima. PM sekarang dapat mengajukan
-                                            <strong> Paket Migrasi Lengkap</strong> (SQL Script, Binary Package, Rollback Plan)
-                                            ke <strong>Grup INFRA (Tim Infrastruktur)</strong> melalui Halaman Pengajuan Rilis untuk mendapatkan
-                                            persetujuan Go-Live ke server produksi.
+                                            Sign-off Lead QA dan Lead Keamanan Siber sudah tercatat. PM dapat mengisi
+                                            target tanggal rilis, estimasi downtime, dan prosedur rollback pada halaman
+                                            Pengajuan Rilis untuk diteruskan ke Quality Gate Grup INFRA.
                                         </p>
                                         <button
                                             onClick={handleSubmitToInfra}
                                             className="w-full py-3.5 bg-white hover:bg-gray-100 text-[#1a365d] rounded-xl font-extrabold text-sm shadow-md transition-all flex items-center justify-center gap-2 cursor-pointer"
                                         >
                                             <Rocket size={16} />
-                                            Buka Halaman Pengajuan Rilis ke Grup INFRA →
+                                            Buka Halaman Pengajuan Rilis ke Grup INFRA
                                         </button>
                                     </>
                                 ) : (
                                     <>
                                         <div className="flex items-center gap-2 text-gray-600">
                                             <Clock size={18} />
-                                            <span className="font-extrabold text-sm text-gray-700">Menunggu Kelengkapan Sign-Off Sebelum ke INFRA</span>
+                                            <span className="font-extrabold text-sm text-gray-700">Menunggu kelengkapan sign-off sebelum ke INFRA</span>
                                         </div>
                                         <p className="text-gray-500 text-xs leading-relaxed">
-                                            Proyek ini belum dapat diajukan ke Grup INFRA karena masih ada sign-off yang belum diterima.
-                                            Pastikan <strong>QA Sign-Off ✅</strong> dan <strong>Cyber Security Sign-Off ✅</strong> keduanya sudah lengkap.
+                                            Backend menolak pengajuan rilis selama kedua jalur pengujian belum berstatus
+                                            Lulus. Pengujian QA: <strong>{qaTrack.statusLabel}</strong>. Audit Keamanan
+                                            Siber: <strong>{cyberTrack.statusLabel}</strong>.
                                         </p>
                                         <button disabled className="w-full py-3.5 bg-gray-200 text-gray-400 rounded-xl font-extrabold text-sm flex items-center justify-center gap-2 cursor-not-allowed">
                                             <Rocket size={16} />
-                                            Pengajuan ke INFRA Belum Tersedia
+                                            Pengajuan ke INFRA belum tersedia
                                         </button>
                                     </>
                                 )}
@@ -400,36 +479,13 @@ export default function ReviewDocs() {
                 </div>
             </div>
 
-            {/* MODAL PRATINJAU DOKUMEN */}
-            {selectedDocPreview && (
-                <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-50 animate-scale-up overflow-y-auto">
-                    <div className="bg-white rounded-2xl max-w-3xl w-full p-6 shadow-2xl border border-gray-100 my-8 space-y-4">
-                        <div className="flex items-center justify-between border-b border-gray-200 pb-3">
-                            <div className="flex items-center gap-3">
-                                <div className="w-10 h-10 rounded-xl bg-[#1a365d] text-white font-bold flex items-center justify-center text-sm">BN</div>
-                                <div>
-                                    <div className="text-[10px] font-bold text-blue-600 uppercase tracking-widest bg-blue-50 px-2 py-0.5 rounded border border-blue-100">Dokumen Resmi SDLC Bank Nagari</div>
-                                    <h3 className="font-extrabold text-gray-800 text-base mt-0.5">{selectedDocPreview.name}</h3>
-                                </div>
-                            </div>
-                            <button onClick={() => setSelectedDocPreview(null)} className="text-gray-400 hover:text-gray-600 p-1.5 rounded-lg cursor-pointer"><X size={20} /></button>
-                        </div>
-                        <div className="bg-gray-50 border border-gray-200 p-6 rounded-xl max-h-[60vh] overflow-y-auto font-mono text-xs text-gray-800 whitespace-pre-wrap leading-relaxed">
-                            {selectedDocPreview.content}
-                        </div>
-                        <div className="flex items-center justify-end gap-3 pt-2 border-t border-gray-100">
-                            <button
-                                onClick={() => toast.success(`Dokumen ${selectedDocPreview.name} berhasil diunduh!`)}
-                                className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 shadow-sm cursor-pointer"
-                            >
-                                <Download size={14} /> Unduh Dokumen (PDF)
-                            </button>
-                            <button onClick={() => setSelectedDocPreview(null)} className="px-4 py-2 bg-gray-200 hover:bg-gray-300 text-gray-800 rounded-xl text-xs font-bold transition-all cursor-pointer">
-                                Tutup
-                            </button>
-                        </div>
-                    </div>
-                </div>
+            {/* PRATINJAU DOKUMEN — berkas asli dari Document Vault, bukan teks contoh */}
+            {previewDocument && (
+                <DocumentViewerModal
+                    doc={previewDocument}
+                    project={activeProject}
+                    onClose={() => setPreviewDocument(null)}
+                />
             )}
         </div>
     );

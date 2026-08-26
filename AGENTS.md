@@ -53,9 +53,16 @@ handoff, lalu inspeksi hanya file, dependensi, dan alur yang terkait dengan tuga
 - Pertahankan format respons API `{ status, message, data, meta? }`.
 - Panggilan API frontend dipusatkan di `frontend/src/services/api.js`.
 - Data wizard SIT/UAT berada di `projects.sit_uat_data`; pahami kompatibilitas
-  key `task_` sebelum mengubah serialisasinya.
+  key `task_` sebelum mengubah serialisasinya. Beberapa key `uat2_*` sudah
+  dipensiunkan tetapi masih mungkin ada pada baris lama — penanda pengulangan UAT
+  hanya boleh dibaca lewat `Project::isUatRestartPending()`, tidak langsung dari
+  key-nya. Lihat `docs/DATA_MODEL.md`.
+- `sit_uat_data.uat1_participants` tidak pernah dikosongkan oleh jalur kode mana
+  pun. Daftar penanda tangan UAT terbawa melewati setiap siklus revisi; PM boleh
+  menambah, tetapi pengosongan ditolak di lapisan API.
 - Approval UAT aktif berada pada `uat_approval_rounds` dan `uat_approvers`, bukan
-  hanya pada JSON legacy `uat3_approvals`.
+  hanya pada JSON legacy `uat3_approvals`. Putaran yang tidak berlaku lagi ditandai
+  `superseded`, bukan dihapus, dan baris `approved` di dalamnya tetap disimpan.
 - Jangan hard-delete data approval atau histori tanpa keputusan eksplisit karena
   audit trail merupakan kebutuhan penting.
 - Jangan commit secret atau menampilkan isi `.env`.

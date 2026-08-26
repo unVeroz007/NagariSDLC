@@ -1,6 +1,6 @@
 // src/pages/admin/ActivityLog.jsx
-import { useState, useMemo, useEffect } from 'react';
-import { useAuth } from '../../contexts/AuthContext';
+import { useState, useMemo } from 'react';
+import toast from 'react-hot-toast';
 import { useActivityLog } from '../../contexts/ActivityContext';
 import LoadingSpinner from '../../components/LoadingSpinner';
 import EmptyState from '../../components/EmptyState';
@@ -16,14 +16,12 @@ import {
     Download,
     RefreshCw,
     Activity,
-    Clock,
     Users,
     Inbox,
     Eye,
 } from 'lucide-react';
 
 export default function ActivityLog() {
-    const { user } = useAuth();
     const { activities, isLoading, refreshData, lastUpdated } = useActivityLog();
     const [viewMode, setViewMode] = useState('timeline'); // 'timeline' | 'table'
     const [selectedActivity, setSelectedActivity] = useState(null);
@@ -110,11 +108,11 @@ export default function ActivityLog() {
         setCurrentPage(1);
     };
 
-    const [toast, setToast] = useState(null);
-
+    // Notifikasi dipakai lewat react-hot-toast (sama seperti halaman lain) supaya
+    // pesan benar-benar tampil; sebelumnya pesan ditaruh di state lokal yang tidak
+    // pernah dirender sehingga umpan balik tombol export tidak terlihat.
     const handleExport = () => {
-        setToast('Fitur export akan segera hadir! Data dapat diexport ke CSV/PDF.');
-        setTimeout(() => setToast(null), 3000);
+        toast('Fitur export akan segera hadir! Data dapat diexport ke CSV/PDF.');
     };
 
     if (isLoading) {

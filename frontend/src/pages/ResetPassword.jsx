@@ -1,6 +1,6 @@
 // src/pages/ResetPassword.jsx
 import { useState, useEffect } from 'react';
-import { Link, useNavigate, useSearchParams } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import {
     Lock,
     Eye,
@@ -12,11 +12,15 @@ import {
     KeyRound,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
+import { authService } from '../services/api';
+import { getPasswordError, PASSWORD_REQUIREMENT_HINT } from '../constants/passwordPolicy';
 
 export default function ResetPassword() {
-    const navigate = useNavigate();
     const [searchParams] = useSearchParams();
+    // `token` dan `email` keduanya berasal dari tautan email dan harus dikirim
+    // kembali apa adanya — broker password backend memerlukan pasangan itu.
     const token = searchParams.get('token');
+    const email = searchParams.get('email');
 
     const [formData, setFormData] = useState({
         password: '',
@@ -28,15 +32,24 @@ export default function ResetPassword() {
     const [isLoading, setIsLoading] = useState(false);
     const [isSuccess, setIsSuccess] = useState(false);
     const [errors, setErrors] = useState({});
-    const [isTokenValid, setIsTokenValid] = useState(true);
+    const [isLinkRejected, setIsLinkRejected] = useState(false);
 
-    // Validasi token (simulasi)
+    /**
+     * Kelengkapan tautan diturunkan langsung dari query string, bukan disimpan di
+     * state lewat effect: nilainya sudah diketahui pada render pertama, dan menyalinnya
+     * ke state hanya menambah satu render tanpa manfaat.
+     *
+     * Keabsahan token sendiri hanya bisa dipastikan backend, jadi penolakan dari
+     * server dicatat terpisah pada `isLinkRejected`.
+     */
+    const isLinkComplete = Boolean(token && email);
+    const isLinkValid = isLinkComplete && !isLinkRejected;
+
     useEffect(() => {
-        if (!token) {
-            setIsTokenValid(false);
-            toast.error('Token reset tidak valid atau sudah kadaluarsa');
+        if (!isLinkComplete) {
+            toast.error('Tautan reset password tidak lengkap atau sudah kadaluarsa');
         }
-    }, [token]);
+    }, [isLinkComplete]);
 
     const handleChange = (e) => {
         const { name, value } = e.target;
@@ -49,10 +62,12 @@ export default function ResetPassword() {
     const validateForm = () => {
         const newErrors = {};
 
-        if (!formData.password) {
-            newErrors.password = 'Password wajib diisi';
-        } else if (formData.password.length < 8) {
-            newErrors.password = 'Password minimal 8 karakter';
+        // Aturannya cermin dari `PasswordPolicy` backend, dipusatkan di
+        // `constants/passwordPolicy.js` agar pesan di sini tidak pernah berbeda
+        // dengan yang sebenarnya diperiksa server.
+        const passwordError = getPasswordError(formData.password);
+        if (passwordError) {
+            newErrors.password = passwordError;
         }
 
         if (!formData.password_confirmation) {
@@ -68,8 +83,8 @@ export default function ResetPassword() {
     const handleSubmit = async (e) => {
         e.preventDefault();
 
-        if (!token) {
-            toast.error('Token tidak valid');
+        if (!token || !email) {
+            toast.error('Tautan reset password tidak lengkap');
             return;
         }
 
@@ -80,36 +95,52 @@ export default function ResetPassword() {
 
         setIsLoading(true);
 
-        // Simulasi reset password (nanti diganti dengan API call)
         try {
-            await new Promise(resolve => setTimeout(resolve, 1500));
-
-            // Simulasi sukses
+            const res = await authService.resetPassword({
+                token,
+                email,
+                password: formData.password,
+                passwordConfirmation: formData.password_confirmation,
+            });
             setIsSuccess(true);
-            toast.success('Password berhasil direset!');
-        } catch (error) {
-            toast.error('Gagal mereset password. Silakan coba lagi.');
+            toast.success(res?.message || 'Password berhasil disetel ulang.');
+        } catch (err) {
+            // 422 pada token yang tidak sah berarti tautannya memang tidak bisa
+            // dipakai lagi, jadi formulir digantikan layar "minta tautan baru".
+            // 422 dari validasi field tetap ditampilkan di dalam formulir.
+            const fieldErrors = err.data?.errors;
+
+            if (fieldErrors) {
+                setErrors({
+                    password: fieldErrors.password?.[0] || '',
+                    password_confirmation: fieldErrors.password_confirmation?.[0] || '',
+                });
+            } else if (err.status === 422) {
+                setIsLinkRejected(true);
+            }
+
+            toast.error(err.message || 'Gagal menyetel ulang password. Silakan coba lagi.');
         } finally {
             setIsLoading(false);
         }
     };
 
-    if (!isTokenValid) {
+    if (!isLinkValid) {
         return (
             <div className="min-h-screen flex items-center justify-center bg-[#f8f9fb] p-4">
                 <div className="bg-white rounded-xl shadow-lg p-8 max-w-md w-full text-center">
                     <div className="w-16 h-16 rounded-full bg-red-100 text-red-500 flex items-center justify-center mx-auto mb-4">
                         <AlertCircle size={32} />
                     </div>
-                    <h2 className="text-xl font-bold text-gray-800 mb-2">Token Tidak Valid</h2>
+                    <h2 className="text-xl font-bold text-gray-800 mb-2">Tautan Tidak Valid</h2>
                     <p className="text-sm text-gray-500 mb-6">
-                        Link reset password tidak valid atau sudah kadaluarsa.
+                        Tautan reset password tidak valid, sudah dipakai, atau sudah kadaluarsa.
                     </p>
                     <Link
                         to="/forgot-password"
                         className="inline-block px-6 py-2 bg-[#003a73] text-white rounded-lg hover:bg-[#002a5a] transition-colors"
                     >
-                        Minta Link Baru
+                        Minta Tautan Baru
                     </Link>
                 </div>
             </div>
@@ -165,11 +196,11 @@ export default function ResetPassword() {
                     <ul className="space-y-6">
                         <li className="flex items-center space-x-3">
                             <CheckCircle className="text-[#D4A017]" size={24} />
-                            <span className="text-white font-medium">Password minimal 8 karakter</span>
+                            <span className="text-white font-medium">{PASSWORD_REQUIREMENT_HINT}</span>
                         </li>
                         <li className="flex items-center space-x-3">
                             <CheckCircle className="text-[#D4A017]" size={24} />
-                            <span className="text-white font-medium">Gunakan kombinasi huruf & angka</span>
+                            <span className="text-white font-medium">Wajib ada huruf besar, huruf kecil, angka & simbol</span>
                         </li>
                     </ul>
                 </div>
@@ -236,7 +267,7 @@ export default function ResetPassword() {
                                 </p>
                             )}
                             <p className="mt-1 text-xs text-gray-400">
-                                Gunakan kombinasi huruf, angka, dan simbol untuk keamanan lebih baik.
+                                Minimal 8 karakter, wajib memuat huruf kecil, huruf besar, angka, dan karakter spesial (@$!%*#?&._-).
                             </p>
                         </div>
 

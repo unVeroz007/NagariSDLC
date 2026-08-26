@@ -31,6 +31,22 @@ export default function ProtectedRoute({ children, allowedRoles }) {
     if (allowedRoles && !allowedRoles.includes(user.role)) {
         // Alihkan ke workspace/tugas utama sesuai role, bukan halaman 403 mentah
         const targetRoute = getDefaultRouteForRole(user.role);
+
+        // Pengalihan hanya sah bila tujuannya berbeda dari halaman saat ini.
+        //
+        // Role yang tidak dikenal `getDefaultRouteForRole` jatuh ke rute bawaan
+        // `/dashboard`, dan rute itu sendiri hanya terbuka untuk `super_admin` serta
+        // `head_of_it`. Tanpa pemeriksaan ini, `<Navigate>` mengarah ke halaman yang
+        // menolaknya lagi, lalu menghitung tujuan yang sama — React Router berputar
+        // sampai memicu "Maximum update depth exceeded" dan layar mati putih.
+        //
+        // Ini bukan kasus hipotetis: role adalah baris tabel `roles`, bukan enum
+        // tetap. Super Admin dapat membuat role baru lewat `POST /roles`, dan role
+        // baru itu belum tercantum di daftar peran mana pun pada frontend.
+        if (targetRoute === location.pathname) {
+            return <Navigate to="/unauthorized" replace state={{ from: location }} />;
+        }
+
         return <Navigate to={targetRoute} replace state={{ from: location }} />;
     }
 

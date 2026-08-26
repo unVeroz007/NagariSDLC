@@ -1,10 +1,11 @@
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import { useProjects } from '../../contexts/ProjectContext';
 import { useNotifications } from '../../contexts/NotificationContext';
 import LoadingSpinner from '../../components/LoadingSpinner';
 import toast from 'react-hot-toast';
 import ChatBox from '../../components/ChatBox';
+import DocumentViewerModal from '../../components/DocumentViewerModal';
 import { taskService, projectService, documentService } from '../../services/api';
 import {
     Code,
@@ -19,9 +20,10 @@ import {
     Eye,
     Paperclip,
     Download,
-    X
+    Undo2
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
+import { getTaskReturnRoundTag } from '../../constants/returnRound';
 
 // Pemetaan status label UI <-> enum backend (TaskStatus: todo, in_progress, hold, done, take_down)
 const STATUS_ENUM_TO_LABEL = {
@@ -48,6 +50,75 @@ const mapTaskStatusToLabel = (status) => {
     // Migrasi status lama 'review' (Code Review) -> dianggap Sedang Dikerjakan
     if (s === 'review' || s === 'code review') return 'Sedang Dikerjakan';
     return 'Belum Mulai';
+};
+
+/**
+ * Ambil entri persetujuan SIT satu task dari kumpulan `sit2_task_approvals`.
+ *
+ * Backend mengirim kunci berawalan `task_` agar `json_encode` menghasilkan objek,
+ * tetapi data lama masih dapat berbentuk larik terindeks. Kedua bentuk ditangani
+ * di satu tempat supaya pemanggilnya tidak mengulang logika yang sama.
+ */
+const findSitApprovalEntry = (approvals, taskId, projectTasks) => {
+    if (!approvals) return null;
+    if (Array.isArray(approvals)) {
+        const index = (projectTasks || []).findIndex((task) => Number(task.id) === Number(taskId));
+        return index >= 0 ? approvals[index] : null;
+    }
+    return approvals[`task_${taskId}`] ?? approvals[taskId] ?? approvals[String(taskId)] ?? null;
+};
+
+/**
+ * Kumpulkan seluruh bukti pengujian yang menjadi dasar arahan revisi satu task.
+ *
+ * Tiga sumber digabung, sebab masing-masing hilang pada kondisi yang berbeda:
+ *
+ * 1. `sit2_task_approvals` — bukti SIT putaran berjalan.
+ * 2. `sit_cycles[].taskApprovals` — arsip bukti SIT putaran sebelumnya.
+ *    `UatExecutionService::holdForMajorRevision()` mengosongkan
+ *    `sit2_task_approvals` tepat ketika revisi Mayor dimulai dan memindahkannya
+ *    ke sini, sehingga developer yang membuka halaman ini setelah revisi Mayor
+ *    dibuat justru tidak lagi melihat bukti SIT yang menjadi dasar revisinya.
+ * 3. `uat2_scenarios` dan `uat2_additional_requests` — lampiran yang diunggah
+ *    penguji pada Eksekusi UAT Internal (Tab 2). Permintaan tambahan Mayor
+ *    melahirkan task `[CR UAT Mayor]` tersendiri yang lampirannya hanya tercatat
+ *    di `uat2_additional_requests`; tanpa sumber ini task tersebut sampai ke
+ *    developer tanpa satu pun lampiran.
+ *
+ * Lampiran yang sama bisa muncul di lebih dari satu sumber (mis. bukti UAT yang
+ * ikut tersalin ke `uat_change_requests`), jadi hasilnya disaring berdasarkan
+ * `docId`.
+ */
+const collectTaskRevisionAttachments = (sitUatData, taskId, projectTasks) => {
+    const collected = [];
+
+    const pushAll = (attachments, evidenceSource) => {
+        (Array.isArray(attachments) ? attachments : []).forEach((doc) => {
+            if (doc) collected.push({ ...doc, evidenceSource });
+        });
+    };
+
+    pushAll(findSitApprovalEntry(sitUatData.sit2_task_approvals, taskId, projectTasks)?.attachments, 'SIT');
+
+    (Array.isArray(sitUatData.sit_cycles) ? sitUatData.sit_cycles : []).forEach((cycle) => {
+        pushAll(findSitApprovalEntry(cycle?.taskApprovals, taskId, projectTasks)?.attachments, 'SIT');
+    });
+
+    (Array.isArray(sitUatData.uat2_scenarios) ? sitUatData.uat2_scenarios : [])
+        .filter((scenario) => Number(scenario?.taskId) === Number(taskId))
+        .forEach((scenario) => pushAll(scenario.attachments, 'UAT'));
+
+    (Array.isArray(sitUatData.uat2_additional_requests) ? sitUatData.uat2_additional_requests : [])
+        .filter((request) => Number(request?.taskId) === Number(taskId))
+        .forEach((request) => pushAll(request.attachments, 'UAT'));
+
+    const seenDocIds = new Set();
+    return collected.filter((doc) => {
+        const key = doc.docId != null ? `doc:${doc.docId}` : `name:${doc.name || doc.originalName || ''}`;
+        if (seenDocIds.has(key)) return false;
+        seenDocIds.add(key);
+        return true;
+    });
 };
 
 export default function MyTasksDev() {
@@ -84,6 +155,11 @@ export default function MyTasksDev() {
                 const taskUatScenario = (projectSitUatData.uat2_scenarios || []).find(
                     scenario => Number(scenario.taskId) === Number(t.id)
                 );
+                // Permintaan tambahan Mayor melahirkan task `[CR UAT Mayor]` yang tidak
+                // punya skenario; arahan revisinya hanya ada di daftar permintaan tambahan.
+                const taskUatAdditionalRequest = (projectSitUatData.uat2_additional_requests || []).find(
+                    request => Number(request.taskId) === Number(t.id)
+                );
 
                 tasks.push({
                     id: t.id,
@@ -94,29 +170,19 @@ export default function MyTasksDev() {
                     priority: t.priority || 'Medium',
                     deadline: t.due_date || t.deadline || '',
                     status: mapTaskStatusToLabel(t.status),
-                    revisionNote: t.revision_note || (taskUatScenario?.result === 'revision' ? taskUatScenario.request : '') || '',
-                    revisionType: taskUatScenario?.changeType || null,
+                    revisionNote: t.revision_note
+                        || (taskUatScenario?.result === 'revision' ? taskUatScenario.request : '')
+                        || taskUatAdditionalRequest?.detail
+                        || '',
+                    revisionType: taskUatScenario?.changeType || taskUatAdditionalRequest?.changeType || null,
                     revisionRequestedBy: t.revision_requested_by || projectSitUatData.uat2_summary?.submittedBy || '',
                     revisionRequestedAt: t.revision_requested_at || null,
                     // Bukti SIT/UAT yang menjadi konteks arahan revisi developer.
-                    revisionAttachments: (() => {
-                        try {
-                            const approvals = projectSitUatData.sit2_task_approvals || {};
-                            let entry = null;
-                            // Backend bisa kirim "task_10" (prefix) atau "10"
-                            if (Array.isArray(approvals)) {
-                                const idx = (p.tasks || []).findIndex(pt => Number(pt.id) === Number(t.id));
-                                entry = idx >= 0 ? approvals[idx] : null;
-                            } else {
-                                entry = approvals[`task_${t.id}`] ?? approvals[t.id] ?? approvals[String(t.id)] ?? null;
-                            }
-                            const sitAttachments = (entry?.attachments || []).map(doc => ({ ...doc, evidenceSource: 'SIT' }));
-                            const uatAttachments = (taskUatScenario?.attachments || []).map(doc => ({ ...doc, evidenceSource: 'UAT' }));
-                            return [...sitAttachments, ...uatAttachments];
-                        } catch {
-                            return [];
-                        }
-                    })(),
+                    revisionAttachments: collectTaskRevisionAttachments(projectSitUatData, t.id, p.tasks),
+                    // Lencana putaran pengembalian dihitung di sini, satu-satunya tempat
+                    // task dan proyek pemiliknya masih bersanding — labelnya dibentuk
+                    // dengan mencocokkan `return_round_id` ke `p.return_rounds`.
+                    returnRoundTag: getTaskReturnRoundTag(t, p),
                 });
             });
         });
@@ -194,24 +260,37 @@ export default function MyTasksDev() {
         }
     };
 
-    // ── Persetujuan SIT (Developer sebagai assignee) ──
+    // ── Persetujuan SIT (Developer pada tim proyek) ──
     // Hanya muncul setelah Eksekusi SIT (Tahap 2) selesai: semua task dicentang OK
     // dan PM menekan "Simpan & Lanjut Review" (activeSitStep >= 3).
     const [sitApprovingId, setSitApprovingId] = useState(null);
     const sitPendingProjects = useMemo(() => {
         return (projects || []).filter(p => {
             const st = String(p.status || '').toUpperCase();
-            if (st !== 'SIT_IN_PROGRESS') return false;
+
+            // `SIT_REVISION` ikut disertakan karena backend menerima persetujuan pada
+            // kedua status ini (`ProjectController::sitApproval`). Sebelumnya hanya
+            // `SIT_IN_PROGRESS` yang cocok, sehingga proyek yang sedang direvisi
+            // hilang dari daftar meskipun persetujuannya masih dibuka.
+            if (st !== 'SIT_IN_PROGRESS' && st !== 'SIT_REVISION') return false;
             // Gate: Tahap 2 (Eksekusi) harus sudah tuntas sebelum persetujuan muncul
             const sitUat = p.sitUatData || p.sit_uat_data || {};
             const activeSitStep = Number(sitUat.activeSitStep || 1);
             if (activeSitStep < 3) return false;
-            // Developer ini harus jadi assignee minimal 1 task
+
+            // Wajib menyetujui: seluruh developer pada tim proyek, ditambah penerima
+            // task bila ia tidak tercatat sebagai anggota tim. Sama dengan
+            // `Project::sitApprovalDeveloperIds()` di backend. Sebelumnya hanya
+            // penerima task yang melihat kartu ini, sehingga developer lain pada tim
+            // yang sama tidak pernah dapat memberikan persetujuan.
+            const isTeamDeveloper = Array.isArray(p.team) && p.team.some(member =>
+                member?.user_role === 'developer' && Number(member.user_id) === Number(user?.id)
+            );
             const isAssignee = Array.isArray(p.tasks) && p.tasks.some(t =>
                 (t.assignee_id ?? t.assignee_detail?.id) != null &&
                 Number(t.assignee_id ?? t.assignee_detail?.id) === Number(user?.id)
             );
-            if (!isAssignee) return false;
+            if (!isTeamDeveloper && !isAssignee) return false;
             const ap = p.sitUatData?.sit3_approvals || p.sit_uat_data?.sit3_approvals || {};
             const devList = ap?.developer?.developers || [];
             // Sembunyikan hanya jika user ini sudah approve
@@ -234,26 +313,36 @@ export default function MyTasksDev() {
 
     // Lihat / unduh bukti pengujian SIT/UAT untuk task yang direvisi.
     const [previewSitDoc, setPreviewSitDoc] = useState(null);
-    const [sitDocLoading, setSitDocLoading] = useState(false);
     const viewSitAttachment = async (doc) => {
         try {
             if (doc?.docId) {
-                setSitDocLoading(true);
                 const loadingId = toast.loading('Membuka berkas...');
                 const blob = await documentService.download(doc.docId);
                 const url = URL.createObjectURL(blob);
                 toast.dismiss(loadingId);
-                setSitDocLoading(false);
-                setPreviewSitDoc({ doc, blobUrl: url });
+                setPreviewSitDoc({ doc, blobUrl: url, ownsBlobUrl: true });
             } else if (doc?.url?.startsWith('blob:')) {
-                setPreviewSitDoc({ doc, blobUrl: doc.url });
+                setPreviewSitDoc({ doc, blobUrl: doc.url, ownsBlobUrl: false });
             } else {
-                toast.info('Berkas belum tersedia untuk dilihat.');
+                toast('Berkas belum tersedia untuk dilihat.');
             }
         } catch (err) {
-            setSitDocLoading(false);
             toast.error(`Gagal membuka berkas: ${err.message}`);
         }
+    };
+    /**
+     * Tutup pratinjau dan lepaskan blob URL yang dibuat di sini.
+     *
+     * URL hasil `createObjectURL` menahan seluruh isi berkas di memori sampai
+     * dicabut. Sebelumnya URL tersebut tidak pernah dicabut, sehingga membuka
+     * banyak bukti berturut-turut menumpuk salinannya sepanjang sesi. URL milik
+     * pemanggil lain (`doc.url`) tidak disentuh — ia masih dipakai di luar modal.
+     */
+    const closeSitPreview = () => {
+        setPreviewSitDoc((current) => {
+            if (current?.ownsBlobUrl && current.blobUrl) URL.revokeObjectURL(current.blobUrl);
+            return null;
+        });
     };
     const downloadSitAttachment = async (doc) => {
         try {
@@ -360,6 +449,10 @@ export default function MyTasksDev() {
                                 const ap = p.sitUatData?.sit3_approvals || p.sit_uat_data?.sit3_approvals || {};
                                 const devList = ap?.developer?.developers || [];
                                 const required = ap?.developer?.required ?? 0;
+                                // Hanya penyetuju yang masih wajib yang dihitung backend
+                                // pada `approvedCount`; `developers[]` sendiri menyimpan
+                                // seluruh riwayat persetujuan dan bisa lebih panjang.
+                                const approvedDev = ap?.developer?.approvedCount ?? devList.length;
                                 return (
                                 <div key={p.id} className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3 bg-gray-50 rounded-xl border border-gray-100">
                                     <div className="min-w-0">
@@ -367,7 +460,7 @@ export default function MyTasksDev() {
                                         <p className="text-[10px] text-gray-400">{p.reqId || p.req_id || `REQ-${p.id}`}</p>
                                         {required > 0 && (
                                             <p className="text-[10px] text-teal-600 mt-0.5">
-                                                {devList.length} dari {required} developer telah menyetujui
+                                                {approvedDev} dari {required} developer telah menyetujui
                                             </p>
                                         )}
                                     </div>
@@ -442,6 +535,16 @@ export default function MyTasksDev() {
                                                     {task.id}
                                                 </span>
                                                 <div className="mt-1 font-bold text-gray-900 line-clamp-2">{task.title}</div>
+                                                {/* Task perbaikan hasil pengembalian jalur pengujian. Lencana penuh,
+                                                    dipisahkan dari kotak revisi oranye di bawahnya: keduanya
+                                                    mekanisme berbeda, dan hanya yang ini yang menahan pengajuan
+                                                    ulang jalur pengujian sampai seluruh task perbaikannya selesai. */}
+                                                {task.returnRoundTag && (
+                                                    <span title={task.returnRoundTag.title}
+                                                        className="inline-flex items-center gap-1 mt-1.5 px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-amber-500 text-white cursor-help">
+                                                        <Undo2 size={10} /> {task.returnRoundTag.label}
+                                                    </span>
+                                                )}
                                                 {task.revisionNote && (
                                                     <div className="mt-2 p-2 bg-orange-50 border border-orange-200 rounded-lg text-[11px] text-orange-800">
                                                         <div className="flex items-center gap-1 font-bold mb-0.5">
@@ -514,9 +617,19 @@ export default function MyTasksDev() {
                                                     onChange={(e) => handleUpdateStatus(task, e.target.value)}
                                                     className="px-3 py-1.5 rounded-xl border border-gray-200 text-xs font-bold outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-600 bg-white cursor-pointer hover:border-gray-300 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                                                 >
-                                                    {STATUS_LABELS.map((st) => (
-                                                        <option key={st} value={st}>{st}</option>
-                                                    ))}
+                                                    {STATUS_LABELS
+                                                        // Take Down disembunyikan untuk task perbaikan
+                                                        // (bertanda putaran pengembalian): backend menolaknya
+                                                        // karena statusnya non-penahan akan melewati gerbang
+                                                        // "seluruh perbaikan selesai". Tetap ditampilkan bila
+                                                        // task memang sedang berstatus Take Down (data lama),
+                                                        // agar nilai select tidak menjadi kosong.
+                                                        .filter((st) => st !== 'Take Down'
+                                                            || !task.returnRoundTag
+                                                            || task.status === 'Take Down')
+                                                        .map((st) => (
+                                                            <option key={st} value={st}>{st}</option>
+                                                        ))}
                                                 </select>
                                                 {updatingTaskId === task.id && (
                                                     <span className="block text-[10px] text-blue-600 mt-1">Menyimpan...</span>
@@ -550,35 +663,30 @@ export default function MyTasksDev() {
             </div>
 
             {/* Modal Pratinjau Bukti Pengujian */}
+            {/*
+              * Memakai `DocumentViewerModal` yang sama dengan halaman dokumen lain.
+              * Modal sebelumnya di sini menampilkan semua jenis berkas melalui satu
+              * `<iframe className="w-full h-[60vh]">`: gambar tampil pada resolusi
+              * aslinya di dalam kotak berukuran tetap, sehingga bukti pengujian yang
+              * lebar hanya terlihat sebagian dan harus digeser ke kanan-kiri serta
+              * atas-bawah. Viewer bersama memilih penyaji sesuai jenis berkas —
+              * gambar lewat `<img>` dengan `object-contain`, PDF lewat `<object>` —
+              * dan menyediakan mode layar penuh.
+              */}
             {previewSitDoc && (
-                <div className="fixed inset-0 z-[99997] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
-                    <div className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl max-h-[90vh] flex flex-col overflow-hidden">
-                        <div className="flex items-center justify-between px-5 py-3.5 border-b border-gray-200 bg-gray-50/70">
-                            <div className="flex items-center gap-2.5 min-w-0">
-                                <div className="w-8 h-8 bg-orange-100 text-orange-600 rounded-lg flex items-center justify-center font-bold text-[9px] shrink-0">
-                                    {(previewSitDoc.doc?.type || 'FILE')}
-                                </div>
-                                <div className="min-w-0">
-                                    <p className="text-xs font-bold text-gray-800 truncate">{previewSitDoc.doc?.originalName || previewSitDoc.doc?.name}</p>
-                                    <p className="text-[10px] text-gray-400">{previewSitDoc.doc?.size}</p>
-                                </div>
-                            </div>
-                            <button onClick={() => setPreviewSitDoc(null)} className="p-2 text-gray-400 hover:text-gray-700 hover:bg-gray-100 rounded-lg transition-colors cursor-pointer">
-                                <X size={18} />
-                            </button>
-                        </div>
-                        <div className="flex-1 overflow-auto bg-gray-100 p-4">
-                            {previewSitDoc.blobUrl && (
-                                <iframe src={previewSitDoc.blobUrl} title="Pratinjau Bukti Pengujian" className="w-full h-[60vh] rounded-xl bg-white border border-gray-200" />
-                            )}
-                        </div>
-                        <div className="flex justify-end gap-2 px-5 py-3 border-t border-gray-200 bg-gray-50/70">
-                            <button onClick={() => downloadSitAttachment(previewSitDoc.doc)} className="px-4 py-2 bg-[#1a365d] hover:bg-[#0f2342] text-white rounded-xl text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer">
-                                <Download size={13} /> Unduh Berkas
-                            </button>
-                        </div>
-                    </div>
-                </div>
+                <DocumentViewerModal
+                    doc={{
+                        id: previewSitDoc.doc?.docId ?? null,
+                        name: previewSitDoc.doc?.originalName || previewSitDoc.doc?.name,
+                        type: previewSitDoc.doc?.evidenceSource
+                            ? `BUKTI ${previewSitDoc.doc.evidenceSource}`
+                            : (previewSitDoc.doc?.doc_type || previewSitDoc.doc?.type || 'BUKTI'),
+                        url: previewSitDoc.blobUrl,
+                        file_size: previewSitDoc.doc?.fileSize ?? previewSitDoc.doc?.file_size ?? null,
+                        size: previewSitDoc.doc?.size ?? null,
+                    }}
+                    onClose={closeSitPreview}
+                />
             )}
         </div>
     );

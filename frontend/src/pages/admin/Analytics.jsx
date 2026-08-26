@@ -1,21 +1,17 @@
 import { useState, useEffect } from 'react';
-import { useAuth } from '../../contexts/AuthContext';
 import { dashboardService } from '../../services/api';
 import {
     Timer,
     CheckCircle,
     Bug,
     Gauge,
-    ChevronRight,
     TrendingUp,
     TrendingDown,
-    BarChart,
     Loader2,
     Users,
 } from 'lucide-react';
 
 export default function Analytics() {
-    const { user } = useAuth();
     const [analyticsData, setAnalyticsData] = useState(null);
     const [isLoading, setIsLoading] = useState(true);
 
@@ -28,6 +24,9 @@ export default function Analytics() {
                     setAnalyticsData(res.data);
                 }
             } catch {
+                // Halaman analitik menampilkan keadaan kosong bila API gagal.
+                // Pesan galat sengaja tidak dimunculkan agar dasbor tetap bisa
+                // dibaca; nilai yang tampil tidak pernah diisi angka karangan.
             } finally {
                 setIsLoading(false);
             }

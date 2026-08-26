@@ -1,22 +1,23 @@
 import { getParallelTestingBadge, PROJECT_STATUS_LABEL } from '../../constants/projectStatus';
-import RBBBadge from '../../components/RBBBadge';
-import ProjectTypeBadge from '../../components/ProjectTypeBadge';
+import { getProjectPriorityClass, getProjectPriorityLabel } from '../../constants/projectPriority';
+import { POLLING_INTERVAL_MS } from '../../constants/polling';
+import { getChangeRequestStatusLabel } from '../../constants/uatChangeRequest';
+import { getTaskReturnRoundTag, isFixTask } from '../../constants/returnRound';
+import { useVisibilityPolling } from '../../hooks/usePolling';
 import DocumentViewerModal from '../../components/DocumentViewerModal';
 import {
     generateDocumentName,
-    DOCUMENT_TYPES,
-    getDocumentTypeInfo,
     formatFileSize,
+    formatDocSizeLabel,
 } from '../../utils/documentNaming';
-import { documentService, taskService, activityLogService, projectService } from '../../services/api';
+import { documentService, taskService, activityLogService, projectService, userService } from '../../services/api';
 import ChatBox from '../../components/ChatBox';
-import SITUATDocumentModal from '../../components/SITUATDocumentModal';
 import SITUATWizard from '../../components/SITUATWizard';
 import { useState, useMemo, useEffect, useRef, useCallback, Fragment } from 'react';
 import toast from 'react-hot-toast';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
-import { useProjects, getFileFromStore } from '../../contexts/ProjectContext';
+import { useProjects } from '../../contexts/ProjectContext';
 import { useNotifications } from '../../contexts/NotificationContext';
 import {
     ChevronLeft,
@@ -24,7 +25,6 @@ import {
     Search,
     Filter,
     Plus,
-    MoreVertical,
     User,
     Calendar,
     Clock,
@@ -35,27 +35,120 @@ import {
     FileText,
     FolderOpen,
     Activity,
-    BarChart,
-    Settings,
     Eye,
     Briefcase,
-    Users,
-    Target,
     MessageSquare,
     Paperclip,
-    Link,
     Trash2,
     X,
     ShieldCheck,
-    Server,
-    CheckSquare,
     Download,
     Upload,
-    Lock,
-    Send,
-    FileCheck,
     RotateCcw,
+    Undo2,
 } from 'lucide-react';
+
+// Pemetaan status task antara enum backend dan label UI. Keduanya murni — tidak
+// menyentuh state komponen — sehingga diletakkan di lingkup modul: selain hemat
+// alokasi per render, penempatannya di atas komponen memastikan `normalizeTask`
+// tidak lagi memanggilnya sebelum deklarasi (temporal dead zone).
+const mapTaskStatusToEnum = (status) => {
+    const s = String(status || '').toLowerCase();
+    if (s === 'selesai' || s === 'done') return 'done';
+    if (s === 'sedang dikerjakan' || s === 'in progress' || s === 'in_progress' || s === 'review' || s === 'code review') return 'in_progress';
+    if (s === 'hold') return 'hold';
+    if (s === 'take down' || s === 'take_down') return 'take_down';
+    return 'todo';
+};
+
+const mapTaskStatusToLabel = (status) => {
+    const s = String(status || '').toLowerCase();
+    if (s === 'done' || s === 'selesai') return 'Selesai';
+    if (s === 'in_progress' || s === 'sedang dikerjakan' || s === 'review' || s === 'code review') return 'Sedang Dikerjakan';
+    if (s === 'hold') return 'Hold';
+    if (s === 'take_down' || s === 'take down') return 'Take Down';
+    return 'Belum Mulai';
+};
+
+// Batasan unggahan pada tab Dokumen.
+const ALLOWED_DOC_EXTS = ['.pdf', '.xls', '.xlsx', '.jpg', '.jpeg', '.png', '.zip'];
+const MAX_DOC_SIZE_MB = 5;
+
+// Pilihan filter status pada toolbar tabel task. Nilainya adalah label UI, sama
+// seperti yang disimpan `normalizeTask`, sehingga perbandingannya langsung.
+//
+// `REVISION_STATUS_FILTER` bukan status di basis data: `TaskStatus` tidak memiliki
+// nilai revisi, dan task yang direvisi tetap berstatus `in_progress`. Revisi ditandai
+// `revision_note` beserta jejak siapa dan kapan memintanya. Filternya tetap disediakan
+// karena inilah pekerjaan yang paling mudah terlupakan — sebelumnya satu-satunya cara
+// menemukannya adalah menyisir seluruh tabel baris per baris.
+const REVISION_STATUS_FILTER = 'Perlu Revisi';
+
+// Juga bukan status di basis data, dan bukan pula kerabat `REVISION_STATUS_FILTER`:
+// ini menyaring task yang lahir dari putaran pengembalian jalur pengujian
+// (`return_round_id` terisi). Disediakan karena justru task inilah yang menahan
+// pengajuan ulang satu jalur — selama satu saja belum selesai, jalurnya tidak dapat
+// diajukan kembali — sehingga perlu bisa dipisahkan dari pekerjaan biasa.
+const FIX_TASK_FILTER = 'Task Perbaikan';
+const TASK_STATUS_FILTERS = ['Belum Mulai', 'Sedang Dikerjakan', REVISION_STATUS_FILTER, FIX_TASK_FILTER, 'Selesai', 'Hold', 'Take Down'];
+
+// Aturan penyaringan satu pilihan filter. Ditaruh satu tempat karena dua pembaca
+// memakainya — daftar task dan angka hitungan di sebelah tiap pilihan pada dropdown —
+// dan keduanya tidak boleh berbeda: filter yang menampilkan lima baris namun berangka
+// nol lebih membingungkan daripada tidak ada angka sama sekali.
+const matchesTaskFilter = (task, filter) => {
+    if (!filter) return true;
+    if (filter === REVISION_STATUS_FILTER) return Boolean(task?.revisionNote);
+    if (filter === FIX_TASK_FILTER) return isFixTask(task);
+    return task?.status === filter;
+};
+
+// Tanggal target selesai hasil kajian analis.
+//
+// Nilainya disimpan di dalam `devAnalystResult.estimation` / `analystResult.estimation`
+// sebagai tanggal ISO (kedua formulir analis memakai `input type="date"`), bukan di
+// kolom `projects.estimation` — kolom itu tidak ada dan tidak pernah dikirim API.
+const getAnalystTargetDate = (project) => {
+    const raw = project?.devAnalystResult?.estimation || project?.analystResult?.estimation || null;
+    if (!raw) return null;
+    const parsed = new Date(raw);
+    return Number.isNaN(parsed.getTime()) ? null : parsed;
+};
+
+const formatLongDate = (value) => {
+    const parsed = value instanceof Date ? value : new Date(value);
+    if (Number.isNaN(parsed.getTime())) return null;
+    return parsed.toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' });
+};
+
+// Versi ringkas untuk kolom tabel. Mengembalikan null (bukan "Invalid Date") bila
+// nilainya kosong atau tidak dapat diurai, agar pemanggil dapat memilih tampilannya.
+const formatShortDate = (value) => {
+    if (!value) return null;
+    const parsed = value instanceof Date ? value : new Date(value);
+    if (Number.isNaN(parsed.getTime())) return null;
+    return parsed.toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' });
+};
+
+// Sisa hari menuju sebuah tanggal, dibulatkan ke hari penuh dan minimal 1.
+// Dipakai untuk mengisi awal kolom "durasi pengerjaan" pada modal edit proyek.
+const daysUntil = (value) => {
+    const target = new Date(value);
+    if (Number.isNaN(target.getTime())) return null;
+    const startOfToday = new Date();
+    startOfToday.setHours(0, 0, 0, 0);
+    const diffDays = Math.ceil((target.getTime() - startOfToday.getTime()) / 86400000);
+    return diffDays > 0 ? diffDays : null;
+};
+
+// Dokumen SIT/UAT (bukti task, hasil review, berita acara, dsb.) disembunyikan
+// dari daftar umum — tampil di panel per-task / wizard SIT-UAT. Nilai dan fungsi
+// filternya murni, jadi diletakkan di lingkup modul supaya identitasnya stabil
+// antar render (dipakai sebagai dependency useMemo di DocumentSection).
+const HIDDEN_DOC_TYPES = ['SIT_TASK_EVIDENCE', 'SIT_SIGNOFF', 'UAT_PREP', 'UAT_EXEC', 'UAT_APPROVAL'];
+const visibleDocs = (list) => Array.isArray(list)
+    ? list.filter(d => !HIDDEN_DOC_TYPES.includes((d.document_type || d.type || '').toUpperCase()))
+    : [];
 
 export default function TaskDetail() {
     const { user } = useAuth();
@@ -63,12 +156,14 @@ export default function TaskDetail() {
     const { id: projectId } = useParams();
     const [searchParams] = useSearchParams();
     const navigate = useNavigate();
-    const openedFromUatApprovals = searchParams.get('from') === 'uat-approvals';
+    // Nilai `uat-approvals` dipertahankan apa adanya meski halaman tujuannya kini memuat
+    // SIT sekaligus: halaman persetujuan gabungan masih mengirim nilai itu, dan tautan
+    // lama yang sudah tersimpan pengguna harus tetap mengenali asalnya.
+    const openedFromApprovals = searchParams.get('from') === 'uat-approvals';
 
     // Mode VIEWER: developer & analyst hanya bisa melihat (read-only).
     // Kecuali developer tetap bisa update status task miliknya sendiri (di My Tasks).
     const isViewerOnly = ['developer', 'analyst', 'head_of_it', 'lead_group'].includes(user?.role);
-    const isDeveloperAssignee = user?.role === 'developer';
 
     // Reset posisi scroll browser ke paling atas (0, 0) saat laman dibuka
     useEffect(() => {
@@ -93,9 +188,9 @@ export default function TaskDetail() {
                 // Pertahankan objek pm & analyst utuh (dengan id) agar bisa di-assign sebagai assignee task
                 pm: ctxFound.pm,
                 analyst: ctxFound.analyst,
-                division: typeof ctxFound.division === 'object' ? (ctxFound.division?.name || 'Divisi TI') : (ctxFound.division || 'Divisi TI'),
+                division: typeof ctxFound.division === 'object' ? (ctxFound.division?.name || '') : (ctxFound.division || ''),
                 status: ctxFound.status || 'IN_DEVELOPMENT',
-                progress: ctxFound.progress || 60,
+                progress: ctxFound.progress ?? 0,
                 tasks: Array.isArray(ctxFound.tasks) ? ctxFound.tasks : []
             };
         }
@@ -111,39 +206,64 @@ export default function TaskDetail() {
     // ── Data SIT/UAT: ambil selalu segar dari API saat project berubah,
     //    agar bukti revisi dari tab SIT selalu tampil di Manajemen Task. ──
     const [sitUatData, setSitUatData] = useState(null);
-    useEffect(() => {
-        let cancelled = false;
-        if (!project?.id) return undefined;
-        // Selalu ambil dari context (auto-refresh 30s) agar tidak pernah kosong/stale
-        const ctxData = project?.sitUatData || project?.sit_uat_data || null;
-        if (ctxData) {
-            setSitUatData(ctxData);
-        }
-        const fetchSitData = () => projectService.getById(project.id)
+    const projectIdForSit = project?.id ?? null;
+
+    const fetchSitUatData = useCallback(() => {
+        if (!projectIdForSit) return;
+        projectService.getById(projectIdForSit)
             .then(res => {
-                if (cancelled) return;
                 const raw = res?.data || res;
                 const sd = raw?.sitUatData || raw?.sit_uat_data || null;
                 if (sd) setSitUatData(sd);
             })
             .catch(() => {});
-        fetchSitData();
-        // Polling ringan agar data SIT/UAT sinkron — cukup jarang & hanya saat tab aktif
-        const sitPollTimer = setInterval(() => {
-            if (document.visibilityState === 'visible') fetchSitData();
-        }, 20000);
-        return () => {
-            cancelled = true;
-            clearInterval(sitPollTimer);
-        };
-    }, [project?.id, project?.sitUatData, project?.sit_uat_data]);
+    }, [projectIdForSit]);
 
+    useEffect(() => {
+        let cancelled = false;
+        if (!projectIdForSit) return undefined;
+        // Selalu ambil dari context (auto-refresh berkala) agar tidak pernah kosong/stale
+        const ctxData = project?.sitUatData || project?.sit_uat_data || null;
+
+        const loadFresh = async () => {
+            try {
+                const res = await projectService.getById(projectIdForSit);
+                if (cancelled) return;
+                const raw = res?.data || res;
+                const sd = raw?.sitUatData || raw?.sit_uat_data || null;
+                if (sd) setSitUatData(sd);
+                else if (ctxData) setSitUatData(ctxData);
+            } catch {
+                if (!cancelled && ctxData) setSitUatData(ctxData);
+            }
+        };
+        loadFresh();
+        return () => { cancelled = true; };
+    }, [projectIdForSit, project?.sitUatData, project?.sit_uat_data]);
+
+    // Polling ringan agar data SIT/UAT sinkron — selang waktunya dipusatkan di
+    // `constants/polling.js` dan berhenti saat tab tidak terlihat.
+    useVisibilityPolling(fetchSitUatData, POLLING_INTERVAL_MS.sitUatData, {
+        enabled: Boolean(projectIdForSit),
+    });
+
+
+    // Bagian proyek yang dibaca hook-hook di bawah diambil ke variabel lokal supaya
+    // dependency-nya persis nilai yang dipakai, bukan objek `project` seutuhnya.
+    const projectTeam = project?.team;
+    const projectPm = project?.pm;
+    const projectAnalyst = project?.analyst;
+    const projectTasks = project?.tasks;
+    const projectSitUatCamel = project?.sitUatData;
+    const projectSitUatSnake = project?.sit_uat_data;
+    const projectStatusHistories = project?.status_histories;
+    const activeProjectId = project?.id;
 
     // Daftar anggota tim proyek yang sah menjadi assignee task.
     // HANYA developer yang sudah dialokasikan ke proyek ini (ditambah PM/Analyst proyek).
     // Tidak ada fallback hardcode — task wajib diserahkan ke orang yang terlibat di proyek.
     const teamMembers = useMemo(() => {
-        const rawTeam = Array.isArray(project?.team) ? project.team : [];
+        const rawTeam = Array.isArray(projectTeam) ? projectTeam : [];
         const members = rawTeam
             .map(m => {
                 if (!m) return null;
@@ -175,70 +295,20 @@ export default function TaskDetail() {
                 role,
             });
         };
-        if (project?.pm) addPerson(project.pm, 'Project Manager');
-        if (project?.analyst) addPerson(project.analyst, 'System Analyst');
+        if (projectPm) addPerson(projectPm, 'Project Manager');
+        if (projectAnalyst) addPerson(projectAnalyst, 'System Analyst');
 
         return members;
-    }, [project?.team, project?.pm, project?.analyst]);
+    }, [projectTeam, projectPm, projectAnalyst]);
 
     const [activeTab, setActiveTab] = useState(() => (
         searchParams.get('tab') === 'sit_uat' ? 'sit_uat' : 'tasks'
     )); // tasks, sit_uat, documents, activity
     const { addNotification } = useNotifications();
 
-    // ─── SIT & UAT Internal State & Helpers ──────────────────────────────────
-    const fmtName = (val, fb = 'Tim TI') => {
-        if (!val) return fb;
-        if (typeof val === 'object') return val.name || val.label || fb;
-        return String(val);
-    };
-    const [sitUatState, setSitUatState] = useState({
-        stagingUrl: project?.stagingUrl || '',
-        sitCoverage: project?.sitCoverage || '',
-        sitNotes: project?.sitNotes || '',
-        uatScenarios: project?.uatScenarios || '',
-        uatNotes: project?.uatNotes || '',
-        sitUatFiles: project?.sitUatFiles || [],
-    });
-    const [sitUatSubmitting, setSitUatSubmitting] = useState(false);
-    const [sitUatDocOpen, setSitUatDocOpen] = useState(false);
-    const sitFileInputRef = useRef(null);
-
-    const handleSITUATFileUpload = (e) => {
-        const files = Array.from(e.target.files);
-        if (!files.length) return;
-        const newDocs = files.map(file => {
-            const url = URL.createObjectURL(file);
-            return {
-                id: `situatdoc_${Date.now()}_${Math.random().toString(36).slice(2)}`,
-                name: file.name,
-                size: `${(file.size / 1024 / 1024).toFixed(2)} MB`,
-                type: file.name.split('.').pop().toUpperCase(),
-                url,
-                uploadedAt: new Date().toISOString(),
-                category: 'BAST_SIT_UAT',
-            };
-        });
-        setSitUatState(prev => ({ ...prev, sitUatFiles: [...prev.sitUatFiles, ...newDocs] }));
-        toast.success(`${files.length} berkas bukti SIT & UAT berhasil dilampirkan.`);
-    };
-
-    const handleSaveSITUAT = (targetStatus) => {
-        setSitUatSubmitting(true);
-        updateProject(project.id, { status: targetStatus, sitPassedAt: new Date().toISOString(), sitPassedBy: fmtName(user?.name, 'Tim TI'), ...sitUatState });
-        if (addNotification) {
-            addNotification(
-                targetStatus === 'DEV_COMPLETED' ? 'BAST Dev Diterbitkan' : 'SIT Diverifikasi',
-                targetStatus === 'DEV_COMPLETED' ? `Proyek ${project.name} LULUS SIT & UAT. Siap QA & Siber.` : `Proyek ${project.name} Lulus SIT. Lanjut ke UAT Internal.`,
-                'success', '/pm/workspace'
-            );
-        }
-        toast.success(targetStatus === 'DEV_COMPLETED' ? `BAST Diterbitkan! Proyek "${project.name}" resmi DEV_COMPLETED.` : `SIT Lulus! Proyek "${project.name}" siap UAT Internal.`);
-        setSitUatSubmitting(false);
-    };
-    // ─────────────────────────────────────────────────────────────────────────
-
     const [searchTask, setSearchTask] = useState('');
+    const [statusFilter, setStatusFilter] = useState('');
+    const [isStatusFilterOpen, setIsStatusFilterOpen] = useState(false);
     const [tasks, setTasks] = useState([]);
 
     // Normalisasi task dari backend -> shape yang dipakai UI
@@ -255,6 +325,12 @@ export default function TaskDetail() {
         revisionNote: t?.revision_note || '',
         revisionRequestedAt: t?.revision_requested_at || null,
         revisionRequestedBy: t?.revision_requested_by || '',
+        // Penanda asal task perbaikan. Jalur dan nomor putaran hanya terisi bila relasi
+        // `returnRound` dimuat — endpoint daftar task tidak memuatnya — jadi labelnya
+        // dibentuk dari `project.return_rounds`; lihat `constants/returnRound.js`.
+        returnRoundId: t?.return_round_id ?? null,
+        returnRoundTrack: t?.return_round_track ?? null,
+        returnRoundNumber: t?.return_round_number ?? null,
     });
 
     // Resolusi nama assignee -> id anggota tim proyek (fallback: cari di tasks yg sudah ada)
@@ -301,9 +377,15 @@ export default function TaskDetail() {
     // Sinkronkan otomatis dengan data task dari ProjectContext (hasil polling/refresh
     // real-time). Setiap task yang sudah ada di-update status & catatan revisi agar
     // perubahan dari tab lain (mis. revisi SIT) langsung terlihat tanpa refresh manual.
+    //
+    // Penggabungan ini tetap memakai effect: `tasks` bukan salinan murni dari context —
+    // isinya berasal dari `taskService.getByProject` dan diubah langsung oleh aksi di
+    // halaman ini (tambah, ubah, minta revisi), sehingga tidak bisa dihitung ulang dari
+    // prop saat render. Aturan react-hooks dimatikan khusus di baris ini.
     useEffect(() => {
         const ctxTasks = Array.isArray(project?.tasks) ? project.tasks : [];
         if (ctxTasks.length === 0) return;
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- gabungkan pembaruan dari polling, lihat catatan di atas
         setTasks(prev => {
             const next = prev.map(t => {
                 const match = ctxTasks.find(ct => String(ct.id) === String(t.id));
@@ -321,6 +403,13 @@ export default function TaskDetail() {
                     revisionNote: match.revision_note || '',
                     revisionRequestedAt: match.revision_requested_at || null,
                     revisionRequestedBy: match.revision_requested_by || '',
+                    // Penanda putaran pengembalian ikut disegarkan supaya task yang baru
+                    // ditandai dari halaman Putaran Pengembalian langsung terlihat di sini.
+                    // Nilai lama dipertahankan bila context mengirimnya kosong, karena
+                    // `ProjectResource` memangkas kolom yang relasinya tidak dimuat.
+                    returnRoundId: match.return_round_id ?? t.returnRoundId ?? null,
+                    returnRoundTrack: match.return_round_track ?? t.returnRoundTrack ?? null,
+                    returnRoundNumber: match.return_round_number ?? t.returnRoundNumber ?? null,
                 };
             });
             // Tambahkan task baru yang ada di context tapi belum di state lokal
@@ -340,6 +429,9 @@ export default function TaskDetail() {
                     revisionNote: ct.revision_note || '',
                     revisionRequestedAt: ct.revision_requested_at || null,
                     revisionRequestedBy: ct.revision_requested_by || '',
+                    returnRoundId: ct.return_round_id ?? null,
+                    returnRoundTrack: ct.return_round_track ?? null,
+                    returnRoundNumber: ct.return_round_number ?? null,
                 }));
             return [...next, ...newTasks];
         });
@@ -405,15 +497,27 @@ export default function TaskDetail() {
         return map[action] || { label: action, cls: 'bg-gray-50 text-gray-600 border-gray-200' };
     };
 
+    /**
+     * Data wizard SIT/UAT yang dipakai seluruh turunan per task.
+     *
+     * Sumbernya dua: objek proyek dari `ProjectContext` (paling baru karena
+     * ikut polling daftar proyek) dan hasil `fetchSitUatData` (dipakai ketika
+     * proyek belum termuat di context, misalnya saat halaman dibuka langsung
+     * lewat URL). Objek context dipakai bila isinya tidak kosong, sebab proyek
+     * yang belum pernah masuk SIT mengembalikan objek kosong dan bukan null.
+     */
+    const resolvedSitUatData = useMemo(() => {
+        const ctxSit = projectSitUatCamel || projectSitUatSnake || null;
+        return (ctxSit && Object.keys(ctxSit).length > 0 ? ctxSit : sitUatData) || ctxSit || sitUatData || {};
+    }, [projectSitUatCamel, projectSitUatSnake, sitUatData]);
+
     // ── Bukti SIT per task (dari sitUatData.sit2_task_approvals) ────────────
     // Normalisasi: backend kadang mengembalikan object {taskId: approval} ATAU
     // array [approval, ...] (akibat PHP integer-key). Di sini di-map ke object
     // keyed by task id menggunakan urutan project.tasks.
     const getTaskApprovalMap = useMemo(() => {
-        const ctxSit = project?.sitUatData || project?.sit_uat_data || null;
-        const sitUat = (ctxSit && Object.keys(ctxSit).length > 0 ? ctxSit : sitUatData) || ctxSit || sitUatData || {};
-        const raw = sitUat?.sit2_task_approvals || {};
-        const taskIds = Array.isArray(project?.tasks) ? project.tasks.map(t => t.id) : [];
+        const raw = resolvedSitUatData?.sit2_task_approvals || {};
+        const taskIds = Array.isArray(projectTasks) ? projectTasks.map(t => t.id) : [];
         const map = {};
         if (Array.isArray(raw)) {
             raw.forEach((v, i) => {
@@ -432,7 +536,7 @@ export default function TaskDetail() {
             }
         }
         return map;
-    }, [project?.tasks, project?.sitUatData, project?.sit_uat_data, sitUatData]);
+    }, [projectTasks, resolvedSitUatData]);
 
     const getTaskSitApproval = (taskId) => {
         try {
@@ -455,15 +559,135 @@ export default function TaskDetail() {
         return approval.approvedAt || null;
     };
 
-    // Download bukti SIT dengan auth header (hindari 401 / Route [login] not defined).
-    const downloadSitAttachment = async (doc) => {
+    /**
+     * Rangkuman hasil UAT Internal (Tahap 2) per task, keyed by id task.
+     *
+     * Dua sumber digabung karena masing-masing hanya memuat sebagian task:
+     *
+     * 1. `uat2_scenarios` — satu entri per task yang diuji pada UAT Internal.
+     * 2. `uat2_additional_requests` — permintaan tambahan yang muncul di
+     *    pertemuan UAT. Setiap permintaan melahirkan task Change Request
+     *    tersendiri dan `taskId`-nya diisi backend, baik Minor maupun Mayor:
+     *    keduanya pekerjaan pengembangan yang harus terlihat di halaman ini.
+     *
+     * Tanpa penggabungan ini task hasil permintaan tambahan tampil di tabel
+     * tanpa satu pun informasi UAT, padahal justru task itulah yang lahir dari
+     * UAT.
+     *
+     * `verificationStatus` ikut dibawa karena inilah penanda apakah perbaikannya
+     * masih menunggu developer (`waiting_development`), menunggu SIT ulang
+     * (`waiting_sit`, hanya untuk Mayor), atau sudah tuntas (`resolved`).
+     *
+     * `verificationAttachments` tetap dibaca meski alur verifikasi terarah revisi
+     * Mayor sudah dihapus: bukti yang sudah pernah diunggah penguji pada alur lama
+     * masih tersimpan di entri skenario/permintaan, dan sekali revisi mayor terjadi
+     * entri itu diarsipkan ke `uat_cycles` sehingga tidak akan bertambah lagi.
+     * Menghapus pembacaannya hanya akan menyembunyikan bukti yang sah.
+     */
+    const taskUatInfoMap = useMemo(() => {
+        const map = {};
+
+        (Array.isArray(resolvedSitUatData?.uat2_scenarios) ? resolvedSitUatData.uat2_scenarios : [])
+            .filter(scenario => scenario?.taskId != null)
+            .forEach(scenario => {
+                map[String(scenario.taskId)] = {
+                    source: 'scenario',
+                    title: scenario.scenario || '',
+                    result: scenario.result || '',
+                    changeType: scenario.changeType || '',
+                    request: scenario.request || '',
+                    comment: scenario.comment || '',
+                    verificationStatus: scenario.verificationStatus || '',
+                    attachments: Array.isArray(scenario.attachments) ? scenario.attachments : [],
+                    verificationAttachments: Array.isArray(scenario.verificationAttachments)
+                        ? scenario.verificationAttachments
+                        : [],
+                };
+            });
+
+        (Array.isArray(resolvedSitUatData?.uat2_additional_requests) ? resolvedSitUatData.uat2_additional_requests : [])
+            .filter(request => request?.taskId != null)
+            .forEach(request => {
+                map[String(request.taskId)] = {
+                    source: 'additional_request',
+                    title: request.title || '',
+                    // Permintaan tambahan selalu berarti ada yang harus dikerjakan,
+                    // sehingga hasilnya disamakan dengan skenario yang direvisi agar
+                    // penyajian di tabel tidak perlu bercabang.
+                    result: 'revision',
+                    changeType: request.changeType || '',
+                    request: request.detail || '',
+                    comment: request.comment || '',
+                    verificationStatus: request.verificationStatus || '',
+                    attachments: Array.isArray(request.attachments) ? request.attachments : [],
+                    verificationAttachments: Array.isArray(request.verificationAttachments)
+                        ? request.verificationAttachments
+                        : [],
+                };
+            });
+
+        return map;
+    }, [resolvedSitUatData]);
+
+    const getTaskUatInfo = (taskId) => taskUatInfoMap[String(taskId)] || null;
+
+    /**
+     * Change Request UAT yang menaungi sebuah task, keyed by id task.
+     *
+     * Hanya CR yang masih hidup dipetakan — permintaan yang sudah `superseded`
+     * tidak lagi mewakili pekerjaan apa pun. Bila satu task pernah direvisi lebih
+     * dari sekali, entri terakhirlah yang menang karena itulah siklus berjalan.
+     *
+     * Dipakai kolom Revisi untuk membedakan revisi Minor dari Mayor beserta
+     * kemajuannya. Sebelumnya kolom itu hanya menampilkan "Menunggu" tanpa
+     * menyebut tingkat perubahannya, padahal konsekuensinya berbeda tajam:
+     * Mayor menahan rilis sampai SIT ulang, Minor hanya menahan persetujuan final.
+     */
+    const taskChangeRequestMap = useMemo(() => {
+        const map = {};
+        (Array.isArray(resolvedSitUatData?.uat_change_requests) ? resolvedSitUatData.uat_change_requests : [])
+            .filter(request => request?.taskId != null && request?.status !== 'superseded')
+            .forEach(request => {
+                map[String(request.taskId)] = request;
+            });
+        return map;
+    }, [resolvedSitUatData]);
+
+    const getTaskChangeRequest = (taskId) => taskChangeRequestMap[String(taskId)] || null;
+
+    /**
+     * UAT sedang menunggu dijalankan ulang dari Tahap 1.
+     *
+     * Revisi Mayor mengarsipkan seluruh putaran UAT yang berjalan ke `uat_cycles`
+     * lalu mengosongkan `uat2_scenarios` & `uat2_additional_requests`, sehingga
+     * kolom UAT setiap task kembali kosong. Tanpa penanda ini kolom kosong itu
+     * terbaca "belum pernah diuji", padahal task-nya sudah diuji dan hasilnya
+     * memicu pengulangan. Kunci lama `uat2_resume_after_sit` ikut dibaca karena
+     * baris yang sudah ada di basis data masih memakainya.
+     */
+    const isUatRestartPending = resolvedSitUatData?.uat_restart_after_sit === true
+        || resolvedSitUatData?.uat2_resume_after_sit === true
+        || (Array.isArray(resolvedSitUatData?.uat_cycles) && resolvedSitUatData.uat_cycles.length > 0);
+
+    /**
+     * Unduh bukti pengujian dengan auth header.
+     *
+     * Tautan `<a href>` langsung ke endpoint dokumen gagal 401 karena tidak
+     * membawa token, dan Laravel merespons dengan `Route [login] not defined`.
+     *
+     * `evidenceKind` hanya menentukan nama berkas cadangan ketika dokumennya
+     * tidak memiliki nama asli; bukti SIT dan bukti UAT sama-sama melewati jalur
+     * ini.
+     */
+    const downloadSitAttachment = async (doc, evidenceKind = 'sit') => {
+        const fallbackName = `bukti-${evidenceKind}`;
         try {
             if (doc?.docId) {
                 const blob = await documentService.download(doc.docId);
                 const url = URL.createObjectURL(blob);
                 const a = document.createElement('a');
                 a.href = url;
-                a.download = doc.originalName || doc.name || 'bukti-sit';
+                a.download = doc.originalName || doc.name || fallbackName;
                 document.body.appendChild(a);
                 a.click();
                 document.body.removeChild(a);
@@ -471,19 +695,28 @@ export default function TaskDetail() {
             } else if (doc?.url?.startsWith('blob:')) {
                 const a = document.createElement('a');
                 a.href = doc.url;
-                a.download = doc.originalName || doc.name || 'bukti-sit';
+                a.download = doc.originalName || doc.name || fallbackName;
                 a.click();
             } else {
-                toast.info('Berkas belum tersedia untuk diunduh.');
+                toast('Berkas belum tersedia untuk diunduh.');
             }
         } catch (err) {
             toast.error(`Gagal mengunduh bukti: ${err.message}`);
         }
     };
 
-    // Buka pratinjau bukti SIT dengan auth header — tampilkan dalam modal in-app.
+    /**
+     * Buka pratinjau bukti pengujian dengan auth header, di dalam modal aplikasi.
+     *
+     * `evidenceKind` memilih judul dan jenis dokumen yang ditampilkan pada
+     * header pratinjau, sebab bukti SIT dan bukti UAT tersimpan sebagai jenis
+     * dokumen yang berbeda (`SIT_TASK_EVIDENCE` dan `UAT_EVIDENCE`).
+     */
     const [sitPreviewDoc, setSitPreviewDoc] = useState(null);
-    const viewSitAttachment = async (doc) => {
+    const viewSitAttachment = async (doc, evidenceKind = 'sit') => {
+        const isUat = evidenceKind === 'uat';
+        const fallbackLabel = isUat ? 'Bukti UAT' : 'Bukti SIT';
+        const documentType = isUat ? 'UAT_EVIDENCE' : 'SIT_TASK_EVIDENCE';
         try {
             if (doc?.docId) {
                 const loadingId = toast.loading('Membuka berkas...');
@@ -492,23 +725,23 @@ export default function TaskDetail() {
                 toast.dismiss(loadingId);
                 setSitPreviewDoc({
                     id: doc.docId,
-                    name: doc.originalName || doc.name || 'Bukti SIT',
+                    name: doc.originalName || doc.name || fallbackLabel,
                     original_filename: doc.originalName || doc.name,
                     url,
                     type: (doc.type || 'FILE'),
-                    document_type: 'SIT_TASK_EVIDENCE',
+                    document_type: documentType,
                 });
             } else if (doc?.url?.startsWith('blob:')) {
                 setSitPreviewDoc({
                     id: doc.docId || null,
-                    name: doc.originalName || doc.name || 'Bukti SIT',
+                    name: doc.originalName || doc.name || fallbackLabel,
                     original_filename: doc.originalName || doc.name,
                     url: doc.url,
                     type: (doc.type || 'FILE'),
-                    document_type: 'SIT_TASK_EVIDENCE',
+                    document_type: documentType,
                 });
             } else {
-                toast.info('Berkas belum tersedia untuk dilihat.');
+                toast('Berkas belum tersedia untuk dilihat.');
             }
         } catch (err) {
             toast.error(`Gagal membuka bukti: ${err.message}`);
@@ -517,35 +750,92 @@ export default function TaskDetail() {
     
     // Modal Edit Proyek & Alokasi PM
     const [isEditProjectModalOpen, setIsEditProjectModalOpen] = useState(false);
+    const [isSavingProjectEdit, setIsSavingProjectEdit] = useState(false);
     const [editProjectForm, setEditProjectForm] = useState({
-        pmName: '',
+        pmId: '',
         description: '',
         estimation: '30',
     });
 
-    const handleOpenEditProjectModal = () => {
-        const rawPM = typeof project?.pm === 'object'
-            ? (project.pm?.name || '')
-            : String(project?.pm || project?.pmName || project?.assignedPM || '');
+    // Kandidat PM diambil dari daftar pengguna nyata, bukan daftar nama tetap.
+    const [pmCandidates, setPmCandidates] = useState([]);
+    const [isPmCandidatesLoading, setIsPmCandidatesLoading] = useState(true);
 
-        let resolvedPM = '';
-        if (rawPM && rawPM !== 'Belum Dialokasi') {
-            const pms = ['Budi Santoso', 'Dewi Lestari', 'Andi Wijaya', 'Citra Kirana'];
-            const foundPM = pms.find(name => rawPM.toLowerCase().includes(name.toLowerCase()));
-            resolvedPM = foundPM || rawPM;
-        }
+    useEffect(() => {
+        let isMounted = true;
+
+        userService.getAll()
+            .then(res => {
+                if (!isMounted) return;
+                const usersList = Array.isArray(res) ? res : res?.data || [];
+                const pmUsers = usersList.filter(candidate => {
+                    const roleName = (candidate.role?.name || candidate.role || '').toString().toLowerCase();
+                    return roleName === 'project_manager' || roleName === 'dev_analyst';
+                });
+
+                setPmCandidates(pmUsers.map(candidate => ({
+                    id: candidate.id,
+                    name: candidate.name,
+                    division: typeof candidate.division === 'string'
+                        ? candidate.division
+                        : (candidate.division?.name || candidate.division_detail?.name || ''),
+                })));
+            })
+            .catch(() => {
+                if (isMounted) setPmCandidates([]);
+            })
+            .finally(() => {
+                if (isMounted) setIsPmCandidatesLoading(false);
+            });
+
+        return () => { isMounted = false; };
+    }, []);
+
+    // Beban proyek aktif per PM, dihitung dari id agar tidak bergantung pada
+    // kecocokan teks nama yang mudah salah.
+    const pmActiveProjectCount = useMemo(() => {
+        const counter = new Map();
+
+        (projects || []).forEach(item => {
+            const pmId = typeof item.pm === 'object' ? item.pm?.id : null;
+            const resolvedPmId = pmId ?? item.pm_id ?? null;
+            const isFinished = item.status === 'LIVE_PRODUCTION'
+                || item.status === 'CANCELLED'
+                || item.status === 'REJECTED';
+
+            if (!resolvedPmId || isFinished) return;
+
+            counter.set(Number(resolvedPmId), (counter.get(Number(resolvedPmId)) || 0) + 1);
+        });
+
+        return counter;
+    }, [projects]);
+
+    const analystTargetDate = getAnalystTargetDate(project);
+    const analystTargetDateLabel = analystTargetDate ? formatLongDate(analystTargetDate) : null;
+    const projectDeadlineLabel = project?.deadline ? formatLongDate(project.deadline) : null;
+
+    const handleOpenEditProjectModal = () => {
+        const currentPmId = (typeof project?.pm === 'object' ? project.pm?.id : null) ?? project?.pm_id ?? '';
+
+        // Durasi diisi awal dari tenggat yang sedang berlaku, lalu target analis sebagai
+        // cadangan. Sebelumnya diisi dari `project.estimation` yang tidak pernah ada,
+        // sehingga kolom ini selalu menampilkan 30 hari dan menimpa tenggat asli begitu
+        // formulir disimpan.
+        const currentDurationDays = daysUntil(project?.deadline) ?? (analystTargetDate ? daysUntil(analystTargetDate) : null);
 
         setEditProjectForm({
-            pmName: resolvedPM,
+            pmId: currentPmId ? String(currentPmId) : '',
             description: project?.description || '',
-            estimation: project?.estimation ? String(project.estimation).replace(/[^0-9]/g, '') || '30' : '30',
+            estimation: String(currentDurationDays ?? 30),
         });
         setIsEditProjectModalOpen(true);
     };
 
-    const handleSaveProjectEdit = (e) => {
+    const handleSaveProjectEdit = async (e) => {
         e.preventDefault();
-        if (!editProjectForm.pmName) {
+        if (isSavingProjectEdit) return;
+        if (!editProjectForm.pmId) {
             toast.error('Pilih Project Manager penanggung jawab!');
             return;
         }
@@ -555,37 +845,27 @@ export default function TaskDetail() {
         calcDeadline.setDate(calcDeadline.getDate() + days);
         const deadlineIso = calcDeadline.toISOString().split('T')[0];
 
-        updateProject(project.id, {
-            pm: { name: editProjectForm.pmName, initial: editProjectForm.pmName.split(' ').map(n=>n[0]).join('').slice(0, 2) },
-            pmName: editProjectForm.pmName,
-            assignedPM: editProjectForm.pmName,
-            description: editProjectForm.description,
-            estimation: `${days} Hari Kerja`,
-            deadline: deadlineIso,
-            targetDate: deadlineIso,
-            rbbDeadline: deadlineIso,
-        });
-
-        toast.success('Informasi proyek & alokasi PM berhasil diperbarui!');
-        setIsEditProjectModalOpen(false);
-    };
-
-    const mapTaskStatusToEnum = (status) => {
-        const s = String(status || '').toLowerCase();
-        if (s === 'selesai' || s === 'done') return 'done';
-        if (s === 'sedang dikerjakan' || s === 'in progress' || s === 'in_progress' || s === 'review' || s === 'code review') return 'in_progress';
-        if (s === 'hold') return 'hold';
-        if (s === 'take down' || s === 'take_down') return 'take_down';
-        return 'todo';
-    };
-
-    const mapTaskStatusToLabel = (status) => {
-        const s = String(status || '').toLowerCase();
-        if (s === 'done' || s === 'selesai') return 'Selesai';
-        if (s === 'in_progress' || s === 'sedang dikerjakan' || s === 'review' || s === 'code review') return 'Sedang Dikerjakan';
-        if (s === 'hold') return 'Hold';
-        if (s === 'take_down' || s === 'take down') return 'Take Down';
-        return 'Belum Mulai';
+        // Backend hanya menerima `pm_id`; mengirim nama saja membuat penugasan ini
+        // tidak pernah tersimpan. `current_stage_deadline` adalah kolom yang memang
+        // dibaca backend untuk tenggat tahap berjalan.
+        //
+        // Hasil `updateProject` ditunggu dan kegagalannya ditangani: versi sebelumnya
+        // memanggilnya tanpa `await` maupun `.catch()` lalu langsung menutup modal, jadi
+        // penggantian PM yang gagal tersimpan tetap terlihat seperti berhasil.
+        setIsSavingProjectEdit(true);
+        try {
+            await updateProject(project.id, {
+                pm_id: Number(editProjectForm.pmId),
+                description: editProjectForm.description,
+                current_stage_deadline: deadlineIso,
+            });
+            toast.success('Perubahan proyek berhasil disimpan.');
+            setIsEditProjectModalOpen(false);
+        } catch (err) {
+            toast.error(`Gagal menyimpan perubahan proyek: ${err.message || 'Terjadi kesalahan'}`);
+        } finally {
+            setIsSavingProjectEdit(false);
+        }
     };
 
     const handleAddTask = async (e) => {
@@ -694,9 +974,19 @@ export default function TaskDetail() {
         }
     };
 
-    const filteredTasks = tasks.filter((task) =>
-        task.name.toLowerCase().includes(searchTask.toLowerCase())
-    );
+    // Pencarian nama task digabung dengan filter status. `task.name` bisa kosong bila
+    // backend mengirim task tanpa judul, jadi nilainya dinormalkan lebih dulu agar
+    // `.toLowerCase()` tidak melempar pada data seperti itu.
+    const filteredTasks = useMemo(() => {
+        const keyword = searchTask.trim().toLowerCase();
+        return tasks.filter((task) => {
+            const matchesKeyword = !keyword || String(task.name || '').toLowerCase().includes(keyword);
+            // "Perlu Revisi" dan "Task Perbaikan" bukan kolom status — keduanya disaring
+            // dari catatan revisi dan dari `return_round_id`; lihat `matchesTaskFilter`.
+            const matchesStatus = matchesTaskFilter(task, statusFilter);
+            return matchesKeyword && matchesStatus;
+        });
+    }, [tasks, searchTask, statusFilter]);
 
     const getStatusBadge = (status) => {
         const configs = {
@@ -752,10 +1042,10 @@ export default function TaskDetail() {
     const [activityLoading, setActivityLoading] = useState(false);
 
     const fetchTaskActivityLogs = useCallback(async () => {
-        if (!project?.id) return;
+        if (!activeProjectId) return;
         setActivityLoading(true);
         try {
-            const res = await activityLogService.getByProject(project.id, 200);
+            const res = await activityLogService.getByProject(activeProjectId, 200);
             const logs = Array.isArray(res?.data) ? res.data : [];
             setTaskActivityLogs(logs);
         } catch {
@@ -763,21 +1053,23 @@ export default function TaskDetail() {
         } finally {
             setActivityLoading(false);
         }
-    }, [project?.id]);
+    }, [activeProjectId]);
 
-    // Load saat project berubah & polling real-time (~15s) agar kegiatan baru langsung tercatat
-    useEffect(() => {
-        fetchTaskActivityLogs();
-        const interval = setInterval(fetchTaskActivityLogs, 15000);
-        return () => clearInterval(interval);
-    }, [fetchTaskActivityLogs]);
+    // Load saat project berubah & polling agar kegiatan baru langsung tercatat.
+    // Selang waktunya dipusatkan di `constants/polling.js`; polling berhenti saat
+    // tab tidak terlihat sehingga tab yang ditinggalkan tidak terus memukul API.
+    useVisibilityPolling(fetchTaskActivityLogs, POLLING_INTERVAL_MS.activityLog, {
+        enabled: Boolean(activeProjectId),
+        immediate: true,
+        resetKey: activeProjectId ?? null,
+    });
 
     // Gabungkan status_histories + activity_logs, urutkan berdasarkan waktu terbaru
     const activityItems = useMemo(() => {
         const items = [];
 
         // 1) Riwayat transisi status proyek
-        const histories = Array.isArray(project?.status_histories) ? project.status_histories : [];
+        const histories = Array.isArray(projectStatusHistories) ? projectStatusHistories : [];
         histories.forEach((h, i) => {
             items.push({
                 id: `hist-${h.id ?? i}`,
@@ -811,7 +1103,7 @@ export default function TaskDetail() {
             const tb = b.createdAt ? new Date(b.createdAt).getTime() : 0;
             return tb - ta;
         });
-    }, [project?.status_histories, taskActivityLogs]);
+    }, [projectStatusHistories, taskActivityLogs]);
 
     const statusLabel = (st) => {
         if (!st) return null;
@@ -843,11 +1135,11 @@ export default function TaskDetail() {
             <div className="max-w-7xl mx-auto w-full flex flex-col gap-6">
                 {/* Back Button — viewer (developer/analyst) kembali ke Daftar Proyek */}
                 <button
-                    onClick={() => navigate(openedFromUatApprovals ? '/approvals/uat' : (isViewerOnly ? '/projects' : '/pm/tasks'))}
+                    onClick={() => navigate(openedFromApprovals ? '/approvals' : (isViewerOnly ? '/projects' : '/pm/tasks'))}
                     className="flex items-center gap-2 text-gray-500 hover:text-[#00529C] transition-colors text-sm mb-2"
                 >
                     <ChevronLeft size={18} />
-                    {openedFromUatApprovals ? 'Kembali ke Persetujuan UAT Saya' : 'Kembali ke Daftar Proyek'}
+                    {openedFromApprovals ? 'Kembali ke Persetujuan Saya' : 'Kembali ke Daftar Proyek'}
                 </button>
 
                 {/* Project Header */}
@@ -869,10 +1161,13 @@ export default function TaskDetail() {
                                     </span>
                                 );
                             })()}
-                            <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold border ${project.priorityColor}`}>
-
+                            {/* Prioritas. Sebelumnya kelasnya diambil dari `project.priorityColor`
+                                yang tidak pernah dikirim API mana pun, jadi lencana ini selalu
+                                tampil tanpa warna, dan nilainya tampil mentah dalam bahasa
+                                Inggris sementara layar lain sudah memakai label Indonesia. */}
+                            <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold border ${getProjectPriorityClass(project.priority)}`}>
                                 <AlertCircle size={14} />
-                                {project.priority}
+                                {getProjectPriorityLabel(project.priority)}
                             </span>
                         </div>
                     </div>
@@ -917,14 +1212,23 @@ export default function TaskDetail() {
                         <div>
                             <div className="flex items-center justify-between mb-3">
                                 <h3 className="text-lg font-bold text-gray-800">Informasi Utama</h3>
-                                {project.estimation && (
+                                {/* Target selesai hasil kajian analis. Sebelumnya lencana ini
+                                    membaca `project.estimation` yang tidak pernah ada, jadi tidak
+                                    pernah tampil sama sekali; nilainya juga dilabeli "Hari Kerja"
+                                    padahal yang tersimpan adalah tanggal target. */}
+                                {analystTargetDateLabel && (
                                     <span className="text-xs px-2.5 py-1 bg-blue-50 text-[#00529C] border border-blue-200 rounded-full font-extrabold shadow-2xs">
-                                        {String(project.estimation).includes('Hari') ? project.estimation : `${project.estimation} Hari Kerja`}
+                                        Target Analis: {analystTargetDateLabel}
                                     </span>
                                 )}
                             </div>
-                            <p className="text-sm text-gray-600 mb-4 leading-relaxed bg-gray-50/70 p-3.5 rounded-xl border border-gray-100/80">
-                                {project.description || "Proyek ini difokuskan pada peningkatan kualitas, penambahan fitur strategis, serta memastikan sistem berjalan sesuai dengan standar keamanan dan performa Bank Nagari."}
+                            {/* Deskripsi apa adanya. Fallback sebelumnya adalah satu paragraf
+                                promosi karangan yang tampil seolah-olah deskripsi asli proyek. */}
+                            <p className={`text-sm mb-4 leading-relaxed p-3.5 rounded-xl border ${project.description
+                                ? 'text-gray-600 bg-gray-50/70 border-gray-100/80'
+                                : 'text-gray-400 italic bg-gray-50/70 border-gray-100/80'
+                                }`}>
+                                {project.description || 'Deskripsi proyek belum diisi.'}
                             </p>
 
                             {/* Tech Stack & Analyst Note Badge jika ada */}
@@ -943,20 +1247,11 @@ export default function TaskDetail() {
                                 </div>
                                 <div>
                                     <span className="block text-[10px] text-gray-400 font-bold uppercase tracking-wider">TENGGAT WAKTU PROYEK</span>
-                                    <span className="block text-sm font-bold text-gray-800">
-                                        {project.deadline && !isNaN(new Date(project.deadline).getTime()) ? (
-                                            new Date(project.deadline).toLocaleDateString('id-ID', {
-                                                day: 'numeric',
-                                                month: 'long',
-                                                year: 'numeric',
-                                            })
-                                        ) : (
-                                            (() => {
-                                                const d = new Date();
-                                                d.setDate(d.getDate() + 30);
-                                                return d.toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' });
-                                            })()
-                                        )}
+                                    {/* Tenggat apa adanya. Fallback sebelumnya menghitung
+                                        "hari ini + 30 hari" lalu menampilkannya seperti tenggat
+                                        resmi, padahal tidak ada tenggat yang pernah ditetapkan. */}
+                                    <span className={`block text-sm font-bold ${projectDeadlineLabel ? 'text-gray-800' : 'text-gray-400 italic'}`}>
+                                        {projectDeadlineLabel || 'Belum ditetapkan'}
                                     </span>
                                 </div>
                             </div>
@@ -1037,10 +1332,56 @@ export default function TaskDetail() {
                                             className="w-full pl-9 pr-4 py-2 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-[#00529C] focus:border-[#00529C] outline-none transition-all"
                                         />
                                     </div>
-                                    <button className="px-3 py-2 border border-gray-200 rounded-lg text-gray-600 text-sm hover:bg-gray-50 transition-colors flex items-center gap-2">
-                                        <Filter size={16} />
-                                        <span className="hidden sm:inline">Filter</span>
-                                    </button>
+                                    {/* Filter status. Tombolnya sebelumnya tidak memiliki `onClick`
+                                        sama sekali, jadi terlihat dapat diklik namun tidak pernah
+                                        menyaring apa pun. */}
+                                    <div className="relative">
+                                        <button
+                                            type="button"
+                                            onClick={() => setIsStatusFilterOpen(prev => !prev)}
+                                            className={`px-3 py-2 border rounded-lg text-sm transition-colors flex items-center gap-2 cursor-pointer ${statusFilter
+                                                ? 'border-[#00529C] bg-blue-50 text-[#00529C] font-semibold'
+                                                : 'border-gray-200 text-gray-600 hover:bg-gray-50'
+                                                }`}
+                                        >
+                                            <Filter size={16} />
+                                            <span className="hidden sm:inline">{statusFilter || 'Filter'}</span>
+                                        </button>
+                                        {isStatusFilterOpen && (
+                                            <>
+                                                <button
+                                                    type="button"
+                                                    aria-label="Tutup filter"
+                                                    onClick={() => setIsStatusFilterOpen(false)}
+                                                    className="fixed inset-0 z-10 cursor-default"
+                                                />
+                                                <div className="absolute left-0 mt-1.5 w-52 bg-white border border-gray-200 rounded-xl shadow-lg z-20 py-1.5">
+                                                    <p className="px-3 py-1.5 text-[10px] font-bold text-gray-400 uppercase tracking-wider">Status Task</p>
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => { setStatusFilter(''); setIsStatusFilterOpen(false); }}
+                                                        className={`w-full text-left px-3 py-2 text-sm hover:bg-gray-50 transition-colors cursor-pointer ${!statusFilter ? 'text-[#00529C] font-semibold' : 'text-gray-600'}`}
+                                                    >
+                                                        Semua Status
+                                                    </button>
+                                                    {TASK_STATUS_FILTERS.map(label => (
+                                                        <button
+                                                            key={label}
+                                                            type="button"
+                                                            onClick={() => { setStatusFilter(label); setIsStatusFilterOpen(false); }}
+                                                            className={`w-full text-left px-3 py-2 text-sm hover:bg-gray-50 transition-colors cursor-pointer flex items-center justify-between ${statusFilter === label ? 'text-[#00529C] font-semibold' : 'text-gray-600'}`}
+                                                        >
+                                                            <span>{label}</span>
+                                                            {/* Hitungannya memakai predikat yang sama dengan tabelnya. */}
+                                                            <span className="text-[10px] text-gray-400">
+                                                                {tasks.filter(t => matchesTaskFilter(t, label)).length}
+                                                            </span>
+                                                        </button>
+                                                    ))}
+                                                </div>
+                                            </>
+                                        )}
+                                    </div>
                                 </div>
                                 {!isViewerOnly && (
                                     <button onClick={() => setIsAddTaskModalOpen(true)} className="px-4 py-2 rounded-lg bg-[#00529C] text-white hover:bg-[#004080] transition-colors text-sm font-semibold flex items-center gap-2 shadow-sm whitespace-nowrap">
@@ -1074,16 +1415,43 @@ export default function TaskDetail() {
                                             const sitApproval = getTaskSitApproval(task.id);
                                             const sitOk = sitApproval?.approved === true;
                                             const sitComment = sitApproval?.comment || '';
+                                            // Hasil UAT Internal (Tahap 2) untuk task ini.
+                                            const uatInfo = getTaskUatInfo(task.id);
+                                            const uatAttachments = uatInfo?.attachments || [];
+                                            const uatVerificationAttachments = uatInfo?.verificationAttachments || [];
+                                            const uatAccepted = uatInfo?.result === 'accepted';
+                                            const uatRevision = uatInfo?.result === 'revision';
+                                            // Change Request UAT yang menaungi task ini, bila ada.
+                                            const uatChangeRequest = getTaskChangeRequest(task.id);
+                                            // Putaran pengembalian yang melahirkan task ini, bila ada. Sengaja
+                                            // dipisahkan dari `hasRevision`: keduanya penanda yang berbeda —
+                                            // `revision_note` datang dari siklus Change Request UAT, sedangkan
+                                            // penanda ini dari pengembalian jalur pengujian oleh Lead QA atau
+                                            // Lead Keamanan Siber, dan hanya penanda ini yang menahan pengajuan
+                                            // ulang jalurnya.
+                                            const returnRoundTag = getTaskReturnRoundTag(task, project);
                                             return (
                                                 <Fragment key={task.id}>
                                                 <tr className="hover:bg-gray-50/70 transition-colors group">
                                                 <td className="py-4 px-4 font-medium text-gray-800">
-                                                    <div className="flex items-center gap-2">
+                                                    <div className="flex items-center gap-2 flex-wrap">
                                                         {task.name}
                                                         {hasRevision && (
                                                             <span title={`Revisi diminta oleh ${task.revisionRequestedBy || '-'} — ${task.revisionNote}`}
                                                                 className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-orange-50 border border-orange-200 text-orange-700 cursor-help">
                                                                 <RotateCcw size={10} /> Revisi
+                                                            </span>
+                                                        )}
+                                                        {/* Lencana penuh, bukan bergaris seperti lencana "Revisi" di
+                                                            sebelahnya. Bobot yang jelas berbeda itu disengaja: dua
+                                                            penanda ini berasal dari dua mekanisme berbeda dan tidak
+                                                            boleh terbaca sebagai satu hal, sekalipun sebuah task dapat
+                                                            memikul keduanya sekaligus. Warna penuhnya sama dengan
+                                                            lencana putaran di halaman Putaran Pengembalian. */}
+                                                        {returnRoundTag && (
+                                                            <span title={returnRoundTag.title}
+                                                                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-amber-500 text-white cursor-help">
+                                                                <Undo2 size={10} /> {returnRoundTag.label}
                                                             </span>
                                                         )}
                                                     </div>
@@ -1092,25 +1460,53 @@ export default function TaskDetail() {
                                                             <span className="font-bold">{task.revisionRequestedBy || 'PM'}:</span> {task.revisionNote}
                                                         </p>
                                                     )}
-                                                    <div className="flex items-center gap-1.5 mt-1.5">
+                                                    {/*
+                                                      * Ringkasan proses persetujuan per task: SIT lebih dulu,
+                                                      * lalu UAT Internal. Sebelumnya hanya baris SIT yang tampil,
+                                                      * sehingga status UAT satu task — diterima atau jenis
+                                                      * revisinya — hanya bisa dilihat dengan membuka wizard
+                                                      * SIT/UAT. Jumlah bukti kini diberi label sumbernya,
+                                                      * sebab dua angka bersebelahan tanpa keterangan tidak
+                                                      * membedakan bukti SIT dari bukti UAT.
+                                                      */}
+                                                    <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
                                                         {hasRevision ? (
+                                                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-orange-50 border border-orange-200 text-orange-700">
+                                                                <RotateCcw size={10} /> Dalam Revisi
+                                                            </span>
+                                                        ) : (
+                                                            <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold border ${sitOk ? 'bg-emerald-50 border-emerald-200 text-emerald-700' : 'bg-gray-50 border-gray-200 text-gray-400'}`}>
+                                                                <CheckCircle size={10} /> SIT {sitOk ? 'Disetujui' : 'Belum di-OK'}
+                                                            </span>
+                                                        )}
+                                                        <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold border ${sitAttachments.length > 0 ? 'bg-blue-50 border-blue-200 text-blue-700' : 'bg-gray-50 border-gray-200 text-gray-400'}`}>
+                                                            <Paperclip size={10} /> {sitAttachments.length} Bukti SIT
+                                                        </span>
+
+                                                        {uatInfo ? (
                                                             <>
-                                                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-orange-50 border border-orange-200 text-orange-700">
-                                                                    <RotateCcw size={10} /> Dalam Revisi
+                                                                <span
+                                                                    title={uatInfo.request || uatInfo.comment || undefined}
+                                                                    className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold border ${uatAccepted
+                                                                        ? 'bg-emerald-50 border-emerald-200 text-emerald-700'
+                                                                        : uatRevision
+                                                                            ? 'bg-orange-50 border-orange-200 text-orange-700'
+                                                                            : 'bg-gray-50 border-gray-200 text-gray-400'}`}
+                                                                >
+                                                                    <ShieldCheck size={10} /> UAT {uatAccepted
+                                                                        ? 'Diterima'
+                                                                        : uatRevision
+                                                                            ? `Revisi ${uatInfo.changeType === 'mayor' ? 'Mayor' : uatInfo.changeType === 'minor' ? 'Minor' : ''}`.trim()
+                                                                            : 'Belum Diuji'}
                                                                 </span>
-                                                                <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold border ${sitAttachments.length > 0 ? 'bg-blue-50 border-blue-200 text-blue-700' : 'bg-gray-50 border-gray-200 text-gray-400'}`}>
-                                                                    <Paperclip size={10} /> {sitAttachments.length} Bukti
+                                                                <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold border ${uatAttachments.length > 0 ? 'bg-violet-50 border-violet-200 text-violet-700' : 'bg-gray-50 border-gray-200 text-gray-400'}`}>
+                                                                    <Paperclip size={10} /> {uatAttachments.length} Bukti UAT
                                                                 </span>
                                                             </>
                                                         ) : (
-                                                            <>
-                                                                <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold border ${sitOk ? 'bg-emerald-50 border-emerald-200 text-emerald-700' : 'bg-gray-50 border-gray-200 text-gray-400'}`}>
-                                                                    <CheckCircle size={10} /> SIT {sitOk ? 'Disetujui' : 'Belum di-OK'}
-                                                                </span>
-                                                                <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold border ${sitAttachments.length > 0 ? 'bg-blue-50 border-blue-200 text-blue-700' : 'bg-gray-50 border-gray-200 text-gray-400'}`}>
-                                                                    <Paperclip size={10} /> {sitAttachments.length} Bukti
-                                                                </span>
-                                                            </>
+                                                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold border bg-gray-50 border-gray-200 text-gray-400">
+                                                                <ShieldCheck size={10} /> {isUatRestartPending ? 'UAT Ulang Belum Dieksekusi' : 'UAT Belum Dijalankan'}
+                                                            </span>
                                                         )}
                                                     </div>
                                                 </td>
@@ -1132,11 +1528,10 @@ export default function TaskDetail() {
                                                     )}
                                                 </td>
                                                 <td className="py-4 px-4 text-gray-500">
-                                                    {new Date(task.deadline).toLocaleDateString('id-ID', {
-                                                        day: 'numeric',
-                                                        month: 'short',
-                                                        year: 'numeric',
-                                                    })}
+                                                    {/* Task tanpa `due_date` sebelumnya menampilkan
+                                                        teks "Invalid Date" karena tanggalnya diformat
+                                                        tanpa pemeriksaan lebih dulu. */}
+                                                    {formatShortDate(task.deadline) || <span className="text-gray-300 italic">Tanpa deadline</span>}
                                                 </td>
                                                 <td className="py-4 px-4">
                                                     <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold border ${getStatusBadge(task.status)}`}>
@@ -1145,9 +1540,37 @@ export default function TaskDetail() {
                                                     </span>
                                                 </td>
                                                 <td className="py-4 px-4 text-center">
+                                                    {/*
+                                                      * Kolom ini menjawab satu pertanyaan: apakah task ini
+                                                      * masih menyimpan pekerjaan revisi. Tingkat perubahannya
+                                                      * ikut disebut karena Minor dan Mayor menahan hal yang
+                                                      * berbeda — Minor menahan persetujuan final UAT, Mayor
+                                                      * menahan rilis sampai SIT ulang lulus.
+                                                      */}
                                                     {hasRevision ? (
-                                                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-orange-100 text-orange-700 border border-orange-200">
-                                                            <RotateCcw size={10} /> Menunggu
+                                                        <div className="flex flex-col items-center gap-1">
+                                                            <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold border ${uatChangeRequest?.type === 'mayor'
+                                                                ? 'bg-red-100 text-red-700 border-red-200'
+                                                                : 'bg-orange-100 text-orange-700 border-orange-200'}`}>
+                                                                <RotateCcw size={10} />
+                                                                {uatChangeRequest?.type === 'mayor'
+                                                                    ? 'Mayor'
+                                                                    : uatChangeRequest?.type === 'minor'
+                                                                        ? 'Minor'
+                                                                        : 'Menunggu'}
+                                                            </span>
+                                                            {uatChangeRequest && (
+                                                                <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[9px] font-bold ${getChangeRequestStatusLabel(uatChangeRequest.status).pillCls}`}>
+                                                                    {getChangeRequestStatusLabel(uatChangeRequest.status).label}
+                                                                </span>
+                                                            )}
+                                                            {!task.assignee && (
+                                                                <span className="text-[9px] font-bold text-red-500">Belum ditugaskan</span>
+                                                            )}
+                                                        </div>
+                                                    ) : uatChangeRequest && ['resolved', 'sit_verified'].includes(uatChangeRequest.status) ? (
+                                                        <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[9px] font-bold ${getChangeRequestStatusLabel(uatChangeRequest.status).pillCls}`}>
+                                                            {getChangeRequestStatusLabel(uatChangeRequest.status).label}
                                                         </span>
                                                     ) : (
                                                         <span className="text-[10px] text-gray-300">—</span>
@@ -1218,7 +1641,7 @@ export default function TaskDetail() {
                                                                                     </div>
                                                                                     <div className="flex-1 min-w-0">
                                                                                         <p className="text-[10px] font-semibold text-gray-700 truncate">{doc.originalName || doc.name}</p>
-                                                                                        <p className="text-[9px] text-gray-400">{doc.size}</p>
+                                                                                        <p className="text-[9px] text-gray-400">{formatDocSizeLabel(doc)}</p>
                                                                                     </div>
                                                                                     <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-all">
                                                                                         {doc.url && (
@@ -1287,7 +1710,7 @@ export default function TaskDetail() {
                                                                                 </div>
                                                                                 <div className="flex-1 min-w-0">
                                                                                     <p className="text-[10px] font-semibold text-gray-700 truncate">{doc.originalName || doc.name}</p>
-                                                                                    <p className="text-[9px] text-gray-400">{doc.size}</p>
+                                                                                    <p className="text-[9px] text-gray-400">{formatDocSizeLabel(doc)}</p>
                                                                                 </div>
                                                                                 <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-all">
                                                                                     {doc.url && (
@@ -1308,6 +1731,135 @@ export default function TaskDetail() {
                                                                     </div>
                                                                 )}
                                                             </div>
+                                                        </div>
+
+                                                        {/* ── Hasil UAT Internal & Bukti (Tahap 2 UAT) ── */}
+                                                        {/*
+                                                          * Bagian ini melengkapi blok SIT di atas. Sebelumnya detail
+                                                          * task hanya memuat sisi SIT, sehingga hasil UAT Internal —
+                                                          * diterima atau direvisi, jenis perubahannya, permintaan
+                                                          * penguji, dan lampirannya — tidak pernah terlihat dari
+                                                          * halaman manajemen task.
+                                                          */}
+                                                        <div className="mb-4">
+                                                            <div className="flex items-center gap-2 mb-2">
+                                                                <ShieldCheck size={13} className="text-violet-600" />
+                                                                <p className="text-[11px] font-bold text-gray-500 uppercase tracking-wider">Hasil UAT Internal & Bukti</p>
+                                                            </div>
+                                                            {!uatInfo ? (
+                                                                <div className="rounded-xl border border-gray-200 bg-gray-50/60 p-3 text-xs text-gray-400 italic flex items-center gap-1.5">
+                                                                    <ShieldCheck size={12} /> {isUatRestartPending
+                                                                        ? 'Revisi mayor membuat UAT dijalankan ulang dari Tahap 1. Hasil UAT task ini akan tampil kembali setelah skenarionya dieksekusi pada putaran baru.'
+                                                                        : 'Task ini belum diuji pada UAT Internal.'}
+                                                                </div>
+                                                            ) : (
+                                                                <div className={`rounded-xl border p-3 text-xs ${uatAccepted ? 'bg-emerald-50/60 border-emerald-200' : uatRevision ? 'bg-orange-50/60 border-orange-200' : 'bg-gray-50/60 border-gray-200'}`}>
+                                                                    <div className="flex items-center justify-between flex-wrap gap-2">
+                                                                        <div className="flex items-center gap-2">
+                                                                            {uatAccepted
+                                                                                ? <CheckCircle size={15} className="text-emerald-600" />
+                                                                                : <AlertCircle size={15} className="text-orange-500" />}
+                                                                            <span className={`font-bold ${uatAccepted ? 'text-emerald-800' : uatRevision ? 'text-orange-800' : 'text-gray-600'}`}>
+                                                                                {uatAccepted
+                                                                                    ? 'Diterima pada UAT Internal'
+                                                                                    : uatRevision
+                                                                                        ? `Diminta Revisi ${uatInfo.changeType === 'mayor' ? 'Mayor' : uatInfo.changeType === 'minor' ? 'Minor' : ''}`.trim()
+                                                                                        : 'Belum Ada Hasil UAT'}
+                                                                            </span>
+                                                                            {uatInfo.source === 'additional_request' && (
+                                                                                <span className="px-2 py-0.5 rounded-full text-[9px] font-bold bg-violet-100 text-violet-700 border border-violet-200">
+                                                                                    Permintaan Tambahan UAT
+                                                                                </span>
+                                                                            )}
+                                                                        </div>
+                                                                    </div>
+                                                                    {uatInfo.title && (
+                                                                        <p className="mt-2 text-gray-600">
+                                                                            <span className="font-bold text-gray-500">Skenario / Judul:</span> {uatInfo.title}
+                                                                        </p>
+                                                                    )}
+                                                                    {uatInfo.request && (
+                                                                        <p className="mt-2 text-gray-700 bg-white/70 rounded-lg p-2 border border-orange-100">
+                                                                            <span className="font-bold text-orange-700">Permintaan Penguji:</span> {uatInfo.request}
+                                                                        </p>
+                                                                    )}
+                                                                    {uatInfo.comment && (
+                                                                        <p className="mt-2 text-gray-700 bg-white/70 rounded-lg p-2 border border-gray-100">
+                                                                            <span className="font-bold text-gray-600">Catatan UAT:</span> {uatInfo.comment}
+                                                                        </p>
+                                                                    )}
+                                                                    {uatAttachments.length === 0 ? (
+                                                                        <p className="mt-2 text-gray-400 italic flex items-center gap-1.5">
+                                                                            <Paperclip size={12} /> Belum ada bukti dilampirkan untuk task ini di UAT Internal.
+                                                                        </p>
+                                                                    ) : (
+                                                                        <div className="mt-2">
+                                                                            <p className="font-bold text-gray-600 flex items-center gap-1.5 mb-1.5">
+                                                                                <Paperclip size={12} /> Bukti UAT ({uatAttachments.length})
+                                                                            </p>
+                                                                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+                                                                                {uatAttachments.map(doc => (
+                                                                                    <div key={doc.docId || doc.id || doc.name} className="flex items-center gap-2 p-2 bg-white rounded-lg border border-gray-100 hover:border-violet-200 transition-all group">
+                                                                                        <div className="w-7 h-7 bg-violet-100 text-violet-600 rounded-md flex items-center justify-center font-bold text-[8px] shrink-0">
+                                                                                            {doc.type || 'FILE'}
+                                                                                        </div>
+                                                                                        <div className="flex-1 min-w-0">
+                                                                                            <p className="text-[10px] font-semibold text-gray-700 truncate">{doc.originalName || doc.name}</p>
+                                                                                            <p className="text-[9px] text-gray-400">{formatDocSizeLabel(doc)}</p>
+                                                                                        </div>
+                                                                                        <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-all">
+                                                                                            <button onClick={() => viewSitAttachment(doc, 'uat')} title="Lihat"
+                                                                                                className="p-1 text-gray-500 hover:text-violet-600 rounded hover:bg-violet-50 transition-colors cursor-pointer">
+                                                                                                <Eye size={12} />
+                                                                                            </button>
+                                                                                            <button onClick={() => downloadSitAttachment(doc, 'uat')} title="Unduh"
+                                                                                                className="p-1 text-gray-500 hover:text-indigo-600 rounded hover:bg-indigo-50 transition-colors cursor-pointer">
+                                                                                                <Download size={12} />
+                                                                                            </button>
+                                                                                        </div>
+                                                                                    </div>
+                                                                                ))}
+                                                                            </div>
+                                                                        </div>
+                                                                    )}
+                                                                    {/*
+                                                                      * Lampiran dari alur verifikasi terarah revisi Mayor yang
+                                                                      * sudah dihapus. Tidak akan ada yang baru, tetapi berkas
+                                                                      * yang sudah pernah diunggah tetap ditampilkan agar bukti
+                                                                      * lama tidak hilang dari konteks task-nya.
+                                                                      */}
+                                                                    {uatVerificationAttachments.length > 0 && (
+                                                                        <div className="mt-2 pt-2 border-t border-violet-200">
+                                                                            <p className="font-bold text-violet-700 flex items-center gap-1.5 mb-1.5">
+                                                                                <Paperclip size={12} /> Bukti Verifikasi Revisi ({uatVerificationAttachments.length}) — arsip alur lama
+                                                                            </p>
+                                                                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+                                                                                {uatVerificationAttachments.map(doc => (
+                                                                                    <div key={doc.docId || doc.id || doc.name} className="flex items-center gap-2 p-2 bg-white rounded-lg border border-gray-100 hover:border-violet-200 transition-all group">
+                                                                                        <div className="w-7 h-7 bg-violet-100 text-violet-600 rounded-md flex items-center justify-center font-bold text-[8px] shrink-0">
+                                                                                            {doc.type || 'FILE'}
+                                                                                        </div>
+                                                                                        <div className="flex-1 min-w-0">
+                                                                                            <p className="text-[10px] font-semibold text-gray-700 truncate">{doc.originalName || doc.name}</p>
+                                                                                            <p className="text-[9px] text-gray-400">{formatDocSizeLabel(doc)}</p>
+                                                                                        </div>
+                                                                                        <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-all">
+                                                                                            <button onClick={() => viewSitAttachment(doc, 'uat')} title="Lihat"
+                                                                                                className="p-1 text-gray-500 hover:text-violet-600 rounded hover:bg-violet-50 transition-colors cursor-pointer">
+                                                                                                <Eye size={12} />
+                                                                                            </button>
+                                                                                            <button onClick={() => downloadSitAttachment(doc, 'uat')} title="Unduh"
+                                                                                                className="p-1 text-gray-500 hover:text-indigo-600 rounded hover:bg-indigo-50 transition-colors cursor-pointer">
+                                                                                                <Download size={12} />
+                                                                                            </button>
+                                                                                        </div>
+                                                                                    </div>
+                                                                                ))}
+                                                                            </div>
+                                                                        </div>
+                                                                    )}
+                                                                </div>
+                                                            )}
                                                         </div>
 
                                                         <div className="flex items-center justify-between mb-2">
@@ -1346,23 +1898,45 @@ export default function TaskDetail() {
                                             </Fragment>
                                             );
                                         })}
+                                        {/* Tanpa baris ini, tabel yang kosong hanya menyisakan
+                                            barisan header tanpa keterangan apa pun — tampak seperti
+                                            gagal memuat, padahal bisa jadi memang belum ada task
+                                            atau pencariannya tidak menemukan apa-apa. */}
+                                        {filteredTasks.length === 0 && (
+                                            <tr>
+                                                <td colSpan={6} className="py-12 text-center">
+                                                    <FolderOpen size={28} className="mx-auto text-gray-300 mb-2" />
+                                                    <p className="text-sm text-gray-500 font-semibold">
+                                                        {tasks.length === 0 ? 'Belum ada task pada proyek ini.' : 'Tidak ada task yang cocok.'}
+                                                    </p>
+                                                    {tasks.length > 0 && (
+                                                        <p className="text-xs text-gray-400 mt-1">
+                                                            Ubah kata pencarian atau hapus filter status.
+                                                        </p>
+                                                    )}
+                                                </td>
+                                            </tr>
+                                        )}
                                     </tbody>
                                 </table>
                             </div>
 
-                            {/* Pagination */}
+                            {/* Ringkasan jumlah baris. Sebelumnya di sini juga ada dua tombol
+                                panah halaman yang selalu `disabled` — tabel ini tidak memakai
+                                paginasi, jadi kontrol itu dihapus daripada dibiarkan mati. */}
                             <div className="p-4 border-t border-gray-200 bg-gray-50/50 flex justify-between items-center mt-auto">
                                 <span className="text-sm text-gray-500">
-                                    Menampilkan {filteredTasks.length} task
+                                    Menampilkan {filteredTasks.length} dari {tasks.length} task
                                 </span>
-                                <div className="flex gap-1">
-                                    <button className="p-1 rounded text-gray-400 hover:bg-gray-200 disabled:opacity-50" disabled>
-                                        <ChevronLeft size={18} />
+                                {statusFilter && (
+                                    <button
+                                        type="button"
+                                        onClick={() => setStatusFilter('')}
+                                        className="text-xs font-semibold text-[#00529C] hover:underline cursor-pointer"
+                                    >
+                                        Hapus filter &quot;{statusFilter}&quot;
                                     </button>
-                                    <button className="p-1 rounded text-gray-400 hover:bg-gray-200 disabled:opacity-50" disabled>
-                                        <ChevronRight size={18} />
-                                    </button>
-                                </div>
+                                )}
                             </div>
                         </>
                     )}
@@ -1378,6 +1952,7 @@ export default function TaskDetail() {
                             addNotification={addNotification}
                             navigate={navigate}
                             isViewer={isViewerOnly}
+                            initialSitStep={searchParams.get('sitStep')}
                             initialUatStep={searchParams.get('uatStep')}
                         />
                     )}
@@ -1874,24 +2449,24 @@ export default function TaskDetail() {
                                     Project Manager (PM) Penanggung Jawab *
                                 </label>
                                 <select
-                                    value={editProjectForm.pmName}
-                                    onChange={(e) => setEditProjectForm({...editProjectForm, pmName: e.target.value})}
+                                    value={editProjectForm.pmId}
+                                    onChange={(e) => setEditProjectForm({...editProjectForm, pmId: e.target.value})}
                                     className="w-full px-3.5 py-2.5 border border-gray-300 rounded-xl text-sm font-semibold focus:ring-2 focus:ring-[#00529C] outline-none bg-white"
+                                    disabled={isPmCandidatesLoading || pmCandidates.length === 0}
                                 >
-                                    <option value="">-- Pilih Project Manager --</option>
-                                    {[
-                                        'Budi Santoso',
-                                        'Dewi Lestari',
-                                        'Andi Wijaya',
-                                        'Citra Kirana',
-                                    ].map(name => {
-                                        const activeCount = (projects || []).filter(p => {
-                                            const pmNameStr = typeof p.pm === 'object' ? (p.pm?.name || '') : String(p.pmName || p.pm || p.assignedPM || '');
-                                            return pmNameStr.toLowerCase().includes(name.toLowerCase()) && p.status !== 'LIVE_PRODUCTION' && p.status !== 'COMPLETED';
-                                        }).length;
+                                    <option value="">
+                                        {isPmCandidatesLoading
+                                            ? 'Memuat daftar Project Manager...'
+                                            : pmCandidates.length === 0
+                                                ? 'Tidak ada akun Project Manager tersedia'
+                                                : '-- Pilih Project Manager --'}
+                                    </option>
+                                    {pmCandidates.map(candidate => {
+                                        const activeCount = pmActiveProjectCount.get(Number(candidate.id)) || 0;
+
                                         return (
-                                            <option key={name} value={name}>
-                                                {name} (Beban: {activeCount} Proyek Aktif)
+                                            <option key={candidate.id} value={String(candidate.id)}>
+                                                {candidate.name}{candidate.division ? ` — ${candidate.division}` : ''} (Beban: {activeCount} Proyek Aktif)
                                             </option>
                                         );
                                     })}
@@ -1931,15 +2506,17 @@ export default function TaskDetail() {
                                 <button
                                     type="button"
                                     onClick={() => setIsEditProjectModalOpen(false)}
-                                    className="px-4 py-2 border border-gray-300 text-gray-700 rounded-xl font-bold text-xs hover:bg-gray-50 transition-colors cursor-pointer"
+                                    disabled={isSavingProjectEdit}
+                                    className="px-4 py-2 border border-gray-300 text-gray-700 rounded-xl font-bold text-xs hover:bg-gray-50 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                                 >
                                     Batal
                                 </button>
                                 <button
                                     type="submit"
-                                    className="px-5 py-2 bg-[#00529C] text-white rounded-xl font-bold text-xs hover:bg-[#004080] transition-colors shadow-md shadow-[#00529C]/20 cursor-pointer"
+                                    disabled={isSavingProjectEdit}
+                                    className="px-5 py-2 bg-[#00529C] text-white rounded-xl font-bold text-xs hover:bg-[#004080] transition-colors shadow-md shadow-[#00529C]/20 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                                 >
-                                    Simpan Perubahan
+                                    {isSavingProjectEdit ? 'Menyimpan...' : 'Simpan Perubahan'}
                                 </button>
                             </div>
                         </form>
@@ -1973,28 +2550,29 @@ export default function TaskDetail() {
  * dengan fallback fetch API setelah upload untuk memastikan daftar terbaru.
  */
 function DocumentSection({ project, user }) {
-    const [docs, setDocs] = useState([]);
     const [loading, setLoading] = useState(false);
     const [uploading, setUploading] = useState(false);
-    const [selectedDocType, setSelectedDocType] = useState('BRD');
     const [searchQuery, setSearchQuery] = useState('');
     const [previewDoc, setPreviewDoc] = useState(null);
     const fileInputRef = useRef(null);
 
-    const ALLOWED_EXTS = ['.pdf', '.xls', '.xlsx', '.jpg', '.jpeg', '.png', '.zip'];
-    const MAX_SIZE_MB = 5;
+    // Tab dokumen di halaman ini tidak menyediakan pemilih jenis dokumen, sehingga
+    // unggahan dari sini selalu diberi jenis BRD. Sebelumnya nilai ini disimpan di
+    // state dengan setter yang tidak pernah dipanggil, yang menyiratkan ada pemilih.
+    const selectedDocType = 'BRD';
 
     // Sumber utama: project.documents (sudah di-embed backend) — instant, tanpa request tambahan.
-    // Dokumen SIT/UAT (bukti task, hasil review, berita acara, dsb.) disembunyikan
-    // dari daftar umum — tampil di panel per-task / wizard SIT-UAT.
-    const HIDDEN_DOC_TYPES = ['SIT_TASK_EVIDENCE', 'SIT_SIGNOFF', 'UAT_PREP', 'UAT_EXEC', 'UAT_APPROVAL'];
-    const visibleDocs = (list) => Array.isArray(list)
-        ? list.filter(d => !HIDDEN_DOC_TYPES.includes((d.document_type || d.type || '').toUpperCase()))
-        : [];
-
-    useEffect(() => {
-        setDocs(visibleDocs(project?.documents));
-    }, [project?.id, project?.documents]);
+    // Daftar dokumen dihitung langsung dari data proyek — tidak lagi disalin ke state
+    // oleh effect. Hasil pengambilan ulang setelah unggah dipakai sebagai penimpa
+    // sementara, dan penimpa itu dibuang begitu data dokumen proyek ikut diperbarui.
+    const projectDocs = useMemo(() => visibleDocs(project?.documents), [project?.documents]);
+    const [refreshedDocs, setRefreshedDocs] = useState(null);
+    const [syncedDocuments, setSyncedDocuments] = useState(project?.documents);
+    if (project?.documents !== syncedDocuments) {
+        setSyncedDocuments(project?.documents);
+        setRefreshedDocs(null);
+    }
+    const docs = refreshedDocs ?? projectDocs;
 
     // Refresh dari API (dipakai setelah upload agar daftar selalu terbaru)
     const fetchDocs = async () => {
@@ -2003,7 +2581,7 @@ function DocumentSection({ project, user }) {
         try {
             const res = await documentService.getAll(project.id);
             if (res && res.data) {
-                setDocs(visibleDocs(res.data));
+                setRefreshedDocs(visibleDocs(res.data));
             }
         } catch {
             // Abaikan error — data embedded tetap tersedia
@@ -2018,12 +2596,12 @@ function DocumentSection({ project, user }) {
         if (!file) return;
 
         const ext = '.' + (file.name.split('.').pop() || '').toLowerCase();
-        if (!ALLOWED_EXTS.includes(ext)) {
+        if (!ALLOWED_DOC_EXTS.includes(ext)) {
             toast.error('Format yang diizinkan: PDF, Excel (.xls/.xlsx), Gambar (.jpg/.jpeg/.png), ZIP!');
             return;
         }
-        if (file.size > MAX_SIZE_MB * 1024 * 1024) {
-            toast.error(`Ukuran file melebihi batas ${MAX_SIZE_MB}MB!`);
+        if (file.size > MAX_DOC_SIZE_MB * 1024 * 1024) {
+            toast.error(`Ukuran file melebihi batas ${MAX_DOC_SIZE_MB}MB!`);
             return;
         }
 

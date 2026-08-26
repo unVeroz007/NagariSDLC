@@ -1,16 +1,16 @@
 import { useState, useMemo, useEffect, useRef } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
-import { useProjects, getProjectRealDocuments, saveFileToStore } from '../../contexts/ProjectContext';
+import { useProjects } from '../../contexts/ProjectContext';
+import { getProjectRealDocuments } from '../../utils/projectDocuments';
 import { useNotifications } from '../../contexts/NotificationContext';
 import LoadingSpinner from '../../components/LoadingSpinner';
 import DocumentViewerModal from '../../components/DocumentViewerModal';
 import toast from 'react-hot-toast';
-import { generateDocumentName, DOCUMENT_TYPES, formatFileSize } from '../../utils/documentNaming';
-import { documentService } from '../../services/api';
+import { DOCUMENT_TYPES, formatFileSize } from '../../utils/documentNaming';
+import { documentService, qaRequestService } from '../../services/api';
 import {
   PROJECT_STATUS,
-  TRACK_STATUS,
-  canAdvanceStatusToReadyForQa,
+  PROJECT_STATUS_LABEL,
   canStartQaTrack,
   getQaTrackStatus,
   isTrackActive,
@@ -32,20 +32,35 @@ import {
   CheckCircle2,
   Copy,
   Eye,
-  Download,
   Building,
   User,
-  ShieldCheck,
 } from 'lucide-react';
+
+/** Batas ukuran unggahan dokumen pendukung, cerminan `DocumentController::upload()`. */
+const MAX_UPLOAD_SIZE_BYTES = 5 * 1024 * 1024;
+
+/**
+ * Bebaskan URL pratinjau berkas yang sudah tidak dipakai.
+ *
+ * `URL.createObjectURL` menahan berkasnya di memori sampai URL-nya dicabut.
+ * Membuang acuannya dari state saja tidak cukup — tanpa pencabutan, setiap berkas
+ * yang pernah dipilih tetap tertahan sepanjang tab dibuka, termasuk berkas draf
+ * proyek yang sudah diganti dan berkas yang pengajuannya sudah terkirim.
+ */
+const releaseFilePreviews = (files) => {
+  (files || []).forEach((file) => {
+    if (file?.url) URL.revokeObjectURL(file.url);
+  });
+};
 
 export default function QARequest() {
   const { user } = useAuth();
-  const { projects, isLoading, updateProject } = useProjects();
+  const { projects, isLoading, refreshData } = useProjects();
   const { addNotification } = useNotifications();
   const navigate = useNavigate();
   const rightPanelRef = useRef(null);
 
-  const [selectedProject, setSelectedProject] = useState(null);
+  const [selectedProjectId, setSelectedProjectId] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedDocPreview, setSelectedDocPreview] = useState(null);
 
@@ -90,7 +105,11 @@ export default function QARequest() {
       return canStartQaTrack(st) && !isAlreadySubmittedQA;
     });
 
-    const isPrivileged = user?.role && ['super_admin', 'lead_group', 'head_of_it', 'development_lead'].includes(user.role);
+    // Hanya Super Admin yang melihat seluruh proyek. Peran lain — termasuk
+    // `lead_group`, `head_of_it`, dan `development_lead` yang sebelumnya diistimewakan
+    // di sini — akan ditolak `TestingTrackService::submitRequest()` karena pengajuan
+    // jalur pengujian hanya boleh dilakukan Analis Pengembangan pemegang disposisi.
+    const isPrivileged = user?.role === 'super_admin';
     if (!isPrivileged && user?.id) {
       const pmId = user.id;
       list = list.filter(p => {
@@ -100,8 +119,12 @@ export default function QARequest() {
     }
 
     if (searchTerm.trim()) {
-      const term = searchTerm.toLowerCase();
+      const term = searchTerm.trim().toLowerCase();
+      // Nomor pengajuan ikut dicari karena itulah yang tampil pada kartu. Sebelumnya
+      // hanya id numerik database yang dicocokkan, sehingga mengetikkan nomor yang
+      // terlihat di layar tidak menemukan apa pun.
       return list.filter(p =>
+        String(p.reqId || p.req_id || '').toLowerCase().includes(term) ||
         String(p.id).toLowerCase().includes(term) ||
         String(p.name).toLowerCase().includes(term) ||
         String(p.division).toLowerCase().includes(term)
@@ -113,79 +136,117 @@ export default function QARequest() {
 
 
 
-  // Auto Select Proyek Pertama jika belum ada yang terpilih
-  useEffect(() => {
-    if (readyProjects.length > 0 && !selectedProject) {
-      setSelectedProject(readyProjects[0]);
-      setFormData(prev => ({
-        ...prev,
-        stagingUrl: readyProjects[0].stagingUrl || import.meta.env.VITE_STAGING_URL,
-        targetDate: readyProjects[0].targetDate || ''
-      }));
-    }
-  }, [readyProjects]);
+  /**
+   * Isi awal form untuk satu proyek.
+   *
+   * Alamat lingkungan uji hanya diambil dari data proyek. Sebelumnya `VITE_STAGING_URL`
+   * dipakai sebagai cadangan, sehingga alamat bawaan lingkungan ikut terkirim seolah-olah
+   * itu alamat proyek yang diajukan.
+   */
+  const buildFormStateFor = (project) => ({
+    targetDate: project?.targetDate || '',
+    stagingUrl: project?.stagingUrl || project?.staging_url || '',
+    testPriority: 'Normal',
+    technicalNotes: '',
+  });
 
-  // Auto scroll ke atas saat proyek terpilih berubah
+  /**
+   * Proyek yang sedang dibuka.
+   *
+   * State hanya menyimpan id; objeknya dicari ulang dari daftar terbaru supaya isi
+   * panel ikut diperbarui saat data proyek berubah (polling). Bila belum ada pilihan
+   * — atau pilihan lama sudah keluar dari daftar karena pengajuannya selesai —
+   * proyek pertama pada daftar yang dipakai.
+   */
+  const selectedProject = useMemo(() => {
+    const picked = selectedProjectId
+      ? readyProjects.find(p => String(p.id) === String(selectedProjectId))
+      : null;
+    return picked || readyProjects[0] || null;
+  }, [readyProjects, selectedProjectId]);
+
+  // Isian formulir adalah draf milik satu proyek: saat proyeknya berganti, draf
+  // disusun ulang pada render yang sama (pola "sesuaikan state saat prop berubah"),
+  // bukan lewat effect yang menyisakan satu render berisi isian proyek sebelumnya.
+  const [formProjectId, setFormProjectId] = useState(null);
+  if ((selectedProject?.id ?? null) !== formProjectId) {
+    setFormProjectId(selectedProject?.id ?? null);
+    setFormData(buildFormStateFor(selectedProject));
+    // Berkas draf milik proyek sebelumnya dibuang bersama drafnya, jadi URL
+    // pratinjaunya dicabut di sini juga.
+    releaseFilePreviews(uploadedFiles);
+    setUploadedFiles([]);
+  }
+
+  // Pembersihan saat komponen dilepas. Effect-nya hanya berjalan sekali, jadi daftar
+  // berkas dibaca lewat ref — bukan dari closure yang sudah usang.
+  const uploadedFilesRef = useRef([]);
   useEffect(() => {
-    if (selectedProject) {
+    uploadedFilesRef.current = uploadedFiles;
+  }, [uploadedFiles]);
+  useEffect(() => () => releaseFilePreviews(uploadedFilesRef.current), []);
+
+  const handleSelectProject = (project) => {
+    setSelectedProjectId(project.id);
+  };
+
+  // Auto scroll ke atas saat proyek terpilih berubah. Yang dipantau id-nya, bukan
+  // objek proyeknya: objek dibuat ulang setiap polling.
+  const selectedProjectIdForScroll = selectedProject?.id ?? null;
+  useEffect(() => {
+    if (selectedProjectIdForScroll) {
       scrollPageToTop();
     }
-  }, [selectedProject?.id]);
+  }, [selectedProjectIdForScroll]);
 
   const handleChange = (e) => {
     const { name, value } = e.target;
     setFormData(prev => ({ ...prev, [name]: value }));
   };
 
-  const handleApplyPresetNote = (presetText) => {
-    setFormData(prev => ({
-      ...prev,
-      technicalNotes: prev.technicalNotes ? `${prev.technicalNotes}\n- ${presetText}` : `- ${presetText}`
-    }));
-    toast.success('Instruksi preset berhasil ditambahkan!');
-  };
-
   const handleFileUpload = (e) => {
     const files = Array.from(e.target.files);
-    const MAX_SIZE = 5 * 1024 * 1024;
-    const oversizedFiles = files.filter(f => f.size > MAX_SIZE);
+    const oversizedFiles = files.filter(f => f.size > MAX_UPLOAD_SIZE_BYTES);
     if (oversizedFiles.length > 0) {
       const fileNames = oversizedFiles.map(f => `"${f.name}"`).join(', ');
       toast.error(`Dokumen ${fileNames} ditolak karena ukurannya melebihi batas maksimal 5MB!`);
     }
-    const validFiles = files.filter(f => f.size <= MAX_SIZE);
+    const validFiles = files.filter(f => f.size <= MAX_UPLOAD_SIZE_BYTES);
     if (validFiles.length === 0) {
       if (e.target) e.target.value = '';
       return;
     }
-    const newFiles = validFiles.map((file) => {
-      const url = URL.createObjectURL(file);
-      saveFileToStore(file.name, url);
-      const ext = file.name.split('.').pop() || '';
-      const autoName = generateDocumentName(
-        selectedProject?.req_id || selectedProject?.id,
-        DOCUMENT_TYPES.QA_REPORT.code,
-        selectedProject?.title || selectedProject?.name
-      ) + '.' + ext;
-      return {
-        name: autoName,
-        originalName: file.name,
-        size: formatFileSize(file.size),
-        type: 'QA_REPORT',
-        rawFile: file,
-        url: url,
-      };
-    });
+    // Nama dokumen final dibuat backend, jadi di sini cukup menahan berkas aslinya
+    // beserta URL objek untuk pratinjau.
+    const newFiles = validFiles.map((file) => ({
+      name: file.name,
+      originalName: file.name,
+      size: formatFileSize(file.size),
+      type: 'QA_REPORT',
+      rawFile: file,
+      url: URL.createObjectURL(file),
+    }));
     setUploadedFiles(prev => [...prev, ...newFiles]);
     if (e.target) e.target.value = '';
-    toast.success(`${newFiles.length} file dokumen pengujian berhasil diunggah!`);
+    toast.success(`${newFiles.length} file dokumen pengujian siap diunggah!`);
   };
 
   const handleRemoveFile = (index) => {
-    setUploadedFiles(prev => prev.filter((_, i) => i !== index));
+    setUploadedFiles(prev => {
+      const removed = prev[index];
+      if (removed?.url) URL.revokeObjectURL(removed.url);
+      return prev.filter((_, i) => i !== index);
+    });
     toast.success('File berhasil dihapus.');
   };
 
+  /**
+   * Kirim pengajuan ke jalur Pengujian QA.
+   *
+   * Pengajuan memakai endpoint jalur (`POST /qa-requests/submit`), bukan pembaruan proyek.
+   * Endpoint itu yang menyetel `qa_status`, menaikkan status utama bila transisinya sah,
+   * dan menuliskan jejak audit pengajuan — sehingga aturannya tinggal satu di backend.
+   */
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!selectedProject) {
@@ -199,55 +260,58 @@ export default function QARequest() {
 
     setIsSubmitting(true);
     try {
-      const liveProj = (projects || []).find(p => String(p.id) === String(selectedProject.id)) || selectedProject;
-
       // Unggah dokumen pendukung ke document vault supaya benar-benar tersimpan
-      // dan namanya di-masking oleh backend. Payload `documents` pada endpoint
-      // update proyek tidak pernah dibaca backend, jadi tidak dipakai lagi.
+      // dan namanya dibuat backend. Payload `documents` pada endpoint update proyek
+      // tidak pernah dibaca backend, jadi tidak dipakai lagi.
+      const filesToUpload = uploadedFiles.filter(f => f.rawFile);
       const failedUploads = [];
-      for (const uploadedFile of uploadedFiles) {
-        if (!uploadedFile.rawFile) continue;
+      const succeededUploads = [];
+      for (const uploadedFile of filesToUpload) {
         try {
           await documentService.upload(uploadedFile.rawFile, {
             project_id: selectedProject.id,
             document_type: DOCUMENT_TYPES.QA_REPORT.code,
             original_filename: uploadedFile.originalName || uploadedFile.rawFile.name,
           });
+          succeededUploads.push(uploadedFile.originalName || uploadedFile.name);
         } catch (uploadErr) {
           failedUploads.push(uploadedFile.originalName || uploadedFile.name);
           toast.error(`Gagal mengunggah "${uploadedFile.originalName || uploadedFile.name}": ${uploadErr.message}`);
         }
       }
 
-      if (failedUploads.length > 0 && failedUploads.length === uploadedFiles.filter(f => f.rawFile).length) {
+      if (filesToUpload.length > 0 && failedUploads.length === filesToUpload.length) {
         throw new Error('Seluruh dokumen pendukung gagal diunggah. Pengajuan QA dibatalkan.');
       }
 
-      // qa_status adalah satu-satunya penanda pengajuan jalur QA. Status utama
-      // hanya dinaikkan bila transisi READY_FOR_QA memang sah dari status saat ini,
-      // sehingga jalur Siber yang sedang berjalan tidak tertimpa.
-      //
-      // Detail pengajuan disimpan pada kolom yang benar-benar ada: target selesai
-      // ke current_stage_deadline dan staging ke staging_url. Prioritas & catatan
-      // teknis dikirim sebagai catatan transisi supaya tetap terekam pada
-      // project_status_histories dan activity_logs (belum ada kolom khususnya).
+      // Prioritas & catatan teknis belum memiliki kolom sendiri, jadi dirangkum sebagai
+      // catatan pengajuan yang tersimpan pada jejak audit perubahan jalur pengujian.
       const submissionNote = [
-        `Pengajuan Pengujian QA oleh ${user?.name || 'Project Manager'}.`,
+        `Pengajuan Pengujian QA oleh ${user?.name || 'Analis Pengembangan'}.`,
         `Prioritas pengujian: ${formData.testPriority}.`,
-        `Target selesai: ${formData.targetDate}.`,
-        formData.stagingUrl ? `Staging URL: ${formData.stagingUrl}.` : null,
         formData.technicalNotes ? `Catatan teknis: ${formData.technicalNotes}` : null,
       ].filter(Boolean).join(' ');
 
-      await updateProject(selectedProject.id, {
-        qa_status: TRACK_STATUS.SUBMITTED,
-        ...(canAdvanceStatusToReadyForQa(liveProj.status)
-          ? { status: PROJECT_STATUS.READY_FOR_QA }
-          : {}),
-        staging_url: formData.stagingUrl,
-        current_stage_deadline: formData.targetDate,
-        notes: submissionNote,
-      });
+      try {
+        await qaRequestService.submitRequest({
+          project_id: selectedProject.id,
+          staging_url: formData.stagingUrl.trim() || null,
+          target_completion_date: formData.targetDate,
+          notes: submissionNote,
+        });
+      } catch (submitErr) {
+        // Dokumen yang sudah lolos unggah tetap tersimpan di Document Vault meski
+        // pengajuannya ditolak. Tanpa keterangan ini pengaju akan mengunggah ulang
+        // berkas yang sama dan meninggalkan duplikat di vault.
+        if (succeededUploads.length > 0) {
+          throw new Error(
+            `${submitErr.message} Catatan: ${succeededUploads.length} dokumen sudah tersimpan di `
+            + 'Manajemen Dokumen — tidak perlu diunggah ulang saat mencoba kembali.',
+            { cause: submitErr }
+          );
+        }
+        throw submitErr;
+      }
 
       addNotification(
         'Pengajuan QA Berhasil',
@@ -256,21 +320,56 @@ export default function QARequest() {
         '/workspace/qa'
       );
 
-      toast.success(`Pengajuan QA untuk proyek ${selectedProject.name} berhasil dikirim!`);
-      
-      setTimeout(() => {
-        setIsSubmitting(false);
-        navigate('/workspace/qa');
-      }, 600);
+      // Kegagalan unggah sebagian tidak boleh berakhir sebagai pesan sukses tunggal.
+      // Pengajuannya memang terkirim, tetapi QA Tester akan bekerja tanpa sebagian
+      // dokumen yang pengaju yakin sudah terlampir.
+      if (failedUploads.length > 0) {
+        toast.error(
+          `Pengajuan QA untuk ${selectedProject.name} terkirim, tetapi ${failedUploads.length} dari `
+          + `${filesToUpload.length} dokumen gagal diunggah. Unggah ulang lewat Manajemen Dokumen.`,
+          { duration: 8000 }
+        );
+      } else {
+        toast.success(`Pengajuan QA untuk proyek ${selectedProject.name} berhasil dikirim!`);
+      }
+
+      // Halaman ini segera ditinggalkan, jadi URL pratinjaunya dicabut lebih dahulu.
+      releaseFilePreviews(uploadedFiles);
+      setUploadedFiles([]);
+
+      refreshData();
+      navigate('/workspace/qa');
     } catch (err) {
       toast.error(err.message || 'Gagal mengajukan proyek ke QA.');
+    } finally {
       setIsSubmitting(false);
     }
   };
 
-  const handleCopyStagingUrl = (url) => {
-    navigator.clipboard.writeText(url);
-    toast.success('Staging URL berhasil disalin ke clipboard!');
+  /**
+   * Salin alamat lingkungan uji ke papan klip.
+   *
+   * Kolomnya boleh kosong (proyek tanpa lingkungan uji), jadi salinan kosong ditolak
+   * lebih dahulu — sebelumnya tombolnya melaporkan "berhasil disalin" atas string
+   * kosong. Clipboard API juga tidak tersedia pada konteks non-HTTPS dan dapat
+   * ditolak izinnya, sehingga kegagalannya perlu ditangani, bukan dilepas sebagai
+   * promise tanpa penangkap.
+   */
+  const handleCopyStagingUrl = async (url) => {
+    const value = String(url || '').trim();
+    if (!value) {
+      toast.error('Alamat lingkungan uji masih kosong.');
+      return;
+    }
+    try {
+      if (!navigator.clipboard?.writeText) {
+        throw new Error('Peramban tidak mengizinkan akses papan klip pada halaman ini.');
+      }
+      await navigator.clipboard.writeText(value);
+      toast.success('Staging URL berhasil disalin ke clipboard!');
+    } catch (err) {
+      toast.error(`Gagal menyalin alamat: ${err.message}`);
+    }
   };
 
   // Dokumen prasyarat per fase/aktivitas: BRD, MEMO, FSD, Berita Acara SIT/UAT, dsb.
@@ -336,15 +435,7 @@ export default function QARequest() {
               readyProjects.map(project => (
                 <div
                   key={project.id}
-                  onClick={() => {
-                    setSelectedProject(project);
-                    setFormData(prev => ({
-                      ...prev,
-                      stagingUrl: project.stagingUrl || import.meta.env.VITE_STAGING_URL,
-                      targetDate: project.targetDate || ''
-                    }));
-                    scrollPageToTop();
-                  }}
+                  onClick={() => handleSelectProject(project)}
                   className={`p-4 rounded-xl border cursor-pointer transition-all ${
                     selectedProject?.id === project.id
                       ? 'border-2 border-[#1a365d] bg-blue-50/40 shadow-sm'
@@ -360,7 +451,8 @@ export default function QARequest() {
                   <h4 className="font-bold text-gray-800 text-xs line-clamp-1 mb-1.5">{project.name}</h4>
                   <div className="flex items-center justify-between text-[11px] text-gray-500 pt-2 border-t border-gray-100">
                     <span>{project.division}</span>
-                    <span className="font-bold text-gray-700">{project.status}</span>
+                    {/* Label status, bukan kode enum mentah seperti sebelumnya. */}
+                    <span className="font-bold text-gray-700 text-right">{PROJECT_STATUS_LABEL[project.status] || project.status}</span>
                   </div>
                 </div>
               ))
@@ -382,7 +474,7 @@ export default function QARequest() {
               <div className="pb-4 border-b border-gray-100">
                 <div className="flex items-center justify-between mb-2">
                   <span className="text-xs font-mono font-bold text-blue-600 bg-blue-50 px-2.5 py-0.5 rounded border border-blue-100">
-                    {selectedProject.id}
+                    {selectedProject.req_id || selectedProject.reqId || selectedProject.id}
                   </span>
                   <div className="flex items-center gap-1.5 flex-wrap"><RBBBadge type={selectedProject.type} deadline={selectedProject.rbbDeadline} /><ProjectTypeBadge type={selectedProject.project_type} /></div>
                 </div>
@@ -392,7 +484,7 @@ export default function QARequest() {
                   <span>Divisi: <strong className="text-gray-700">{selectedProject.division}</strong></span>
                   <span>•</span>
                   <User size={14} className="text-gray-400" />
-                  <span>PM: <strong className="text-gray-700">{typeof selectedProject.pm === 'object' ? selectedProject.pm?.name : (selectedProject.pm || 'Andi Wijaya')}</strong></span>
+                  <span>Analis Pengembangan: <strong className="text-gray-700">{typeof selectedProject.pm === 'object' ? selectedProject.pm?.name : (selectedProject.pm || '-')}</strong></span>
                 </p>
               </div>
 
@@ -410,7 +502,7 @@ export default function QARequest() {
               {/* URL Staging & Account Credentials */}
               <div className="space-y-3">
                 <label className="block text-xs font-bold text-gray-800 uppercase tracking-wider">
-                  Target Staging Test Environment URL <span className="text-red-500">*</span>
+                  Alamat Lingkungan Uji (Staging)
                 </label>
                 <div className="flex items-center gap-2">
                   <div className="relative flex-1">
@@ -420,20 +512,20 @@ export default function QARequest() {
                       name="stagingUrl"
                       value={formData.stagingUrl}
                       onChange={handleChange}
-                      placeholder="https://staging-app.banknagari.co.id"
+                      placeholder="https://staging.banknagari.co.id/nama-aplikasi"
                       className="w-full pl-10 pr-4 py-2.5 bg-white border border-gray-200 rounded-xl text-xs md:text-sm font-mono focus:outline-none focus:ring-2 focus:ring-[#1a365d]/20 focus:border-[#1a365d]"
-                      required
                     />
                   </div>
                   <button
                     type="button"
                     onClick={() => handleCopyStagingUrl(formData.stagingUrl)}
                     className="p-2.5 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-xl transition-all cursor-pointer shadow-xs"
-                    title="Salin Staging URL"
+                    title="Salin alamat lingkungan uji"
                   >
                     <Copy size={16} />
                   </button>
                 </div>
+                <p className="text-[10px] text-gray-400">Kosongkan bila proyek ini tidak memiliki lingkungan uji yang dapat diakses QA Tester.</p>
               </div>
 
               {/* Target Finish Date & Priority */}
@@ -479,7 +571,11 @@ export default function QARequest() {
                   Dokumen SDLC Prasyarat Terlampir ({projectDocsList.length})
                 </h4>
                 <div className="space-y-2">
-                  {projectDocsList.map(doc => (
+                  {projectDocsList.length === 0 ? (
+                    <div className="p-3 bg-gray-50 border border-gray-200 rounded-xl text-xs text-gray-400 italic text-center">
+                      Belum ada dokumen prasyarat terlampir pada proyek ini.
+                    </div>
+                  ) : projectDocsList.map(doc => (
                     <div key={doc.id} className="p-3 bg-gray-50 border border-gray-200 rounded-xl flex items-center justify-between">
                       <div className="flex items-center gap-2.5 overflow-hidden">
                         <FileText size={16} className="text-blue-600 shrink-0" />
@@ -508,16 +604,16 @@ export default function QARequest() {
                 </label>
                 <div className="border-2 border-dashed border-gray-200 hover:border-blue-400 bg-gray-50/50 rounded-2xl p-5 text-center transition-all">
                   <CloudUpload size={32} className="text-blue-600 mx-auto mb-2" />
-                  <p className="text-xs font-bold text-gray-700">Tarik &amp; lepas file di sini, atau klik untuk memilih file</p>
-                  <p className="text-[10px] text-gray-400 mt-1">Format dukungan: PDF, DOCX, XLSX, JSON (Maksimal 5 MB)</p>
-<input
+                  <p className="text-xs font-bold text-gray-700">Klik untuk memilih berkas pendukung</p>
+                  <p className="text-[10px] text-gray-400 mt-1">PDF, Excel (.xls/.xlsx), Gambar (.jpg/.jpeg/.png), ZIP — maks. 5 MB per berkas</p>
+                  <input
                     type="file"
                     multiple
                     accept=".pdf,.xls,.xlsx,.jpg,.jpeg,.png,.zip"
                     onChange={handleFileUpload}
                     className="hidden"
                     id="qa-file-input"
-                />
+                  />
                   <label
                     htmlFor="qa-file-input"
                     className="mt-3 inline-block px-4 py-2 bg-white border border-gray-300 hover:border-blue-600 text-gray-700 font-bold rounded-xl text-xs cursor-pointer shadow-xs transition-all"
@@ -528,6 +624,7 @@ export default function QARequest() {
 
                 {uploadedFiles.length > 0 && (
                   <div className="mt-3 space-y-2">
+                    <p className="text-[10px] text-gray-400">Nama dokumen final dibuat sistem saat pengajuan dikirim.</p>
                     {uploadedFiles.map((file, idx) => (
                       <div key={idx} className="p-2.5 bg-blue-50/60 border border-blue-200 rounded-xl flex items-center justify-between text-xs shadow-2xs">
                         <div className="flex items-center gap-2 truncate pr-2">
@@ -583,8 +680,11 @@ export default function QARequest() {
                   className="w-full py-3.5 bg-[#1a365d] hover:bg-[#0f2342] text-white rounded-xl font-bold text-sm shadow-md transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
                 >
                   <Send size={16} />
-                  <span>Kirim Pengajuan Quality Assurance (QA)</span>
+                  <span>{isSubmitting ? 'Mengirim pengajuan...' : 'Kirim Pengajuan Quality Assurance (QA)'}</span>
                 </button>
+                <p className="text-[10px] text-gray-400 text-center mt-2">
+                  Pengajuan masuk ke Workspace Lead QA. Status jalur naik ke pelaksanaan setelah Lead mendisposisikan QA Tester.
+                </p>
               </div>
             </form>
           )}

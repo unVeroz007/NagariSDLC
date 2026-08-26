@@ -1,8 +1,8 @@
 // src/pages/Register.jsx
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
-import { useNotifications } from '../contexts/NotificationContext';
+import { authService } from '../services/api';
 import {
     User,
     Mail,
@@ -18,19 +18,25 @@ import {
     ArrowLeft,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
+import { getPasswordError } from '../constants/passwordPolicy';
+
+/**
+ * Semua pendaftaran mandiri terdaftar sebagai Business User. Peran dipatok di
+ * server (`AuthController::SELF_REGISTRATION_ROLE`) dan field `role` ditolak
+ * backend, jadi nilai ini hanya keterangan untuk pengguna.
+ */
+const SELF_REGISTRATION_ROLE_LABEL = 'Business User (Pengaju Proyek)';
 
 export default function Register() {
     const navigate = useNavigate();
-    const { login, registerUser } = useAuth();
-    const { addNotification } = useNotifications();
+    const { registerUser } = useAuth();
 
     const [formData, setFormData] = useState({
         name: '',
         email: '',
         password: '',
         password_confirmation: '',
-        department: '',
-        role: 'business_user',
+        division_id: '',
         terms: false,
     });
 
@@ -39,22 +45,40 @@ export default function Register() {
     const [isLoading, setIsLoading] = useState(false);
     const [errors, setErrors] = useState({});
 
-    // Departemen options
-    const departments = [
-        'Divisi TI',
-        'Divisi Kredit',
-        'Divisi Dana & Jasa',
-        'Divisi Digital Banking',
-        'Divisi SDM',
-        'Divisi Kepatuhan',
-        'Divisi Manajemen Risiko',
-        'Divisi Operasional',
-        'Divisi Audit Internal',
-        'Divisi Treasury & International',
-        'Divisi Perencanaan & Strategi',
-        'Divisi Layanan',
-        'Kantor Pusat Operasional',
-    ];
+    // Daftar divisi resmi dari master data, bukan daftar hardcode.
+    //
+    // Formulir ini sebelumnya menyimpan sendiri 13 nama divisi, dan hanya satu di
+    // antaranya yang benar-benar ada di tabel `divisions`. Karena backend dahulu
+    // membuat baris divisi baru dari nama yang tidak dikenal, setiap pendaftaran
+    // menambah divisi karangan ke master data. Backend sekarang hanya menerima
+    // `division_id` yang sudah terdaftar, sehingga pilihannya wajib berasal dari
+    // server.
+    const [divisions, setDivisions] = useState([]);
+    const [isLoadingDivisions, setIsLoadingDivisions] = useState(true);
+    const [divisionsError, setDivisionsError] = useState('');
+
+    useEffect(() => {
+        let isMounted = true;
+
+        (async () => {
+            try {
+                const res = await authService.getPublicDivisions();
+                if (!isMounted) return;
+                setDivisions(Array.isArray(res?.data) ? res.data : []);
+                setDivisionsError('');
+            } catch (error) {
+                if (!isMounted) return;
+                setDivisions([]);
+                setDivisionsError(error.message || 'Gagal memuat daftar divisi.');
+            } finally {
+                if (isMounted) setIsLoadingDivisions(false);
+            }
+        })();
+
+        return () => {
+            isMounted = false;
+        };
+    }, []);
 
     const handleChange = (e) => {
         const { name, value, type, checked } = e.target;
@@ -83,10 +107,12 @@ export default function Register() {
             newErrors.email = 'Format email tidak valid';
         }
 
-        if (!formData.password) {
-            newErrors.password = 'Password wajib diisi';
-        } else if (formData.password.length < 8) {
-            newErrors.password = 'Password minimal 8 karakter';
+        // Aturannya cermin dari `PasswordPolicy` backend, dipusatkan di
+        // `constants/passwordPolicy.js` agar pesan di sini tidak pernah berbeda
+        // dengan yang sebenarnya diperiksa server.
+        const passwordError = getPasswordError(formData.password);
+        if (passwordError) {
+            newErrors.password = passwordError;
         }
 
         if (!formData.password_confirmation) {
@@ -95,8 +121,8 @@ export default function Register() {
             newErrors.password_confirmation = 'Password tidak cocok';
         }
 
-        if (!formData.department) {
-            newErrors.department = 'Pilih departemen';
+        if (!formData.division_id) {
+            newErrors.division_id = 'Pilih divisi';
         }
 
         if (!formData.terms) {
@@ -118,12 +144,14 @@ export default function Register() {
         setIsLoading(true);
 
         try {
+            // `role` sengaja tidak dikirim: backend menolaknya (`prohibited`) dan
+            // memaksa setiap pendaftaran mandiri menjadi Business User.
             const result = await registerUser({
-                name: formData.name,
-                email: formData.email,
+                name: formData.name.trim(),
+                email: formData.email.trim().toLowerCase(),
                 password: formData.password,
-                department: formData.department,
-                role: formData.role || 'business_user',
+                password_confirmation: formData.password_confirmation,
+                division_id: Number(formData.division_id),
             });
 
             if (!result.success) {
@@ -134,33 +162,23 @@ export default function Register() {
 
             toast.success('Registrasi berhasil! Silakan login.');
 
-            addNotification(
-                'Akun Baru Terdaftar',
-                `Pengguna ${formData.name} telah mendaftar sebagai ${formData.role}`,
-                'success'
-            );
-
+            /*
+             * Notifikasi "Akun Baru Terdaftar" sebelumnya dibuat di sini dan sudah
+             * dihapus. Notifikasi pada aplikasi ini tersimpan di peramban pembuatnya,
+             * sedangkan halaman pendaftaran diakses tanpa login: notifikasi itu tidak
+             * pernah sampai ke petugas IT mana pun, dan satu-satunya yang membacanya
+             * adalah pendaftar itu sendiri — berisi keterangan tentang dirinya. Bila
+             * kelak IT perlu diberi tahu setiap pendaftaran, pemberitahuannya harus
+             * dibuat backend saat registrasi diproses, bukan di sisi peramban.
+             */
             navigate('/login');
-        } catch (error) {
+        } catch {
+            // `registerUser` sudah mengubah kegagalan API menjadi
+            // `{ success: false, message }`, jadi sisanya kesalahan tak terduga.
             toast.error('Registrasi gagal, silakan coba lagi.');
         } finally {
             setIsLoading(false);
         }
-    };
-
-    const getRoleLabel = (role) => {
-        const labels = {
-            business_user: 'Business User (Pengaju Proyek)',
-            lead_group: 'Lead Group (Approval)',
-            analyst: 'System Analyst',
-            project_manager: 'Project Manager',
-            qa_lead: 'QA Lead',
-            qa_tester: 'QA Tester',
-            cyber_lead: 'Cyber Lead',
-            pentester: 'Pentester',
-            head_of_it: 'Head of IT',
-        };
-        return labels[role] || role;
     };
 
     return (
@@ -358,35 +376,44 @@ export default function Register() {
                             )}
                         </div>
 
-                        {/* Departemen */}
+                        {/* Divisi */}
                         <div>
                             <label className="block text-xs font-semibold text-gray-600 uppercase tracking-wider mb-2">
-                                Departemen <span className="text-red-500">*</span>
+                                Divisi <span className="text-red-500">*</span>
                             </label>
                             <div className="relative">
                                 <Building size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
                                 <select
-                                    name="department"
-                                    value={formData.department}
+                                    name="division_id"
+                                    value={formData.division_id}
                                     onChange={handleChange}
-                                    className={`w-full pl-10 pr-4 py-3 border rounded-lg bg-gray-50 text-sm focus:ring-2 focus:ring-[#00529C] focus:border-[#00529C] outline-none appearance-none transition-all ${errors.department ? 'border-red-400' : 'border-gray-200'
+                                    disabled={isLoadingDivisions || divisions.length === 0}
+                                    className={`w-full pl-10 pr-4 py-3 border rounded-lg bg-gray-50 text-sm focus:ring-2 focus:ring-[#00529C] focus:border-[#00529C] outline-none appearance-none transition-all disabled:bg-gray-100 disabled:cursor-not-allowed ${errors.division_id ? 'border-red-400' : 'border-gray-200'
                                         }`}
                                 >
-                                    <option value="">Pilih Departemen</option>
-                                    {departments.map((dept) => (
-                                        <option key={dept} value={dept}>{dept}</option>
+                                    <option value="">
+                                        {isLoadingDivisions ? 'Memuat daftar divisi...' : 'Pilih Divisi'}
+                                    </option>
+                                    {divisions.map((division) => (
+                                        <option key={division.id} value={division.id}>{division.name}</option>
                                     ))}
                                 </select>
                             </div>
-                            {errors.department && (
+                            {divisionsError && (
                                 <p className="mt-1.5 text-xs text-red-500 flex items-center gap-1">
                                     <AlertCircle size={12} />
-                                    {errors.department}
+                                    {divisionsError}
+                                </p>
+                            )}
+                            {errors.division_id && (
+                                <p className="mt-1.5 text-xs text-red-500 flex items-center gap-1">
+                                    <AlertCircle size={12} />
+                                    {errors.division_id}
                                 </p>
                             )}
                         </div>
 
-                        {/* Role (readonly, default business_user) */}
+                        {/* Peran akun — dipatok server sebagai Business User */}
                         <div>
                             <label className="block text-xs font-semibold text-gray-600 uppercase tracking-wider mb-2">
                                 Role / Peran
@@ -395,13 +422,14 @@ export default function Register() {
                                 <Shield size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
                                 <input
                                     type="text"
-                                    value={getRoleLabel(formData.role)}
+                                    value={SELF_REGISTRATION_ROLE_LABEL}
                                     disabled
                                     className="w-full pl-10 pr-4 py-3 border border-gray-200 rounded-lg bg-gray-100 text-sm text-gray-500 cursor-not-allowed"
                                 />
                             </div>
                             <p className="mt-1.5 text-xs text-gray-400">
-                                Role akan ditentukan oleh Administrator setelah registrasi.
+                                Setiap pendaftaran mandiri terdaftar sebagai Business User. Peran lain hanya dapat
+                                diberikan Administrator.
                             </p>
                         </div>
 

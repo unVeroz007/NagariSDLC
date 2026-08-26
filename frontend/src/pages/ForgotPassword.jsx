@@ -1,6 +1,6 @@
 // src/pages/ForgotPassword.jsx
 import { useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link } from 'react-router-dom';
 import {
     Mail,
     ArrowLeft,
@@ -11,9 +11,9 @@ import {
     KeyRound,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
+import { authService } from '../services/api';
 
 export default function ForgotPassword() {
-    const navigate = useNavigate();
     const [email, setEmail] = useState('');
     const [isLoading, setIsLoading] = useState(false);
     const [isSent, setIsSent] = useState(false);
@@ -32,9 +32,14 @@ export default function ForgotPassword() {
         return true;
     };
 
-    const handleSubmit = async (e) => {
-        e.preventDefault();
-
+    /**
+     * Kirim permintaan tautan reset.
+     *
+     * Backend menjawab dengan pesan yang sama untuk email terdaftar maupun tidak,
+     * jadi keberhasilan di sini hanya berarti permintaannya diterima — bukan bahwa
+     * akunnya ada. Pesan sukses karena itu memakai teks dari backend apa adanya.
+     */
+    const requestResetLink = async () => {
         if (!validateEmail()) {
             toast.error('Mohon perbaiki email Anda');
             return;
@@ -42,23 +47,32 @@ export default function ForgotPassword() {
 
         setIsLoading(true);
 
-        // Simulasi request reset password (nanti diganti dengan API call)
         try {
-            await new Promise(resolve => setTimeout(resolve, 1500));
-
-            // Simulasi sukses
+            const res = await authService.requestPasswordReset(email.trim().toLowerCase());
             setIsSent(true);
-            toast.success('Link reset password telah dikirim ke email Anda!');
-        } catch (error) {
-            toast.error('Gagal mengirim link reset. Silakan coba lagi.');
+            toast.success(res?.message || 'Permintaan reset password telah dikirim.');
+        } catch (err) {
+            setError(err.message || 'Gagal mengirim tautan reset.');
+            toast.error(err.message || 'Gagal mengirim tautan reset. Silakan coba lagi.');
         } finally {
             setIsLoading(false);
         }
     };
 
-    const handleResend = () => {
-        setIsSent(false);
-        handleSubmit(new Event('submit'));
+    const handleSubmit = async (e) => {
+        e.preventDefault();
+        await requestResetLink();
+    };
+
+    /**
+     * Kirim ulang tanpa keluar dari layar konfirmasi.
+     *
+     * Backend membatasi jarak antar permintaan (60 detik) dan menjawab 429 bila
+     * terlalu cepat, jadi kegagalannya perlu terlihat — layar konfirmasi tetap
+     * ditampilkan dan pesannya muncul sebagai toast.
+     */
+    const handleResend = async () => {
+        await requestResetLink();
     };
 
     return (
@@ -135,17 +149,19 @@ export default function ForgotPassword() {
                             </div>
                             <h3 className="text-xl font-bold text-gray-800 mb-2">Cek Email Anda!</h3>
                             <p className="text-sm text-gray-600 mb-4">
-                                Kami telah mengirimkan link reset password ke{' '}
-                                <span className="font-semibold text-gray-800">{email}</span>
+                                Jika{' '}
+                                <span className="font-semibold text-gray-800">{email}</span>{' '}
+                                terdaftar dan akunnya aktif, tautan reset password sudah dikirim ke sana.
                             </p>
                             <p className="text-xs text-gray-500 mb-6">
-                                Link reset hanya berlaku 60 menit. Jika tidak menemukan email, cek folder Spam.
+                                Tautan reset hanya berlaku 60 menit dan sekali pakai. Jika tidak menemukan email, cek folder Spam.
                             </p>
                             <button
                                 onClick={handleResend}
-                                className="text-[#00529C] hover:underline text-sm font-medium"
+                                disabled={isLoading}
+                                className="text-[#00529C] hover:underline text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed disabled:no-underline"
                             >
-                                Kirim ulang link
+                                {isLoading ? 'Mengirim ulang...' : 'Kirim ulang tautan'}
                             </button>
                             <div className="mt-4 pt-4 border-t border-emerald-200">
                                 <Link

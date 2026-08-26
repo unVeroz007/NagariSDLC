@@ -1,35 +1,30 @@
 import { useState, useMemo } from 'react';
 import { useProjects } from '../contexts/ProjectContext';
-import { useAuth } from '../contexts/AuthContext';
 import { useNavigate } from 'react-router-dom';
 import LoadingSpinner from '../components/LoadingSpinner';
-import EmptyState from '../components/EmptyState';
 import RBBBadge from '../components/RBBBadge';
 import ProjectTypeBadge from '../components/ProjectTypeBadge';
 import {
-  Search,
-  ChevronLeft,
-  ChevronRight,
-  ChevronDown,
-  Clock,
-  CheckCircle,
-  XCircle,
-  Inbox,
-  UserCheck,
-  Hourglass,
-  ClipboardCheck,
-  Filter,
-  UserX,
-  UserCheck2,
-  CheckCircle2,
+    ChevronLeft,
+    ChevronRight,
+    ChevronDown,
+    Clock,
+    CheckCircle,
+    XCircle,
+    Inbox,
+    UserCheck,
+    Hourglass,
+    ClipboardCheck,
+    Filter,
+    UserX,
+    UserCheck2,
+    CheckCircle2,
 } from 'lucide-react';
 
 export default function Queue() {
-  const { user } = useAuth();
-  const { projects, isLoading, refreshData } = useProjects();
+  const { projects, isLoading } = useProjects();
   const navigate = useNavigate();
 
-  const [searchTerm, setSearchTerm] = useState('');
   const [activeTab, setActiveTab] = useState('pending'); // 'pending' | 'in_review' | 'completed'
   const [typeFilter, setTypeFilter] = useState('All');
   const [currentPage, setCurrentPage] = useState(1);
@@ -56,22 +51,11 @@ export default function Queue() {
       });
     }
 
-    // Search
-    if (searchTerm) {
-      const term = searchTerm.toLowerCase();
-      result = result.filter(p => {
-        const idStr = String(p.reqId || p.req_id || p.id || '').toLowerCase();
-        const nameStr = String(p.name || p.title || '').toLowerCase();
-        const divStr = String(typeof p.division === 'object' ? p.division?.name : p.division || '').toLowerCase();
-        return idStr.includes(term) || nameStr.includes(term) || divStr.includes(term);
-      });
-    }
-
     // Sorting (terbaru dulu)
     result.sort((a, b) => (b.id || 0) - (a.id || 0));
 
     return result;
-  }, [projects, activeTab, searchTerm, typeFilter]);
+  }, [projects, activeTab, typeFilter]);
 
   // Pagination
   const totalPages = Math.ceil(filteredProjects.length / itemsPerPage);
@@ -271,8 +255,7 @@ export default function Queue() {
                       const statusConfig = getStatusBadge(project.status);
                       const analyst = getAnalystName(project);
                       const isInReview = project.status === 'IN_REVIEW';
-                      const isCompleted = project.status === 'ANALYSIS_APPROVED' || project.status === 'REJECTED';
-                      
+
                       return (
                         <tr key={project.id} className="hover:bg-gray-50 transition-colors group">
                           <td className="px-6 py-4 font-semibold text-[#00529C]">{project.req_id || project.reqId || project.id}</td>

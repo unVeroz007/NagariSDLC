@@ -1,36 +1,36 @@
 // src/pages/admin/Settings.jsx
-import { useState, useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import { useProjects } from '../../contexts/ProjectContext';
 import {
-    Save,
-    X,
-    CheckCircle,
-    AlertCircle,
     User,
-    Building,
     Shield,
-    Bell,
     Database,
-    RefreshCw,
     Clock,
-    Calendar,
-    FileText,
+    Server,
+    Link2,
+    LogOut,
     Users,
     Settings as SettingsIcon,
-    ChevronRight,
     Eye,
     EyeOff,
-    Palette,
 } from 'lucide-react';
-import { authService } from '../../services/api';
+import { authService, sessionStore, userService } from '../../services/api';
+import { getPasswordError, PASSWORD_REQUIREMENT_HINT } from '../../constants/passwordPolicy';
+import { buildProfileFromUser } from '../../utils/userProfile';
 import toast from 'react-hot-toast';
 
 // Sub-komponen untuk setiap tab
-const ProfileSettings = ({ user, profile, setProfile, handleSave }) => {
-    const [isEditing, setIsEditing] = useState(false);
-    const [formData, setFormData] = useState(profile);
+const ProfileSettings = ({ user, profile }) => {
+    const { updateProfile } = useAuth();
+
+    // formData berisi draft yang belum disimpan; null berarti tidak sedang
+    // mengedit. Dengan begitu tidak ada salinan data profil yang bisa membeku
+    // saat user pada context baru tersedia setelah komponen ini dirender.
+    const [formData, setFormData] = useState(null);
     const [isSubmitting, setIsSubmitting] = useState(false);
+    const isEditing = formData !== null;
+    const view = formData ?? profile;
 
     const handleChange = (e) => {
         const { name, value } = e.target;
@@ -38,14 +38,26 @@ const ProfileSettings = ({ user, profile, setProfile, handleSave }) => {
     };
 
     const handleSubmit = async () => {
+        if (!formData) return;
+
+        if (!formData.name.trim()) {
+            toast.error('Nama lengkap wajib diisi.');
+            return;
+        }
+
         setIsSubmitting(true);
         try {
-            await authService.updateProfile(formData.name, formData.phone);
-            setProfile(formData);
-            setIsEditing(false);
-            handleSave('Profil berhasil diperbarui & tersimpan ke database!');
-        } catch (err) {
-            toast.error(`Gagal memperbarui profil: ${err.message}`);
+            // Lewat AuthContext, bukan authService langsung, supaya user pada
+            // context dan localStorage ikut tersegarkan. Toast keberhasilan
+            // sudah dikeluarkan di sana.
+            const result = await updateProfile({
+                name: formData.name.trim(),
+                phone_number: formData.phone.trim() || null,
+            });
+
+            if (result?.success) {
+                setFormData(null);
+            }
         } finally {
             setIsSubmitting(false);
         }
@@ -60,7 +72,7 @@ const ProfileSettings = ({ user, profile, setProfile, handleSave }) => {
                 </div>
                 {!isEditing ? (
                     <button
-                        onClick={() => setIsEditing(true)}
+                        onClick={() => setFormData(profile)}
                         className="px-4 py-2 bg-[#00529C] text-white rounded-lg text-sm font-medium hover:bg-[#004080] transition-colors"
                     >
                         Edit Profil
@@ -68,16 +80,17 @@ const ProfileSettings = ({ user, profile, setProfile, handleSave }) => {
                 ) : (
                     <div className="flex gap-2">
                         <button
-                            onClick={() => { setIsEditing(false); setFormData(profile); }}
+                            onClick={() => setFormData(null)}
                             className="px-4 py-2 border border-gray-300 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-50 transition-colors"
                         >
                             Batal
                         </button>
                         <button
                             onClick={handleSubmit}
-                            className="px-4 py-2 bg-[#003a73] text-white rounded-lg text-sm font-medium hover:bg-[#002a5a] transition-colors"
+                            disabled={isSubmitting}
+                            className="px-4 py-2 bg-[#003a73] text-white rounded-lg text-sm font-medium hover:bg-[#002a5a] transition-colors disabled:opacity-70 disabled:cursor-not-allowed"
                         >
-                            Simpan
+                            {isSubmitting ? 'Menyimpan...' : 'Simpan'}
                         </button>
                     </div>
                 )}
@@ -88,7 +101,7 @@ const ProfileSettings = ({ user, profile, setProfile, handleSave }) => {
                     <label className="block text-sm font-semibold text-gray-700 mb-1">Foto Profil</label>
                     <div className="flex items-center gap-4">
                         <div className="w-20 h-20 rounded-full bg-[#003a73] text-white flex items-center justify-center text-2xl font-bold">
-                            {formData.name?.charAt(0) || 'U'}
+                            {view.name.trim().charAt(0).toUpperCase() || '?'}
                         </div>
                         <button className="px-3 py-1.5 text-sm border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors">
                             Upload Foto
@@ -103,15 +116,16 @@ const ProfileSettings = ({ user, profile, setProfile, handleSave }) => {
                             name="name"
                             value={formData.name}
                             onChange={handleChange}
+                            placeholder="Nama lengkap sesuai data kepegawaian"
                             className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#00529C] focus:border-transparent"
                         />
                     ) : (
-                        <p className="px-4 py-2 bg-gray-50 rounded-lg border border-gray-200 text-gray-700">{formData.name}</p>
+                        <p className="px-4 py-2 bg-gray-50 rounded-lg border border-gray-200 text-gray-700">{view.name || '-'}</p>
                     )}
                 </div>
                 <div>
                     <label className="block text-sm font-semibold text-gray-700 mb-1">Email</label>
-                    <p className="px-4 py-2 bg-gray-50 rounded-lg border border-gray-200 text-gray-500">{formData.email}</p>
+                    <p className="px-4 py-2 bg-gray-50 rounded-lg border border-gray-200 text-gray-500">{view.email || '-'}</p>
                 </div>
                 <div>
                     <label className="block text-sm font-semibold text-gray-700 mb-1">No. Handphone</label>
@@ -121,26 +135,30 @@ const ProfileSettings = ({ user, profile, setProfile, handleSave }) => {
                             name="phone"
                             value={formData.phone}
                             onChange={handleChange}
+                            placeholder="Contoh: 08xxxxxxxxxx"
                             className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#00529C] focus:border-transparent"
                         />
                     ) : (
-                        <p className="px-4 py-2 bg-gray-50 rounded-lg border border-gray-200 text-gray-700">{formData.phone}</p>
+                        <p className="px-4 py-2 bg-gray-50 rounded-lg border border-gray-200 text-gray-700">{view.phone || 'Belum diisi'}</p>
                     )}
                 </div>
                 <div>
                     <label className="block text-sm font-semibold text-gray-700 mb-1">Divisi / Departemen</label>
-                    <p className="px-4 py-2 bg-gray-50 rounded-lg border border-gray-200 text-gray-500">{formData.department}</p>
+                    <p className="px-4 py-2 bg-gray-50 rounded-lg border border-gray-200 text-gray-500">{view.department || 'Belum diatur admin'}</p>
                 </div>
                 <div>
                     <label className="block text-sm font-semibold text-gray-700 mb-1">Role</label>
-                    <p className="px-4 py-2 bg-gray-50 rounded-lg border border-gray-200 text-gray-500">{formData.role}</p>
+                    <p className="px-4 py-2 bg-gray-50 rounded-lg border border-gray-200 text-gray-500">{view.roleLabel || view.role || 'Belum diatur admin'}</p>
                 </div>
             </div>
 
             <div className="pt-4 border-t border-gray-200">
+                {/* Tanggal bergabung dibaca dari created_at akun; sebelumnya nilai ini
+                    selalu menampilkan tanggal hari ini sehingga tidak pernah benar. */}
                 <p className="text-xs text-gray-400">
-                    <span className="font-semibold">ID User:</span> {user?.id || 'USR-001'} &nbsp;•&nbsp;
-                    <span className="font-semibold">Bergabung:</span> {new Date().toLocaleDateString('id-ID')}
+                    <span className="font-semibold">ID User:</span> {user?.id ?? '-'} &nbsp;•&nbsp;
+                    <span className="font-semibold">Bergabung:</span>{' '}
+                    {user?.created_at ? new Date(user.created_at).toLocaleDateString('id-ID') : '-'}
                 </p>
             </div>
         </div>
@@ -148,9 +166,16 @@ const ProfileSettings = ({ user, profile, setProfile, handleSave }) => {
 };
 
 const SecuritySettings = () => {
+    const { logout } = useAuth();
     const [password, setPassword] = useState({ current: '', new: '', confirm: '' });
     const [showPasswords, setShowPasswords] = useState({ current: false, new: false, confirm: false });
-    const [twoFA, setTwoFA] = useState(false);
+    const [isLoggingOut, setIsLoggingOut] = useState(false);
+
+    // Waktu mulai sesi dibaca dari sesi yang benar-benar tersimpan di peramban ini.
+    const sessionStartedAt = useMemo(() => {
+        const issuedAt = sessionStore.read()?.issuedAt;
+        return issuedAt ? new Date(issuedAt) : null;
+    }, []);
 
     const handlePasswordChange = (e) => {
         const { name, value } = e.target;
@@ -163,8 +188,15 @@ const SecuritySettings = () => {
             toast.error('Konfirmasi password tidak cocok!');
             return;
         }
-        if (password.new.length < 8) {
-            toast.error('Password minimal 8 karakter!');
+        const passwordError = getPasswordError(password.new);
+        if (passwordError) {
+            toast.error(passwordError);
+            return;
+        }
+        // Backend menolak password baru yang sama dengan password saat ini
+        // (aturan `different`), jadi diberitahukan di sini sebelum request dikirim.
+        if (password.new === password.current) {
+            toast.error('Password baru harus berbeda dari password saat ini.');
             return;
         }
         try {
@@ -178,6 +210,15 @@ const SecuritySettings = () => {
 
     const togglePassword = (field) => {
         setShowPasswords(prev => ({ ...prev, [field]: !prev[field] }));
+    };
+
+    const handleLogout = async () => {
+        setIsLoggingOut(true);
+        try {
+            await logout();
+        } finally {
+            setIsLoggingOut(false);
+        }
     };
 
     return (
@@ -230,7 +271,7 @@ const SecuritySettings = () => {
                             {showPasswords.new ? <EyeOff size={18} /> : <Eye size={18} />}
                         </button>
                     </div>
-                    <p className="text-xs text-gray-400 mt-1">Minimal 8 karakter, kombinasi huruf dan angka.</p>
+                    <p className="text-xs text-gray-400 mt-1">{PASSWORD_REQUIREMENT_HINT}</p>
                 </div>
                 <div>
                     <label className="block text-sm font-semibold text-gray-700 mb-1">Konfirmasi Password Baru</label>
@@ -260,212 +301,102 @@ const SecuritySettings = () => {
                 </button>
             </form>
 
-            {/* 2FA */}
+            {/*
+              * Sesi perangkat ini.
+              *
+              * Blok ini sebelumnya menampilkan "Chrome • Windows • IP 192.168.1.1"
+              * yang ditulis langsung di berkas ini untuk setiap pengguna, ditemani
+              * tombol "Keluar dari Semua Perangkat" tanpa penangan klik. Backend tidak
+              * menyimpan daftar perangkat maupun endpoint pencabutan seluruh token,
+              * jadi yang ditampilkan sekarang hanya sesi peramban ini dan tombolnya
+              * memanggil POST /auth/logout yang memang ada.
+              *
+              * Blok Autentikasi Dua Faktor juga dihapus: sakelarnya hanya mengubah
+              * state lokal, tidak ada kolom, endpoint, maupun alur verifikasi 2FA di
+              * backend, sehingga tampilannya menjanjikan perlindungan yang tidak ada.
+              */}
             <div className="pt-4 border-t border-gray-200 max-w-md">
-                <h4 className="font-semibold text-gray-700 mb-4">Autentikasi Dua Faktor (2FA)</h4>
-                <div className="flex items-center justify-between p-4 bg-gray-50 rounded-lg border border-gray-200">
-                    <div>
-                        <p className="font-semibold text-gray-800">Aplikasi Authenticator</p>
-                        <p className="text-sm text-gray-500">Google Authenticator atau aplikasi sejenis.</p>
-                    </div>
-                    <label className="relative inline-flex items-center cursor-pointer">
-                        <input
-                            type="checkbox"
-                            checked={twoFA}
-                            onChange={() => setTwoFA(!twoFA)}
-                            className="sr-only peer"
-                        />
-                        <div className="w-11 h-6 bg-gray-200 rounded-full peer peer-checked:bg-emerald-500 transition-colors relative">
-                            <div className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full transition-transform ${twoFA ? 'translate-x-5' : ''}`} />
-                        </div>
-                    </label>
-                </div>
-            </div>
-
-            {/* Session Management */}
-            <div className="pt-4 border-t border-gray-200 max-w-md">
-                <h4 className="font-semibold text-gray-700 mb-4">Sesi Aktif</h4>
+                <h4 className="font-semibold text-gray-700 mb-4">Sesi Perangkat Ini</h4>
                 <div className="space-y-3">
                     <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg border border-gray-200">
                         <div>
-                            <p className="font-medium text-gray-800">Perangkat Ini</p>
-                            <p className="text-xs text-gray-500">Chrome • Windows • IP 192.168.1.1</p>
+                            <p className="font-medium text-gray-800">Sesi aktif di peramban ini</p>
+                            <p className="text-xs text-gray-500 flex items-center gap-1 mt-0.5">
+                                <Clock size={12} />
+                                {sessionStartedAt
+                                    ? `Masuk sejak ${sessionStartedAt.toLocaleString('id-ID', {
+                                        day: '2-digit', month: 'long', year: 'numeric',
+                                        hour: '2-digit', minute: '2-digit',
+                                    })}`
+                                    : 'Waktu mulai sesi tidak tercatat'}
+                            </p>
                         </div>
                         <span className="text-xs text-emerald-600 font-medium">Aktif</span>
                     </div>
-                    <button className="text-sm text-red-500 hover:text-red-600 font-medium">
-                        Keluar dari Semua Perangkat
+                    <button
+                        type="button"
+                        onClick={handleLogout}
+                        disabled={isLoggingOut}
+                        className="text-sm text-red-500 hover:text-red-600 font-medium flex items-center gap-1.5 cursor-pointer disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                        <LogOut size={14} />
+                        {isLoggingOut ? 'Mengakhiri sesi...' : 'Keluar dari Perangkat Ini'}
                     </button>
+                    <p className="text-xs text-gray-500">
+                        Sistem belum mencatat daftar perangkat, sehingga sesi di perangkat lain
+                        harus diakhiri dari perangkat tersebut.
+                    </p>
                 </div>
             </div>
         </div>
     );
 };
 
-const NotificationSettings = () => {
-    const [notifications, setNotifications] = useState([
-        { id: 'project', label: 'Update Proyek', desc: 'Notifikasi perubahan status proyek', enabled: true },
-        { id: 'task', label: 'Tugas', desc: 'Notifikasi tugas baru atau perubahan', enabled: true },
-        { id: 'qa', label: 'Pengajuan QA', desc: 'Notifikasi saat ada pengajuan QA', enabled: true },
-        { id: 'cyber', label: 'Pengajuan Cyber', desc: 'Notifikasi saat ada pengajuan Cyber', enabled: true },
-        { id: 'release', label: 'Pengajuan Rilis', desc: 'Notifikasi saat ada pengajuan rilis', enabled: true },
-        { id: 'approval', label: 'Persetujuan', desc: 'Notifikasi saat ada permintaan approval', enabled: true },
-        { id: 'weekly', label: 'Laporan Mingguan', desc: 'Ringkasan aktivitas mingguan', enabled: false },
-        { id: 'system', label: 'Pesan Sistem', desc: 'Notifikasi pemeliharaan & update sistem', enabled: true },
-    ]);
-
-    const toggleNotification = (id) => {
-        setNotifications(prev =>
-            prev.map(n => n.id === id ? { ...n, enabled: !n.enabled } : n)
-        );
-    };
-
-    const handleSave = () => {
-        toast.success('Preferensi notifikasi berhasil disimpan!');
-    };
-
-    return (
-        <div className="space-y-6">
-            <div>
-                <h3 className="text-lg font-semibold text-gray-800 mb-2">Preferensi Notifikasi</h3>
-                <p className="text-sm text-gray-500">Aktifkan atau nonaktifkan notifikasi untuk setiap jenis event.</p>
-            </div>
-
-            <div className="space-y-3 max-w-2xl">
-                {notifications.map((item) => (
-                    <div key={item.id} className="flex items-center justify-between p-4 bg-gray-50 rounded-lg border border-gray-200 hover:bg-gray-100 transition-colors">
-                        <div>
-                            <p className="font-semibold text-gray-800">{item.label}</p>
-                            <p className="text-sm text-gray-500">{item.desc}</p>
-                        </div>
-                        <label className="relative inline-flex items-center cursor-pointer">
-                            <input
-                                type="checkbox"
-                                checked={item.enabled}
-                                onChange={() => toggleNotification(item.id)}
-                                className="sr-only peer"
-                            />
-                            <div className="w-11 h-6 bg-gray-200 rounded-full peer peer-checked:bg-emerald-500 transition-colors relative">
-                                <div className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full transition-transform ${item.enabled ? 'translate-x-5' : ''}`} />
-                            </div>
-                        </label>
-                    </div>
-                ))}
-            </div>
-
-            <button
-                onClick={handleSave}
-                className="px-4 py-2 bg-[#003a73] text-white rounded-lg font-medium hover:bg-[#002a5a] transition-colors"
-            >
-                Simpan Preferensi
-            </button>
-        </div>
-    );
-};
-
-const AppearanceSettings = () => {
-    const [theme, setTheme] = useState('light');
-
-    return (
-        <div className="space-y-6">
-            <div>
-                <h3 className="text-lg font-semibold text-gray-800 mb-2">Tampilan & Tema</h3>
-                <p className="text-sm text-gray-500">Sesuaikan tampilan antarmuka sesuai preferensi Anda.</p>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 max-w-2xl">
-                {/* Light Theme */}
-                <div
-                    className={`border-2 rounded-xl p-4 cursor-pointer transition-all ${theme === 'light' ? 'border-[#00529C] shadow-md' : 'border-gray-200 hover:border-gray-300'
-                        }`}
-                    onClick={() => setTheme('light')}
-                >
-                    {theme === 'light' && (
-                        <div className="text-[#00529C] float-right">
-                            <CheckCircle size={20} />
-                        </div>
-                    )}
-                    <div className="h-20 bg-gray-100 rounded-lg p-2 flex flex-col gap-1">
-                        <div className="h-3 w-full bg-white rounded"></div>
-                        <div className="flex gap-1">
-                            <div className="w-1/3 h-10 bg-white rounded"></div>
-                            <div className="w-2/3 h-10 bg-white rounded"></div>
-                        </div>
-                    </div>
-                    <p className="text-center font-medium text-gray-800 mt-2">Terang</p>
-                </div>
-
-                {/* Dark Theme */}
-                <div
-                    className={`border-2 rounded-xl p-4 cursor-pointer transition-all ${theme === 'dark' ? 'border-[#00529C] shadow-md' : 'border-gray-200 hover:border-gray-300'
-                        }`}
-                    onClick={() => setTheme('dark')}
-                >
-                    <div className="h-20 bg-gray-800 rounded-lg p-2 flex flex-col gap-1">
-                        <div className="h-3 w-full bg-gray-700 rounded"></div>
-                        <div className="flex gap-1">
-                            <div className="w-1/3 h-10 bg-gray-700 rounded"></div>
-                            <div className="w-2/3 h-10 bg-gray-700 rounded"></div>
-                        </div>
-                    </div>
-                    <p className="text-center font-medium text-gray-800 mt-2">Gelap</p>
-                </div>
-
-                {/* System Theme */}
-                <div
-                    className={`border-2 rounded-xl p-4 cursor-pointer transition-all ${theme === 'system' ? 'border-[#00529C] shadow-md' : 'border-gray-200 hover:border-gray-300'
-                        }`}
-                    onClick={() => setTheme('system')}
-                >
-                    <div className="h-20 flex rounded-lg overflow-hidden">
-                        <div className="w-1/2 bg-gray-100 p-2 flex flex-col gap-1">
-                            <div className="h-3 w-full bg-white rounded"></div>
-                            <div className="w-full h-8 bg-white rounded"></div>
-                        </div>
-                        <div className="w-1/2 bg-gray-800 p-2 flex flex-col gap-1">
-                            <div className="h-3 w-full bg-gray-700 rounded"></div>
-                            <div className="w-full h-8 bg-gray-700 rounded"></div>
-                        </div>
-                    </div>
-                    <p className="text-center font-medium text-gray-800 mt-2">Ikuti Sistem</p>
-                </div>
-            </div>
-
-            <div className="pt-4 border-t border-gray-200 max-w-2xl">
-                <h4 className="font-semibold text-gray-700 mb-3">Preferensi Lainnya</h4>
-                <div className="space-y-3">
-                    <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg border border-gray-200">
-                        <span className="text-gray-700">Tampilkan animasi</span>
-                        <label className="relative inline-flex items-center cursor-pointer">
-                            <input type="checkbox" className="sr-only peer" defaultChecked />
-                            <div className="w-11 h-6 bg-gray-200 rounded-full peer-checked:bg-emerald-500 transition-colors relative">
-                                <div className="absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full transition-transform peer-checked:translate-x-5"></div>
-                            </div>
-                        </label>
-                    </div>
-                    <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg border border-gray-200">
-                        <span className="text-gray-700">Compact mode (lebih padat)</span>
-                        <label className="relative inline-flex items-center cursor-pointer">
-                            <input type="checkbox" className="sr-only peer" />
-                            <div className="w-11 h-6 bg-gray-200 rounded-full peer-checked:bg-emerald-500 transition-colors relative">
-                                <div className="absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full transition-transform peer-checked:translate-x-5"></div>
-                            </div>
-                        </label>
-                    </div>
-                </div>
-            </div>
-        </div>
-    );
-};
-
+/**
+ * Ikhtisar sistem.
+ *
+ * Semua angka di sini harus punya sumber. Versi sebelumnya menampilkan "Total
+ * Pengguna 47", "Uptime Sistem 99.8%", dan "Versi Aplikasi v2.4.0" sebagai teks
+ * tetap di berkas ini — tiga angka yang tidak pernah diukur maupun dibaca dari mana
+ * pun, padahal ditampilkan di halaman pengaturan sebagai kondisi sistem. Jumlah
+ * pengguna sekarang dihitung dari GET /users, dan sebagai ganti uptime serta versi
+ * ditampilkan lingkungan build dan alamat API yang benar-benar dipakai peramban.
+ *
+ * Tiga tombol "Tindakan Sistem" (Clear Cache, Export Log Sistem, Reset Konfigurasi
+ * ke Default) juga dihapus: ketiganya tidak punya penangan klik maupun endpoint.
+ */
 const SystemSettings = () => {
     const { projects } = useProjects();
+    const [userCount, setUserCount] = useState(null);
+    const [userCountError, setUserCountError] = useState(null);
+
+    useEffect(() => {
+        let cancelled = false;
+
+        const loadUserCount = async () => {
+            try {
+                const res = await userService.getAll();
+                if (cancelled) return;
+                setUserCount(Array.isArray(res?.data) ? res.data.length : 0);
+                setUserCountError(null);
+            } catch (err) {
+                if (cancelled) return;
+                setUserCountError(err.message || 'Gagal memuat jumlah pengguna.');
+            }
+        };
+
+        loadUserCount();
+        return () => { cancelled = true; };
+    }, []);
+
+    const apiBaseUrl = import.meta.env.VITE_API_URL || 'Belum dikonfigurasi';
+    const buildMode = import.meta.env.MODE || 'tidak diketahui';
 
     return (
         <div className="space-y-6">
             <div>
-                <h3 className="text-lg font-semibold text-gray-800 mb-2">Pengaturan Sistem</h3>
-                <p className="text-sm text-gray-500">Konfigurasi umum sistem dan informasi aplikasi.</p>
+                <h3 className="text-lg font-semibold text-gray-800 mb-2">Informasi Sistem</h3>
+                <p className="text-sm text-gray-500">Ringkasan data dan konfigurasi aplikasi yang sedang berjalan.</p>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6 max-w-3xl">
@@ -483,45 +414,33 @@ const SystemSettings = () => {
                         <Users size={20} className="text-[#00529C]" />
                         <div>
                             <p className="font-semibold text-gray-800">Total Pengguna</p>
-                            <p className="text-2xl font-bold text-gray-800">47</p>
+                            {userCountError ? (
+                                <p className="text-sm text-red-500 mt-0.5">{userCountError}</p>
+                            ) : (
+                                <p className="text-2xl font-bold text-gray-800">
+                                    {userCount === null ? 'Memuat...' : userCount}
+                                </p>
+                            )}
                         </div>
                     </div>
                 </div>
                 <div className="p-4 bg-gray-50 rounded-lg border border-gray-200">
                     <div className="flex items-center gap-3">
-                        <Clock size={20} className="text-[#00529C]" />
+                        <Server size={20} className="text-[#00529C]" />
                         <div>
-                            <p className="font-semibold text-gray-800">Uptime Sistem</p>
-                            <p className="text-2xl font-bold text-gray-800">99.8%</p>
+                            <p className="font-semibold text-gray-800">Lingkungan Aplikasi</p>
+                            <p className="text-lg font-bold text-gray-800 capitalize">{buildMode}</p>
                         </div>
                     </div>
                 </div>
                 <div className="p-4 bg-gray-50 rounded-lg border border-gray-200">
                     <div className="flex items-center gap-3">
-                        <Calendar size={20} className="text-[#00529C]" />
-                        <div>
-                            <p className="font-semibold text-gray-800">Versi Aplikasi</p>
-                            <p className="text-2xl font-bold text-gray-800">v2.4.0</p>
+                        <Link2 size={20} className="text-[#00529C]" />
+                        <div className="min-w-0">
+                            <p className="font-semibold text-gray-800">Alamat API</p>
+                            <p className="text-sm font-mono text-gray-700 break-all">{apiBaseUrl}</p>
                         </div>
                     </div>
-                </div>
-            </div>
-
-            <div className="pt-4 border-t border-gray-200 max-w-3xl">
-                <h4 className="font-semibold text-gray-700 mb-3">Tindakan Sistem</h4>
-                <div className="space-y-3">
-                    <button className="flex items-center gap-2 px-4 py-2 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors text-gray-700">
-                        <RefreshCw size={16} />
-                        Clear Cache
-                    </button>
-                    <button className="flex items-center gap-2 px-4 py-2 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors text-gray-700">
-                        <FileText size={16} />
-                        Export Log Sistem
-                    </button>
-                    <button className="flex items-center gap-2 px-4 py-2 bg-white border border-red-300 rounded-lg hover:bg-red-50 transition-colors text-red-500">
-                        <AlertCircle size={16} />
-                        Reset Konfigurasi ke Default
-                    </button>
                 </div>
             </div>
         </div>
@@ -532,36 +451,28 @@ const SystemSettings = () => {
 export default function Settings() {
     const { user } = useAuth();
     const [activeTab, setActiveTab] = useState('profile');
-    const [profile, setProfile] = useState({
-        name: user?.name || 'Ahmad Fauzi',
-        email: user?.email || 'ahmad.fauzi@banknagari.co.id',
-        phone: '+62 812 3456 7890',
-        department: user?.department || 'IT',
-        role: user?.role || 'Super Admin',
-    });
 
-    const handleSave = (message = 'Perubahan berhasil disimpan!') => {
-        toast.success(message);
-    };
+    // Profil dibaca ulang dari user pada context setiap kali user berubah,
+    // sehingga tab Profil langsung menampilkan hasil penyimpanan terakhir.
+    const profile = useMemo(() => buildProfileFromUser(user), [user]);
 
+    // Tab Notifikasi dan Tampilan dihapus. Keduanya hanya berisi sakelar yang
+    // mengubah state lokal: preferensi notifikasi tidak punya endpoint penyimpanan
+    // (tombolnya bahkan menampilkan "berhasil disimpan" tanpa mengirim apa pun),
+    // dan pilihan tema gelap, animasi, serta compact mode tidak pernah diterapkan
+    // ke antarmuka. Tampilkan kembali setelah penyimpanan preferensinya ada.
     const tabs = [
         { id: 'profile', label: 'Profil', icon: User },
         { id: 'security', label: 'Keamanan', icon: Shield },
-        { id: 'notifications', label: 'Notifikasi', icon: Bell },
-        { id: 'appearance', label: 'Tampilan', icon: Palette },
         { id: 'system', label: 'Sistem', icon: SettingsIcon },
     ];
 
     const renderContent = () => {
         switch (activeTab) {
             case 'profile':
-                return <ProfileSettings user={user} profile={profile} setProfile={setProfile} handleSave={handleSave} />;
+                return <ProfileSettings user={user} profile={profile} />;
             case 'security':
                 return <SecuritySettings />;
-            case 'notifications':
-                return <NotificationSettings />;
-            case 'appearance':
-                return <AppearanceSettings />;
             case 'system':
                 return <SystemSettings />;
             default:
@@ -580,13 +491,8 @@ export default function Settings() {
                             Pengaturan Sistem
                         </h1>
                         <p className="text-sm text-gray-500 mt-1">
-                            Kelola profil, keamanan, notifikasi, tampilan, dan konfigurasi sistem.
+                            Kelola profil, keamanan akun, dan lihat informasi sistem.
                         </p>
-                    </div>
-                    <div className="flex items-center gap-2">
-                        <span className="text-xs text-gray-400 bg-gray-100 px-3 py-1 rounded-full">
-                            v2.4.0
-                        </span>
                     </div>
                 </div>
 

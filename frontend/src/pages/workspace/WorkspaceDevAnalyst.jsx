@@ -1,6 +1,6 @@
 import RBBBadge from '../../components/RBBBadge';
 import ProjectTypeBadge from '../../components/ProjectTypeBadge';
-import { useState, useMemo, useRef, useEffect } from 'react';
+import { useState, useMemo, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import { useNotifications } from '../../contexts/NotificationContext';
@@ -10,31 +10,23 @@ import {
     CheckCircle2,
     Clock,
     Send,
-    Save,
     FileText,
-    Users,
     Filter,
     Search,
-    Calendar,
-    ChevronRight,
     Upload,
-    CloudUpload,
     Trash2,
     FolderOpen,
     Cpu,
-    Layers,
-    X,
-    UserCheck,
     MessageSquare,
-    ShieldCheck
+    ShieldCheck,
 } from 'lucide-react';
-import { useProjects, saveFileToStore, getFileFromStore } from '../../contexts/ProjectContext';
-import { userService, documentService, projectService } from '../../services/api';
+import { useProjects } from '../../contexts/ProjectContext';
+import { saveFileToStore, getFileFromStore } from '../../utils/projectDocuments';
+import { documentService, projectService } from '../../services/api';
 import LoadingSpinner from '../../components/LoadingSpinner';
-import EmptyState from '../../components/EmptyState';
 import DocumentViewerModal from '../../components/DocumentViewerModal';
 import toast from 'react-hot-toast';
-import { generateDocumentName, DOCUMENT_TYPES, formatFileSize, getDocExtLabel, getDocIconStyle } from '../../utils/documentNaming';
+import { generateDocumentName, formatFileSize, formatDocSizeLabel, getDocExtLabel, getDocIconStyle } from '../../utils/documentNaming';
 
 const resolveAllProjectDocs = (project) => {
     if (!project) return [];
@@ -132,58 +124,70 @@ export default function WorkspaceDevAnalyst() {
 
     const [previewDoc, setPreviewDoc] = useState(null);
 
-    const [selectedAnalystFilter, setSelectedAnalystFilter] = useState(() => {
-        if (user?.role === 'super_admin' || user?.role === 'lead_group' || user?.role === 'development_lead') return 'ALL';
-        return 'ALL'; // All dev analysts can see all team tasks
-    });
-    const [devAnalystList, setDevAnalystList] = useState([]);
+    const [selectedAnalystFilter, setSelectedAnalystFilter] = useState('ALL');
 
-    // Load PM candidates for filter dropdown
-    useEffect(() => {
-        const loadPMs = async () => {
-            try {
-                const res = await userService.getAll();
-                const users = res.data || res || [];
-                setDevAnalystList(users.filter(u => (u.role_detail?.name || u.role || '') === 'project_manager'));
-            } catch {
-                setDevAnalystList([]);
-            }
-        };
-        loadPMs();
-    }, []);
+    // Hanya role pengawas yang boleh menyaring lintas Analis Pengembangan.
+    // Untuk PM biasa, backend sudah hanya mengirim proyek dengan `pm_id` dirinya,
+    // sehingga nilai 'ALL' pun tidak membocorkan antrean PM lain.
+    const canFilterAcrossDevAnalysts = user?.role === 'super_admin'
+        || user?.role === 'lead_group'
+        || user?.role === 'development_lead';
 
-    // Helper to safely extract analyst name from string or object
-    const getAnalystName = (p) => {
+    // Nama Analis Pengembangan sebuah proyek.
+    //
+    // PM dan Analis Pengembangan adalah orang yang sama, jadi identitasnya diambil
+    // dari `pm` — bukan `analyst`, yang menyimpan System Analyst Fase 1. Nama penanda
+    // tangan kajian dipakai lebih dulu bila ada karena itulah pelaksana sebenarnya.
+    const getDevAnalystName = (p) => {
         if (!p) return '';
-        const a = p.analyst || p.assignedAnalyst;
-        if (!a) return '';
-        let name = typeof a === 'object' ? (a?.name || '') : String(a);
-        if (name && name.includes('(')) {
-            name = name.split('(')[0].trim();
-        }
-        return name;
+        const name = p.devAnalystResult?.analystName
+            || (typeof p.pm === 'object' ? (p.pm?.name || '') : String(p.pm || ''));
+        return name.includes('(') ? name.split('(')[0].trim() : name;
     };
+
+    // Antrean dasar: seluruh proyek fase kajian pengembangan, belum disaring per PM.
+    // Dipisah dari reviewQueue supaya daftar pilihan PM tidak menyusut setiap kali satu
+    // PM dipilih — kalau diturunkan dari hasil penyaringan, opsi lain hilang dan filter
+    // tidak bisa dikembalikan lewat dropdown.
+    const reviewQueueBase = useMemo(
+        () => (projects || []).filter(p => p.status === 'DEV_ANALYSIS'),
+        [projects]
+    );
+
+    // Opsi filter diambil dari data nyata, memakai id sebagai nilai. Pencocokan
+    // berbasis id — bukan nama — karena beberapa pengguna di sistem ini bernama sama
+    // pada role yang berbeda, sehingga pencocokan nama bisa salah sasaran.
+    const devAnalystOptions = useMemo(() => {
+        const byId = new Map();
+        reviewQueueBase.forEach(p => {
+            const id = p.pm_id || (typeof p.pm === 'object' ? p.pm?.id : null);
+            const name = getDevAnalystName(p);
+            if (id && name && !byId.has(Number(id))) {
+                byId.set(Number(id), name);
+            }
+        });
+        return [...byId.entries()]
+            .map(([id, name]) => ({ id, name }))
+            .sort((a, b) => a.name.localeCompare(b.name, 'id'));
+    }, [reviewQueueBase]);
 
     // Filter antrean proyek yang sedang di tahap DEV_ANALYSIS
     const reviewQueue = useMemo(() => {
-        let list = projects.filter(p => p.status === 'DEV_ANALYSIS');
+        const matchesPm = (p, targetId) => {
+            const pmId = p.pm_id || (typeof p.pm === 'object' ? p.pm?.id : null);
+            return pmId != null && Number(pmId) === Number(targetId);
+        };
 
         if (selectedAnalystFilter === 'MY_PROJECTS') {
-            list = list.filter(p => {
-                const analystId = p.analyst?.id || (typeof p.assignedAnalyst === 'object' ? p.assignedAnalyst?.id : null);
-                if (analystId && user?.id) return analystId === user.id;
-                const analystName = getAnalystName(p);
-                return analystName.toLowerCase().includes((user?.name || '').split('(')[0].trim().toLowerCase());
-            });
-        } else if (selectedAnalystFilter !== 'ALL') {
-            list = list.filter(p => {
-                const analystName = getAnalystName(p);
-                return analystName.toLowerCase().includes(selectedAnalystFilter.split('(')[0].trim().toLowerCase());
-            });
+            return user?.id ? reviewQueueBase.filter(p => matchesPm(p, user.id)) : [];
         }
 
-        return list;
-    }, [projects, selectedAnalystFilter, user]);
+        if (selectedAnalystFilter !== 'ALL') {
+            return reviewQueueBase.filter(p => matchesPm(p, selectedAnalystFilter));
+        }
+
+        return reviewQueueBase;
+    }, [reviewQueueBase, selectedAnalystFilter, user]);
 
     const [selectedProjectState, setSelectedProject] = useState(null);
     const [projectSearch, setProjectSearch] = useState('');
@@ -202,7 +206,13 @@ export default function WorkspaceDevAnalyst() {
     const [decision, setDecision] = useState('Disetujui (Layak Develop)');
     const [techStack, setTechStack] = useState('Microservices Java Spring Boot + React JS + PostgreSQL');
     const [notes, setNotes] = useState('');
-    const [estimationDays, setEstimationDays] = useState('30');
+    // Terikat ke <input type="date"> dan dikirim sebagai `estimation` (tanggal ISO).
+    // Nilai awal wajib kosong: "30" adalah sisa desain lama "hari pengerjaan" yang tak
+    // valid untuk input tanggal — field-nya tampil kosong tetapi "30" tetap terkirim
+    // bila analis tidak memilih tanggal, lalu gagal di-parse `new Date()` di hilir
+    // (badge "Target Analis" tidak pernah muncul). `estimation: estimationDays || null`
+    // di bawah baru bermakna bila nilai awalnya kosong.
+    const [estimationDays, setEstimationDays] = useState('');
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [uploadedFiles, setUploadedFiles] = useState([]);
     const fileInputRef = useRef(null);
@@ -248,7 +258,12 @@ export default function WorkspaceDevAnalyst() {
         });
 
         setUploadedFiles(prev => [...prev, ...newFiles]);
-        if (newFiles.length > 0) toast.success(`${newFiles.length} dokumen berhasil diunggah.`);
+        // Berkas baru dipilih di peramban, belum dikirim ke server. Unggahan
+        // sebenarnya terjadi di handleSubmit, jadi pesan di sini tidak boleh
+        // menyatakan "berhasil diunggah".
+        if (newFiles.length > 0) {
+            toast.success(`${newFiles.length} dokumen dipilih. Berkas diunggah saat kajian dikirim.`);
+        }
         e.target.value = '';
     };
 
@@ -285,6 +300,7 @@ export default function WorkspaceDevAnalyst() {
 
         try {
             const uploadedDocIds = [];
+            const failedUploads = [];
 
             // Upload semua dokumen ke backend secara permanen
             if (uploadedFiles.length > 0 && selectedProject?.id) {
@@ -306,6 +322,7 @@ export default function WorkspaceDevAnalyst() {
                             });
                         }
                     } catch (uploadErr) {
+                        failedUploads.push(uf.originalName || uf.name);
                         toast.error(`Gagal mengunggah "${uf.originalName}": ${uploadErr.message}`);
                     }
                 }
@@ -331,12 +348,17 @@ export default function WorkspaceDevAnalyst() {
                 '/workspace/dev-lead'
             );
             toast.success(`Kajian teknis arsitektur untuk "${selectedProject?.name}" selesai! Dikirim ke Ketua Grup Pengembangan (Tab 3: Siap Tunjuk PM).`);
+            // Kajian tetap terkirim meski ada berkas yang gagal diunggah, tetapi
+            // penggunanya harus tahu berkas mana yang belum masuk Document Vault.
+            if (failedUploads.length > 0) {
+                toast.error(`${failedUploads.length} dokumen belum tersimpan di Document Vault: ${failedUploads.join(', ')}. Unggah ulang dari menu Dokumen.`);
+            }
             setIsSubmitting(false);
             setSelectedProject(null);
             setNotes('');
             setUploadedFiles([]);
         } catch (err) {
-            toast.error('Gagal mengirim kajian teknis.');
+            toast.error(`Gagal mengirim kajian teknis: ${err?.message || 'kesalahan tidak diketahui'}`);
             setIsSubmitting(false);
         }
     };
@@ -388,7 +410,14 @@ export default function WorkspaceDevAnalyst() {
                             const ap = p.sitUatData?.sit3_approvals || p.sit_uat_data?.sit3_approvals || {};
                             const devList = ap?.developer?.developers || [];
                             const requiredDev = ap?.developer?.required ?? 0;
-                            const devDone = requiredDev > 0 && devList.length >= requiredDev;
+                            // `developers[]` menyimpan seluruh persetujuan yang pernah
+                            // tercatat, termasuk milik developer yang sudah keluar dari
+                            // tim, jadi panjangnya bukan ukuran kelengkapan.
+                            // `approvedCount` dihitung backend hanya dari penyetuju yang
+                            // masih wajib. Cadangan `devList.length` dipakai untuk data
+                            // lama yang belum memuat field itu.
+                            const approvedDev = ap?.developer?.approvedCount ?? devList.length;
+                            const devDone = requiredDev > 0 && approvedDev >= requiredDev;
                             const pmDone = ap?.pm?.approved === true;
                             const leadDone = ap?.development_lead?.approved === true;
                             const isMyProject = p.pm_id != null && Number(p.pm_id) === Number(user?.id);
@@ -430,7 +459,7 @@ export default function WorkspaceDevAnalyst() {
                                         <div className={`p-2 rounded-lg border text-center ${devDone ? 'bg-emerald-50 border-emerald-200' : 'bg-white border-gray-200'}`}>
                                             <p className="text-[9px] font-bold text-gray-500 uppercase">Developer</p>
                                             <p className={`text-[10px] font-bold mt-0.5 ${devDone ? 'text-emerald-700' : 'text-amber-700'}`}>
-                                                {devList.length}/{requiredDev} {devDone ? '✓' : ''}
+                                                {approvedDev}/{requiredDev} {devDone ? '✓' : ''}
                                             </p>
                                         </div>
                                         <div className={`p-2 rounded-lg border text-center ${pmDone ? 'bg-emerald-50 border-emerald-200' : 'bg-white border-gray-200'}`}>
@@ -461,7 +490,7 @@ export default function WorkspaceDevAnalyst() {
                 </div>
 
                 <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
-                    {(user?.role === 'super_admin' || user?.role === 'lead_group' || user?.role === 'development_lead') && (
+                    {canFilterAcrossDevAnalysts && (
                         <>
                             <button
                                 onClick={() => setSelectedAnalystFilter('ALL')}
@@ -480,16 +509,20 @@ export default function WorkspaceDevAnalyst() {
                                 className="px-3 py-1.5 rounded-xl text-xs font-semibold border border-gray-200 bg-white text-gray-700 outline-none focus:border-[#00529C]"
                             >
                                 <option value="">-- Filter Per Dev Analis (PM) --</option>
-                                {devAnalystList.map(a => (
-                                    <option key={a.id} value={a.name}>{a.name}</option>
+                                {devAnalystOptions.map(a => (
+                                    <option key={a.id} value={a.id}>{a.name}</option>
                                 ))}
                             </select>
                         </>
                     )}
 
-                    <span className="px-3.5 py-1.5 rounded-xl text-xs font-bold bg-[#00529C] text-white shadow-xs">
-                        👤 Proyek Tugas Saya
-                    </span>
+                    {/* PM biasa: penanda bahwa antrean yang tampil memang hanya miliknya.
+                        Tidak ditampilkan untuk role pengawas karena antrean mereka lintas PM. */}
+                    {! canFilterAcrossDevAnalysts && (
+                        <span className="px-3.5 py-1.5 rounded-xl text-xs font-bold bg-[#00529C] text-white shadow-xs">
+                            👤 Proyek Tugas Saya
+                        </span>
+                    )}
                 </div>
             </div>
 
@@ -661,7 +694,10 @@ export default function WorkspaceDevAnalyst() {
                                                     </div>
                                                     <div className="truncate min-w-0">
                                                         <p className="text-xs font-semibold text-gray-800 truncate">{doc.name}</p>
-                                                        <p className="text-[11px] text-gray-500">{doc.size || '2.4 MB'} • {doc.label || 'Dokumen SDLC Terlampir'}</p>
+                                                        {/* Ukuran & label apa adanya. Nilai bawaan sebelumnya
+                                                            adalah '2.4 MB' — angka karangan yang tampil seolah
+                                                            ukuran berkas sungguhan. */}
+                                                        <p className="text-[11px] text-gray-500">{formatDocSizeLabel(doc)} • {doc.label || doc.doc_type || 'Dokumen proyek'}</p>
                                                     </div>
                                                 </div>
                                                 <div className="flex items-center gap-1.5 shrink-0">

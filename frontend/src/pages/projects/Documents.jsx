@@ -11,25 +11,16 @@ import {
     List,
     Eye,
     Download,
-    Plus,
     Upload,
-    ChevronRight,
     X,
     CheckCircle2,
     Folder,
-    Printer,
-    Maximize2,
-    Minimize2,
-    ZoomIn,
-    ZoomOut,
     ShieldCheck,
     Verified,
-    FileCheck,
 } from 'lucide-react';
-import { useAuth } from '../../contexts/AuthContext';
 import { useProjects } from '../../contexts/ProjectContext';
 import { documentService } from '../../services/api';
-import { getDocExtLabel, getDocIconStyle, generateDocumentName, DOCUMENT_TYPES } from '../../utils/documentNaming';
+import { getDocExtLabel, getDocIconStyle, generateDocumentName, formatDocSizeLabel, DOCUMENT_TYPES } from '../../utils/documentNaming';
 import LoadingSpinner from '../../components/LoadingSpinner';
 import EmptyState from '../../components/EmptyState';
 import DocumentViewerModal from '../../components/DocumentViewerModal';
@@ -54,15 +45,8 @@ const mapDocTypeToCategory = (type, fileName = '') => {
     return { category: 'Kebutuhan', color: 'bg-blue-100 text-blue-700 border-blue-200' };
 };
 
-const iconMap = {
-    pdf: { icon: File, className: 'text-red-500' },
-    word: { icon: FileText, className: 'text-blue-600' },
-    excel: { icon: FileSpreadsheet, className: 'text-emerald-600' },
-};
-
 export default function Documents() {
-    const { user } = useAuth();
-    const { projects, isLoading } = useProjects();
+    const { projects, isLoading, refreshData } = useProjects();
 
     const [searchTerm, setSearchTerm] = useState('');
     const [activeTab, setActiveTab] = useState('Semua File');
@@ -71,19 +55,9 @@ export default function Documents() {
 
     // Modals & Viewer states
     const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
-    const [isFolderModalOpen, setIsFolderModalOpen] = useState(false);
     const [previewDoc, setPreviewDoc] = useState(null);
-    const [zoomLevel, setZoomLevel] = useState(100);
-    const [isFullscreen, setIsFullscreen] = useState(false);
 
     // Form states
-    const [folderName, setFolderName] = useState('');
-    const [customFolders, setCustomFolders] = useState([
-        { id: 'f1', name: 'BRD & FSD Kebutuhan', color: 'bg-blue-50 border-blue-200 text-[#1A56DB]' },
-        { id: 'f2', name: 'Laporan Test QA & Siber', color: 'bg-purple-50 border-purple-200 text-purple-700' },
-        { id: 'f3', name: 'Berita Acara UAT & Legal', color: 'bg-emerald-50 border-emerald-200 text-emerald-700' },
-    ]);
-
     const [uploadProject, setUploadProject] = useState('');
     const [uploadProjectId, setUploadProjectId] = useState('');
     const [uploadDocType, setUploadDocType] = useState('BRD');
@@ -94,53 +68,10 @@ export default function Documents() {
 
     const fileInputRef = useRef(null);
 
-    const tabs = ['Semua File', 'Kebutuhan (BRD/FSD)', 'Teknis & UAT', 'Kontrak/Legal'];
-
     const showToast = (msg, type = 'success') => {
         setToastMessage({ msg, type });
         setTimeout(() => setToastMessage(null), 3000);
     };
-
-    const isPdfDoc = useMemo(() => {
-        if (!previewDoc) return false;
-        const fileName = (previewDoc.name || '').toLowerCase();
-        return fileName.endsWith('.pdf') || previewDoc.type === 'pdf';
-    }, [previewDoc]);
-
-    const isImageDoc = useMemo(() => {
-        if (!previewDoc) return false;
-        const fileName = (previewDoc.name || '').toLowerCase();
-        return /\.(png|jpe?g|gif|webp|svg)$/i.test(fileName);
-    }, [previewDoc]);
-
-    // Convert Data URL to Blob URL ONLY for PDFs/Images to prevent browser forced downloads
-    const previewBlobUrl = useMemo(() => {
-        if (!previewDoc) return null;
-        if (!isPdfDoc && !isImageDoc) return null;
-
-        const rawUrl = previewDoc.url || previewDoc.fileUrl || previewDoc.dataUrl;
-        if (!rawUrl) return null;
-
-        if (rawUrl.startsWith('data:')) {
-            try {
-                const parts = rawUrl.split(',');
-                const mimeMatch = parts[0].match(/:(.*?);/);
-                const mime = mimeMatch ? mimeMatch[1] : (isPdfDoc ? 'application/pdf' : 'image/png');
-                const bstr = atob(parts[1]);
-                let n = bstr.length;
-                const u8arr = new Uint8Array(n);
-                while (n--) {
-                    u8arr[n] = bstr.charCodeAt(n);
-                }
-                const blob = new Blob([u8arr], { type: mime });
-                return URL.createObjectURL(blob);
-            } catch (e) {
-                console.warn('Failed to convert Data URL to Blob:', e);
-                return rawUrl;
-            }
-        }
-        return rawUrl;
-    }, [previewDoc, isPdfDoc, isImageDoc]);
 
     // Map API documents only (DocumentVault) — no synthetic entries
     const allDocs = useMemo(() => {
@@ -151,12 +82,15 @@ export default function Documents() {
 
             return p.documents.map((doc, idx) => ({
                 id: doc.id || `DOC-PRJ-${p.id}-${idx}`,
-                name: doc.file_name || doc.name || 'Dokumen.pdf',
-                size: doc.file_size || doc.size || 'N/A',
+                name: doc.file_name || doc.name || 'Dokumen tanpa nama',
+                size: doc.file_size ?? doc.size ?? null,
                 type: doc.document_type || doc.doc_type || doc.type || 'lainnya',
                 project: pName,
-                uploadedBy: doc.author || doc.uploader?.name || p.creator?.name || user?.name || 'PIC Proyek',
-                date: doc.created_at || doc.uploadedAt || p.submittedAt || 'Terbaru',
+                // Pengunggah apa adanya. Rantai cadangan sebelumnya berakhir pada
+                // `user?.name`, sehingga dokumen tanpa data pengunggah dikreditkan ke akun
+                // yang sedang membuka halaman — keliru pada kolom yang bersifat audit.
+                uploadedBy: doc.uploader?.name || doc.author || null,
+                date: doc.created_at || doc.uploadedAt || null,
             }));
         });
 
@@ -173,7 +107,7 @@ export default function Documents() {
         });
 
         return unique;
-    }, [projects, user]);
+    }, [projects]);
 
     const mappedDocs = useMemo(() => (allDocs || []).map(doc => {
         const fileName = doc.file_name || doc.name || 'Dokumen.pdf';
@@ -185,17 +119,20 @@ export default function Documents() {
         return {
             id: doc.id,
             name: fileName,
-            size: doc.file_size || doc.size || '1.5 MB',
+            // Ukuran apa adanya (byte dari `documents.file_size`). Nilai bawaan sebelumnya
+            // adalah '1.5 MB' — angka karangan yang tampil seolah ukuran berkas sungguhan.
+            // Berkas tanpa catatan ukuran ditangani saat render oleh `formatDocSizeLabel`.
+            size: doc.file_size ?? doc.size ?? null,
             project: doc.project_name || doc.project || 'Proyek SDLC',
             category: typeInfo.category,
-            uploadedBy: doc.uploaded_by_name || doc.uploadedBy || user?.name || 'System User',
-            date: doc.created_at ? new Date(doc.created_at).toLocaleDateString('id-ID') : (doc.date || 'Terbaru'),
+            uploadedBy: doc.uploaded_by_name || doc.uploadedBy || null,
+            date: doc.created_at ? new Date(doc.created_at).toLocaleDateString('id-ID') : (doc.date || null),
             type: doc.doc_type || doc.type || 'brd',
             url: doc.url || doc.fileUrl || doc.dataUrl || null,
             icon,
             color: typeInfo.color,
         };
-    }), [allDocs, user]);
+    }), [allDocs]);
 
 
     // Summary metrics
@@ -280,9 +217,9 @@ export default function Documents() {
             const term = searchTerm.toLowerCase();
             result = result.filter(
                 (doc) =>
-                    doc.name.toLowerCase().includes(term) ||
-                    doc.project.toLowerCase().includes(term) ||
-                    doc.uploadedBy.toLowerCase().includes(term)
+                    String(doc.name || '').toLowerCase().includes(term) ||
+                    String(doc.project || '').toLowerCase().includes(term) ||
+                    String(doc.uploadedBy || '').toLowerCase().includes(term)
             );
         }
 
@@ -312,22 +249,6 @@ export default function Documents() {
                 setUploadFileName(file.name);
             }
         }
-    };
-
-    // Submit Buat Folder
-    const handleCreateFolder = (e) => {
-        e.preventDefault();
-        if (!folderName.trim()) return;
-
-        const newFolder = {
-            id: `f_${Date.now()}`,
-            name: folderName,
-            color: 'bg-blue-50 border-blue-200 text-[#1A56DB]',
-        };
-        setCustomFolders(prev => [...prev, newFolder]);
-        showToast(`Folder "${folderName}" berhasil dibuat!`);
-        setFolderName('');
-        setIsFolderModalOpen(false);
     };
 
     // Submit Unggah Dokumen (via API, nama otomatis masking XXX/GPTD/TIPE/...)
@@ -367,7 +288,11 @@ export default function Documents() {
             setSelectedFile(null);
             setUploadProjectId('');
             setUploadProject('');
-            window.location.reload();
+            // Muat ulang daftar proyek (beserta relasi dokumennya) dari API.
+            // Sebelumnya halaman ini memakai window.location.reload() yang membuang
+            // seluruh state aplikasi dan memulai ulang autentikasi hanya untuk
+            // menyegarkan satu daftar.
+            await refreshData();
         } catch (err) {
             showToast(`Gagal mengunggah: ${err.message || 'Terjadi kesalahan'}`, 'error');
         } finally {
@@ -396,15 +321,6 @@ export default function Documents() {
         }
     };
 
-    // Delete Folder handler
-    const handleDeleteFolder = (id, name, e) => {
-        e.stopPropagation();
-        if (window.confirm(`Apakah Anda yakin ingin menghapus folder "${name}"?`)) {
-            setCustomFolders(prev => prev.filter(f => f.id !== id));
-            showToast(`Folder "${name}" telah dihapus.`, 'warning');
-        }
-    };
-
     const toggleSelectAll = () => {
         if (selectedDocs.length === filteredDocs.length) {
             setSelectedDocs([]);
@@ -417,12 +333,6 @@ export default function Documents() {
         setSelectedDocs((prev) =>
             prev.includes(id) ? prev.filter((docId) => docId !== id) : [...prev, id]
         );
-    };
-
-    const getDocIcon = (type) => {
-        const config = iconMap[type] || { icon: File, className: 'text-gray-400' };
-        const Icon = config.icon;
-        return <Icon className={`${config.className} w-6 h-6`} />;
     };
 
     if (isLoading) return <LoadingSpinner text="Memuat dokumen..." />;
@@ -452,13 +362,6 @@ export default function Documents() {
                         </p>
                     </div>
                     <div className="flex items-center gap-3">
-                        <button
-                            onClick={() => setIsFolderModalOpen(true)}
-                            className="px-4 py-2.5 bg-white border border-gray-300 text-gray-700 rounded-xl text-sm font-semibold hover:bg-gray-50 transition-colors flex items-center gap-2 shadow-xs cursor-pointer active:scale-95"
-                        >
-                            <FolderOpen size={18} className="text-[#1A56DB]" />
-                            Buat Folder
-                        </button>
                         <button
                             onClick={() => setIsUploadModalOpen(true)}
                             className="px-4 py-2.5 bg-[#003a73] text-white rounded-xl text-sm font-semibold hover:bg-[#002a5a] transition-colors flex items-center gap-2 shadow-sm cursor-pointer active:scale-95"
@@ -504,9 +407,6 @@ export default function Documents() {
                             </h3>
                             <p className="text-xs text-gray-400 mt-0.5">Pilih folder kategori di bawah untuk memfilter berkas dokumen SDLC</p>
                         </div>
-                        <button onClick={() => setIsFolderModalOpen(true)} className="text-xs font-bold text-[#1A56DB] hover:underline flex items-center gap-1 cursor-pointer">
-                            <Plus size={14} /> Tambah Folder
-                        </button>
                     </div>
 
                     <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3.5">
@@ -643,7 +543,7 @@ export default function Documents() {
                                                         <p className="font-semibold text-gray-800 group-hover:text-[#1A56DB] transition-colors">
                                                             {doc.name}
                                                         </p>
-                                                        <p className="text-xs text-gray-400">{doc.size}</p>
+                                                        <p className="text-xs text-gray-400">{formatDocSizeLabel(doc)}</p>
                                                     </div>
                                                 </div>
                                             </td>
@@ -653,8 +553,12 @@ export default function Documents() {
                                                     {doc.category}
                                                 </span>
                                             </td>
-                                            <td className="py-4 px-5 text-gray-500">{doc.uploadedBy}</td>
-                                            <td className="py-4 px-5 text-gray-500 text-xs">{doc.date}</td>
+                                            <td className="py-4 px-5 text-gray-500">
+                                                {doc.uploadedBy || <span className="text-gray-300 italic">Tidak tercatat</span>}
+                                            </td>
+                                            <td className="py-4 px-5 text-gray-500 text-xs">
+                                                {doc.date || <span className="text-gray-300 italic">—</span>}
+                                            </td>
                                             <td className="py-4 px-5 text-center">
                                                 <div className="flex items-center justify-center gap-1">
                                                     <button
@@ -692,7 +596,7 @@ export default function Documents() {
                                                     </div>
                                                     <div>
                                                         <p className="font-bold text-gray-800 text-sm">{doc.name}</p>
-                                                        <p className="text-xs text-gray-400">{doc.size}</p>
+                                                        <p className="text-xs text-gray-400">{formatDocSizeLabel(doc)}</p>
                                                     </div>
                                                 </div>
                                                 <span className={`px-2.5 py-1 rounded-full text-xs font-bold border ${doc.color}`}>
@@ -700,7 +604,7 @@ export default function Documents() {
                                                 </span>
                                             </div>
                                             <p className="text-xs text-gray-500 font-medium">Proyek: <span className="text-gray-800">{doc.project}</span></p>
-                                            <p className="text-xs text-gray-400 mt-1">Oleh: {doc.uploadedBy}</p>
+                                            <p className="text-xs text-gray-400 mt-1">Oleh: {doc.uploadedBy || 'Tidak tercatat'}</p>
                                         </div>
                                         <div className="flex items-center justify-end gap-1 mt-4 pt-3 border-t border-gray-100">
                                             <button onClick={() => setPreviewDoc(doc)} className="p-1.5 text-gray-400 hover:text-[#1A56DB] hover:bg-blue-50 rounded-lg transition-colors">
@@ -717,51 +621,6 @@ export default function Documents() {
                     </div>
                 </div>
             </div>
-
-            {/* ── MODAL: Buat Folder Baru ── */}
-            {isFolderModalOpen && (
-                <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-50 flex items-center justify-center p-4">
-                    <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-xl animate-scale-up">
-                        <div className="flex justify-between items-center mb-4">
-                            <h3 className="text-lg font-bold text-gray-800 flex items-center gap-2">
-                                <FolderOpen size={20} className="text-[#1A56DB]" />
-                                Buat Folder Baru
-                            </h3>
-                            <button onClick={() => setIsFolderModalOpen(false)} className="text-gray-400 hover:text-gray-600 p-1 rounded-lg">
-                                <X size={18} />
-                            </button>
-                        </div>
-                        <form onSubmit={handleCreateFolder} className="space-y-4">
-                            <div>
-                                <label className="block text-xs font-bold text-gray-700 uppercase mb-1">Nama Folder</label>
-                                <input
-                                    type="text"
-                                    required
-                                    value={folderName}
-                                    onChange={e => setFolderName(e.target.value)}
-                                    placeholder="Contoh: Dokumen Spesifikasi Kebutuhan"
-                                    className="w-full px-3.5 py-2.5 border border-gray-200 rounded-xl text-sm outline-none focus:border-[#1A56DB] focus:ring-2 focus:ring-[#1A56DB]/20"
-                                />
-                            </div>
-                            <div className="flex justify-end gap-3 pt-2">
-                                <button
-                                    type="button"
-                                    onClick={() => setIsFolderModalOpen(false)}
-                                    className="px-4 py-2 bg-gray-100 text-gray-600 rounded-xl text-sm font-semibold hover:bg-gray-200"
-                                >
-                                    Batal
-                                </button>
-                                <button
-                                    type="submit"
-                                    className="px-4 py-2 bg-[#003a73] text-white rounded-xl text-sm font-bold hover:bg-[#002a5a] shadow-md"
-                                >
-                                    Simpan Folder
-                                </button>
-                            </div>
-                        </form>
-                    </div>
-                </div>
-            )}
 
             {/* ── MODAL: Unggah Dokumen ── */}
             {isUploadModalOpen && (

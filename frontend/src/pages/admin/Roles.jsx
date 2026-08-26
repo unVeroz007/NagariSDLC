@@ -1,5 +1,6 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useMasterData } from '../../contexts/MasterDataContext';
+import { getMenuItemsForRole } from '../../data/menuConfig';
 import {
     Shield,
     Plus,
@@ -9,14 +10,12 @@ import {
     X,
     Lock,
     Key,
-    Calendar,
-    FileText,
-    CheckCircle,
+    Network,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 
 export default function RolesManagement() {
-    const { roles, addRole, editRole, deleteRole } = useMasterData();
+    const { roles, groups, addRole, editRole, deleteRole } = useMasterData();
     const [searchTerm, setSearchTerm] = useState('');
 
     // Modal States
@@ -25,23 +24,79 @@ export default function RolesManagement() {
     const [editingRole, setEditingRole] = useState(null);
 
     // Form State
+    //
+    // `menuAccess` berisi daftar path menu yang dicentang. Kosong berarti TANPA
+    // pembatasan — seluruh menu role tersebut tampil. Perlakuan itu sama dengan backend
+    // (`Role::menuAccessPaths()`), supaya tidak ada role yang kehilangan seluruh menunya
+    // hanya karena tidak ada yang dicentang.
     const [formData, setFormData] = useState({
         name: '',
         code: '',
         description: '',
-        menuAccess: '',
+        groupId: '',
+        menuAccess: [],
     });
+
+    // Pilihan menu selalu berasal dari peta menu di kode (`menuSections`), bukan dari
+    // daftar bebas. Pembatasan menu bersifat mengurangi: tidak ada cara memberi sebuah
+    // role menu yang rutenya memang tidak terbuka untuknya.
+    const availableMenuItems = useMemo(
+        () => getMenuItemsForRole(formData.code),
+        [formData.code]
+    );
+
+    const menuSectionGroups = useMemo(() => {
+        const bySection = new Map();
+        availableMenuItems.forEach(item => {
+            if (! bySection.has(item.section)) {
+                bySection.set(item.section, []);
+            }
+            bySection.get(item.section).push(item);
+        });
+        return Array.from(bySection, ([section, items]) => ({ section, items }));
+    }, [availableMenuItems]);
 
     // Filter Roles
     const filteredRoles = roles.filter(r =>
         r.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
         (r.code && r.code.toLowerCase().includes(searchTerm.toLowerCase())) ||
         String(r.id).toLowerCase().includes(searchTerm.toLowerCase()) ||
-        (r.menuAccess && r.menuAccess.toLowerCase().includes(searchTerm.toLowerCase()))
+        (r.groupName && r.groupName.toLowerCase().includes(searchTerm.toLowerCase()))
     );
 
+    /**
+     * Ringkasan pembatasan menu sebuah role, apa adanya menurut basis data.
+     *
+     * Kolom ini sebelumnya menampilkan teks tetap "Modul Standar" untuk setiap role —
+     * nilai yang tidak pernah dikirim ke server maupun dibaca kembali.
+     */
+    const describeMenuAccess = (role) => {
+        const totalMenus = getMenuItemsForRole(role.code).length;
+        const restricted = Array.isArray(role.menuAccess) ? role.menuAccess.length : 0;
+
+        if (totalMenus === 0) {
+            return { label: 'Belum ada peta menu', tone: 'bg-amber-50 text-amber-700 border-amber-200' };
+        }
+        if (restricted === 0) {
+            return { label: `Semua menu (${totalMenus})`, tone: 'bg-gray-100 text-gray-700 border-gray-200' };
+        }
+        return {
+            label: `${restricted} dari ${totalMenus} menu`,
+            tone: 'bg-blue-50 text-blue-700 border-blue-200',
+        };
+    };
+
+    const toggleMenuPath = (path) => {
+        setFormData(prev => ({
+            ...prev,
+            menuAccess: prev.menuAccess.includes(path)
+                ? prev.menuAccess.filter(p => p !== path)
+                : [...prev.menuAccess, path],
+        }));
+    };
+
     const handleOpenAdd = () => {
-        setFormData({ name: '', code: '', description: '', menuAccess: '' });
+        setFormData({ name: '', code: '', description: '', groupId: '', menuAccess: [] });
         setIsAddModalOpen(true);
     };
 
@@ -51,7 +106,8 @@ export default function RolesManagement() {
             name: r.name,
             code: r.code,
             description: r.description || '',
-            menuAccess: r.menuAccess || '',
+            groupId: r.groupId ? String(r.groupId) : '',
+            menuAccess: Array.isArray(r.menuAccess) ? [...r.menuAccess] : [],
         });
         setIsEditModalOpen(true);
     };
@@ -70,6 +126,14 @@ export default function RolesManagement() {
         e.preventDefault();
         if (!formData.name.trim()) {
             toast.error('Nama role wajib diisi!');
+            return;
+        }
+        // Halaman Administrasi yang mengatur pembatasan menu berada di dalam menu itu
+        // sendiri, jadi Super Admin yang membatasi dirinya tidak punya jalan kembali.
+        // Backend menolaknya juga; penghalang di sini hanya agar pesannya muncul sebelum
+        // permintaan dikirim.
+        if (editingRole.code === 'super_admin' && formData.menuAccess.length > 0) {
+            toast.error('Akses menu Super Admin tidak dapat dibatasi.');
             return;
         }
         editRole(editingRole.id, formData);
@@ -101,6 +165,100 @@ export default function RolesManagement() {
         return 'bg-gray-100 text-gray-700 border-gray-200';
     };
 
+    /**
+     * Bagian formulir untuk penempatan grup dan pembatasan menu.
+     *
+     * Dipakai modal Tambah maupun Edit supaya keduanya tidak pernah menyimpang. Satu-satunya
+     * perbedaan adalah Super Admin: aksesnya tidak boleh dibatasi karena halaman
+     * Administrasi yang mengatur pembatasan itu sendiri berada di dalam menu.
+     */
+    const renderGroupAndMenuFields = ({ menuRestrictionLocked = false } = {}) => (
+        <>
+            <div>
+                <label className="block text-xs font-bold text-gray-700 mb-1">Grup Kerja</label>
+                <select
+                    value={formData.groupId}
+                    onChange={(e) => setFormData({ ...formData, groupId: e.target.value })}
+                    className="w-full px-3.5 py-2 rounded-xl border border-gray-200 text-xs font-medium bg-white focus:ring-2 focus:ring-blue-100 focus:border-[#003a73] outline-none"
+                >
+                    <option value="">— Tanpa grup —</option>
+                    {groups.map(g => (
+                        <option key={g.id} value={g.id}>{g.name} ({g.code})</option>
+                    ))}
+                </select>
+                <p className="text-[11px] text-gray-500 mt-1 leading-relaxed">
+                    Grup mengelompokkan role untuk penataan personel dan tampilan. Hak persetujuan
+                    serta hak mengubah status proyek tetap ditentukan kode role, bukan grupnya.
+                </p>
+            </div>
+
+            <div>
+                <div className="flex items-center justify-between mb-1">
+                    <label className="block text-xs font-bold text-gray-700">Pembatasan Akses Menu</label>
+                    {!menuRestrictionLocked && formData.menuAccess.length > 0 && (
+                        <button
+                            type="button"
+                            onClick={() => setFormData({ ...formData, menuAccess: [] })}
+                            className="text-[11px] font-bold text-blue-600 hover:text-blue-800 cursor-pointer"
+                        >
+                            Bersihkan pilihan
+                        </button>
+                    )}
+                </div>
+
+                {menuRestrictionLocked ? (
+                    <p className="text-[11px] text-gray-500 leading-relaxed bg-purple-50 border border-purple-100 rounded-xl px-3 py-2">
+                        Akses menu Super Admin tidak dapat dibatasi. Halaman Administrasi yang mengatur
+                        pembatasan ini berada di dalam menu, sehingga membatasinya akan menutup satu-satunya
+                        jalan untuk membatalkannya.
+                    </p>
+                ) : menuSectionGroups.length === 0 ? (
+                    <p className="text-[11px] text-gray-500 leading-relaxed bg-amber-50 border border-amber-100 rounded-xl px-3 py-2">
+                        Kode role <span className="font-mono font-bold">{formData.code || '—'}</span> belum
+                        memiliki peta menu di aplikasi, jadi belum ada menu yang bisa dibatasi. Peta menu
+                        ditentukan di kode (<span className="font-mono">data/menuConfig.js</span>); pembatasan
+                        di sini hanya dapat mengurangi menu yang sudah ada.
+                    </p>
+                ) : (
+                    <>
+                        <p className="text-[11px] text-gray-500 mb-2 leading-relaxed">
+                            Tanpa centang sama sekali, seluruh {availableMenuItems.length} menu role ini tampil.
+                            Bila ada yang dicentang, hanya menu tercentang yang tampil di sidebar.
+                        </p>
+                        <div className="max-h-52 overflow-y-auto rounded-xl border border-gray-200 divide-y divide-gray-100">
+                            {menuSectionGroups.map(({ section, items }) => (
+                                <div key={section} className="p-2.5">
+                                    <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1.5">{section}</p>
+                                    <div className="space-y-1">
+                                        {items.map(item => (
+                                            <label key={item.path} className="flex items-start gap-2 text-xs text-gray-700 cursor-pointer hover:text-gray-900">
+                                                <input
+                                                    type="checkbox"
+                                                    checked={formData.menuAccess.includes(item.path)}
+                                                    onChange={() => toggleMenuPath(item.path)}
+                                                    className="mt-0.5 accent-[#003a73] cursor-pointer"
+                                                />
+                                                <span>
+                                                    {item.label}
+                                                    <span className="block text-[10px] text-gray-400 font-mono">{item.path}</span>
+                                                </span>
+                                            </label>
+                                        ))}
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                        <p className="text-[11px] text-gray-500 mt-1.5">
+                            {formData.menuAccess.length === 0
+                                ? 'Saat ini: tanpa pembatasan.'
+                                : `Saat ini: ${formData.menuAccess.length} dari ${availableMenuItems.length} menu dipilih.`}
+                        </p>
+                    </>
+                )}
+            </div>
+        </>
+    );
+
     return (
         <div className="flex-1 overflow-y-auto px-6 py-4 md:px-8 md:py-5 bg-[#f8f9fb]">
             {/* Header */}
@@ -130,7 +288,7 @@ export default function RolesManagement() {
                             type="text"
                             value={searchTerm}
                             onChange={(e) => setSearchTerm(e.target.value)}
-                            placeholder="Cari nama, kode, atau menu akses role..."
+                            placeholder="Cari nama, kode, atau grup kerja role..."
                             className="w-full pl-10 pr-4 py-2 rounded-xl border border-gray-200 bg-white text-sm focus:border-[#00529C] focus:ring-2 focus:ring-blue-100 outline-none transition-all shadow-sm"
                         />
                     </div>
@@ -146,6 +304,7 @@ export default function RolesManagement() {
                             <tr className="bg-gray-50 text-gray-500 text-xs font-semibold uppercase tracking-wider border-b border-gray-200">
                                 <th className="py-4 px-6">ID & Kode Role</th>
                                 <th className="py-4 px-6">Nama Role</th>
+                                <th className="py-4 px-6">Grup Kerja</th>
                                 <th className="py-4 px-6">Hak Akses Menu</th>
                                 <th className="py-4 px-6">Deskripsi & Wewenang</th>
                                 <th className="py-4 px-6 text-center">Aksi</th>
@@ -154,7 +313,7 @@ export default function RolesManagement() {
                         <tbody className="divide-y divide-gray-100 text-sm">
                             {filteredRoles.length === 0 ? (
                                 <tr>
-                                    <td colSpan={5} className="p-8 text-center text-gray-400">
+                                    <td colSpan={6} className="p-8 text-center text-gray-400">
                                         Tidak ada role yang ditemukan.
                                     </td>
                                 </tr>
@@ -178,10 +337,25 @@ export default function RolesManagement() {
                                             )}
                                         </td>
                                         <td className="py-4 px-6">
-                                            <span className="inline-flex items-center gap-1.5 text-xs font-medium text-gray-700 bg-gray-100 px-2.5 py-1 rounded-md border border-gray-200">
-                                                <Key size={12} className="text-gray-500" />
-                                                {r.menuAccess || 'Modul Standar'}
-                                            </span>
+                                            {r.groupName ? (
+                                                <span className="inline-flex items-center gap-1.5 text-xs font-medium text-indigo-700 bg-indigo-50 px-2.5 py-1 rounded-md border border-indigo-100">
+                                                    <Network size={12} className="text-indigo-500" />
+                                                    {r.groupName}
+                                                </span>
+                                            ) : (
+                                                <span className="text-xs text-gray-400">Tanpa grup</span>
+                                            )}
+                                        </td>
+                                        <td className="py-4 px-6">
+                                            {(() => {
+                                                const access = describeMenuAccess(r);
+                                                return (
+                                                    <span className={`inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1 rounded-md border ${access.tone}`}>
+                                                        <Key size={12} className="opacity-70" />
+                                                        {access.label}
+                                                    </span>
+                                                );
+                                            })()}
                                         </td>
                                         <td className="py-4 px-6 text-gray-600 text-xs max-w-md">
                                             {r.description || '-'}
@@ -221,7 +395,7 @@ export default function RolesManagement() {
             {/* MODAL TAMBAH ROLE */}
             {isAddModalOpen && (
                 <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/40 backdrop-blur-xs animate-fadeIn">
-                    <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full overflow-hidden border border-gray-100">
+                    <div className="bg-white rounded-2xl shadow-2xl max-w-lg w-full max-h-[90vh] overflow-y-auto border border-gray-100">
                         <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200 bg-gray-50/80">
                             <h3 className="font-bold text-gray-800 text-base flex items-center gap-2">
                                 <Shield size={18} className="text-[#003a73]" /> Tambah Role Baru
@@ -256,17 +430,7 @@ export default function RolesManagement() {
                                     required
                                 />
                             </div>
-                            <div>
-                                <label className="block text-xs font-bold text-gray-700 mb-1">Hak Akses Menu Utama</label>
-                                <input
-                                    type="text"
-                                    value={formData.menuAccess}
-                                    onChange={(e) => setFormData({ ...formData, menuAccess: e.target.value })}
-                                    placeholder="Contoh: Audit Trail, Quality Gate"
-                                    className="w-full px-3.5 py-2 rounded-xl border border-gray-200 text-xs font-medium focus:ring-2 focus:ring-blue-100 focus:border-[#003a73] outline-none"
-                                    required
-                                />
-                            </div>
+                            {renderGroupAndMenuFields()}
                             <div>
                                 <label className="block text-xs font-bold text-gray-700 mb-1">Deskripsi Wewenang</label>
                                 <textarea
@@ -300,7 +464,7 @@ export default function RolesManagement() {
             {/* MODAL EDIT ROLE */}
             {isEditModalOpen && editingRole && (
                 <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/40 backdrop-blur-xs animate-fadeIn">
-                    <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full overflow-hidden border border-gray-100">
+                    <div className="bg-white rounded-2xl shadow-2xl max-w-lg w-full max-h-[90vh] overflow-y-auto border border-gray-100">
                         <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200 bg-gray-50/80">
                             <h3 className="font-bold text-gray-800 text-base flex items-center gap-2">
                                 <Edit size={18} className="text-[#003a73]" /> Edit Data Role
@@ -334,16 +498,7 @@ export default function RolesManagement() {
                                     required
                                 />
                             </div>
-                            <div>
-                                <label className="block text-xs font-bold text-gray-700 mb-1">Hak Akses Menu Utama</label>
-                                <input
-                                    type="text"
-                                    value={formData.menuAccess}
-                                    onChange={(e) => setFormData({ ...formData, menuAccess: e.target.value })}
-                                    className="w-full px-3.5 py-2 rounded-xl border border-gray-200 text-xs font-medium focus:ring-2 focus:ring-blue-100 focus:border-[#003a73] outline-none"
-                                    required
-                                />
-                            </div>
+                            {renderGroupAndMenuFields({ menuRestrictionLocked: editingRole.code === 'super_admin' })}
                             <div>
                                 <label className="block text-xs font-bold text-gray-700 mb-1">Deskripsi Wewenang</label>
                                 <textarea

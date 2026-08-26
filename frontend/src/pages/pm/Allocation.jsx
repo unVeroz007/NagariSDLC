@@ -12,13 +12,15 @@ import {
     UserCheck,
     Check,
     AlertCircle,
+    Loader2,
+    UserX,
 } from 'lucide-react';
 
 export default function Allocation() {
     const { user } = useAuth();
     const navigate = useNavigate();
     const { addNotification } = useNotifications();
-    const { projects, refreshData } = useProjects();
+    const { projects, isLoading: isProjectsLoading, refreshData } = useProjects();
     const rightPanelRef = useRef(null);
 
     const [developerCandidates, setDeveloperCandidates] = useState([]);
@@ -27,21 +29,28 @@ export default function Allocation() {
     // Fetch dynamic developer candidates from Backend API
     useEffect(() => {
         let isMounted = true;
-        setIsDeveloperLoading(true);
         userService.getAll()
             .then(res => {
                 if (!isMounted) return;
                 const usersList = Array.isArray(res) ? res : res?.data || [];
+                // Dicocokkan persis dengan nilai enum `App\Enums\UserRole::DEVELOPER`.
+                // Pencocokan potongan kata sebelumnya membuat setiap role baru yang
+                // memuat kata "developer" ikut masuk pool tanpa disengaja.
                 const devUsers = usersList.filter(u => {
                     const r = (u.role?.name || u.role || '').toString().toLowerCase();
-                    return r.includes('developer');
+                    return r === 'developer';
                 });
                 setDeveloperCandidates(devUsers.map(u => ({
                     id: u.id,
                     name: u.name,
                     email: u.email,
                     skill: typeof u.division === 'string' ? u.division : (u.division?.name || u.division_detail?.name || 'Developer'),
-                    available: true,
+                    // Ketersediaan diambil dari status akun sebenarnya. `GET /users`
+                    // mengembalikan seluruh pengguna termasuk yang sudah dinonaktifkan,
+                    // dan kolom ini sebelumnya ditulis `true` tanpa syarat — sehingga
+                    // developer yang aksesnya sudah dicabut tetap tampil "Tersedia" dan
+                    // masih bisa dimasukkan ke dalam tim proyek berjalan.
+                    isActive: u.is_active !== false,
                 })));
             })
             .catch(() => {
@@ -75,6 +84,12 @@ export default function Allocation() {
             p.team_allocated_by_pm !== true
         );
 
+        // Daftar peran istimewa ini disamakan dengan
+        // `ProjectAccessService::PERSONNEL_ASSIGNER_ROLES`, yaitu gerbang backend untuk
+        // `canAllocateTeam()`. Jangan diperketat menjadi hanya `super_admin` seperti pada
+        // halaman pengajuan jalur pengujian: di sana gerbangnya
+        // `TestingTrackService::submitRequest()` yang memang hanya meloloskan PM
+        // pemegang disposisi, sedangkan alokasi tim juga wewenang Kadiv dan Dev Lead.
         const isPrivileged = user?.role && ['super_admin', 'lead_group', 'head_of_it', 'development_lead'].includes(user.role);
         if (!isPrivileged && user?.id) {
             const pmId = user.id;
@@ -91,10 +106,30 @@ export default function Allocation() {
     const [isSubmitting, setIsSubmitting] = useState(false);
 
     // Proyek terpilih SELALU di-derive dari data projects terbaru (hindari objek stale).
+    // Bila PM belum memilih apa pun — atau proyek pilihannya sudah keluar dari daftar
+    // karena alokasinya selesai — proyek pertama pada daftar dipakai. Sebelumnya hal
+    // ini dikerjakan sebuah effect yang memanggil setState setelah render, sehingga
+    // panel detail sempat tampil kosong satu render.
     const selectedProject = useMemo(() => {
-        if (!selectedProjectId) return null;
-        return (projects || []).find(p => String(p.id) === String(selectedProjectId)) || null;
-    }, [projects, selectedProjectId]);
+        const picked = selectedProjectId
+            ? activeProjectsWithPM.find(p => String(p.id) === String(selectedProjectId))
+            : null;
+        return picked || activeProjectsWithPM[0] || null;
+    }, [activeProjectsWithPM, selectedProjectId]);
+
+    // Anggota tim yang dipilih PM sebelumnya (assigned_by === 'pm'). Tim dari Lead
+    // Pengembangan ditampilkan terpisah dan terkunci, jadi tidak masuk draf ini.
+    const pmSelectedMemberIds = (project) => (Array.isArray(project?.team) ? project.team : [])
+        .filter(t => t && t.user_id && String(t.assigned_by) === 'pm')
+        .map(t => Number(t.user_id));
+
+    // Draf pilihan tim mengikuti proyek yang sedang dibuka: saat proyeknya berganti,
+    // draf disusun ulang pada render yang sama (pola "sesuaikan state saat prop berubah").
+    const [teamDraftProjectId, setTeamDraftProjectId] = useState(null);
+    if ((selectedProject?.id ?? null) !== teamDraftProjectId) {
+        setTeamDraftProjectId(selectedProject?.id ?? null);
+        setSelectedTeamIds(pmSelectedMemberIds(selectedProject));
+    }
 
     // 🔒 Tim yang SUDAH dialokasikan oleh Lead Pengembangan (dari backend project.team).
     // HANYA anggota dengan assigned_by === 'lead' (bukan yang dipilih PM).
@@ -119,12 +154,34 @@ export default function Allocation() {
         [leadAssignedTeam]
     );
 
-    // Developer yang masih bisa dipilih PM (available & belum ditetapkan Lead).
+    // Developer yang masih bisa dipilih PM (akun aktif & belum ditetapkan Lead).
     // Anggota yang sudah dipilih PM sebelumnya tetap bisa di-uncheck (boleh dicabut).
     const selectableDevs = useMemo(
-        () => developerCandidates.filter(d => d.available && !leadAssignedUserIds.has(Number(d.id))),
+        () => developerCandidates.filter(d => d.isActive && !leadAssignedUserIds.has(Number(d.id))),
         [developerCandidates, leadAssignedUserIds]
     );
+
+    // Apakah seluruh developer yang boleh dipilih sudah tercentang?
+    //
+    // Perbandingan dilakukan per anggota, bukan per panjang array. Draf pilihan PM
+    // dapat memuat id yang tidak ada lagi pada daftar kandidat — misalnya akun yang
+    // sejak itu dinonaktifkan, atau yang kemudian ditetapkan Lead sehingga terkunci —
+    // sehingga dua panjang yang sama tidak berarti dua himpunan yang sama. Akibatnya
+    // tombol "Pilih Semua Tersedia" sebelumnya bisa berbunyi "Batal Pilih Semua"
+    // padahal masih ada developer yang belum tercentang.
+    const isAllSelectableSelected = useMemo(() => {
+        if (selectableDevs.length === 0) return false;
+        const selected = new Set(selectedTeamIds.map(Number));
+        return selectableDevs.every(d => selected.has(Number(d.id)));
+    }, [selectableDevs, selectedTeamIds]);
+
+    // Anggota tambahan pilihan PM yang benar-benar dapat dikirim. Satu sumber untuk
+    // ringkasan, hitungan tim akhir, dan payload alokasi — supaya ketiganya tidak
+    // pernah menyebut jumlah yang berbeda.
+    const pmSelectedDevs = useMemo(() => {
+        const selected = new Set(selectedTeamIds.map(Number));
+        return selectableDevs.filter(d => selected.has(Number(d.id)));
+    }, [selectableDevs, selectedTeamIds]);
 
     // Status proyek yang relevan sebagai "beban aktif" developer:
     // proyek yang sudah lolos analisis & masih berjalan (bukan live/cancel/reject).
@@ -160,16 +217,6 @@ export default function Allocation() {
         }).length;
     };
 
-    useEffect(() => {
-        if (activeProjectsWithPM.length > 0) {
-            if (!selectedProjectId || !activeProjectsWithPM.find(p => String(p.id) === String(selectedProjectId))) {
-                setSelectedProjectId(activeProjectsWithPM[0].id);
-            }
-        } else {
-            setSelectedProjectId(null);
-        }
-    }, [projects, activeProjectsWithPM.length]);
-
     // Helper untuk scroll paling atas panel detail & container main di MainLayout
     const scrollPageToTop = () => {
         if (rightPanelRef.current) {
@@ -184,22 +231,8 @@ export default function Allocation() {
 
     // Auto scroll ke atas saat proyek dipilih
     useEffect(() => {
-        if (selectedProjectId) {
+        if (selectedProject?.id) {
             scrollPageToTop();
-        }
-    }, [selectedProjectId]);
-
-    // Update selected team IDs when selected project changes.
-    // Isi awal: hanya anggota yang dipilih PM sebelumnya (assigned_by === 'pm').
-    // Tim Lead ditampilkan terpisah dan terkunci (tidak masuk selectedTeamIds).
-    useEffect(() => {
-        if (selectedProject?.team && Array.isArray(selectedProject.team)) {
-            const pmIds = selectedProject.team
-                .filter(t => t && t.user_id && String(t.assigned_by) === 'pm')
-                .map(t => Number(t.user_id));
-            setSelectedTeamIds(pmIds);
-        } else {
-            setSelectedTeamIds([]);
         }
     }, [selectedProject?.id]);
 
@@ -209,20 +242,24 @@ export default function Allocation() {
             toast.error('Developer ini sudah dipilih oleh Lead Pengembangan dan tidak dapat diubah.');
             return;
         }
-        if (selectedTeamIds.includes(devId)) {
-            setSelectedTeamIds(selectedTeamIds.filter(id => id !== devId));
-        } else {
-            setSelectedTeamIds([...selectedTeamIds, devId]);
+        const dev = developerCandidates.find(d => Number(d.id) === Number(devId));
+        if (dev && !dev.isActive) {
+            toast.error('Akun developer ini sudah dinonaktifkan dan tidak dapat dialokasikan.');
+            return;
         }
+        // Pembaruan berbasis fungsi, bukan membaca `selectedTeamIds` dari closure.
+        // Baris tabel dan checkbox di dalamnya sama-sama dapat memicu handler ini pada
+        // satu interaksi, dan versi lama menghitung nilai baru dari state render
+        // sebelumnya — pencentangan kedua membatalkan yang pertama.
+        setSelectedTeamIds((prev) => (
+            prev.some(id => Number(id) === Number(devId))
+                ? prev.filter(id => Number(id) !== Number(devId))
+                : [...prev, devId]
+        ));
     };
 
     const handleSelectAllDevs = () => {
-        const availableDevs = selectableDevs.map(d => d.id);
-        if (selectedTeamIds.length === availableDevs.length) {
-            setSelectedTeamIds([]);
-        } else {
-            setSelectedTeamIds(availableDevs);
-        }
+        setSelectedTeamIds(isAllSelectableSelected ? [] : selectableDevs.map(d => d.id));
     };
 
     const handleSubmit = async () => {
@@ -236,8 +273,10 @@ export default function Allocation() {
 
         setIsSubmitting(true);
 
-        // Tim final = tim Lead (terkunci, assigned_by 'lead') + pilihan PM (assigned_by 'pm')
-        const additionalTeam = developerCandidates.filter(d => selectedTeamIds.includes(d.id));
+        // Tim final = tim Lead (terkunci, assigned_by 'lead') + pilihan PM (assigned_by 'pm').
+        // Pilihan PM diambil dari `pmSelectedDevs`, bukan seluruh kandidat: id yang
+        // tertinggal di draf tetapi akunnya sudah dinonaktifkan tidak boleh terkirim.
+        const additionalTeam = pmSelectedDevs;
         const allocatedTeam = [
             ...leadAssignedTeam.map(t => ({ user_id: t.user_id, skill: t.role || 'Developer', assigned_by: 'lead' })),
             ...additionalTeam.map(d => ({ user_id: d.id, skill: d.skill || 'Developer', assigned_by: 'pm' })),
@@ -303,7 +342,21 @@ export default function Allocation() {
                         <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider">Proyek Dikelola ({activeProjectsWithPM.length})</h3>
                     </div>
 
-                    {activeProjectsWithPM.length === 0 ? (
+                    {isProjectsLoading && projects.length === 0 ? (
+                        // Muat pertama daftar proyek dibedakan dari daftar yang benar-benar
+                        // kosong. Sebelumnya keduanya menampilkan "Belum Ada Proyek
+                        // Membutuhkan PM" beserta tombol ke Workspace Dev Lead, sehingga
+                        // PM diarahkan pergi dari halaman ini padahal datanya masih dimuat.
+                        <div className="text-center py-8 px-4 bg-white rounded-xl border border-gray-200 shadow-xs">
+                            <div className="w-12 h-12 rounded-2xl bg-blue-50 text-[#00529C] flex items-center justify-center mx-auto mb-3">
+                                <Loader2 size={22} className="animate-spin" />
+                            </div>
+                            <h4 className="text-xs font-bold text-gray-800 mb-1">Memuat Daftar Proyek</h4>
+                            <p className="text-[11px] text-gray-500 leading-relaxed">
+                                Mengambil proyek yang membutuhkan alokasi tim dari server.
+                            </p>
+                        </div>
+                    ) : activeProjectsWithPM.length === 0 ? (
                         <div className="text-center py-8 px-4 bg-white rounded-xl border border-gray-200 shadow-xs">
                             <div className="w-12 h-12 rounded-2xl bg-amber-50 text-amber-600 flex items-center justify-center mx-auto mb-3">
                                 <AlertCircle size={24} />
@@ -346,7 +399,7 @@ export default function Allocation() {
                                 <h4 className="font-bold text-gray-800 text-sm mb-1 line-clamp-1">{project.name}</h4>
                                 <div className="flex items-center gap-2 text-xs text-gray-500 mt-2">
                                     <UserCheck size={13} className="text-emerald-600" />
-                                    <span>PM: {project.pm?.name || 'Budi Santoso'}</span>
+                                    <span>PM: {project.pm?.name || 'Belum ditugaskan'}</span>
                                 </div>
                             </div>
                         ))
@@ -378,7 +431,11 @@ export default function Allocation() {
                                 <div className="border-b border-gray-100 pb-4">
                                     <div className="flex items-center justify-between">
                                         <span className="text-xs font-mono font-bold text-blue-600 bg-blue-50 px-2.5 py-0.5 rounded">
-                                            {selectedProject.id}
+                                            {/* Nomor pengajuan, sama dengan yang tampil pada
+                                                kartu di panel kiri. Sebelumnya kolom ini
+                                                menampilkan id numerik database, sehingga satu
+                                                proyek punya dua penanda berbeda di satu layar. */}
+                                            {selectedProject.reqId || selectedProject.req_id || `REQ-${selectedProject.id}`}
                                         </span>
                                         <div className="flex items-center gap-1.5 flex-wrap">
                                             <RBBBadge type={selectedProject.type} deadline={selectedProject.rbbDeadline} />
@@ -397,7 +454,10 @@ export default function Allocation() {
                                         </div>
                                         <div>
                                             <div className="text-xs text-emerald-700 font-bold uppercase tracking-wider">Project Manager Penanggung Jawab</div>
-                                            <div className="text-sm font-extrabold text-emerald-950">{selectedProject.pm?.name || 'Budi Santoso'} ({selectedProject.pm?.department || 'Divisi TI'})</div>
+                                            <div className="text-sm font-extrabold text-emerald-950">
+                                                {selectedProject.pm?.name || 'Belum ditugaskan'}
+                                                {selectedProject.pm?.department ? ` (${selectedProject.pm.department})` : ''}
+                                            </div>
                                         </div>
                                     </div>
                                     <span className="bg-emerald-100 text-emerald-800 text-xs font-bold px-3 py-1 rounded-full flex items-center gap-1">
@@ -407,7 +467,6 @@ export default function Allocation() {
                             </>
                         )}
 
-                            {/* SEKSI FORM ALOKASI TIM DEVELOPER */}
                             {/* SEKSI FORM ALOKASI TIM DEVELOPER */}
                             <section className="bg-gray-50 rounded-2xl border border-gray-200 p-5 space-y-4">
                                 <div className="flex items-center justify-between border-b border-gray-200 pb-3">
@@ -421,9 +480,10 @@ export default function Allocation() {
                                     <button
                                         type="button"
                                         onClick={handleSelectAllDevs}
-                                        className="text-xs font-bold text-blue-600 hover:text-blue-800 bg-white border border-blue-200 px-3 py-1.5 rounded-lg transition-all cursor-pointer"
+                                        disabled={selectableDevs.length === 0}
+                                        className="text-xs font-bold text-blue-600 hover:text-blue-800 bg-white border border-blue-200 px-3 py-1.5 rounded-lg transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                                     >
-                                        {selectedTeamIds.length === selectableDevs.length && selectableDevs.length > 0 ? 'Batal Pilih Semua' : 'Pilih Semua Tersedia'}
+                                        {isAllSelectableSelected ? 'Batal Pilih Semua' : 'Pilih Semua Tersedia'}
                                     </button>
                                 </div>
 
@@ -486,26 +546,28 @@ export default function Allocation() {
                                                 </tr>
                                             ) : (
                                                 developerCandidates.map((dev) => {
-                                                    const isChecked = selectedTeamIds.includes(dev.id);
+                                                    const isChecked = selectedTeamIds.some(id => Number(id) === Number(dev.id));
                                                     const isLocked = leadAssignedUserIds.has(Number(dev.id));
+                                                    const isInactive = !isLocked && !dev.isActive;
+                                                    const isDisabled = isLocked || isInactive;
                                                     const realtimeWorkload = getDeveloperActiveProjectCount(dev);
 
                                                     return (
                                                         <tr
                                                             key={dev.id}
                                                             onClick={() => handleToggleDev(dev.id)}
-                                                            className={`transition-colors ${isLocked ? 'bg-indigo-50/40 cursor-not-allowed' : `cursor-pointer ${isChecked ? 'bg-blue-50/50 font-semibold' : 'hover:bg-gray-50'}`}`}
+                                                            className={`transition-colors ${isLocked ? 'bg-indigo-50/40 cursor-not-allowed' : isInactive ? 'bg-gray-50 text-gray-400 cursor-not-allowed' : `cursor-pointer ${isChecked ? 'bg-blue-50/50 font-semibold' : 'hover:bg-gray-50'}`}`}
                                                         >
                                                             <td className="p-3.5 text-center" onClick={(e) => e.stopPropagation()}>
                                                                 <input
                                                                     type="checkbox"
-                                                                    checked={isLocked ? true : isChecked}
-                                                                    disabled={isLocked}
+                                                                    checked={isLocked ? true : (isInactive ? false : isChecked)}
+                                                                    disabled={isDisabled}
                                                                     onChange={() => handleToggleDev(dev.id)}
-                                                                    className={`w-4 h-4 rounded border-gray-300 focus:ring-blue-500 ${isLocked ? 'text-indigo-500 cursor-not-allowed opacity-60' : 'text-blue-600 cursor-pointer'}`}
+                                                                    className={`w-4 h-4 rounded border-gray-300 focus:ring-blue-500 ${isLocked ? 'text-indigo-500 cursor-not-allowed opacity-60' : isInactive ? 'cursor-not-allowed opacity-40' : 'text-blue-600 cursor-pointer'}`}
                                                                 />
                                                             </td>
-                                                            <td className="p-3.5 text-gray-800 font-bold">
+                                                            <td className={`p-3.5 font-bold ${isInactive ? 'text-gray-400' : 'text-gray-800'}`}>
                                                                 <span>{dev.name}</span>
                                                                 {isLocked && (
                                                                     <span className="ml-2 inline-flex items-center gap-1 text-[10px] font-bold text-indigo-700 bg-indigo-100 px-2 py-0.5 rounded-full">
@@ -519,9 +581,16 @@ export default function Allocation() {
                                                                 </span>
                                                             </td>
                                                             <td className="p-3.5 text-center">
+                                                                {/* Kolom ini sebelumnya selalu berbunyi "Tersedia" karena
+                                                                    ketersediaannya ditulis `true` tanpa syarat saat kandidat
+                                                                    dimuat. Sekarang mencerminkan status akun sebenarnya. */}
                                                                 {isLocked ? (
                                                                     <span className="bg-indigo-100 text-indigo-700 px-2.5 py-0.5 rounded-full text-[10px] font-bold">
                                                                         Ditetapkan Lead
+                                                                    </span>
+                                                                ) : isInactive ? (
+                                                                    <span className="inline-flex items-center gap-1 bg-gray-200 text-gray-600 px-2.5 py-0.5 rounded-full text-[10px] font-bold">
+                                                                        <UserX size={11} /> Akun Nonaktif
                                                                     </span>
                                                                 ) : (
                                                                     <span className="bg-emerald-100 text-emerald-700 px-2.5 py-0.5 rounded-full text-[10px] font-bold">
@@ -538,16 +607,13 @@ export default function Allocation() {
                                 </div>
 
                                 {/* Ringkasan Tim Terpilih */}
-                                {selectedTeamIds.length > 0 && (
+                                {pmSelectedDevs.length > 0 && (
                                     <div className="bg-blue-50 border border-blue-200 p-3.5 rounded-xl text-xs text-blue-900 flex items-center justify-between">
                                         <div className="flex items-center gap-2">
                                             <Users size={16} className="text-blue-700 shrink-0" />
                                             <span>
-                                                <strong>{selectedTeamIds.length} Developer Tambahan Terpilih:</strong>{' '}
-                                                {developerCandidates
-                                                    .filter(d => selectedTeamIds.includes(d.id))
-                                                    .map(d => d.name)
-                                                    .join(', ')}
+                                                <strong>{pmSelectedDevs.length} Developer Tambahan Terpilih:</strong>{' '}
+                                                {pmSelectedDevs.map(d => d.name).join(', ')}
                                             </span>
                                         </div>
                                     </div>
@@ -562,9 +628,9 @@ export default function Allocation() {
                                 {/* Action Bar / Total Developer & Tombol Alokasi (Diposisikan di Bawah Tabel Tim Dev) */}
                                 <div className="bg-white border border-gray-200 p-4 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-xs mt-4">
                                     <div className="text-xs text-gray-600">
-                                        Total Tim Akhir: <strong className="text-gray-900 text-sm font-extrabold">{leadAssignedTeam.length + selectedTeamIds.length} Orang</strong>
+                                        Total Tim Akhir: <strong className="text-gray-900 text-sm font-extrabold">{leadAssignedTeam.length + pmSelectedDevs.length} Orang</strong>
                                         {leadAssignedTeam.length > 0 && (
-                                            <span className="ml-2 text-indigo-600 font-semibold">({leadAssignedTeam.length} dari Lead + {selectedTeamIds.length} tambahan PM)</span>
+                                            <span className="ml-2 text-indigo-600 font-semibold">({leadAssignedTeam.length} dari Lead + {pmSelectedDevs.length} tambahan PM)</span>
                                         )}
                                     </div>
                                     <button

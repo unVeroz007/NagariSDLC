@@ -11,7 +11,7 @@ import ResetPassword from '../pages/ResetPassword';
 import Unauthorized from '../pages/Unauthorized';
 import NotFound from '../pages/NotFound';
 import ExternalUatApproval from '../pages/ExternalUatApproval';
-import InternalUatApprovals from '../pages/approvals/InternalUatApprovals';
+import MyApprovals from '../pages/approvals/MyApprovals';
 
 // Main pages
 import Dashboard from '../pages/Dashboard';
@@ -37,12 +37,12 @@ import PMWorkspace from '../pages/pm/PMWorkspace';
 import ProjectTracker from '../pages/pm/ProjectTracker';
 import Allocation from '../pages/pm/Allocation';
 import Kanban from '../pages/pm/Kanban';
-import Task from '../pages/pm/Tasks';
 import TaskDetail from '../pages/pm/TaskDetail';
 import QARequest from '../pages/pm/QARequest';
 import CyberRequest from '../pages/pm/CyberRequest';
 import ReviewDocs from '../pages/pm/ReviewDocs';
 import ReleaseRequest from '../pages/pm/ReleaseRequest';
+import ReturnRounds from '../pages/pm/ReturnRounds';
 
 // My Tasks pages
 import MyTasksQA from '../pages/mytasks/MyTasksQA';
@@ -52,6 +52,7 @@ import MyTasksDev from '../pages/mytasks/MyTasksDev';
 // Admin pages
 import Users from '../pages/admin/Users';
 import Divisions from '../pages/admin/Divisions';
+import Groups from '../pages/admin/Groups';
 import Roles from '../pages/admin/Roles';
 import Analytics from '../pages/admin/Analytics';
 import Settings from '../pages/admin/Settings';
@@ -60,14 +61,14 @@ import ActivityLog from '../pages/admin/ActivityLog';
 // Other pages
 import QualityGate from '../pages/QualityGate';
 
+import { PLANNING_QA_PAGE_ROLES } from '../constants/roles';
+
 // Role constants
 const ALL_ROLES = ['super_admin', 'lead_group', 'analyst', 'development_lead', 'project_manager', 'qa_lead', 'qa_tester', 'cyber_team', 'developer', 'business_user', 'cyber_lead', 'pentester', 'head_of_it', 'dev_analyst'];
 const PM_ROLES = ['super_admin', 'dev_analyst', 'project_manager', 'development_lead'];
 const LEAD_ROLES = ['super_admin', 'lead_group'];
-const ANALYST_ROLES = ['super_admin', 'analyst'];
 const DEV_LEAD_ROLES = ['super_admin', 'development_lead'];
 const DEV_MEMBER_ROLES = ['super_admin', 'development_lead', 'developer', 'dev_analyst', 'project_manager'];
-const QA_ROLES = ['super_admin', 'qa_lead', 'qa_tester', 'lead_group'];
 const CYBER_ROLES = ['super_admin', 'cyber_team', 'cyber_lead', 'pentester'];
 const ADMIN_ROLES = ['super_admin'];
 // Role yang boleh menginisiasi & melacak pengajuan proyek
@@ -77,6 +78,12 @@ const DOC_MANAGEMENT_ROLES = ['super_admin', 'head_of_it', 'lead_group', 'projec
 // Role yang boleh membuka detail proyek (TaskDetail): PM + viewer (developer/analyst read-only)
 const TASK_DETAIL_ROLES = ['super_admin', 'head_of_it', 'lead_group', 'dev_analyst', 'project_manager', 'development_lead', 'developer', 'analyst'];
 const INTERNAL_UAT_APPROVER_ROLES = ['super_admin', 'head_of_it', 'lead_group', 'analyst', 'development_lead', 'project_manager', 'dev_analyst', 'developer'];
+// Role yang boleh membuka halaman Putaran Pengembalian. Dibuat tersendiri karena tidak
+// ada konstanta lain yang menyatukan sisi pengembangan dengan kedua Lead pengujian:
+// PM/Analis Pengembangan menindak putarannya, sementara Lead Pengembangan, developer,
+// Lead QA, dan Lead Keamanan Siber perlu membaca temuan yang dikembalikan tanpa hak
+// mengubahnya. Pembatasan aksinya sendiri ada di halaman (kepemilikan `pm_id`).
+const RETURN_ROUND_PAGE_ROLES = ['super_admin', 'project_manager', 'dev_analyst', 'development_lead', 'developer', 'qa_lead', 'cyber_lead'];
 
 const router = createBrowserRouter([
     // ─────────────────────────────────────────────
@@ -155,12 +162,20 @@ const router = createBrowserRouter([
                 element: <Profile />,
             },
             {
-                path: '/approvals/uat',
+                path: '/approvals',
                 element: (
                     <ProtectedRoute allowedRoles={INTERNAL_UAT_APPROVER_ROLES}>
-                        <InternalUatApprovals />
+                        <MyApprovals />
                     </ProtectedRoute>
                 ),
+            },
+            {
+                // Halaman ini dulu hanya memuat persetujuan UAT. Jalur lamanya
+                // dipertahankan sebagai pengalihan karena masih dipakai penanda balik
+                // `from=uat-approvals` di `TaskDetail` dan tautan yang sudah tersimpan
+                // pengguna.
+                path: '/approvals/uat',
+                element: <Navigate to="/approvals" replace />,
             },
             {
                 path: '/projects',
@@ -215,7 +230,7 @@ const router = createBrowserRouter([
             {
                 path: '/workspace/analyst',
                 element: (
-                    <ProtectedRoute allowedRoles={ANALYST_ROLES}>
+                    <ProtectedRoute allowedRoles={PLANNING_QA_PAGE_ROLES}>
                         <WorkspaceAnalyst />
                     </ProtectedRoute>
                 ),
@@ -303,7 +318,7 @@ const router = createBrowserRouter([
             {
                 path: '/workspace/qa',
                 element: (
-                    <ProtectedRoute allowedRoles={QA_ROLES}>
+                    <ProtectedRoute allowedRoles={PLANNING_QA_PAGE_ROLES}>
                         <WorkspaceQA />
                     </ProtectedRoute>
                 ),
@@ -311,7 +326,7 @@ const router = createBrowserRouter([
             {
                 path: '/my-tasks/qa',
                 element: (
-                    <ProtectedRoute allowedRoles={QA_ROLES}>
+                    <ProtectedRoute allowedRoles={PLANNING_QA_PAGE_ROLES}>
                         <MyTasksQA />
                     </ProtectedRoute>
                 ),
@@ -337,6 +352,14 @@ const router = createBrowserRouter([
                 element: (
                     <ProtectedRoute allowedRoles={CYBER_ROLES}>
                         <MyTasksCyber />
+                    </ProtectedRoute>
+                ),
+            },
+            {
+                path: '/pm/return-rounds',
+                element: (
+                    <ProtectedRoute allowedRoles={RETURN_ROUND_PAGE_ROLES}>
+                        <ReturnRounds />
                     </ProtectedRoute>
                 ),
             },
@@ -385,6 +408,14 @@ const router = createBrowserRouter([
                 ),
             },
             {
+                path: '/admin/groups',
+                element: (
+                    <ProtectedRoute allowedRoles={ADMIN_ROLES}>
+                        <Groups />
+                    </ProtectedRoute>
+                ),
+            },
+            {
                 path: '/admin/roles',
                 element: (
                     <ProtectedRoute allowedRoles={ADMIN_ROLES}>
@@ -407,7 +438,7 @@ const router = createBrowserRouter([
             {
                 path: '/analytics',
                 element: (
-                    <ProtectedRoute allowedRoles={ADMIN_ROLES}>
+                    <ProtectedRoute allowedRoles={['super_admin', 'head_of_it']}>
                         <Analytics />
                     </ProtectedRoute>
                 ),

@@ -4,32 +4,17 @@ import { activityLogService } from '../services/api';
 
 const ActivityContext = createContext();
 
-export const actionMap = {
-    create_user: { label: 'Membuat Pengguna Baru', color: 'bg-blue-100 text-blue-700' },
-    update_user: { label: 'Memperbarui Pengguna', color: 'bg-amber-100 text-amber-700' },
-    delete_user: { label: 'Menghapus Pengguna', color: 'bg-red-100 text-red-700' },
-    create_division: { label: 'Membuat Divisi Baru', color: 'bg-teal-100 text-teal-700' },
-    update_division: { label: 'Memperbarui Divisi', color: 'bg-cyan-100 text-cyan-700' },
-    delete_division: { label: 'Menghapus Divisi', color: 'bg-rose-100 text-rose-700' },
-    create_role: { label: 'Membuat Role Baru', color: 'bg-purple-100 text-purple-700' },
-    update_role: { label: 'Memperbarui Role', color: 'bg-indigo-100 text-indigo-700' },
-    delete_role: { label: 'Menghapus Role', color: 'bg-red-100 text-red-700' },
-    approve_release: { label: 'Menyetujui Rilis', color: 'bg-emerald-100 text-emerald-700' },
-    assign_team: { label: 'Alokasi Tim', color: 'bg-blue-100 text-blue-700' },
-    upload_document: { label: 'Unggah Dokumen', color: 'bg-purple-100 text-purple-700' },
-    auto_quality_gate: { label: 'Quality Gate Otomatis', color: 'bg-indigo-100 text-indigo-700' },
-    create_project: { label: 'Inisiasi Proyek Baru', color: 'bg-sky-100 text-sky-700' },
-    reject_project: { label: 'Menolak Proyek', color: 'bg-red-100 text-red-700' },
-    upload_report: { label: 'Upload Laporan Pentest', color: 'bg-amber-100 text-amber-700' },
-};
-
 export function ActivityProvider({ children }) {
     const [activities, setActivities] = useState([]);
-    const [isLoading, setIsLoading] = useState(false);
+    // Pemuatan pertama berjalan otomatis pada mount, jadi status awalnya "memuat".
+    // Dengan begitu efek di bawah tidak perlu memanggil setState secara sinkron
+    // (penyebab cascading render) hanya untuk menyalakan indikator.
+    const [isLoading, setIsLoading] = useState(true);
     const [lastUpdated, setLastUpdated] = useState(null);
     const [summary, setSummary] = useState(null);
 
-    // Fetch from API
+    // Ambil data aktivitas dari API. Dipakai untuk pemuatan pertama (effect di
+    // bawah) dan refresh manual dari UI.
     const refreshData = useCallback(async (filters = {}) => {
         setIsLoading(true);
         try {
@@ -48,12 +33,21 @@ export function ActivityProvider({ children }) {
 
             setLastUpdated(new Date().toISOString());
         } catch {
+            // Aktivitas hanya data pendukung tampilan; kegagalan memuatnya tidak
+            // boleh memunculkan galat ke pengguna. Data lama tetap dipertahankan
+            // dan akan diperbarui pada polling berikutnya.
         } finally {
             setIsLoading(false);
         }
     }, []);
 
+    // Pemuatan pertama saat provider dipasang. Aturan react-hooks melarang
+    // setState sinkron di dalam effect, tetapi pengambilan data awal memang perlu
+    // dipicu di sini (tidak ada data server yang di-inject dari luar) dan
+    // refreshData menyalakan indikator sebelum menunggu jaringan. Pola ini
+    // disengaja, bukan turunan state yang bisa dihitung saat render.
     useEffect(() => {
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- pemuatan awal dari API, lihat catatan di atas
         refreshData();
     }, [refreshData]);
 

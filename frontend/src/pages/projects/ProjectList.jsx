@@ -5,7 +5,6 @@ import { useNavigate } from 'react-router-dom';
 import { useProjects } from '../../contexts/ProjectContext';
 import { useAuth } from '../../contexts/AuthContext';
 import LoadingSpinner from '../../components/LoadingSpinner';
-import EmptyState from '../../components/EmptyState';
 import {
     Search,
     Download,
@@ -22,7 +21,7 @@ import {
     Building2,
     Phone,
 } from 'lucide-react';
-import { getProjectStats } from '../../data/mockData';
+import { getProjectStats } from '../../data/projectStats';
 import { PROJECT_STATUS_LABEL, PROJECT_STATUS_COLOR } from '../../constants/projectStatus';
 
 export default function ProjectList() {

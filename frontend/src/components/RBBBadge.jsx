@@ -1,6 +1,6 @@
-import { AlertTriangle, Clock } from 'lucide-react';
+import { AlertTriangle } from 'lucide-react';
 
-export default function RBBBadge({ type, deadline, status }) {
+export default function RBBBadge({ type, deadline }) {
   const normType = String(type || '').toUpperCase().replace('-', '_');
 
   // Jika RBB

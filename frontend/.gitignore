@@ -12,6 +12,12 @@ dist
 dist-ssr
 *.local
 
+# Environment lokal. Hanya berkas *.example yang boleh masuk repo.
+.env
+.env.*
+!.env.example
+!.env.production.example
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

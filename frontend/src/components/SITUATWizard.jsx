@@ -13,28 +13,74 @@ import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import toast from 'react-hot-toast';
 import {
-    ShieldCheck, Server, CheckSquare, Lock, CheckCircle2,
-    Upload, X, FileText, ArrowRight, ArrowLeft, AlertTriangle,
-    RotateCcw, Send, Paperclip, Info, ChevronRight, Clock,
-    Eye, Download, Printer, Building2, ClipboardList, Bug,
-    UserCheck, FileCheck, BookOpen, Users, Trash2, Plus, Check, Edit, Save, RefreshCw, Link2
+    ShieldCheck,
+    Server,
+    CheckSquare,
+    Lock,
+    CheckCircle2,
+    Upload,
+    X,
+    FileText,
+    ArrowRight,
+    AlertTriangle,
+    RotateCcw,
+    Send,
+    Paperclip,
+    Info,
+    ChevronRight,
+    Clock,
+    Eye,
+    Download,
+    ClipboardList,
+    Bug,
+    UserCheck,
+    FileCheck,
+    BookOpen,
+    Users,
+    Trash2,
+    Plus,
+    Check,
+    Edit,
+    Save,
+    RefreshCw,
+    Link2,
 } from 'lucide-react';
 import { generateDocumentName, getDocumentTypeInfo, formatFileSize } from '../utils/documentNaming';
 import { taskService, projectService, documentService, userService } from '../services/api';
+import { CHANGE_REQUEST_OPEN_STATUSES, getChangeRequestStatusLabel } from '../constants/uatChangeRequest';
 import SITTaskExecution from './SITTaskExecution';
 import DocumentViewerModal from './DocumentViewerModal';
 
 // ─── Helper: safely render object or string field ────────────────────────────
+// `0` dan `false` sengaja tidak dianggap kosong supaya angka nol tetap tampil.
 const sf = (val, fb = '-') => {
-    if (!val) return fb;
+    if (val === null || val === undefined || val === '') return fb;
     if (typeof val === 'object') return String(val.name || val.label || val.initial || fb);
     return String(val);
 };
 
+// ─── Helper: label waktu penyimpanan draft ───────────────────────────────────
+// Jam saja bila draft disimpan hari ini, lengkap dengan tanggal bila lebih lama,
+// supaya "tersimpan 14.05" tidak terbaca sebagai penyimpanan beberapa menit lalu
+// padahal berasal dari sesi pengisian hari sebelumnya.
+const draftSavedLabel = (isoString) => {
+    if (!isoString) return '';
+    const parsed = new Date(isoString);
+    if (Number.isNaN(parsed.getTime())) return '';
+    const isToday = parsed.toDateString() === new Date().toDateString();
+    return parsed.toLocaleString('id-ID', isToday
+        ? { hour: '2-digit', minute: '2-digit' }
+        : { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
+};
+
 // ─── Helper: format timestamp ────────────────────────────────────────────────
+// Tanpa penjaga NaN, timestamp rusak dari `sit_uat_data` lama akan tampil sebagai
+// tulisan "Invalid Date" di UI.
 const fmtDate = (iso) => {
     if (!iso) return '-';
-    return new Date(iso).toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+    const parsed = new Date(iso);
+    if (Number.isNaN(parsed.getTime())) return '-';
+    return parsed.toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' });
 };
 
 // Format yang diterima backend untuk verifikasi link: 08..., 8..., atau +62...
@@ -48,11 +94,12 @@ const normalizeIndonesianPhone = (value) => {
 };
 
 // ─── Constants ───────────────────────────────────────────────────────────────
-const SIT_STATUSES = ['IN_DEVELOPMENT', 'SIT_IN_PROGRESS', 'SIT_REVISION', 'RETURN_TO_DEV'];
-const UAT_STATUSES = ['SIT_PASSED', 'UAT_IN_PROGRESS', 'UAT_REVISION_SIT', 'UAT_REVISION_DEV'];
-const DONE_STATUSES = ['DEV_COMPLETED'];
 const SIT_SIGN_OFF_DOCUMENT_TYPES = ['SIT_RESULT', 'SIT_SIGNOFF'];
 const UAT_PREPARATION_DOCUMENT_TYPES = ['UNDANGAN', 'UAT_PLAN', 'LAMPIRAN', 'LAINNYA'];
+// Jeda autosave draft Persiapan UAT: cukup lama agar satu kalimat yang sedang
+// diketik tidak menghasilkan puluhan permintaan, cukup singkat agar isian sudah
+// tersimpan ketika pengguna berpindah laman untuk mencari data pendukung.
+const UAT1_AUTOSAVE_DELAY_MS = 1500;
 const UAT_APPROVAL_ROLES = [
     { value: 'requester', label: 'Pemohon Proyek', side: 'requester' },
     { value: 'requester_group_lead', label: 'Pimpinan Grup Pemohon', side: 'requester' },
@@ -66,14 +113,89 @@ const REQUIRED_SINGLE_UAT_APPROVAL_ROLES = UAT_APPROVAL_ROLES
     .filter(role => role.value !== 'developer')
     .map(role => role.value);
 const UAT_INTERNAL_ACCOUNT_ROLES = {
+    requester: ['business_user'],
     developer: ['developer'],
     analyst_pm: ['project_manager', 'dev_analyst', 'analyst'],
     development_group_lead: ['development_lead', 'lead_group'],
     technology_division_lead: ['head_of_it'],
 };
+// Cermin `UatApprovalRole::requiredMode()` di backend: hanya pimpinan grup dan pimpinan
+// divisi pemohon yang memakai link pribadi, karena keduanya belum tentu memiliki akun
+// aplikasi. Pemohon proyek selalu memiliki akun — dialah yang mengajukan proyeknya —
+// sehingga persetujuannya dikerjakan langsung di dalam aplikasi.
+//
+// Aturannya sengaja ditulis satu kali di sini dan dibaca oleh penyeedan peserta,
+// penurunan mode saat posisi diganti, serta validasi sebelum simpan. Sebelumnya tiap
+// tempat menyimpulkan sendiri dari `side === 'requester'`, dan itulah yang membuat
+// wizard mengirim mode yang selalu ditolak backend begitu aturannya berubah.
+const UAT_EXTERNAL_LINK_APPROVAL_ROLES = ['requester_group_lead', 'requester_division_lead'];
+const uatRequiredApprovalMode = (approvalRole) => (
+    UAT_EXTERNAL_LINK_APPROVAL_ROLES.includes(approvalRole) ? 'external_link' : 'internal_account'
+);
 
-const participantId = () => globalThis.crypto?.randomUUID?.()
-    || `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 14)}`;
+/**
+ * Identitas stabil satu peserta UAT.
+ *
+ * Wajib berbentuk UUID. Backend memakai `Str::isUuid()` untuk memutuskan apakah
+ * `uat_approvers.participant_key` boleh mengikuti id peserta ini; bila id-nya bukan
+ * UUID, backend membangkitkan kunci acaknya sendiri sehingga matriks approval tidak
+ * akan pernah cocok dengan daftar peserta — matriks selalu dilaporkan tidak sinkron,
+ * dan sinkronisasi mencabut lalu menduplikasi seluruh approver.
+ *
+ * `crypto.randomUUID` hanya ada pada secure context, jadi aplikasi yang diakses lewat
+ * HTTP di alamat LAN tidak memilikinya. Cadangannya menyusun UUID v4 sendiri dari
+ * `crypto.getRandomValues`, yang tersedia juga di luar secure context.
+ */
+const participantId = () => {
+    if (typeof globalThis.crypto?.randomUUID === 'function') {
+        return globalThis.crypto.randomUUID();
+    }
+
+    const bytes = new Uint8Array(16);
+    if (typeof globalThis.crypto?.getRandomValues === 'function') {
+        globalThis.crypto.getRandomValues(bytes);
+    } else {
+        for (let i = 0; i < bytes.length; i += 1) bytes[i] = Math.floor(Math.random() * 256);
+    }
+    bytes[6] = (bytes[6] & 0x0f) | 0x40; // versi 4
+    bytes[8] = (bytes[8] & 0x3f) | 0x80; // varian RFC 4122
+
+    const hex = Array.from(bytes, byte => byte.toString(16).padStart(2, '0')).join('');
+    return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+};
+
+// Latar ikon kartu approval SIT Tahap 3, ditulis sebagai kelas utuh agar terdeteksi
+// pemindai Tailwind.
+const SIT3_ROLE_ICON_BG = {
+    blue: 'bg-blue-100',
+    amber: 'bg-amber-100',
+    emerald: 'bg-emerald-100',
+};
+
+// Peserta yang tersimpan sebelum kolom `id` diperkenalkan tidak punya identitas stabil.
+// Backfill di sini supaya editor inline dan React key selalu punya kunci yang tidak
+// berubah saat baris lain dihapus.
+//
+// Mode approver sekaligus diselaraskan dengan `uatRequiredApprovalMode()`. Roster yang
+// disimpan sebelum posisi pemohon berpindah ke akun internal masih membawa
+// `external_link`, dan baris seperti itu pasti ditolak backend saat disimpan ulang.
+// Memperbaikinya di sini bukan kemewahan: memilih ulang opsi yang sudah terpilih tidak
+// memicu `change` pada `<select>`, sehingga PM tidak punya cara wajar menurunkan modenya
+// kembali tanpa berpindah posisi lalu kembali. Nomor HP yang tidak lagi terpakai
+// dikosongkan agar tidak tersimpan sebagai data yatim.
+const normalizeUatParticipants = (savedParticipants) => (
+    Array.isArray(savedParticipants) ? savedParticipants : []
+).map(participant => {
+    const withId = participant?.id ? participant : { ...participant, id: participantId() };
+    if (withId?.isApprover !== true || !withId.approvalRole) return withId;
+    const requiredMode = uatRequiredApprovalMode(withId.approvalRole);
+    if (withId.approvalMode === requiredMode) return withId;
+    return {
+        ...withId,
+        approvalMode: requiredMode,
+        phone: requiredMode === 'internal_account' ? '' : withId.phone,
+    };
+});
 
 const buildUatExecutionScenarios = (savedScenarios, tasks, savedAdditionalRequests = []) => {
     const additionalRequestTaskIds = new Set(
@@ -129,10 +251,52 @@ const buildUatAdditionalRequests = (savedRequests) => (
         : [],
 }));
 
-// 🔓 MODE PEMERIKSAAN/UNLOCK: bila true, seluruh tahapan SIT & UAT dapat dibuka
-// dan diedit tanpa terkunci status proyek (untuk keperluan cek/testing/development).
-// Set false untuk kembali ke alur terkunci normal.
-const UNLOCK_ALL_STAGES = true;
+// 🔓 MODE PEMERIKSAAN/UNLOCK: escape hatch khusus debug lokal. Bila true, seluruh
+// tahapan SIT & UAT dapat dibuka dan diedit tanpa memperhatikan status proyek,
+// sehingga tombol aksi bisa memicu transisi yang ditolak backend.
+// WAJIB tetap `false` di staging dan produksi.
+const UNLOCK_ALL_STAGES = false;
+
+// ─── Status Gate SIT & UAT ───────────────────────────────────────────────────
+// Daftar status di bawah ini adalah cermin dari `allowedTransitions` pada
+// `backend/app/Services/ProjectWorkflowService.php`. Bila state machine backend
+// berubah, daftar ini harus disesuaikan agar tombol aksi tidak pernah menawarkan
+// transisi yang akan ditolak backend.
+
+// Status tempat tombol "Mulai Pengujian SIT" sah ditekan, yaitu status yang
+// memang mengizinkan transisi ke SIT_IN_PROGRESS.
+const SIT_STARTABLE_STATUSES = ['IN_DEVELOPMENT', 'SIT_REVISION', 'UAT_REVISION_DEV'];
+
+// Status tempat SIT sedang berjalan atau sedang menunggu dikerjakan ulang.
+// Dipakai hanya untuk aksen visual kartu SIT.
+const SIT_ACTIVE_STATUSES = ['SIT_IN_PROGRESS', 'SIT_REVISION', 'UAT_REVISION_DEV'];
+
+// Status yang berarti pelaksanaan SIT sudah selesai sehingga wizard tampil
+// read-only. Seluruh fase sesudah UAT Internal ikut disertakan supaya berita
+// acara SIT tetap dapat dibaca untuk keperluan audit ketika proyek sudah berada
+// di QA, Siber, UAT bisnis, maupun produksi.
+const SIT_COMPLETED_STATUSES = [
+    'SIT_PASSED', 'UAT_IN_PROGRESS', 'UAT_REVISION_SIT', 'UAT_PASSED', 'DEV_COMPLETED',
+    'RETURN_TO_DEV', 'READY_FOR_QA', 'QA_IN_PROGRESS', 'QA_PASSED',
+    'CYBER_IN_PROGRESS', 'CYBER_PASSED', 'READY_FOR_UAT',
+    'PENDING_GOLIVE', 'LIVE_PRODUCTION',
+];
+
+// Status yang berarti UAT Internal sudah selesai. Alasannya sama dengan
+// SIT_COMPLETED_STATUSES: berita acara UAT Internal harus tetap terbaca setelah
+// proyek bergerak ke fase berikutnya.
+const UAT_COMPLETED_STATUSES = [
+    'UAT_PASSED', 'DEV_COMPLETED', 'RETURN_TO_DEV', 'READY_FOR_QA',
+    'QA_IN_PROGRESS', 'QA_PASSED', 'CYBER_IN_PROGRESS', 'CYBER_PASSED',
+    'READY_FOR_UAT', 'PENDING_GOLIVE', 'LIVE_PRODUCTION',
+];
+
+// Status tempat UAT Internal sedang berjalan. Dipakai untuk aksen visual saja.
+const UAT_ACTIVE_STATUSES = ['SIT_PASSED', 'UAT_IN_PROGRESS', 'UAT_REVISION_SIT'];
+
+// Status tempat kartu UAT Internal boleh dibuka, baik untuk dikerjakan maupun
+// dibaca sebagai riwayat.
+const UAT_UNLOCKED_STATUSES = SIT_COMPLETED_STATUSES;
 
 // ─── Sub-step definitions ────────────────────────────────────────────────────
 const SIT_STEPS = [
@@ -145,21 +309,6 @@ const UAT_STEPS = [
     { id: 2, title: 'Eksekusi UAT Internal', icon: <UserCheck size={15} />, desc: 'Pengujian Fungsi & Temuan', color: 'orange' },
     { id: 3, title: 'Persetujuan Final', icon: <CheckCircle2 size={15} />, desc: 'Sign-off & Terbitkan BAST', color: 'emerald' },
 ];
-
-// ─── File Upload Helper ─────────────────────────────────────────────────────
-function useFileUpload(category) {
-    const inputRef = useRef(null);
-    const createEntries = (files) => files.map(file => ({
-        id: `${category}_${Date.now()}_${Math.random().toString(36).slice(2)}`,
-        name: file.name,
-        size: `${(file.size / 1024 / 1024).toFixed(2)} MB`,
-        type: file.name.split('.').pop().toUpperCase(),
-        url: URL.createObjectURL(file),
-        uploadedAt: new Date().toISOString(),
-        category,
-    }));
-    return { inputRef, createEntries };
-}
 
 // ─── DocList ────────────────────────────────────────────────────────────────
 // Menampilkan daftar dokumen dengan:
@@ -266,12 +415,39 @@ function StepTab({ step, isActive, isCompleted, onClick }) {
 }
 
 // ─── MAIN COMPONENT ─────────────────────────────────────────────────────────
-export default function SITUATWizard({ project, updateProject, addNotification, navigate, refreshProject, isViewer = false, initialUatStep = null }) {
+export default function SITUATWizard({ project, updateProject, addNotification, navigate, refreshProject, isViewer = false, initialSitStep = null, initialUatStep = null }) {
     const status = project?.status || 'IN_DEVELOPMENT';
     const sitUatData = project?.sitUatData || {};
     const { user } = useAuth();
     const sitRetestCycle = Number(sitUatData.uat_hold?.cycle || 0);
-    const isTargetedSitRetest = sitUatData.uat2_resume_after_sit === true && sitRetestCycle > 0;
+
+    // Revisi Mayor kini memulai ulang kedua siklus: seluruh task diuji ulang di SIT,
+    // lalu UAT dijalankan lagi dari Tahap 1. Penanda backend berganti nama menjadi
+    // `uat_restart_after_sit`, tetapi baris yang tersimpan sebelum perubahan masih
+    // membawa `uat2_resume_after_sit`. Keduanya dibaca di satu tempat agar tidak ada
+    // cabang UI yang kelewat saat kunci lama akhirnya hilang dari data produksi.
+    const isUatRestartPending = sitUatData.uat_restart_after_sit === true
+        || sitUatData.uat2_resume_after_sit === true;
+
+    // Revisi Minor tidak memundurkan siklus: SIT tidak diulang dan Tahap 3 tetap
+    // terbuka dengan roster penanda tangan yang sama. Yang ditahan hanya keputusan
+    // persetujuannya, sampai seluruh Change Request Minor selesai dikerjakan tim
+    // pengembangan. Bacanya dari `uat_hold` — penanda yang sama yang dipakai
+    // `Project::isUatMinorRevisionPending()` di backend — supaya UI dan gerbang
+    // servernya tidak pernah berbeda pendapat.
+    const isUatMinorRevisionPending = sitUatData.uat_hold?.reason === 'minor_revision'
+        && sitUatData.uat_hold?.status === 'developer_revision';
+
+    // Dua pertanyaan yang dulu dijawab satu variabel dan sekarang harus dipisah:
+    // (1) apakah SIT ini bagian dari siklus revisi — tetap memperketat syarat bukti
+    //     pengujian baru per task; dan
+    // (2) apakah scope-nya dipersempit ke task tertentu — sekarang hanya berlaku untuk
+    //     baris lama yang masih menyimpan `sit_retest_scope.mode === 'targeted'`,
+    //     karena re-test baru selalu 'full' dengan `taskIds: []`.
+    const isSitRevisionCycle = isUatRestartPending && sitRetestCycle > 0;
+    const sitRetestScope = sitUatData.sit_retest_scope || {};
+    const isTargetedSitRetest = isSitRevisionCycle
+        && sitRetestScope.mode === 'targeted';
     const sitRetestTaskIds = useMemo(() => {
         if (!isTargetedSitRetest) return [];
 
@@ -288,12 +464,17 @@ export default function SITUATWizard({ project, updateProject, addNotification, 
             .filter(Boolean))];
     }, [isTargetedSitRetest, sitRetestCycle, sitUatData.sit_retest_scope, sitUatData.uat_change_requests]);
     const sitRetestTaskIdSet = useMemo(() => new Set(sitRetestTaskIds), [sitRetestTaskIds]);
+
+    // Daftar task diambil ke variabel lokal supaya dependency memo di bawah persis
+    // sama dengan nilai yang dibaca (bukan objek `project` seutuhnya).
+    const projectTasks = project?.tasks;
+
     const sitScopeTasks = useMemo(() => {
-        const tasks = Array.isArray(project?.tasks) ? project.tasks : [];
+        const tasks = Array.isArray(projectTasks) ? projectTasks : [];
 
         return tasks.filter(task => String(task.status || '').toLowerCase() !== 'take_down'
             && (!isTargetedSitRetest || sitRetestTaskIdSet.has(Number(task.id))));
-    }, [isTargetedSitRetest, project?.tasks, sitRetestTaskIdSet]);
+    }, [isTargetedSitRetest, projectTasks, sitRetestTaskIdSet]);
 
     // Role user saat ini → apakah dia pemegang hak approval SIT.
     // PM (dev_analyst / project_manager) = Analyst Pengembangan.
@@ -303,15 +484,30 @@ export default function SITUATWizard({ project, updateProject, addNotification, 
     // Approval SIT dari role (disimpan di sitUatData.sit3_approvals)
     const sit3Approvals = sitUatData.sit3_approvals || {};
 
-    // Jumlah developer (assignee task unik) yang harus approve
-    const requiredDeveloperIds = useMemo(() => (
-        [...new Set(
-            sitScopeTasks
-                .map(t => t.assignee_id ?? t.assignee_detail?.id)
+    // Daftar developer yang wajib menyetujui hasil SIT.
+    //
+    // Gabungan dua himpunan, sama dengan `Project::sitApprovalDeveloperIds()` di
+    // backend: seluruh developer pada tim proyek, ditambah penerima task pada scope
+    // SIT yang sedang berjalan (bila ada yang tidak tercatat sebagai anggota tim).
+    // Sebelumnya hanya penerima task yang dihitung, sehingga developer lain pada tim
+    // yang sama tidak pernah dimintai persetujuan meskipun ikut memikul hasil rilis.
+    //
+    // Penanda "developer" diambil dari `user_role` (role global pengguna), bukan dari
+    // `role` anggota tim yang berupa teks bebas jabatan dalam proyek.
+    const projectTeam = project?.team;
+    const requiredDeveloperIds = useMemo(() => {
+        const teamDeveloperIds = (Array.isArray(projectTeam) ? projectTeam : [])
+            .filter(member => member?.user_role === 'developer')
+            .map(member => member.user_id);
+
+        const scopeAssigneeIds = sitScopeTasks.map(t => t.assignee_id ?? t.assignee_detail?.id);
+
+        return [...new Set(
+            [...teamDeveloperIds, ...scopeAssigneeIds]
                 .filter(id => id != null)
                 .map(id => Number(id))
-        )]
-    ), [sitScopeTasks]);
+        )];
+    }, [projectTeam, sitScopeTasks]);
     const requiredDeveloperCount = requiredDeveloperIds.length;
 
     // Jumlah developer yang sudah approve
@@ -335,11 +531,47 @@ export default function SITUATWizard({ project, updateProject, addNotification, 
         && sit3Approvals?.development_lead?.approved === true;
 
     // ── State ─────────────────────────────────────────────────────────────
-    const [activeSitStep, setActiveSitStep] = useState(sitUatData.activeSitStep || 1);
-    const [activeUatStep, setActiveUatStep] = useState(() => {
-        const requestedStep = Number(initialUatStep);
-        return [1, 2, 3].includes(requestedStep) ? requestedStep : (sitUatData.activeUatStep || 1);
+    // Tab SIT awal boleh ditentukan lewat query `?sitStep=` agar inbox "Persetujuan Saya"
+    // dapat menautkan langsung ke Tahap 3. Nilainya dibatasi maksimal langkah yang sudah
+    // tercatat di backend: tautan tidak boleh menjadi jalan pintas melewati tahap yang
+    // belum dikerjakan, sebab `buildSitUatData` akan ikut menaikkan langkah tersimpan
+    // begitu wizard disimpan dari tab yang dibuka.
+    const [activeSitStep, setActiveSitStep] = useState(() => {
+        const savedStep = Number(sitUatData.activeSitStep) || 1;
+        const requestedStep = Number(initialSitStep);
+        return [1, 2, 3].includes(requestedStep) ? Math.min(requestedStep, savedStep) : savedStep;
     });
+    const [activeUatStep, setActiveUatStep] = useState(() => {
+        // Sama seperti `?sitStep=`: tautan dari inbox tidak boleh menjadi jalan pintas ke
+        // tahap yang belum dikerjakan. Tanpa clamp ini `?uatStep=3` membuka Persetujuan
+        // Final walau eksekusi UAT belum pernah disimpan, dan penyimpanan berikutnya ikut
+        // menaikkan langkah tersimpan ke 3 — progres proyek jadi berbohong.
+        const savedStep = Number(sitUatData.activeUatStep) || 1;
+        const requestedStep = Number(initialUatStep);
+        return [1, 2, 3].includes(requestedStep) ? Math.min(requestedStep, savedStep) : savedStep;
+    });
+
+    // Langkah tertinggi yang tercatat di backend. `activeSitStep`/`activeUatStep` hanya
+    // menyatakan tab yang sedang dibuka, sehingga menengok kembali ke tab sebelumnya
+    // tidak boleh dianggap sebagai kemunduran progres: nilai tersimpan inilah acuan
+    // "sudah pernah sampai mana", dipakai oleh penanda selesai, navigasi tab, dan
+    // penjaga di `buildSitUatData` agar penyimpanan tidak pernah menurunkan langkah.
+    const storedActiveSitStep = Number(sitUatData.activeSitStep) || 1;
+    const storedActiveUatStep = Number(sitUatData.activeUatStep) || 1;
+    const reachedSitStep = Math.max(activeSitStep, storedActiveSitStep);
+
+    // Pengecualian untuk restart UAT akibat revisi Mayor: backend mengarsipkan lalu
+    // MENGHAPUS hasil Tahap 2 dan putaran approval Tahap 3, jadi tahap itu memang tidak
+    // selesai lagi. Mempertahankan high-water mark di sini akan menandai Tahap 2/3
+    // "Selesai ✓" untuk data yang sudah tidak ada dan membuat tab-nya bisa dilompati
+    // tanpa dieksekusi. Selama sebuah siklus revisi pernah terjadi dan snapshot hasil UAT
+    // belum difinalkan ulang, satu-satunya acuan yang jujur adalah langkah tersimpan.
+    // Data lama dari alur verifikasi Mayor tetap membawa `uat2_summary.submittedAt`,
+    // sehingga perilaku high-water mark-nya tidak berubah.
+    const uatProgressWasReset = sitRetestCycle > 0 && !sitUatData.uat2_summary?.submittedAt;
+    const reachedUatStep = uatProgressWasReset
+        ? storedActiveUatStep
+        : Math.max(activeUatStep, storedActiveUatStep);
 
     // SIT Step 1 data
     const [sit1, setSit1] = useState({
@@ -387,19 +619,22 @@ export default function SITUATWizard({ project, updateProject, addNotification, 
     });
 
     // UAT Step 1 data — Persiapan Skenario UAT
-    const [uat1, setUat1] = useState({
+    // Inisialisasi lazy: argumen `useState` biasa dievaluasi setiap render walau
+    // hasilnya dibuang. `normalizeUatParticipants` sampai membuat UUID baru tiap render,
+    // jadi bentuk fungsi dipakai agar hanya berjalan sekali.
+    const [uat1, setUat1] = useState(() => ({
         scenarioList: sitUatData.uat1_scenarioList || '',        // daftar skenario (derived dari task, editable)
         preparedBy: sitUatData.uat1_preparedBy || '',            // disiapkan oleh (PM)
         prepNotes: sitUatData.uat1_prepNotes || '',              // catatan persiapan
         // Peserta yang terlibat dalam UAT
-        participants: sitUatData.uat1_participants || [],        // [{name, role, unit}]
+        participants: normalizeUatParticipants(sitUatData.uat1_participants), // [{id, name, role, unit, phone, ...}]
         // Jadwal pelaksanaan UAT
         startDate: sitUatData.uat1_startDate || '',
         endDate: sitUatData.uat1_endDate || '',
         // Unit / divisi peminta
         unit: sitUatData.uat1_unit || '',
         docs: sitUatData.uat1_docs || [],
-    });
+    }));
     const [uatInternalUsers, setUatInternalUsers] = useState([]);
 
     useEffect(() => {
@@ -415,7 +650,7 @@ export default function SITUATWizard({ project, updateProject, addNotification, 
         return () => { cancelled = true; };
     }, [activeUatStep]);
     // UAT Step 2 data — hasil dicatat per skenario/task, bukan angka manual.
-    const [uat2, setUat2] = useState({
+    const [uat2, setUat2] = useState(() => ({
         scenarios: buildUatExecutionScenarios(
             sitUatData.uat2_scenarios,
             project?.tasks,
@@ -423,7 +658,7 @@ export default function SITUATWizard({ project, updateProject, addNotification, 
         ),
         additionalRequests: buildUatAdditionalRequests(sitUatData.uat2_additional_requests),
         execNotes: sitUatData.uat2_summary?.notes || sitUatData.uat2_execNotes || '',
-    });
+    }));
     // UAT Step 3 data
     const [uat3, setUat3] = useState({
         approvalNotes: sitUatData.uat3_approvalNotes || '',
@@ -434,6 +669,12 @@ export default function SITUATWizard({ project, updateProject, addNotification, 
     // Revision & modal state (SIT/UAT level)
     const [submitting, setSubmitting] = useState(false);
     const [savingUatDraft, setSavingUatDraft] = useState(false);
+    // Draft Persiapan UAT (tab 1). `uat1DraftSavedAt` menampung waktu penyimpanan
+    // terakhir — baik dari autosave maupun tombol "Simpan sebagai Draft" — supaya
+    // pengguna tahu isian formulirnya sudah tersimpan sebelum ia berpindah laman
+    // untuk mencari data pendukung.
+    const [savingUat1Draft, setSavingUat1Draft] = useState(false);
+    const [uat1DraftSavedAt, setUat1DraftSavedAt] = useState(sitUatData.uat1_draft_saved_at || null);
 
     // Pratinjau dokumen (modal) & status upload
     const [previewDoc, setPreviewDoc] = useState(null);
@@ -546,68 +787,116 @@ export default function SITUATWizard({ project, updateProject, addNotification, 
         toast.success(`${drafts.length} berkas ditambahkan. Pilih tipe lalu tersimpan otomatis.`);
     };
 
-    const changeDocType = async (setter, idx, newDocType) => {
-        let target = null;
-        setter(prev => {
-            const list = prev.docs || [];
-            target = list[idx] || null;
-            const info = getDocumentTypeInfo(newDocType);
-            const ext = target?.name?.split('.').pop() || 'file';
-            const newName = maskedDocName(newDocType) + '.' + ext;
-            const updated = list.map((d, i) => i === idx ? { ...d, doc_type: newDocType, color: info.color, name: newName, maskedName: newName } : d);
-            return { ...prev, docs: updated };
-        });
-        // Upload ulang ke server jika sudah pernah (nama berubah)
-        if (target?.docId) {
-            try { await documentService.delete(target.docId); } catch { /* ignore */ }
-            await uploadDocToServer(setter, idx, newDocType);
+    /**
+     * Mengubah tipe dokumen draft sekaligus nama maskingnya.
+     *
+     * `docs` wajib dikirim oleh pemanggil, bukan dibaca dari dalam updater `setState`.
+     * React hanya menjalankan updater secara sinkron lewat optimasi eager state, yaitu
+     * ketika komponen belum punya update tertunda. Karena pemanggil di halaman ini
+     * hampir selalu memicu setState lain lebih dulu, pola lama (menugaskan variabel
+     * luar dari dalam updater) menghasilkan `null` dan berkas gagal diproses.
+     */
+    const changeDocType = async (setter, docs, idx, newDocType) => {
+        const target = (docs || [])[idx] || null;
+        if (!target) return;
+
+        const info = getDocumentTypeInfo(newDocType);
+        const ext = (target.name?.split('.').pop() || 'file').toLowerCase();
+        const newName = `${maskedDocName(newDocType)}.${ext}`;
+        setter(prev => ({
+            ...prev,
+            docs: (prev.docs || []).map((d, i) => (
+                i === idx ? { ...d, doc_type: newDocType, color: info.color, name: newName, maskedName: newName } : d
+            )),
+        }));
+
+        if (!target.docId) return;
+
+        // Nama masking di server mengikuti tipe dokumen, sehingga berkas yang sudah
+        // terunggah perlu diganti. API dokumen belum punya endpoint update metadata,
+        // jadi caranya hapus lalu unggah ulang — dan itu hanya aman bila salinan lokal
+        // (`rawFile`) masih ada. Setelah halaman dimuat ulang `rawFile` sudah hilang,
+        // maka dokumen dibiarkan utuh agar tidak terhapus permanen tanpa pengganti.
+        if (!target.rawFile) {
+            toast('Tipe diperbarui pada wizard. Nama berkas di server tetap memakai tipe lama; hapus lalu unggah ulang bila perlu diselaraskan.', { icon: 'ℹ️' });
+            return;
         }
+
+        try {
+            await documentService.delete(target.docId);
+        } catch (error) {
+            toast.error(`Gagal mengganti berkas lama di server: ${error.message}`);
+            return;
+        }
+        await uploadDocToServer(setter, docs, idx, newDocType);
     };
 
-    const uploadDocToServer = async (setter, idx, docType) => {
-        let target = null;
-        setter(prev => {
-            const list = prev.docs || [];
-            target = list[idx] || null;
-            return { ...prev, docs: list.map((d, i) => i === idx ? { ...d, isUploading: true } : d) };
-        });
-        if (!target?.rawFile || !project?.id) return;
+    /**
+     * Mengunggah satu draft ke server. Mengembalikan objek dokumen versi terbaru
+     * (sudah berisi `docId`) supaya pemanggil bisa langsung mempersist referensinya,
+     * atau `null` bila upload gagal / tidak ada berkas yang perlu diunggah.
+     */
+    const uploadDocToServer = async (setter, docs, idx, docType) => {
+        const target = (docs || [])[idx] || null;
+        if (!target?.rawFile || !project?.id) return null;
+
+        const resolvedType = docType || target.doc_type || 'LAINNYA';
+        setter(prev => ({
+            ...prev,
+            docs: (prev.docs || []).map((d, i) => (i === idx ? { ...d, isUploading: true } : d)),
+        }));
         try {
             const res = await documentService.upload(target.rawFile, {
                 project_id: project.id,
-                document_type: docType || target.doc_type || 'LAINNYA',
+                document_type: resolvedType,
                 original_filename: target.originalName,
             });
             const doc = res?.data || {};
-            const ext = (target.originalName.split('.').pop() || 'file').toLowerCase();
-            const masked = generateDocumentName(project?.req_id || project?.id, docType || target.doc_type || 'LAINNYA', project?.title || project?.name);
-            setter(prev => {
-                const list = prev.docs || [];
-                return { ...prev, docs: list.map((d, i) => i === idx ? {
-                    ...d,
-                    docId: doc.id || null,
-                    name: masked + '.' + ext,
-                    maskedName: masked + '.' + ext,
-                    url: doc.id ? `${import.meta.env.VITE_API_URL}/documents/${doc.id}/download` : d.url,
-                    isUploading: false,
-                } : d) };
-            });
+            const ext = (target.originalName?.split('.').pop() || 'file').toLowerCase();
+            const masked = generateDocumentName(project?.req_id || project?.id, resolvedType, project?.title || project?.name);
+            const patch = {
+                docId: doc.id || null,
+                doc_type: resolvedType,
+                name: `${masked}.${ext}`,
+                maskedName: `${masked}.${ext}`,
+                url: doc.id ? `${import.meta.env.VITE_API_URL}/documents/${doc.id}/download` : target.url,
+                isUploading: false,
+            };
+            setter(prev => ({
+                ...prev,
+                docs: (prev.docs || []).map((d, i) => (i === idx ? { ...d, ...patch } : d)),
+            }));
             toast.success('Berkas diunggah ke server.');
+            return { ...target, ...patch };
         } catch (err) {
-            setter(prev => {
-                const list = prev.docs || [];
-                return { ...prev, docs: list.map((d, i) => i === idx ? { ...d, isUploading: false } : d) };
-            });
+            setter(prev => ({
+                ...prev,
+                docs: (prev.docs || []).map((d, i) => (i === idx ? { ...d, isUploading: false } : d)),
+            }));
             toast.error(`Gagal mengunggah: ${err.message}`);
+            return null;
         }
     };
 
-    // Upload semua draft yang belum di-upload (dipakai saat simpan step / tombol selesai)
+    /**
+     * Mengunggah semua draft yang belum punya `docId` (dipakai saat simpan step /
+     * tombol selesai). Mengembalikan daftar dokumen terbaru; pemanggil harus memakai
+     * hasil ini untuk `buildSitUatData` karena state React belum ter-update di closure
+     * render yang sedang berjalan. Melempar error bila ada draft yang gagal diunggah
+     * supaya langkah tidak dilaporkan sukses padahal berkasnya tidak tersimpan.
+     */
     const uploadAllDrafts = async (setter, docs) => {
-        const drafts = (docs || []).map((d, i) => ({ d, i })).filter(x => !x.d.docId && x.d.rawFile);
-        for (const { d, i } of drafts) {
-            await uploadDocToServer(setter, i, d.doc_type);
+        const list = [...(docs || [])];
+        let failed = 0;
+        for (let idx = 0; idx < list.length; idx += 1) {
+            const draft = list[idx];
+            if (draft.docId || !draft.rawFile) continue;
+            const uploaded = await uploadDocToServer(setter, list, idx, draft.doc_type);
+            if (uploaded) list[idx] = uploaded;
+            else failed += 1;
         }
+        if (failed > 0) throw new Error(`${failed} berkas gagal diunggah. Periksa koneksi lalu coba lagi.`);
+        return list;
     };
 
     /**
@@ -845,12 +1134,25 @@ export default function SITUATWizard({ project, updateProject, addNotification, 
         setUploadingCategory('UAT_APPROVAL');
         try {
             const nextDocs = (uat3.docs || []).filter((_, docIndex) => docIndex !== index);
+            // Referensi di `sit_uat_data` dilepas lebih dulu supaya link approval eksternal
+            // tidak pernah menunjuk dokumen yang sudah terhapus. Konsekuensinya, bila
+            // penghapusan berkas gagal, yang tertinggal hanya berkas tanpa referensi.
             await projectService.update(project.id, {
                 sitUatData: buildSitUatData({ uat3_docs: sanitizeDocs(nextDocs) }),
             });
-            if (target.docId) await documentService.delete(target.docId);
-
+            // State disamakan tepat setelah referensi terlepas, sebelum penghapusan berkas,
+            // agar daftar tidak lagi menampilkan dokumen yang sudah tidak tercatat.
             setUat3(previous => ({ ...previous, docs: nextDocs }));
+
+            if (target.docId) {
+                try {
+                    await documentService.delete(target.docId);
+                } catch (error) {
+                    toast.error(`Dokumen dilepas dari proyek, tetapi berkasnya gagal dihapus di server: ${error.message}`);
+                    refreshProject?.();
+                    return;
+                }
+            }
             if (target.url?.startsWith('blob:')) URL.revokeObjectURL(target.url);
             refreshProject?.();
             toast('Dokumen Persetujuan Final dihapus dan tidak lagi tersedia pada link eksternal.', { icon: '🗑️' });
@@ -862,16 +1164,28 @@ export default function SITUATWizard({ project, updateProject, addNotification, 
         }
     };
 
-    const onRemoveDoc = async (setter, idx) => {
-        let removed = null;
-        setter(prev => {
-            const list = prev.docs || [];
-            removed = list[idx] || null;
-            return { ...prev, docs: list.filter((_, i) => i !== idx) };
-        });
-        if (removed?.docId) {
-            try { await documentService.delete(removed.docId); } catch { /* ignore */ }
+    /**
+     * Menghapus satu berkas dari daftar wizard sekaligus dari server bila sudah
+     * terunggah. `docs` dikirim eksplisit dengan alasan yang sama seperti
+     * `changeDocType`: membaca state dari dalam updater tidak dijamin sinkron.
+     */
+    const onRemoveDoc = async (setter, docs, idx) => {
+        const removed = (docs || [])[idx] || null;
+        if (!removed) return;
+
+        setter(prev => ({ ...prev, docs: (prev.docs || []).filter((_, i) => i !== idx) }));
+
+        if (removed.docId) {
+            try {
+                await documentService.delete(removed.docId);
+            } catch (error) {
+                toast.error(`Berkas dihapus dari daftar, tetapi gagal dihapus di server: ${error.message}`);
+                return;
+            }
         }
+        // Draft memegang object URL hasil `URL.createObjectURL`; lepaskan agar memori
+        // blob tidak tertahan sampai tab ditutup.
+        if (removed.url?.startsWith('blob:')) URL.revokeObjectURL(removed.url);
         toast('Berkas dihapus.', { icon: '🗑️' });
     };
 
@@ -1093,112 +1407,6 @@ export default function SITUATWizard({ project, updateProject, addNotification, 
         }
     };
 
-    const getUatVerificationUploadKey = (source, itemId) => `uat_verification_${source}_${itemId}`;
-
-    const uploadUatMajorVerificationEvidence = async (source, itemId, files) => {
-        if (!project?.id || !files.length || uploadingUatScenarioId) return;
-
-        const collectionKey = source === 'scenario' ? 'scenarios' : 'additionalRequests';
-        const currentItemIndex = (uat2[collectionKey] || []).findIndex(item => item.id === itemId);
-        const currentItem = (uat2[collectionKey] || [])[currentItemIndex];
-        const contextLabel = `VERIFIKASI-${uatItemLabel(currentItem, currentItemIndex, source === 'scenario' ? 'SKENARIO' : 'PERMINTAAN')}`;
-        const remainingSlots = Math.max(0, 10 - (currentItem?.verificationAttachments || []).length);
-        if (remainingSlots === 0) {
-            toast.error('Maksimal 10 lampiran bukti untuk setiap item verifikasi Mayor.');
-            return;
-        }
-        const filesToUpload = files.slice(0, remainingSlots);
-        if (filesToUpload.length < files.length) {
-            toast(`Hanya ${filesToUpload.length} berkas yang diunggah karena batas maksimal 10 lampiran.`, { icon: 'ℹ️' });
-        }
-
-        const uploadKey = getUatVerificationUploadKey(source, itemId);
-        setUploadingUatScenarioId(uploadKey);
-        try {
-            const results = await Promise.allSettled(filesToUpload.map(async file => {
-                const response = await documentService.upload(file, {
-                    project_id: project.id,
-                    document_type: 'UAT_EVIDENCE',
-                    original_filename: file.name,
-                    context_label: contextLabel,
-                });
-                const document = response?.data || {};
-                if (!document.id) throw new Error('Server tidak mengembalikan ID dokumen.');
-
-                const extension = (file.name.split('.').pop() || 'file').toUpperCase();
-                const maskedName = document.file_name
-                    || `${maskedDocName('UAT_EVIDENCE', [contextLabel])}.${extension.toLowerCase()}`;
-
-                return {
-                    id: `UAT_VERIFICATION_EVIDENCE_${document.id}`,
-                    docId: document.id,
-                    name: maskedName,
-                    maskedName,
-                    originalName: file.name,
-                    size: formatFileSize(file.size),
-                    type: extension,
-                    uploadedAt: document.created_at || new Date().toISOString(),
-                    category: 'UAT_EVIDENCE',
-                    doc_type: 'UAT_EVIDENCE',
-                    color: getDocumentTypeInfo('UAT_EVIDENCE').color,
-                };
-            }));
-            const uploaded = results
-                .filter(result => result.status === 'fulfilled')
-                .map(result => result.value);
-            const failedCount = results.length - uploaded.length;
-
-            if (uploaded.length > 0) {
-                setUat2(previous => ({
-                    ...previous,
-                    [collectionKey]: (previous[collectionKey] || []).map(item => item.id === itemId
-                        ? {
-                            ...item,
-                            verificationAttachments: [
-                                ...(item.verificationAttachments || []),
-                                ...uploaded,
-                            ],
-                        }
-                        : item),
-                }));
-                toast.success(`${uploaded.length} bukti verifikasi Mayor berhasil diunggah.`);
-            }
-            if (failedCount > 0) {
-                toast.error(`${failedCount} lampiran bukti verifikasi gagal diunggah.`);
-            }
-        } finally {
-            setUploadingUatScenarioId(null);
-        }
-    };
-
-    const removeUatMajorVerificationEvidence = async (source, itemId, attachmentIndex) => {
-        const collectionKey = source === 'scenario' ? 'scenarios' : 'additionalRequests';
-        const item = (uat2[collectionKey] || []).find(entry => entry.id === itemId);
-        const attachment = item?.verificationAttachments?.[attachmentIndex];
-        if (!attachment || uploadingUatScenarioId) return;
-
-        const uploadKey = getUatVerificationUploadKey(source, itemId);
-        setUploadingUatScenarioId(uploadKey);
-        try {
-            if (attachment.docId) await documentService.delete(attachment.docId);
-            setUat2(previous => ({
-                ...previous,
-                [collectionKey]: (previous[collectionKey] || []).map(entry => entry.id === itemId
-                    ? {
-                        ...entry,
-                        verificationAttachments: (entry.verificationAttachments || [])
-                            .filter((_, index) => index !== attachmentIndex),
-                    }
-                    : entry),
-            }));
-            toast('Lampiran bukti verifikasi dihapus.', { icon: '🗑️' });
-        } catch (error) {
-            toast.error(`Gagal menghapus bukti verifikasi: ${error.message}`);
-        } finally {
-            setUploadingUatScenarioId(null);
-        }
-    };
-
     const viewDoc = async (doc) => {
         try {
             if (doc?.docId) {
@@ -1206,11 +1414,15 @@ export default function SITUATWizard({ project, updateProject, addNotification, 
                 const blob = await documentService.download(doc.docId);
                 const url = URL.createObjectURL(blob);
                 toast.dismiss(loadingId);
-                setPreviewDoc({ ...doc, blobUrl: url });
+                // `ownsBlobUrl` menandai object URL yang dibuat khusus untuk pratinjau ini,
+                // jadi aman di-revoke saat modal ditutup.
+                setPreviewDoc({ ...doc, blobUrl: url, ownsBlobUrl: true });
             } else if (doc?.url?.startsWith('blob:')) {
-                setPreviewDoc({ ...doc, blobUrl: doc.url });
+                // Draft memakai object URL milik daftar dokumen. Jangan di-revoke saat modal
+                // ditutup, karena berkasnya masih dipakai baris daftar dan pratinjau berikutnya.
+                setPreviewDoc({ ...doc, blobUrl: doc.url, ownsBlobUrl: false });
             } else {
-                toast.info('Berkas belum tersedia untuk dilihat.');
+                toast('Berkas belum tersedia untuk dilihat.');
             }
         } catch (err) {
             toast.error(`Gagal membuka berkas: ${err.message}`);
@@ -1235,7 +1447,7 @@ export default function SITUATWizard({ project, updateProject, addNotification, 
                 a.download = doc.maskedName || doc.name || 'berkas';
                 a.click();
             } else {
-                toast.info('Berkas belum tersedia untuk diunduh.');
+                toast('Berkas belum tersedia untuk diunduh.');
             }
         } catch (err) {
             toast.error(`Gagal mengunduh berkas: ${err.message}`);
@@ -1245,17 +1457,32 @@ export default function SITUATWizard({ project, updateProject, addNotification, 
     // ── Status helpers ─────────────────────────────────────────────────────
     const stUpper = String(status || '').toUpperCase();
 
-    const isDev = ['IN_DEVELOPMENT', 'DEVELOPMENT', 'DEV_IN_PROGRESS', 'IN_SPRINT', 'READY_FOR_DEVELOPMENT'].includes(stUpper) || UNLOCK_ALL_STAGES;
-    const sitActive = isDev || ['SIT_IN_PROGRESS', 'SIT_REVISION', 'UAT_REVISION_DEV', 'RETURN_TO_DEV'].includes(stUpper) || UNLOCK_ALL_STAGES;
-    const sitDone = ['SIT_PASSED', 'UAT_IN_PROGRESS', 'UAT_REVISION_SIT', 'UAT_PASSED', 'DEV_COMPLETED'].includes(stUpper) && !UNLOCK_ALL_STAGES;
-    const uatUnlocked = ['SIT_PASSED', 'UAT_IN_PROGRESS', 'UAT_REVISION_SIT', 'UAT_PASSED', 'DEV_COMPLETED'].includes(stUpper) || UNLOCK_ALL_STAGES;
-    const uatActive = ['SIT_PASSED', 'UAT_IN_PROGRESS', 'UAT_REVISION_SIT'].includes(stUpper) || UNLOCK_ALL_STAGES;
-    const uatDone = ['UAT_PASSED', 'DEV_COMPLETED'].includes(stUpper) && !UNLOCK_ALL_STAGES;
+    const isDev = ['IN_DEVELOPMENT', 'READY_FOR_DEVELOPMENT'].includes(stUpper) || UNLOCK_ALL_STAGES;
+    const sitActive = isDev || SIT_ACTIVE_STATUSES.includes(stUpper) || UNLOCK_ALL_STAGES;
+    const sitDone = SIT_COMPLETED_STATUSES.includes(stUpper) && !UNLOCK_ALL_STAGES;
+    const uatUnlocked = UAT_UNLOCKED_STATUSES.includes(stUpper) || UNLOCK_ALL_STAGES;
+    const uatActive = UAT_ACTIVE_STATUSES.includes(stUpper) || UNLOCK_ALL_STAGES;
+    const uatDone = UAT_COMPLETED_STATUSES.includes(stUpper) && !UNLOCK_ALL_STAGES;
     const isComplete = stUpper === 'DEV_COMPLETED' && !UNLOCK_ALL_STAGES;
 
+    // Tombol "Mulai Pengujian SIT" hanya boleh muncul pada status yang memang
+    // mengizinkan transisi ke SIT_IN_PROGRESS. Di luar itu wizard tampil sebagai
+    // panel informasi read-only agar pengguna tidak menekan tombol yang pasti
+    // ditolak backend.
+    const sitStartable = !sitDone && stUpper !== 'SIT_IN_PROGRESS'
+        && SIT_STARTABLE_STATUSES.includes(stUpper) && !UNLOCK_ALL_STAGES;
+    const sitUnavailable = !sitDone && stUpper !== 'SIT_IN_PROGRESS'
+        && !SIT_STARTABLE_STATUSES.includes(stUpper) && !UNLOCK_ALL_STAGES;
+    const sitUnavailableReason = stUpper === 'ON_HOLD'
+        ? 'Proyek sedang ditahan sementara (ON_HOLD). Lanjutkan kembali ke tahap pengembangan sebelum menjalankan SIT.'
+        : ['REJECTED', 'CANCELLED'].includes(stUpper)
+            ? 'Proyek tidak dilanjutkan, sehingga pengujian SIT tidak tersedia.'
+            : 'Pengujian SIT terbuka setelah proyek masuk tahap pengembangan (IN_DEVELOPMENT) dan seluruh task developer selesai.';
+
     // ── Gate helper: status task developer ────────────────────────────────
-    // SIT pertama mencakup semua task aktif. SIT ulang Mayor hanya memakai task
-    // dalam scope Change Request siklus aktif.
+    // SIT pertama maupun SIT ulang siklus revisi mencakup seluruh task aktif. Scope yang
+    // dipersempit ke sebagian task hanya tersisa pada data lama (`mode: 'targeted'`),
+    // dan di sanalah assignee wajib ada karena task-nya berasal dari Change Request.
     const taskGate = useCallback(() => {
         const isReady = task => String(task.status || '').toLowerCase() === 'done'
             && (!isTargetedSitRetest || Boolean(task.assignee_id ?? task.assignee_detail?.id));
@@ -1297,14 +1524,16 @@ export default function SITUATWizard({ project, updateProject, addNotification, 
             return `Semua ${eligibleTaskIds.length} task harus disetujui (OK) sebelum dilanjutkan ke approval.`;
         }
 
-        if (isTargetedSitRetest) {
+        // Setiap siklus revisi menuntut bukti pengujian baru, bukan warisan siklus lalu.
+        // Karena scope SIT ulang kini mencakup seluruh task, syarat ini berlaku merata.
+        if (isSitRevisionCycle) {
             const tasksWithoutEvidence = eligibleTaskIds.filter(id => {
                 const approval = sit2Approvals?.[id];
                 return !Array.isArray(approval?.attachments)
                     || !approval.attachments.some(attachment => Boolean(attachment?.docId));
             });
             if (tasksWithoutEvidence.length > 0) {
-                return `${tasksWithoutEvidence.length} task dalam scope SIT ulang belum memiliki lampiran bukti pengujian baru.`;
+                return `${tasksWithoutEvidence.length} task pada SIT ulang belum memiliki lampiran bukti pengujian baru.`;
             }
         }
 
@@ -1323,7 +1552,7 @@ export default function SITUATWizard({ project, updateProject, addNotification, 
         }
 
         return '';
-    }, [approvedTaskCount, eligibleTaskIds, isTargetedSitRetest, sit2Approvals, taskGate]);
+    }, [approvedTaskCount, eligibleTaskIds, isSitRevisionCycle, sit2Approvals, taskGate]);
 
     const uat2Summary = useMemo(() => {
         const scenarios = Array.isArray(uat2.scenarios) ? uat2.scenarios : [];
@@ -1370,44 +1599,35 @@ export default function SITUATWizard({ project, updateProject, addNotification, 
         return '';
     }, [uat2.additionalRequests, uat2.scenarios, uploadingUatScenarioId]);
     const uat2IsSubmitted = Boolean(sitUatData.uat2_summary?.submittedAt);
-    const uat2VerificationMode = sitUatData.uat2_verification_mode === true;
-    const uat2AwaitingMajorVerification = sitUatData.uat2_resume_after_sit === true
-        || uat2VerificationMode;
+
+    // Tahap 2 dikunci hanya oleh dua sebab yang benar-benar sah:
+    // 1. snapshot hasil UAT sudah difinalkan (`uat2_summary.submittedAt`) — dikunci
+    //    backend juga, jadi UI tidak boleh menawarkan pengeditan; dan
+    // 2. eksekusi memang belum boleh berjalan karena proyek sedang berada di tangan
+    //    developer atau menunggu SIT ulang.
+    // Dulu penanda restart ikut mengunci selamanya karena hasil lama "dibekukan" untuk
+    // verifikasi item Mayor. Sekarang restart berarti seluruh skenario dieksekusi ulang
+    // dari nol, sehingga begitu proyek kembali UAT_IN_PROGRESS tanpa restart tertunda,
+    // Tahap 2 harus bisa diisi seperti putaran pertama.
+    //
+    // Pengecualian sebab (1): putaran yang berkesimpulan revisi Minor masih menahan
+    // persetujuan, dan unit peminta berhak mengajukan permintaan revisi berikutnya atas
+    // proyek yang sama. Backend pun membuka kuncinya pada keadaan yang sama persis
+    // (`UatExecutionService::submit()`), dan mengarsipkan putaran lama ke `uat_cycles`
+    // lebih dulu sehingga snapshot auditnya tetap utuh.
     const uat2EditingLocked = uatDone
-        || uat2IsSubmitted
+        || (uat2IsSubmitted && !isUatMinorRevisionPending)
         || status === 'UAT_REVISION_DEV'
-        || sitUatData.uat2_resume_after_sit === true
-        || uat2VerificationMode;
-    const uatMajorVerificationItems = useMemo(() => [
-        ...(uat2.scenarios || [])
-            .filter(item => item.changeType === 'mayor' && item.verificationStatus === 'pending')
-            .map(item => ({ ...item, source: 'scenario', title: item.scenario })),
-        ...(uat2.additionalRequests || [])
-            .filter(item => item.changeType === 'mayor' && item.verificationStatus === 'pending')
-            .map(item => ({ ...item, source: 'additional_request' })),
-    ], [uat2.additionalRequests, uat2.scenarios]);
-    const uatMajorVerificationValidation = useMemo(() => {
-        if (!uat2VerificationMode) return '';
-        if (uatMajorVerificationItems.length === 0) return 'Tidak ada item Mayor yang tersedia untuk diverifikasi.';
-        if (uatMajorVerificationItems.some(item => !['accepted', 'revision'].includes(item.verificationResult))) {
-            return 'Tentukan apakah setiap perbaikan Mayor Diterima atau Masih Revisi.';
-        }
-        if (uatMajorVerificationItems.some(item => item.verificationResult === 'revision' && !item.verificationComment?.trim())) {
-            return 'Alasan wajib diisi untuk perbaikan Mayor yang masih memerlukan revisi.';
-        }
-        if (uatMajorVerificationItems.some(item => !(item.verificationAttachments || []).some(document => document?.docId))) {
-            return 'Unggah minimal satu lampiran bukti verifikasi untuk setiap item Mayor.';
-        }
-        if (uploadingUatScenarioId) return 'Tunggu hingga seluruh lampiran bukti verifikasi selesai diproses.';
-        return '';
-    }, [uat2VerificationMode, uatMajorVerificationItems, uploadingUatScenarioId]);
+        || isUatRestartPending;
 
     // ── Completion check per step ──────────────────────────────────────────
-    const sit1Done = sitDone || (status === 'SIT_IN_PROGRESS' && activeSitStep > 1);
-    const sit2Done = sitDone || (status === 'SIT_IN_PROGRESS' && activeSitStep > 2);
+    // Memakai langkah tertinggi yang pernah dicapai, bukan tab yang sedang dibuka:
+    // membuka kembali tab 1 tidak menghapus tanda selesai tab-tab sebelumnya.
+    const sit1Done = sitDone || (status === 'SIT_IN_PROGRESS' && reachedSitStep > 1);
+    const sit2Done = sitDone || (status === 'SIT_IN_PROGRESS' && reachedSitStep > 2);
     const sit3Done = sitDone;
-    const uat1Done = uatDone || (status === 'UAT_IN_PROGRESS' && activeUatStep > 1);
-    const uat2Done = uatDone || (status === 'UAT_IN_PROGRESS' && activeUatStep > 2);
+    const uat1Done = uatDone || (status === 'UAT_IN_PROGRESS' && reachedUatStep > 1);
+    const uat2Done = uatDone || (status === 'UAT_IN_PROGRESS' && reachedUatStep > 2);
     const uat3Done = uatDone;
 
     // ── Persist helper ─────────────────────────────────────────────────────
@@ -1420,59 +1640,130 @@ export default function SITUATWizard({ project, updateProject, addNotification, 
         return sanitized;
     });
 
-    const buildSitUatData = (overrides = {}) => ({
-        ...sitUatData,
-        activeSitStep, activeUatStep,
-        sit1_stagingUrl: sit1.stagingUrl,
-        sit2_totalCases: taskGate().done,
-        sit2_passedCases: approvedTaskCount,
-        sit2_defects: defectTaskCount,
-        sit2_task_approvals: sit2Approvals,
-        sit3_reviewNotes: sit3.reviewNotes, sit3_docs: sanitizeDocs(sit3.docs),
-        uat1_scenarioList: uat1.scenarioList, uat1_preparedBy: uat1.preparedBy,
-        uat1_prepNotes: uat1.prepNotes, uat1_docs: sanitizeDocs(uat1.docs),
-        uat1_participants: uat1.participants,
-        uat1_startDate: uat1.startDate, uat1_endDate: uat1.endDate,
-        uat1_unit: uat1.unit,
-        uat2_executedCount: uat2Summary.executedCount,
-        uat2_passedCount: uat2Summary.acceptedCount,
-        uat2_findings: uat2Summary.revisionCount,
-        uat2_execNotes: uat2.execNotes,
-        uat2_scenarios: (uat2.scenarios || []).map(item => ({
-            ...item,
-            attachments: sanitizeDocs(item.attachments),
-            verificationAttachments: sanitizeDocs(item.verificationAttachments),
-        })),
-        uat2_additional_requests: (uat2.additionalRequests || []).map(item => ({
-            ...item,
-            attachments: sanitizeDocs(item.attachments),
-            verificationAttachments: sanitizeDocs(item.verificationAttachments),
-        })),
-        uat3_approvalNotes: uat3.approvalNotes, uat3_approvedBy: uat3.approvedBy,
-        uat3_docs: sanitizeDocs(uat3.docs),
-        revisions,
-        ...overrides,
-    });
+    /**
+     * Susun payload `sitUatData` dari seluruh state wizard.
+     *
+     * `options.allowStepRewind` hanya dipakai oleh transisi yang memang memulai ulang
+     * sebuah fase (mulai SIT, mulai/ulang UAT). Di luar itu langkah wizard dijaga agar
+     * tidak pernah turun: `activeSitStep`/`activeUatStep` mengikuti tab yang sedang
+     * dibuka, jadi tanpa penjaga ini satu simpan otomatis saat pengguna menengok tab 1
+     * akan menuliskan langkah 1 ke DB dan mengunci kembali tab-tab yang sudah selesai —
+     * inilah penyebab alur UAT bisa berhenti di tengah persetujuan.
+     */
+    const buildSitUatData = (overrides = {}, options = {}) => {
+        const { allowStepRewind = false } = options;
+        const merged = {
+            ...sitUatData,
+            activeSitStep, activeUatStep,
+            sit1_stagingUrl: sit1.stagingUrl,
+            sit2_totalCases: taskGate().done,
+            sit2_passedCases: approvedTaskCount,
+            sit2_defects: defectTaskCount,
+            sit2_task_approvals: sit2Approvals,
+            sit3_reviewNotes: sit3.reviewNotes, sit3_docs: sanitizeDocs(sit3.docs),
+            uat1_scenarioList: uat1.scenarioList, uat1_preparedBy: uat1.preparedBy,
+            uat1_prepNotes: uat1.prepNotes, uat1_docs: sanitizeDocs(uat1.docs),
+            uat1_participants: uat1.participants,
+            uat1_startDate: uat1.startDate, uat1_endDate: uat1.endDate,
+            uat1_unit: uat1.unit,
+            uat2_executedCount: uat2Summary.executedCount,
+            uat2_passedCount: uat2Summary.acceptedCount,
+            uat2_findings: uat2Summary.revisionCount,
+            uat2_execNotes: uat2.execNotes,
+            uat2_scenarios: (uat2.scenarios || []).map(item => ({
+                ...item,
+                attachments: sanitizeDocs(item.attachments),
+                verificationAttachments: sanitizeDocs(item.verificationAttachments),
+            })),
+            uat2_additional_requests: (uat2.additionalRequests || []).map(item => ({
+                ...item,
+                attachments: sanitizeDocs(item.attachments),
+                verificationAttachments: sanitizeDocs(item.verificationAttachments),
+            })),
+            uat3_approvalNotes: uat3.approvalNotes, uat3_approvedBy: uat3.approvedBy,
+            uat3_docs: sanitizeDocs(uat3.docs),
+            revisions,
+            ...overrides,
+        };
+
+        if (!allowStepRewind) {
+            merged.activeSitStep = Math.max(Number(merged.activeSitStep) || 1, storedActiveSitStep);
+            merged.activeUatStep = Math.max(Number(merged.activeUatStep) || 1, storedActiveUatStep);
+        }
+
+        return merged;
+    };
 
     // Simpan sitUatData ke backend secara SILENT (tanpa toast & tanpa reload).
     // Dipakai agar perubahan approval/lampiran/komentar langsung tersimpan ke DB
     // sehingga dokumentasi tetap ada saat pindah tab / refresh.
+    // Mengembalikan `true` bila penyimpanan berhasil, agar penanda autosave hanya
+    // diperbarui ketika datanya benar-benar sampai ke server.
     const persistQueueRef = useRef(Promise.resolve());
     const persistSitUatData = (overrides = {}) => {
-        if (!project?.id) return Promise.resolve();
+        if (!project?.id) return Promise.resolve(false);
         // Serialisasi: jalankan berurutan agar tidak saling menimpa (race condition)
         const run = persistQueueRef.current.then(async () => {
             try {
                 await projectService.update(project.id, {
                     sitUatData: buildSitUatData(overrides),
                 });
+                return true;
             } catch {
                 // silent — jangan spam error di sini
+                return false;
             }
         });
         persistQueueRef.current = run;
         return run;
     };
+
+    // ── Autosave draft Persiapan Skenario UAT (tab 1) ──────────────────────
+    // Isian tab 1 sebelumnya baru tersimpan saat tombol "Simpan & Lanjut" ditekan,
+    // sehingga pengguna yang berpindah laman untuk mencari data pendukung (unit
+    // peminta, jadwal, nama penyiap) kehilangan seluruh isian dan harus mengulang
+    // dari awal. Peserta dan dokumen sudah punya jalur simpannya sendiri, jadi yang
+    // diikuti di sini hanya field teks dan jadwal.
+    const uat1AutosaveSnapshot = JSON.stringify({
+        scenarioList: uat1.scenarioList,
+        preparedBy: uat1.preparedBy,
+        prepNotes: uat1.prepNotes,
+        unit: uat1.unit,
+        startDate: uat1.startDate,
+        endDate: uat1.endDate,
+    });
+    const lastUat1AutosaveRef = useRef(uat1AutosaveSnapshot);
+    const uat1AutosaveEnabled = activeUatStep === 1
+        && !uatDone
+        && Boolean(project?.id)
+        && (status === 'UAT_IN_PROGRESS' || UNLOCK_ALL_STAGES);
+
+    // `persistSitUatData` dibuat ulang setiap render, jadi versi terbarunya disimpan
+    // pada ref: memasukkannya sebagai dependency effect di bawah akan menyetel ulang
+    // penundaan autosave pada setiap render dan penyimpanan tidak pernah terjadi.
+    const persistSitUatDataRef = useRef(persistSitUatData);
+    useEffect(() => {
+        persistSitUatDataRef.current = persistSitUatData;
+    });
+
+    useEffect(() => {
+        if (!uat1AutosaveEnabled) return undefined;
+        if (uat1AutosaveSnapshot === lastUat1AutosaveRef.current) return undefined;
+
+        const timer = setTimeout(() => {
+            const savedAt = new Date().toISOString();
+            persistSitUatDataRef.current({ uat1_draft_saved_at: savedAt })
+                .then(saved => {
+                    if (!saved) return;
+                    // Ditandai hanya bila datanya benar-benar sampai ke server, sehingga
+                    // penyimpanan yang gagal masih terkirim ulang pada perubahan berikutnya.
+                    lastUat1AutosaveRef.current = uat1AutosaveSnapshot;
+                    setUat1DraftSavedAt(savedAt);
+                });
+        }, UAT1_AUTOSAVE_DELAY_MS);
+
+        return () => clearTimeout(timer);
+    }, [uat1AutosaveEnabled, uat1AutosaveSnapshot]);
 
     // Perubahan approval/komentar/lampiran task langsung disimpan ke backend
     // agar dokumentasi (bukti revisi, catatan, persetujuan) tetap ada di semua laman.
@@ -1484,13 +1775,35 @@ export default function SITUATWizard({ project, updateProject, addNotification, 
         refreshProject?.();
     };
 
-    // Sinkronkan approvals saat project berubah (refresh/polling)
-    useEffect(() => {
+    // Sinkronkan state yang berasal dari data tersimpan saat komponen dipakai untuk
+    // proyek lain tanpa remount. Pola "sesuaikan state saat prop berubah" (bandingkan id
+    // sebelumnya) dipakai agar penyesuaian terjadi pada render yang sama, bukan lewat
+    // effect yang memicu render kedua setelah UI proyek baru sempat tampil dengan data
+    // lama.
+    //
+    // `uat1` ikut disinkronkan karena `buildSitUatData` selalu menuliskan
+    // `uat1_participants` dari state ini. Tanpa sinkronisasi, satu penyimpanan apa pun
+    // setelah wizard berpindah proyek akan menimpa roster penanda tangan proyek baru
+    // dengan roster proyek sebelumnya — kebocoran lintas proyek yang paling mahal karena
+    // daftar penanda tangan UAT tidak boleh pernah hilang.
+    const [syncedProjectId, setSyncedProjectId] = useState(project?.id);
+    if (project?.id !== syncedProjectId) {
+        setSyncedProjectId(project?.id);
         setSit2Approvals(normalizeApprovals(sitUatData.sit2_task_approvals));
-    }, [project?.id]);
+        setUat1({
+            scenarioList: sitUatData.uat1_scenarioList || '',
+            preparedBy: sitUatData.uat1_preparedBy || '',
+            prepNotes: sitUatData.uat1_prepNotes || '',
+            participants: normalizeUatParticipants(sitUatData.uat1_participants),
+            startDate: sitUatData.uat1_startDate || '',
+            endDate: sitUatData.uat1_endDate || '',
+            unit: sitUatData.uat1_unit || '',
+            docs: sitUatData.uat1_docs || [],
+        });
+    }
 
     // ── Handler: START SIT (gatekeeper) ────────────────────────────────────
-    const handleStartSIT = () => {
+    const handleStartSIT = async () => {
         const gate = taskGate();
         if (gate.total === 0) {
             toast.error('Belum ada task developer di proyek ini. Buat & selesaikan task terlebih dahulu sebelum memulai SIT.');
@@ -1501,21 +1814,30 @@ export default function SITUATWizard({ project, updateProject, addNotification, 
             toast.error(`Tidak dapat memulai SIT: masih ada ${gate.incomplete.length} task dalam scope belum selesai (${names}).`);
             return;
         }
-        const startsMajorRevisionCycle = status === 'UAT_REVISION_DEV' || sitUatData.uat2_resume_after_sit === true;
-        updateProject(project.id, {
-            status: 'SIT_IN_PROGRESS',
-            sitUatData: buildSitUatData({
-                activeSitStep: 1,
-                ...(startsMajorRevisionCycle ? {
-                    sit2_task_approvals: {},
-                    sit3_reviewNotes: '',
-                    sit3_docs: [],
-                    sit3_approvals: {},
-                    uat3_approvals: {},
-                } : {}),
-            }),
-        });
-        toast.success(`Pengujian SIT dimulai untuk proyek "${project.name}".`);
+        const startsMajorRevisionCycle = status === 'UAT_REVISION_DEV' || isUatRestartPending;
+        setSubmitting(true);
+        try {
+            // Transisi status harus dipastikan diterima backend sebelum sukses dilaporkan;
+            // tanpa await, penolakan otorisasi/workflow tetap tampil sebagai notifikasi sukses.
+            await updateProject(project.id, {
+                status: 'SIT_IN_PROGRESS',
+                sitUatData: buildSitUatData({
+                    activeSitStep: 1,
+                    ...(startsMajorRevisionCycle ? {
+                        sit2_task_approvals: {},
+                        sit3_reviewNotes: '',
+                        sit3_docs: [],
+                        sit3_approvals: {},
+                        uat3_approvals: {},
+                    } : {}),
+                }, { allowStepRewind: true }),
+            });
+            toast.success(`Pengujian SIT dimulai untuk proyek "${project.name}".`);
+        } catch (error) {
+            toast.error(`SIT belum dapat dimulai: ${error.message}`);
+        } finally {
+            setSubmitting(false);
+        }
     };
 
     const handleSaveSITDraft = async () => {
@@ -1544,27 +1866,32 @@ export default function SITUATWizard({ project, updateProject, addNotification, 
             toast.error(sit2Validation);
             return;
         }
-        // Upload draft dokumen yang belum di-upload (agar docId tersimpan di sitUatData)
+        // Upload draft dokumen yang belum di-upload. Hasilnya dipakai langsung sebagai
+        // override karena state `sit3` di closure ini masih versi sebelum upload,
+        // sehingga tanpa override `docId` tersimpan null di `sitUatData`.
         setSubmitting(true);
         try {
-            await uploadAllDrafts(setSit3, sit3.docs);
+            const nextSit3Docs = await uploadAllDrafts(setSit3, sit3.docs);
             const nextStep = step + 1;
             await updateProject(project.id, {
                 status: 'SIT_IN_PROGRESS',
                 sitUatData: buildSitUatData({
                     activeSitStep: nextStep,
+                    sit3_docs: sanitizeDocs(nextSit3Docs),
                     ...(step === 2 ? { sit2_submitted_at: new Date().toISOString() } : {}),
                 }),
             });
             setActiveSitStep(nextStep);
             toast.success(`SIT Tahap ${step} tersimpan. Lanjut ke Tahap ${nextStep}.`);
+        } catch (error) {
+            toast.error(`SIT Tahap ${step} gagal disimpan: ${error.message}`);
         } finally {
             setSubmitting(false);
         }
     };
 
     const handleSITPass = async () => {
-        const resumesMajorUatVerification = sitUatData.uat2_resume_after_sit === true;
+        const restartsUatFromStart = isUatRestartPending;
         if (!hasUploadedSitSignOffDocument) {
             toast.error('Unggah minimal satu dokumen Hasil Review / Berita Acara SIT sebelum melanjutkan ke UAT Internal.');
             return;
@@ -1585,19 +1912,28 @@ export default function SITUATWizard({ project, updateProject, addNotification, 
         setSubmitting(true);
         try {
             await projectService.update(project.id, {
-                sitUatData: buildSitUatData({ activeSitStep: 3, activeUatStep: resumesMajorUatVerification ? 2 : 1 }),
+                // Fase UAT selalu dibuka dari Tahap 1, termasuk pada restart akibat revisi
+                // Mayor: seluruh skenario disiapkan dan dieksekusi ulang, bukan hanya item
+                // Mayor-nya. Karena itu penurunan langkah di sini memang disengaja dan
+                // `allowStepRewind` wajib menyertainya — tanpa itu penjaga di
+                // `buildSitUatData` akan menaikkan kembali langkah ke nilai tersimpan (3)
+                // dan UAT tampak sudah selesai.
+                sitUatData: buildSitUatData(
+                    { activeSitStep: 3, activeUatStep: 1 },
+                    { allowStepRewind: true }
+                ),
             });
             await projectService.updateStatus(project.id, 'SIT_PASSED', sit3.reviewNotes.trim());
             addNotification?.(
                 'SIT Lulus!',
-                resumesMajorUatVerification
-                    ? `Proyek "${project.name}" lulus SIT ulang dan siap memverifikasi perbaikan Mayor di UAT.`
+                restartsUatFromStart
+                    ? `Proyek "${project.name}" lulus SIT ulang. UAT Internal dijalankan ulang dari Tahap 1 (persiapan skenario).`
                     : `Proyek "${project.name}" lulus SIT. UAT Internal dapat dimulai.`,
                 'success',
                 '/pm/workspace'
             );
-            toast.success(resumesMajorUatVerification
-                ? '🎉 SIT ulang lulus! Lanjutkan verifikasi perbaikan Mayor di UAT Tab 2.'
+            toast.success(restartsUatFromStart
+                ? '🎉 SIT ulang lulus! UAT Internal dijalankan ulang dari Tahap 1 — seluruh skenario diuji kembali.'
                 : '🎉 SIT Lulus! Proyek siap melanjutkan ke UAT Internal.');
             refreshProject?.();
         } catch (error) {
@@ -1612,8 +1948,18 @@ export default function SITUATWizard({ project, updateProject, addNotification, 
     const [sitApprovalSubmitting, setSitApprovalSubmitting] = useState(false);
     const handleSubmitSitApproval = async () => {
         if (!currentRoleKey || !project?.id) return;
-        if (sit3Approvals?.[currentRoleKey]?.approved) {
-            toast.info('Anda sudah memberikan persetujuan SIT.');
+
+        // Developer tidak menempati satu slot `approved` seperti PM dan Development
+        // Lead: persetujuannya tercatat sebagai baris pada
+        // `sit3_approvals.developer.developers[]`. Memeriksa `approved` di sana selalu
+        // menghasilkan undefined, sehingga penjaga ini dulu tidak pernah menahan
+        // pengiriman ganda milik developer.
+        const alreadyApproved = currentRoleKey === 'developer'
+            ? hasCurrentDeveloperApproved
+            : sit3Approvals?.[currentRoleKey]?.approved === true;
+
+        if (alreadyApproved) {
+            toast('Anda sudah memberikan persetujuan SIT.');
             return;
         }
         setSitApprovalSubmitting(true);
@@ -1630,8 +1976,8 @@ export default function SITUATWizard({ project, updateProject, addNotification, 
     };
 
     // ── Auto-fill peserta dan unit UAT (Tab 1) ──
-    // Peserta otomatis tetap dapat diedit. Approver pihak peminta memakai link
-    // pribadi, sedangkan approver IT harus ditautkan ke akun aplikasi.
+    // Peserta otomatis tetap dapat diedit. Pimpinan pihak peminta memakai link pribadi,
+    // sedangkan pemohon dan seluruh pihak IT harus ditautkan ke akun aplikasi.
     // Unit otomatis dari divisi pemohon. Tanggal wajib dipilih sendiri oleh PM.
     const buildUatParticipants = useCallback(() => {
         const participants = [];
@@ -1647,7 +1993,15 @@ export default function SITUATWizard({ project, updateProject, addNotification, 
             'Pemohon (Business User)',
             sf(project?.creator?.division_detail || project?.creator?.division, ''),
             '',
-            { isApprover: true, approvalRole: 'requester', approvalMode: 'external_link' }
+            // Slot pemohon langsung ditautkan ke akun pengaju proyek: backend menuntut
+            // `userId` slot ini sama dengan `created_by`, jadi menebaknya di sini lebih
+            // baik daripada membiarkan PM memilih di antara seluruh akun business user.
+            {
+                isApprover: true,
+                approvalRole: 'requester',
+                approvalMode: uatRequiredApprovalMode('requester'),
+                userId: Number(project?.creator?.id || project?.creator_id) || null,
+            }
         );
         addP(sf(project?.pm, ''), 'PM / Analyst Pengembangan', 'Divisi Pengembangan TI', '', {
             isApprover: true, approvalRole: 'analyst_pm', approvalMode: 'internal_account', userId: project?.pm?.id || project?.pm_id || null,
@@ -1661,62 +2015,104 @@ export default function SITUATWizard({ project, updateProject, addNotification, 
         return participants;
     }, [project]);
 
-    useEffect(() => {
-        if (activeUatStep !== 1) return;
-        setUat1(prev => {
-            const updates = {};
-            // Isi peserta hanya jika masih kosong
-            if (!prev.participants || prev.participants.length === 0) {
-                updates.participants = buildUatParticipants();
-            }
-            // Unit / Divisi Peminta otomatis dari business user (pemohon)
-            if (!prev.unit) {
-                updates.unit = sf(project?.creator?.division_detail || project?.creator?.division || project?.division, '');
-            }
-            // Disiapkan Oleh otomatis dari PM / Analyst Pengembangan
-            if (!prev.preparedBy) {
-                updates.preparedBy = sf(project?.pm, '');
-            }
-            if (Object.keys(updates).length === 0) return prev;
-            return { ...prev, ...updates };
-        });
-    }, [activeUatStep, project?.id, buildUatParticipants]);
+    // Prefill draf UAT langkah 1 (peserta, unit peminta, disiapkan oleh) selama isinya
+    // masih kosong. Dijalankan saat langkah 1 dibuka atau proyeknya berganti, pada
+    // render yang sama — dulu lewat effect, sehingga formulir sempat tampil kosong satu
+    // render sebelum terisi. Nilai awal kunci sengaja null agar prefill juga berjalan
+    // pada render pertama.
+    const uat1PrefillKey = `${activeUatStep}:${project?.id ?? ''}`;
+    const [syncedUat1PrefillKey, setSyncedUat1PrefillKey] = useState(null);
+    if (uat1PrefillKey !== syncedUat1PrefillKey) {
+        setSyncedUat1PrefillKey(uat1PrefillKey);
+        if (activeUatStep === 1) {
+            setUat1(prev => {
+                const updates = {};
+                // Roster penanda tangan UAT hanya boleh dibangkitkan sekali, yaitu ketika
+                // proyek belum pernah menyimpannya. "Belum pernah diisi" dan "sengaja
+                // dikosongkan PM" tidak bisa dibedakan dari state: `normalizeUatParticipants`
+                // memetakan undefined maupun [] menjadi [] yang sama. Karena restart revisi
+                // Mayor membawa alur ini kembali ke Tahap 1, menebak dari panjang array
+                // berarti setiap restart menimpa roster kurasi PM dengan daftar bawaan —
+                // padahal orang yang sama harus terbawa dan tidak boleh ditulis ulang.
+                // Jadi sinyalnya diambil dari data mentah sebelum normalisasi: prefill hanya
+                // jalan bila kuncinya benar-benar belum ada (atau bukan array).
+                const storedParticipants = sitUatData.uat1_participants;
+                if (!Array.isArray(storedParticipants) && (prev.participants || []).length === 0) {
+                    updates.participants = buildUatParticipants();
+                }
+                // Unit / Divisi Peminta otomatis dari business user (pemohon)
+                if (!prev.unit) {
+                    updates.unit = sf(project?.creator?.division_detail || project?.creator?.division || project?.division, '');
+                }
+                // Disiapkan Oleh otomatis dari PM / Analyst Pengembangan
+                if (!prev.preparedBy) {
+                    updates.preparedBy = sf(project?.pm, '');
+                }
+                if (Object.keys(updates).length === 0) return prev;
+                return { ...prev, ...updates };
+            });
+        }
+    }
 
-    const handleStartUAT = () => {
-        const resumesMajorVerification = sitUatData.uat2_resume_after_sit === true
-            || sitUatData.uat2_verification_mode === true;
-        // Auto-fill peserta UAT dari proyek: pemohon (creator), PM, analyst, developer
+    const handleStartUAT = async () => {
+        const restartsUatFromStart = isUatRestartPending;
+        // Roster penanda tangan tidak pernah dibangun ulang bila sudah ada isinya: pada
+        // restart revisi Mayor orang yang sama harus terbawa, PM hanya boleh menambah.
         const participants = (uat1.participants || []).length > 0 ? uat1.participants : buildUatParticipants();
-        setUat1(prev => ({ ...prev, participants }));
-        setActiveUatStep(resumesMajorVerification ? 2 : 1);
-        updateProject(project.id, {
-            status: 'UAT_IN_PROGRESS',
-            sitUatData: buildSitUatData({
-                activeUatStep: resumesMajorVerification ? 2 : 1,
-                uat1_participants: participants,
-            }),
-        });
-        toast.success(resumesMajorVerification
-            ? `SIT ulang selesai. Verifikasi perbaikan Mayor proyek "${project.name}" dapat dilakukan di UAT Tab 2.`
-            : `Pengujian UAT Internal dimulai untuk proyek "${project.name}".`);
+        // Restart maupun UAT pertama sama-sama dimulai dari Tahap 1 (persiapan skenario).
+        const nextStep = 1;
+        setSubmitting(true);
+        try {
+            await updateProject(project.id, {
+                status: 'UAT_IN_PROGRESS',
+                sitUatData: buildSitUatData({
+                    activeUatStep: nextStep,
+                    uat1_participants: participants,
+                }, { allowStepRewind: true }),
+            });
+            setUat1(prev => ({ ...prev, participants }));
+            setActiveUatStep(nextStep);
+            toast.success(restartsUatFromStart
+                ? `SIT ulang selesai. UAT Internal proyek "${project.name}" dijalankan ulang dari Tahap 1; daftar penanda tangan sebelumnya tetap terpakai.`
+                : `Pengujian UAT Internal dimulai untuk proyek "${project.name}".`);
+        } catch (error) {
+            toast.error(`UAT Internal belum dapat dimulai: ${error.message}`);
+        } finally {
+            setSubmitting(false);
+        }
     };
 
     // ── Handler peserta UAT ──
-    const [editingUatIdx, setEditingUatIdx] = useState(null); // idx peserta yang sedang diedit (inline)
+    // Peserta dilacak dengan `id` stabil, bukan indeks: menghapus baris di atas baris
+    // yang sedang diedit akan menggeser indeks sehingga form editor berpindah ke orang lain.
+    const [editingUatId, setEditingUatId] = useState(null);
     const handleAddUatParticipant = () => {
-        const participants = [...(uat1.participants || []), {
+        const newParticipant = {
             id: participantId(), name: '', role: '', unit: '', phone: '',
             isApprover: false, approvalRole: '', approvalMode: '', userId: null,
-        }];
+        };
+        const participants = [...(uat1.participants || []), newParticipant];
         setUat1(prev => ({ ...prev, participants }));
-        setEditingUatIdx(participants.length - 1);
+        setEditingUatId(newParticipant.id);
         persistSitUatData({ uat1_participants: participants });
     };
     const handleRemoveUatParticipant = (idx) => {
+        const removed = (uat1.participants || [])[idx];
         const participants = (uat1.participants || []).filter((_, i) => i !== idx);
+        // Roster kosong yang tersimpan adalah kerusakan data, bukan sekadar tampilan:
+        // daftar penanda tangan UAT harus terbawa antar siklus dan tidak boleh diketik
+        // ulang. Karena itu backend menolak menyimpannya — `ProjectController` menahan
+        // setiap kiriman yang mengosongkan `uat1_participants` dan mengembalikan nilai
+        // tersimpan. Menghapus baris terakhir dari sini akan tampak berhasil di layar
+        // lalu diam-diam dibatalkan saat halaman dimuat ulang, jadi peringatannya
+        // disampaikan lebih dulu dan penghapusannya tidak dilanjutkan.
+        if (participants.length === 0) {
+            toast.error('Daftar penanda tangan UAT tidak boleh dikosongkan. Peserta ini terbawa ke setiap siklus revisi; ganti datanya bila salah, atau tambahkan penggantinya lebih dulu sebelum menghapus yang terakhir.');
+            return;
+        }
         setUat1(prev => ({ ...prev, participants }));
         persistSitUatData({ uat1_participants: participants });
-        if (editingUatIdx === idx) setEditingUatIdx(null);
+        if (removed && editingUatId === removed.id) setEditingUatId(null);
     };
     const handleUatParticipantChange = (idx, field, val) => {
         const participants = (uat1.participants || []).map((p, i) => {
@@ -1734,7 +2130,7 @@ export default function SITUATWizard({ project, updateProject, addNotification, 
                     };
                 }
                 const approvalRole = UAT_APPROVAL_ROLES.find(item => item.value === val);
-                const approvalMode = approvalRole?.side === 'requester' ? 'external_link' : 'internal_account';
+                const approvalMode = uatRequiredApprovalMode(val);
                 return {
                     ...next,
                     isApprover: true,
@@ -1749,7 +2145,7 @@ export default function SITUATWizard({ project, updateProject, addNotification, 
             }
             if (field === 'approvalRole') {
                 const role = UAT_APPROVAL_ROLES.find(item => item.value === val);
-                next.approvalMode = role?.side === 'requester' ? 'external_link' : 'internal_account';
+                next.approvalMode = uatRequiredApprovalMode(val);
                 next.userId = null;
                 next.role = role?.label || next.role;
             }
@@ -1774,9 +2170,9 @@ export default function SITUATWizard({ project, updateProject, addNotification, 
         // Tidak langsung persist per ketikan (boros) — persist saat klik "Selesai"
     };
     const handleUatParticipantDone = () => {
-        if (editingUatIdx === null) return;
+        if (editingUatId === null) return;
         persistSitUatData({ uat1_participants: uat1.participants });
-        setEditingUatIdx(null);
+        setEditingUatId(null);
     };
 
     const projectDeveloperUserIds = new Set(
@@ -1784,6 +2180,9 @@ export default function SITUATWizard({ project, updateProject, addNotification, 
             .map(task => Number(task.assignee_id || task.assignee?.id || task.assignee_detail?.id))
             .filter(Boolean)
     );
+    // Akun pengaju proyek. `creator_id` selalu dikirim ProjectResource, sedangkan
+    // `creator` hanya ada ketika relasinya dimuat, jadi keduanya dibaca berurutan.
+    const projectCreatorUserId = Number(project?.creator?.id || project?.creator_id) || null;
 
     const uatApproverValidation = (() => {
         const approvers = (uat1.participants || []).filter(participant => participant.isApprover === true);
@@ -1796,8 +2195,25 @@ export default function SITUATWizard({ project, updateProject, addNotification, 
             return 'Minimal satu Developer wajib ditetapkan sebagai approver.';
         }
         if (approvers.some(participant => !participant.name?.trim())) return 'Nama seluruh approver wajib diisi.';
+        // Baris yang ditandai approver tetapi posisinya belum dipilih tidak dapat dinilai
+        // lebih jauh — backend menolaknya dengan pesan yang sama.
+        if (approvers.some(participant => !UAT_APPROVAL_ROLES.some(role => role.value === participant.approvalRole))) {
+            return 'Jenis atau metode approval tidak valid.';
+        }
+        // Metode approval tiap posisi dipatok backend, sehingga baris yang modenya tidak
+        // cocok pasti ditolak saat disimpan. Pesannya disamakan kata per kata dengan
+        // `UatApprovalService::validateParticipants()` agar aturan yang sama tidak pernah
+        // dibaca pengguna dalam dua rumusan yang berbeda.
+        const mismatchedModeApprover = approvers.find(participant => (
+            participant.approvalMode !== uatRequiredApprovalMode(participant.approvalRole)
+        ));
+        if (mismatchedModeApprover) {
+            return uatRequiredApprovalMode(mismatchedModeApprover.approvalRole) === 'external_link'
+                ? 'Pimpinan grup dan pimpinan divisi pemohon menggunakan link approval eksternal.'
+                : 'Posisi ini wajib menggunakan akun internal aplikasi.';
+        }
         if (approvers.some(participant => participant.approvalMode === 'external_link' && !participant.phone?.trim())) {
-            return 'Nomor HP seluruh approver pihak peminta wajib diisi.';
+            return 'Nomor HP approver yang memakai link approval eksternal wajib diisi.';
         }
         const invalidExternalApprover = approvers.find(participant => (
             participant.approvalMode === 'external_link' && !normalizeIndonesianPhone(participant.phone)
@@ -1806,7 +2222,18 @@ export default function SITUATWizard({ project, updateProject, addNotification, 
             return `Nomor HP ${invalidExternalApprover.name || 'approver pihak peminta'} tidak valid. Gunakan format 08... atau +62...`;
         }
         if (approvers.some(participant => participant.approvalMode === 'internal_account' && !participant.userId)) {
-            return 'Seluruh approver pihak IT wajib ditautkan ke akun aplikasi.';
+            return 'Approver internal wajib terhubung ke akun aktif.';
+        }
+        // Slot pemohon terikat ke akun yang benar-benar mengajukan proyek: gerbang baca
+        // matriks memakai `created_by`, sementara gerbang keputusan in-app memakai
+        // `user_id`, jadi dua akun berbeda membuat persetujuannya tidak pernah bisa dikirim.
+        // Dilewati bila identitas pengaju tidak ikut terkirim, supaya wizard tidak memblokir
+        // penyimpanan atas dasar data yang sekadar belum dimuat.
+        const misassignedRequester = projectCreatorUserId !== null
+            && approvers.some(participant => participant.approvalRole === 'requester'
+                && Number(participant.userId) !== projectCreatorUserId);
+        if (misassignedRequester) {
+            return 'Approver pemohon harus akun yang mengajukan proyek ini.';
         }
         const invalidDeveloper = approvers.find(participant => participant.approvalRole === 'developer'
             && !projectDeveloperUserIds.has(Number(participant.userId)));
@@ -1818,33 +2245,87 @@ export default function SITUATWizard({ project, updateProject, addNotification, 
 
     // Skenario UAT otomatis dari task (nama task sebagai daftar skenario)
     const uatScenarioTasks = useMemo(() => {
-        if (!Array.isArray(project?.tasks)) return [];
+        if (!Array.isArray(projectTasks)) return [];
         const additionalRequestTaskIds = new Set(
             (uat2.additionalRequests || []).map(item => Number(item.taskId)).filter(Boolean)
         );
-        return project.tasks.filter(task => String(task.status || '').toLowerCase() !== 'take_down'
+        return projectTasks.filter(task => String(task.status || '').toLowerCase() !== 'take_down'
             && !additionalRequestTaskIds.has(Number(task.id)));
-    }, [project?.tasks, uat2.additionalRequests]);
+    }, [projectTasks, uat2.additionalRequests]);
+
+    /**
+     * Simpan isian Persiapan Skenario UAT (tab 1) sebagai draft.
+     *
+     * Berbeda dari "Simpan & Lanjut": tidak ada validasi kelengkapan approver, tidak
+     * ada perpindahan tahap, dan status proyek tidak disentuh. Dokumen undangan yang
+     * masih berupa draft tetap diunggah lebih dulu supaya `docId`-nya ikut tersimpan —
+     * tanpa itu lampiran akan hilang saat halaman dimuat ulang.
+     */
+    const handleSaveUAT1Draft = async () => {
+        if (!project?.id) return;
+        if (uploadingCategory === 'UAT_PREP') {
+            toast.error('Tunggu hingga dokumen undangan selesai diunggah sebelum menyimpan draft.');
+            return;
+        }
+
+        setSavingUat1Draft(true);
+        try {
+            const nextUat1Docs = await uploadAllDrafts(setUat1, uat1.docs);
+            const savedAt = new Date().toISOString();
+            await projectService.update(project.id, {
+                sitUatData: buildSitUatData({
+                    uat1_docs: sanitizeDocs(nextUat1Docs),
+                    uat1_draft_saved_at: savedAt,
+                }),
+            });
+            // Autosave tidak perlu mengulang perubahan yang sudah ikut tersimpan di sini.
+            lastUat1AutosaveRef.current = uat1AutosaveSnapshot;
+            setUat1DraftSavedAt(savedAt);
+            toast.success('Draft Persiapan UAT berhasil disimpan. Isian dapat dilanjutkan kapan saja tanpa mengulang dari awal.');
+            refreshProject?.();
+        } catch (error) {
+            toast.error(`Gagal menyimpan draft Persiapan UAT: ${error.message}`);
+        } finally {
+            setSavingUat1Draft(false);
+        }
+    };
 
     const handleSaveUATStep = async (step) => {
-        const nextStep = step + 1;
-        setSubmitting(true);
+        // Kembali ke langkah yang tertinggi, bukan sekadar satu langkah maju: pengguna
+        // yang menengok kembali ke tab 1 saat proses persetujuan berjalan harus kembali
+        // ke tab tempat ia berhenti, tidak dipaksa melewati tab 2 yang sudah final.
+        const nextStep = Math.max(step + 1, storedActiveUatStep);
         // Tahap 1 memerlukan minimal 1 dokumen undangan UAT
         if (step === 1 && (!uat1.docs || uat1.docs.length === 0)) {
-            setSubmitting(false);
             toast.error('Unggah minimal 1 dokumen undangan UAT sebelum lanjut ke Eksekusi.');
             return;
         }
         if (step === 1 && uatApproverValidation) {
-            setSubmitting(false);
             toast.error(uatApproverValidation);
             return;
         }
-        if (step === 1) await uploadAllDrafts(setUat1, uat1.docs);
-        setActiveUatStep(nextStep);
-        updateProject(project.id, { status: 'UAT_IN_PROGRESS', sitUatData: buildSitUatData({ activeUatStep: nextStep }) });
-        toast.success(`UAT Tahap ${step} tersimpan. Lanjut ke Tahap ${nextStep}.`);
-        setSubmitting(false);
+        setSubmitting(true);
+        try {
+            // Sama seperti SIT: hasil upload dipakai sebagai override supaya `docId`
+            // dokumen undangan benar-benar tersimpan di `sitUatData`.
+            const overrides = { activeUatStep: nextStep };
+            if (step === 1) {
+                const nextUat1Docs = await uploadAllDrafts(setUat1, uat1.docs);
+                overrides.uat1_docs = sanitizeDocs(nextUat1Docs);
+            }
+            await updateProject(project.id, {
+                status: 'UAT_IN_PROGRESS',
+                sitUatData: buildSitUatData(overrides),
+            });
+            setActiveUatStep(nextStep);
+            setUat1DraftSavedAt(new Date().toISOString());
+            lastUat1AutosaveRef.current = uat1AutosaveSnapshot;
+            toast.success(`UAT Tahap ${step} tersimpan. Lanjut ke Tahap ${nextStep}.`);
+        } catch (error) {
+            toast.error(`UAT Tahap ${step} gagal disimpan: ${error.message}`);
+        } finally {
+            setSubmitting(false);
+        }
     };
 
     const buildUatExecutionPayload = () => ({
@@ -1905,14 +2386,29 @@ export default function SITUATWizard({ project, updateProject, addNotification, 
             const requiresDevelopmentRevision = response?.meta?.requires_development_revision === true;
 
             if (requiresDevelopmentRevision) {
+                // Backend mengarsipkan hasil UAT putaran ini ke `uat_cycles` lalu
+                // mengosongkan seluruh data eksekusi Tahap 2 dan approval SIT. State lokal
+                // harus mengikuti: kunci-kunci ini tidak dilindungi
+                // SERVER_MANAGED_SIT_UAT_KEYS, jadi wizard yang masih ter-mount akan
+                // menuliskan kembali data basi itu pada penyimpanan berikutnya.
                 setSit2Approvals({});
                 setSit3({ reviewNotes: '', docs: [] });
                 setActiveSitStep(1);
-                setActiveUatStep(2);
-                toast.error('Revisi mayor tercatat sebagai Change Request. Proyek dikembalikan ke developer dan wajib menjalani SIT ulang.');
+                // `uat2Summary` (executedCount/passedCount/findings) diturunkan dari kedua
+                // koleksi ini, jadi mengosongkannya sekaligus menihilkan angka ringkasan.
+                setUat2({
+                    scenarios: [],
+                    additionalRequests: [],
+                    execNotes: '',
+                });
+                // Kembali ke Tahap 1: setelah SIT ulang lulus, seluruh skenario disiapkan
+                // dan diuji ulang dari awal. `uat1.participants` sengaja tidak disentuh —
+                // roster penanda tangan terbawa lintas siklus.
+                setActiveUatStep(1);
+                toast.error('Revisi mayor tercatat sebagai Change Request. Proyek dikembalikan ke developer, wajib SIT ulang menyeluruh, lalu UAT dijalankan ulang dari Tahap 1.');
                 addNotification?.(
                     'Change Request Mayor UAT',
-                    `Proyek "${project.name}" dikembalikan ke developer. Setelah perbaikan, SIT harus diulang.`,
+                    `Proyek "${project.name}" dikembalikan ke developer. Setelah perbaikan, SIT diulang untuk seluruh task dan UAT dijalankan ulang dari awal.`,
                     'warning',
                     '/pm/workspace'
                 );
@@ -1930,57 +2426,14 @@ export default function SITUATWizard({ project, updateProject, addNotification, 
         }
     };
 
-    const updateUatMajorVerification = (source, itemId, field, value) => {
-        const collectionKey = source === 'scenario' ? 'scenarios' : 'additionalRequests';
-        setUat2(previous => ({
-            ...previous,
-            [collectionKey]: (previous[collectionKey] || []).map(item =>
-                item.id === itemId ? { ...item, [field]: value } : item
-            ),
-        }));
-    };
-
-    const handleSubmitUatMajorVerification = async () => {
-        if (uatMajorVerificationValidation) {
-            toast.error(uatMajorVerificationValidation);
-            return;
-        }
-
-        setSubmitting(true);
-        try {
-            const response = await projectService.submitUatMajorVerification(project.id, {
-                items: uatMajorVerificationItems.map(item => ({
-                    source: item.source,
-                    id: item.id,
-                    result: item.verificationResult,
-                    comment: item.verificationComment?.trim() || null,
-                    attachments: (item.verificationAttachments || []).map(document => ({ docId: document.docId })),
-                })),
-            });
-            const requiresAnotherRevision = response?.meta?.requires_development_revision === true;
-            if (requiresAnotherRevision) {
-                setActiveUatStep(2);
-                toast.error('Sebagian perbaikan Mayor masih belum sesuai. UAT kembali di-hold dan Change Request lanjutan dibuat.');
-            } else {
-                setActiveUatStep(3);
-                toast.success('Seluruh perbaikan Mayor diterima. UAT dilanjutkan ke Persetujuan Final.');
-            }
-            refreshProject?.();
-        } catch (error) {
-            toast.error(`Verifikasi perbaikan Mayor gagal disimpan: ${error.message}`);
-        } finally {
-            setSubmitting(false);
-        }
-    };
-
     const handleUATPass = async () => {
         setSubmitting(true);
         try {
-            await uploadAllDrafts(setUat3, uat3.docs);
+            const nextUat3Docs = await uploadAllDrafts(setUat3, uat3.docs);
             await projectService.update(project.id, {
                 status: 'DEV_COMPLETED',
                 uatPassedAt: new Date().toISOString(),
-                sitUatData: buildSitUatData({ activeUatStep: 3 }),
+                sitUatData: buildSitUatData({ activeUatStep: 3, uat3_docs: sanitizeDocs(nextUat3Docs) }),
             });
             addNotification?.('BAST Diterbitkan — DEV COMPLETED!', `Proyek "${project.name}" lulus SIT & UAT Internal. Siap QA & Siber.`, 'success', '/pm/workspace');
             toast.success('🎉 BAST Diterbitkan! Proyek resmi berstatus DEV_COMPLETED.');
@@ -2009,7 +2462,16 @@ export default function SITUATWizard({ project, updateProject, addNotification, 
     const currentUserUatApprovals = (uatApprovalMatrix?.approvers || []).filter(
         approver => approver.approval_mode === 'internal_account' && Number(approver.user_id) === Number(user?.id)
     );
+    // Sisi pemohon hanya berwenang menyetujui — penolakan dan permintaan revisinya sudah
+    // tercatat saat eksekusi UAT. Kewenangan dibaca dari `can_reject` milik matriks, bukan
+    // dari daftar posisi di klien, supaya tombol yang tampil tidak pernah menyimpang dari
+    // `UatApprovalRole::canReject()`. Nilai yang belum terisi diperlakukan sebagai boleh,
+    // agar respons lama tidak kehilangan tombol yang sah.
+    const canRejectUatAsCurrentUser = currentUserUatApprovals.some(
+        approver => approver.status === 'pending' && approver.can_reject !== false
+    );
 
+    // Dipakai untuk refresh imperatif setelah keputusan approval dikirim.
     const loadUatApprovalMatrix = useCallback(async (showLoading = true) => {
         if (!project?.id || activeUatStep < 3) return;
         if (showLoading) setUatMatrixLoading(true);
@@ -2023,6 +2485,8 @@ export default function SITUATWizard({ project, updateProject, addNotification, 
         }
     }, [activeUatStep, project]);
 
+    // Pemuatan awal saat UAT Tahap 3 dibuka. Sengaja tidak memanggil
+    // `loadUatApprovalMatrix` agar effect tidak memanggil setState secara sinkron.
     useEffect(() => {
         let cancelled = false;
         if (!project?.id || activeUatStep < 3) return undefined;
@@ -2107,6 +2571,12 @@ export default function SITUATWizard({ project, updateProject, addNotification, 
 
     // Riwayat Change Request, termasuk yang dibentuk otomatis dari UAT Tahap 2.
     const uatChangeRequests = sitUatData.uat_change_requests || [];
+    // Permintaan yang masih menunggu tim pengembangan. Dipakai Tahap 3 untuk
+    // menjelaskan mengapa persetujuan finalnya belum boleh ditutup.
+    const openUatChangeRequests = uatChangeRequests
+        .filter(request => CHANGE_REQUEST_OPEN_STATUSES.includes(request?.status));
+    const openMinorChangeRequests = openUatChangeRequests
+        .filter(request => request?.type !== 'mayor');
     // ── Handler: Kembalikan Task ke Developer (alur revisi task terintegrasi) ──
     const handleReturnTaskRevision = async () => {
         if (!showTaskRevisionModal) return;
@@ -2187,7 +2657,7 @@ export default function SITUATWizard({ project, updateProject, addNotification, 
             <div className="bg-white rounded-2xl border border-gray-200 p-4 shadow-sm">
                 <div className="flex items-center gap-2 mb-2">
                     <ShieldCheck size={16} className="text-sky-600" />
-                    <h4 className="font-bold text-sm text-gray-800">Syarat Masuk SIT (Gate) — {isTargetedSitRetest ? 'Scope Revisi Mayor' : 'Task Developer'}</h4>
+                    <h4 className="font-bold text-sm text-gray-800">Syarat Masuk SIT (Gate) — {isTargetedSitRetest ? 'Scope Revisi Mayor (Data Lama)' : 'Task Developer'}</h4>
                 </div>
                 {(() => {
                     const gate = taskGate();
@@ -2208,7 +2678,7 @@ export default function SITUATWizard({ project, updateProject, addNotification, 
                                 {gate.total === 0
                                     ? 'Belum ada task developer. Buat & selesaikan task sebelum memulai SIT.'
                                     : gate.canStart
-                                        ? `Semua task ${isTargetedSitRetest ? 'dalam scope revisi ' : ''}telah selesai. SIT siap dimulai.`
+                                        ? `Semua task ${isTargetedSitRetest ? 'dalam scope revisi ' : ''}telah selesai. SIT ${isSitRevisionCycle ? 'ulang ' : ''}siap dimulai.`
                                         : isTargetedSitRetest
                                             ? 'Masih ada task dalam scope revisi yang belum selesai atau belum memiliki assignee.'
                                             : 'Masih ada task yang belum selesai.'}
@@ -2242,7 +2712,7 @@ export default function SITUATWizard({ project, updateProject, addNotification, 
                     <AlertTriangle size={18} className="text-red-600 shrink-0 mt-0.5" />
                     <div>
                         <p className="font-bold text-red-900 text-sm">UAT Memerlukan Revisi Mayor ke Development</p>
-                        <p className="text-xs text-red-800 mt-0.5">Change Request mayor harus diselesaikan developer. Setelah perbaikan, jalankan SIT ulang; jika lulus, kembali ke UAT Tab 2 untuk memverifikasi hanya item Mayor sebelum Persetujuan Final.</p>
+                        <p className="text-xs text-red-800 mt-0.5">Change Request mayor harus diselesaikan developer. Setelah perbaikan, SIT diulang untuk <strong>seluruh task</strong>; jika lulus, UAT dijalankan ulang dari Tahap 1 — seluruh skenario disiapkan dan diuji kembali sebelum Persetujuan Final. Daftar penanda tangan UAT tetap terpakai.</p>
                     </div>
                 </div>
             )}
@@ -2269,8 +2739,8 @@ export default function SITUATWizard({ project, updateProject, addNotification, 
                     </div>
                 </div>
 
-                {/* SIT not started */}
-                {(!sitDone && stUpper !== 'SIT_IN_PROGRESS' && !UNLOCK_ALL_STAGES) && (
+                {/* SIT belum dimulai, tetapi status proyek mengizinkan SIT dimulai */}
+                {sitStartable && (
                     <div className="p-6">
                         <RevisionBanner revisions={revisions} type="SIT_TO_DEV" />
                         <RevisionBanner revisions={revisions} type="UAT_TO_DEV" />
@@ -2291,6 +2761,20 @@ export default function SITUATWizard({ project, updateProject, addNotification, 
                     </div>
                 )}
 
+                {/* SIT belum tersedia pada status proyek saat ini */}
+                {sitUnavailable && (
+                    <div className="p-6">
+                        <div className="text-center py-4">
+                            <Lock size={32} className="mx-auto text-gray-300 mb-3" />
+                            <p className="text-sm font-semibold text-gray-600 mb-1">Pengujian SIT belum tersedia</p>
+                            <p className="text-xs text-gray-500 max-w-md mx-auto">{sitUnavailableReason}</p>
+                            <p className="text-[11px] text-gray-400 mt-3">
+                                Status proyek saat ini: <span className="font-bold text-gray-600">{stUpper || '-'}</span>
+                            </p>
+                        </div>
+                    </div>
+                )}
+
                 {/* SIT Active or Done */}
                 {(stUpper === 'SIT_IN_PROGRESS' || sitDone || UNLOCK_ALL_STAGES) && (
                     <div>
@@ -2302,7 +2786,7 @@ export default function SITUATWizard({ project, updateProject, addNotification, 
                                     step={step}
                                     isActive={activeSitStep === step.id}
                                     isCompleted={step.id === 1 ? sit1Done : step.id === 2 ? sit2Done : sit3Done}
-                                    onClick={() => (sitDone || UNLOCK_ALL_STAGES || step.id <= activeSitStep) && setActiveSitStep(step.id)}
+                                    onClick={() => (sitDone || UNLOCK_ALL_STAGES || step.id <= reachedSitStep) && setActiveSitStep(step.id)}
                                 />
                             ))}
                         </div>
@@ -2317,18 +2801,31 @@ export default function SITUATWizard({ project, updateProject, addNotification, 
                                 </div>
                                 <p className="text-xs text-gray-500 mb-3">
                                     {isTargetedSitRetest
-                                        ? 'SIT ulang ini bersifat terarah. Environment tetap disiapkan, tetapi skenario hanya mencakup task yang terkena Change Request Mayor pada siklus aktif.'
-                                        : 'Lengkapi environment yang akan diuji. Jumlah skenario otomatis mengikuti task yang sudah Selesai.'}
+                                        ? 'SIT ulang ini memakai scope lama yang terarah. Environment tetap disiapkan, tetapi skenario hanya mencakup task yang terkena Change Request Mayor pada siklus aktif.'
+                                        : isSitRevisionCycle
+                                            ? 'SIT dijalankan ulang setelah revisi Mayor. Seluruh task diuji ulang dari awal, bukan hanya yang terdampak, dan setiap task perlu lampiran bukti pengujian baru.'
+                                            : 'Lengkapi environment yang akan diuji. Jumlah skenario otomatis mengikuti task yang sudah Selesai.'}
                                 </p>
 
-                                {isTargetedSitRetest && (
+                                {isSitRevisionCycle && (
                                     <div className="rounded-xl border border-violet-200 bg-violet-50 p-4 flex items-start gap-3 text-violet-800">
                                         <RotateCcw size={16} className="shrink-0 mt-0.5" />
                                         <div>
-                                            <p className="text-xs font-bold">SIT Ulang Terarah — Siklus #{sitRetestCycle}</p>
-                                            <p className="text-[11px] mt-1 leading-relaxed">
-                                                Hanya {sitRetestTaskIds.length} task yang terdampak revisi/request Mayor yang diuji ulang. Task lain mempertahankan hasil SIT sebelumnya dan tidak masuk ke tabel eksekusi siklus ini.
-                                            </p>
+                                            {isTargetedSitRetest ? (
+                                                <>
+                                                    <p className="text-xs font-bold">SIT Ulang Terarah (Scope Lama) — Siklus #{sitRetestCycle}</p>
+                                                    <p className="text-[11px] mt-1 leading-relaxed">
+                                                        Hanya {sitRetestTaskIds.length} task yang terdampak revisi/request Mayor yang diuji ulang. Task lain mempertahankan hasil SIT sebelumnya dan tidak masuk ke tabel eksekusi siklus ini.
+                                                    </p>
+                                                </>
+                                            ) : (
+                                                <>
+                                                    <p className="text-xs font-bold">SIT ulang siklus #{sitRetestCycle} — seluruh task diuji ulang</p>
+                                                    <p className="text-[11px] mt-1 leading-relaxed">
+                                                        Revisi Mayor memulai ulang kedua siklus: {taskGate().total} task diuji ulang menyeluruh, lalu UAT dijalankan lagi dari Tahap 1 (persiapan skenario). Daftar penanda tangan UAT tetap terpakai dan tidak perlu diisi ulang.
+                                                    </p>
+                                                </>
+                                            )}
                                         </div>
                                     </div>
                                 )}
@@ -2378,7 +2875,7 @@ export default function SITUATWizard({ project, updateProject, addNotification, 
                                         : <AlertTriangle size={15} className="text-amber-500 shrink-0" />}
                                     <span className="font-semibold">
                                         {taskGate().canStart
-                                            ? `Semua task ${isTargetedSitRetest ? 'dalam scope revisi ' : ''}sudah Selesai — SIT siap dilaksanakan.`
+                                            ? `Semua task ${isTargetedSitRetest ? 'dalam scope revisi ' : ''}sudah Selesai — SIT ${isSitRevisionCycle ? 'ulang ' : ''}siap dilaksanakan.`
                                             : `Masih ada ${taskGate().incomplete.length} task dalam scope yang belum selesai.`}
                                     </span>
                                 </div>
@@ -2451,6 +2948,9 @@ export default function SITUATWizard({ project, updateProject, addNotification, 
                                     <p className="text-[11px] text-gray-500 mb-2">
                                         Centang <strong>OK</strong> pada setiap task dalam scope yang sudah lolos. Lampirkan <strong>bukti pengujian baru</strong> per task. Gunakan <strong>Revisi</strong> bila hasil belum sesuai. Lanjut ke Review &amp; Sign-Off hanya jika seluruh task dalam scope disetujui.
                                     </p>
+                                    {/* `isTargetedRetest` di komponen ini hanya memilih pesan "scope SIT ulang"
+                                        ketika daftar task kosong, jadi yang relevan adalah scope yang benar-benar
+                                        dipersempit (data lama) — bukan siklus revisinya. */}
                                     <SITTaskExecution
                                         project={project}
                                         approvals={sit2Approvals}
@@ -2458,13 +2958,24 @@ export default function SITUATWizard({ project, updateProject, addNotification, 
                                         onRequestRevision={setShowTaskRevisionModal}
                                         taskIds={eligibleTaskIds}
                                         isTargetedRetest={isTargetedSitRetest}
+                                        // Persetujuan dan bukti task SIT hanya boleh disunting selama
+                                        // SIT masih berjalan. `sitDone` sudah bernilai true begitu proyek
+                                        // melewati SIT (SIT_PASSED sampai produksi), dan sesuai komentar
+                                        // SIT_COMPLETED_STATUSES tab ini memang tampil read-only pada saat
+                                        // itu — tabnya tetap bisa dibuka untuk dibaca sebagai berita acara,
+                                        // tetapi seluruh aksi (OK, revisi, lampiran) dibekukan. Peninjau
+                                        // juga tidak pernah boleh menyunting. Server menegakkan hal yang
+                                        // sama lewat SIT_FROZEN_STATUSES di ProjectController::update().
+                                        readOnly={isViewer || sitDone}
                                     />
                                 </div>
 
                                 <div className="rounded-xl border border-indigo-200 bg-indigo-50 p-3 text-[11px] text-indigo-800">
                                     {isTargetedSitRetest
                                         ? <>Simpan sebagai <strong>draft</strong> jika pengujian belum selesai. Finalisasi hanya dapat dilakukan setelah seluruh task dalam scope selesai, disetujui, dan memiliki lampiran bukti baru untuk siklus ini.</>
-                                        : <>Simpan sebagai <strong>draft</strong> jika pengujian atau revisi belum selesai. Finalisasi hanya dapat dilakukan setelah seluruh task selesai dan disetujui, serta task hasil revisi memiliki lampiran bukti baru.</>}
+                                        : isSitRevisionCycle
+                                            ? <>Simpan sebagai <strong>draft</strong> jika pengujian ulang belum selesai. Finalisasi hanya dapat dilakukan setelah <strong>seluruh task</strong> diuji ulang, disetujui, dan memiliki lampiran bukti pengujian baru untuk siklus ini.</>
+                                            : <>Simpan sebagai <strong>draft</strong> jika pengujian atau revisi belum selesai. Finalisasi hanya dapat dilakukan setelah seluruh task selesai dan disetujui, serta task hasil revisi memiliki lampiran bukti baru.</>}
                                 </div>
 
                                 {!sitDone && (status === 'SIT_IN_PROGRESS' || UNLOCK_ALL_STAGES) && activeSitStep === 2 && (
@@ -2528,14 +3039,14 @@ export default function SITUATWizard({ project, updateProject, addNotification, 
                                     </div>
                                     <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                                         {[
-                                            { key: 'developer', label: 'Developer', desc: requiredDeveloperCount > 0 ? `Semua ${requiredDeveloperCount} pengembang harus menyetujui` : 'Pengembang yang mengerjakan task', color: 'blue', icon: <UserCheck size={16} className="text-blue-500" /> },
+                                            { key: 'developer', label: 'Developer', desc: requiredDeveloperCount > 0 ? `Semua ${requiredDeveloperCount} developer tim proyek harus menyetujui` : 'Developer pada tim proyek', color: 'blue', icon: <UserCheck size={16} className="text-blue-500" /> },
                                             { key: 'pm', label: 'PM / Analyst Pengembangan', desc: 'Project Manager proyek', color: 'amber', icon: <Users size={16} className="text-amber-500" /> },
                                             { key: 'development_lead', label: 'Development Lead', desc: 'Pimpinan pengembangan', color: 'emerald', icon: <ShieldCheck size={16} className="text-emerald-500" /> },
                                         ].map(r => {
                                             const isDev = r.key === 'developer';
                                             const ap = sit3Approvals?.[r.key];
-                                            let approved = false;
-                                            let detail = null;
+                                            let approved;
+                                            let detail;
                                             if (isDev) {
                                                 approved = devApproved;
                                                 detail = devApproved
@@ -2549,11 +3060,14 @@ export default function SITUATWizard({ project, updateProject, addNotification, 
                                                     ? `✓ ${ap.approvedBy} • ${fmtDate(ap.at)}`
                                                     : 'Belum memberikan persetujuan';
                                             }
-                                            const colorMap = { blue: 'blue', amber: 'amber', emerald: 'emerald' }[r.color];
+                                            // Kelas Tailwind ditulis utuh, tidak diinterpolasi: Tailwind 4
+                                            // memindai teks sumber apa adanya sehingga `bg-${x}-100`
+                                            // tidak pernah menghasilkan kelas dari baris ini.
+                                            const iconBgClass = SIT3_ROLE_ICON_BG[r.color] || 'bg-gray-100';
                                             return (
                                                 <div key={r.key} className={`rounded-xl border p-3 transition-all ${approved ? 'bg-emerald-50 border-emerald-200' : 'bg-gray-50 border-gray-200'}`}>
                                                     <div className="flex items-center justify-between">
-                                                        <div className={`w-9 h-9 rounded-xl flex items-center justify-center ${approved ? 'bg-emerald-100' : `bg-${colorMap}-100`}`}>
+                                                        <div className={`w-9 h-9 rounded-xl flex items-center justify-center ${approved ? 'bg-emerald-100' : iconBgClass}`}>
                                                             {r.icon}
                                                         </div>
                                                         {approved ? (
@@ -2610,6 +3124,17 @@ export default function SITUATWizard({ project, updateProject, addNotification, 
                                     {currentRoleKey === 'developer' && isCurrentUserRequiredDeveloper && hasCurrentDeveloperApproved && (
                                         <p className="text-[10px] text-emerald-600 mt-2 flex items-center gap-1">
                                             <CheckCircle2 size={11} /> Anda telah menyetujui SIT pada proyek ini.
+                                        </p>
+                                    )}
+                                    {/*
+                                      * Developer yang membuka proyek ini tanpa berada pada timnya tidak
+                                      * punya slot persetujuan. Tanpa keterangan ini, layarnya hanya
+                                      * memperlihatkan kartu status tanpa penjelasan mengapa formulir
+                                      * persetujuan tidak muncul.
+                                      */}
+                                    {currentRoleKey === 'developer' && !isCurrentUserRequiredDeveloper && !sitDone && (
+                                        <p className="text-[10px] text-gray-500 mt-2 flex items-start gap-1">
+                                            <Info size={11} className="shrink-0 mt-0.5" /> Persetujuan SIT hanya diberikan developer yang tercatat pada tim proyek ini.
                                         </p>
                                     )}
                                     {currentRoleKey && currentRoleKey !== 'developer' && !sit3Approvals?.[currentRoleKey]?.approved && !sitDone && (
@@ -2705,7 +3230,7 @@ export default function SITUATWizard({ project, updateProject, addNotification, 
                                             {submitting ? (
                                                 <><span className="w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin" /> Memproses Kelulusan SIT...</>
                                             ) : (
-                                                <><CheckCircle2 size={14} /> {sitUatData.uat2_resume_after_sit ? 'SIT Ulang Lulus — Verifikasi Mayor di UAT' : 'SIT Lulus — Lanjut ke UAT Internal'}</>
+                                                <><CheckCircle2 size={14} /> {isUatRestartPending ? 'SIT Ulang Lulus — Jalankan Ulang UAT dari Tahap 1' : 'SIT Lulus — Lanjut ke UAT Internal'}</>
                                             )}
                                         </button>
                                         {sitPassBlockedReason && (
@@ -2764,16 +3289,16 @@ export default function SITUATWizard({ project, updateProject, addNotification, 
                     <div className="p-6 text-center">
                         <CheckSquare size={36} className="mx-auto text-amber-400 mb-3" />
                         <p className="text-sm font-semibold text-gray-700 mb-1">
-                            {uat2AwaitingMajorVerification ? 'SIT ulang telah lulus! Siap memverifikasi perbaikan Mayor.' : 'SIT telah lulus! Siap memulai UAT Internal.'}
+                            {isUatRestartPending ? 'SIT ulang telah lulus! UAT dijalankan ulang dari awal.' : 'SIT telah lulus! Siap memulai UAT Internal.'}
                         </p>
                         <p className="text-xs text-gray-500 mb-4">
-                            {uat2AwaitingMajorVerification ? 'Hasil UAT sebelumnya tetap terkunci; hanya item Mayor yang perlu diverifikasi ulang oleh user.' : 'Pastikan PM dan perwakilan Divisi Peminta sudah siap untuk pengujian fungsional bisnis.'}
+                            {isUatRestartPending ? 'Seluruh skenario disiapkan dan diuji ulang mulai Tahap 1. Daftar penanda tangan UAT sebelumnya tetap terpakai — PM hanya perlu menambah bila ada peserta baru.' : 'Pastikan PM dan perwakilan Divisi Peminta sudah siap untuk pengujian fungsional bisnis.'}
                         </p>
                         <button
                             onClick={handleStartUAT}
                             className="px-6 py-2.5 bg-amber-500 hover:bg-amber-600 text-white font-bold text-sm rounded-xl transition-all shadow-md cursor-pointer flex items-center gap-2 mx-auto"
                         >
-                            <ArrowRight size={16} /> {uat2AwaitingMajorVerification ? 'Verifikasi Perbaikan Mayor' : 'Mulai UAT Internal'}
+                            <ArrowRight size={16} /> {isUatRestartPending ? 'Jalankan Ulang UAT Internal' : 'Mulai UAT Internal'}
                         </button>
                     </div>
                 )}
@@ -2800,7 +3325,7 @@ export default function SITUATWizard({ project, updateProject, addNotification, 
                                     step={step}
                                     isActive={activeUatStep === step.id}
                                     isCompleted={step.id === 1 ? uat1Done : step.id === 2 ? uat2Done : uat3Done}
-                                    onClick={() => (uatDone || UNLOCK_ALL_STAGES || step.id <= activeUatStep) && setActiveUatStep(step.id)}
+                                    onClick={() => (uatDone || UNLOCK_ALL_STAGES || step.id <= reachedUatStep) && setActiveUatStep(step.id)}
                                 />
                             ))}
                         </div>
@@ -2907,7 +3432,7 @@ export default function SITUATWizard({ project, updateProject, addNotification, 
                                             <li><strong>3.</strong> Link pihak peminta dibuat PM di UAT Tab 3 setelah hasil Tab 2 disimpan final.</li>
                                         </ol>
                                     </div>
-                                    {uat1.participants.length === 0 ? (
+                                    {(uat1.participants || []).length === 0 ? (
                                         <p className="text-[11px] text-gray-400 italic">Peserta akan terisi otomatis dari pihak yang terlibat dalam proyek.</p>
                                     ) : (
                                         <div className="border border-gray-200 rounded-xl overflow-x-auto">
@@ -2923,8 +3448,8 @@ export default function SITUATWizard({ project, updateProject, addNotification, 
                                                     </tr>
                                                 </thead>
                                                 <tbody className="divide-y divide-gray-100">
-                                                    {uat1.participants.map((p, idx) => {
-                                                        const isEditing = editingUatIdx === idx;
+                                                    {(uat1.participants || []).map((p, idx) => {
+                                                        const isEditing = editingUatId !== null && editingUatId === p.id;
                                                         const editable = !uatDone && !isViewer && canManageUatApprovals;
                                                         const approvalRole = UAT_APPROVAL_ROLES.find(role => role.value === p.approvalRole);
                                                         const hasInvalidPhone = p.approvalMode === 'external_link'
@@ -2933,9 +3458,13 @@ export default function SITUATWizard({ project, updateProject, addNotification, 
                                                         const eligibleInternalAccounts = uatInternalUsers.filter(account => (
                                                             (UAT_INTERNAL_ACCOUNT_ROLES[p.approvalRole] || []).includes(account.role)
                                                             && (p.approvalRole !== 'developer' || projectDeveloperUserIds.has(Number(account.id)))
+                                                            // Posisi pemohon hanya boleh diisi akun pengaju proyek. Tanpa penyaring
+                                                            // ini seluruh akun business user ikut terdaftar, padahal semua pilihan
+                                                            // selain pengaju pasti ditolak backend saat disimpan.
+                                                            && (p.approvalRole !== 'requester' || Number(account.id) === projectCreatorUserId)
                                                         ));
                                                         return (
-                                                            <tr key={idx} className={`hover:bg-amber-50/40 transition-colors ${isEditing ? 'bg-amber-50/60' : ''}`}>
+                                                            <tr key={p.id || `uat_participant_${idx}`} className={`hover:bg-amber-50/40 transition-colors ${isEditing ? 'bg-amber-50/60' : ''}`}>
                                                                 {/* Nama */}
                                                                 <td className="py-2.5 px-4 text-gray-800 font-medium">
                                                                     {isEditing ? (
@@ -2943,7 +3472,7 @@ export default function SITUATWizard({ project, updateProject, addNotification, 
                                                                             type="text"
                                                                             value={p.name}
                                                                             onChange={e => handleUatParticipantChange(idx, 'name', e.target.value)}
-                                                                            placeholder={p.approvalMode === 'internal_account' ? 'Terisi dari akun IT' : 'Nama peserta'}
+                                                                            placeholder={p.approvalMode === 'internal_account' ? 'Terisi dari akun yang dipilih' : 'Nama peserta'}
                                                                             disabled={p.approvalMode === 'internal_account'}
                                                                             className="w-full px-2.5 py-1.5 border border-amber-300 rounded-lg text-xs focus:outline-none focus:border-amber-500 bg-white disabled:bg-gray-100 disabled:text-gray-500"
                                                                         />
@@ -3012,7 +3541,7 @@ export default function SITUATWizard({ project, updateProject, addNotification, 
                                                                                 className="w-full px-2.5 py-2 border border-amber-300 rounded-lg text-xs bg-white focus:outline-none focus:border-amber-500"
                                                                             >
                                                                                 <option value="participant">Peserta UAT saja — tidak approval</option>
-                                                                                <optgroup label="Pihak Peminta — link pribadi + nomor HP">
+                                                                                <optgroup label="Pihak Pemohon — pemohon lewat akun, pimpinan lewat link pribadi">
                                                                                     {UAT_APPROVAL_ROLES.filter(role => role.side === 'requester').map(role => <option key={role.value} value={role.value}>{role.label}</option>)}
                                                                                 </optgroup>
                                                                                 <optgroup label="Pihak IT — menggunakan akun aplikasi">
@@ -3021,7 +3550,7 @@ export default function SITUATWizard({ project, updateProject, addNotification, 
                                                                             </select>
                                                                             {p.approvalMode === 'internal_account' && (
                                                                                 <>
-                                                                                    <label className="block text-[9px] font-bold uppercase tracking-wide text-gray-500">Akun pihak IT</label>
+                                                                                    <label className="block text-[9px] font-bold uppercase tracking-wide text-gray-500">Akun aplikasi</label>
                                                                                     <select value={p.userId || ''}
                                                                                         onChange={e => handleUatParticipantChange(idx, 'userId', e.target.value)}
                                                                                         className="w-full px-2.5 py-2 border border-blue-300 rounded-lg text-xs bg-white focus:outline-none focus:border-blue-500">
@@ -3029,9 +3558,9 @@ export default function SITUATWizard({ project, updateProject, addNotification, 
                                                                                         {eligibleInternalAccounts.map(account => <option key={account.id} value={account.id}>{account.name} — {account.role_detail?.display_name || account.role}</option>)}
                                                                                     </select>
                                                                                     {eligibleInternalAccounts.length > 0 ? (
-                                                                                        <p className="text-[9px] text-blue-600">{p.approvalRole === 'developer' ? 'Hanya developer yang mengerjakan task proyek ini yang ditampilkan. ' : ''}Nama, divisi, dan kedudukan akan terisi otomatis dari akun yang dipilih. Nomor HP tidak diperlukan karena approval dilakukan melalui akun.</p>
+                                                                                        <p className="text-[9px] text-blue-600">{p.approvalRole === 'developer' ? 'Hanya developer yang mengerjakan task proyek ini yang ditampilkan. ' : ''}{p.approvalRole === 'requester' ? 'Hanya akun yang mengajukan proyek ini yang ditampilkan. ' : ''}Nama, divisi, dan kedudukan akan terisi otomatis dari akun yang dipilih. Nomor HP tidak diperlukan karena approval dilakukan melalui akun.</p>
                                                                                     ) : (
-                                                                                        <p className="text-[9px] font-semibold text-red-600">Belum ada akun dengan role yang sesuai. Tambahkan atau perbaiki role akun melalui pengelolaan pengguna.</p>
+                                                                                        <p className="text-[9px] font-semibold text-red-600">{p.approvalRole === 'requester' ? 'Akun pengaju proyek ini tidak ditemukan. Pastikan akun pemohon masih aktif melalui pengelolaan pengguna.' : 'Belum ada akun dengan role yang sesuai. Tambahkan atau perbaiki role akun melalui pengelolaan pengguna.'}</p>
                                                                                     )}
                                                                                 </>
                                                                             )}
@@ -3064,7 +3593,7 @@ export default function SITUATWizard({ project, updateProject, addNotification, 
                                                                                 </button>
                                                                             ) : (
                                                                                 <button
-                                                                                    onClick={() => setEditingUatIdx(idx)}
+                                                                                    onClick={() => setEditingUatId(p.id || null)}
                                                                                     className="p-1.5 text-gray-400 hover:text-amber-600 hover:bg-amber-50 rounded-lg transition-colors cursor-pointer"
                                                                                     title="Edit peserta"
                                                                                 >
@@ -3130,15 +3659,38 @@ export default function SITUATWizard({ project, updateProject, addNotification, 
                                             </label>
                                         )}
                                     </div>
-                                    <DocList docs={uat1.docs} onRemove={i => onRemoveDoc(setUat1, i)} onView={viewDoc} onDownload={downloadDoc} onTypeChange={(i, t) => changeDocType(setUat1, i, t)} docTypeOptions={docTypeOptions('UAT_PREP')} readOnly={uatDone} />
+                                    <DocList docs={uat1.docs} onRemove={i => onRemoveDoc(setUat1, uat1.docs, i)} onView={viewDoc} onDownload={downloadDoc} onTypeChange={(i, t) => changeDocType(setUat1, uat1.docs, i, t)} docTypeOptions={docTypeOptions('UAT_PREP')} readOnly={uatDone} />
                                 </div>
 
                                 {!uatDone && (status === 'UAT_IN_PROGRESS' || UNLOCK_ALL_STAGES) && activeUatStep === 1 && (
-                                    <div className="flex justify-end pt-2">
-                                        <button onClick={() => handleSaveUATStep(1)} disabled={!uat1.unit || !uat1.startDate || !uat1.preparedBy}
-                                            className="px-5 py-2.5 bg-amber-500 hover:bg-amber-600 disabled:bg-gray-300 disabled:cursor-not-allowed text-white text-xs font-bold rounded-xl flex items-center gap-2 transition-all cursor-pointer">
-                                            Simpan &amp; Lanjut Eksekusi UAT <ArrowRight size={14} />
-                                        </button>
+                                    <div className="space-y-2 pt-2">
+                                        <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-[11px] text-amber-800 leading-relaxed">
+                                            Isian pada tahap ini <strong>tersimpan otomatis</strong> beberapa saat setelah Anda berhenti mengetik, sehingga data tidak hilang saat Anda berpindah laman untuk mencari data pendukung. Gunakan <strong>Simpan sebagai Draft</strong> bila ingin menyimpan sekaligus mengunggah dokumen undangan tanpa memajukan tahap.
+                                        </div>
+                                        <div className="w-full flex flex-col-reverse sm:flex-row sm:justify-end sm:items-center gap-2">
+                                            {uat1DraftSavedAt && (
+                                                <span className="sm:mr-auto text-[10px] text-gray-500 flex items-center gap-1">
+                                                    <Check size={11} className="text-emerald-500" /> Draft tersimpan {draftSavedLabel(uat1DraftSavedAt)}
+                                                </span>
+                                            )}
+                                            <button
+                                                onClick={handleSaveUAT1Draft}
+                                                disabled={savingUat1Draft || submitting || uploadingCategory === 'UAT_PREP'}
+                                                className="px-5 py-2.5 bg-white hover:bg-amber-50 disabled:bg-gray-100 disabled:text-gray-400 disabled:cursor-not-allowed text-amber-700 border border-amber-300 text-xs font-bold rounded-xl flex items-center justify-center gap-2 transition-all cursor-pointer"
+                                            >
+                                                {savingUat1Draft ? <Clock size={14} /> : <Save size={14} />}
+                                                {savingUat1Draft ? 'Menyimpan Draft...' : 'Simpan sebagai Draft'}
+                                            </button>
+                                            <button
+                                                onClick={() => handleSaveUATStep(1)}
+                                                disabled={!uat1.unit || !uat1.startDate || !uat1.preparedBy || savingUat1Draft || submitting}
+                                                className="px-5 py-2.5 bg-amber-500 hover:bg-amber-600 disabled:bg-gray-300 disabled:cursor-not-allowed text-white text-xs font-bold rounded-xl flex items-center justify-center gap-2 transition-all cursor-pointer"
+                                            >
+                                                {storedActiveUatStep > 1
+                                                    ? `Simpan & Kembali ke Tahap ${storedActiveUatStep}`
+                                                    : 'Simpan & Lanjut Eksekusi UAT'} <ArrowRight size={14} />
+                                            </button>
+                                        </div>
                                     </div>
                                 )}
                             </div>
@@ -3163,22 +3715,12 @@ export default function SITUATWizard({ project, updateProject, addNotification, 
                                     <span><strong>Diterima</strong> berarti fungsi sesuai kebutuhan. Jika memilih <strong>Revisi</strong>, tentukan Minor atau Mayor dan tuliskan permintaan user. Minor diperbaiki tanpa memundurkan alur; Mayor menjadi Change Request, kembali ke developer, dan wajib SIT ulang.</span>
                                 </div>
 
-                                {(status === 'UAT_REVISION_DEV' || sitUatData.uat2_resume_after_sit === true) && (
+                                {(status === 'UAT_REVISION_DEV' || isUatRestartPending) && (
                                     <div className="p-4 bg-red-50 border border-red-200 rounded-xl flex items-start gap-3 text-red-800">
                                         <Lock size={16} className="shrink-0 mt-0.5" />
                                         <div>
-                                            <p className="text-xs font-bold">UAT sedang di-hold untuk Change Request Mayor</p>
-                                            <p className="text-[11px] mt-1 leading-relaxed">Hasil UAT tetap terkunci sebagai jejak audit. Developer menyelesaikan item Mayor terlebih dahulu, lalu seluruh perubahan menjalani SIT ulang sebelum kembali ke tab ini untuk verifikasi user.</p>
-                                        </div>
-                                    </div>
-                                )}
-
-                                {uat2VerificationMode && (
-                                    <div className="p-4 bg-emerald-50 border border-emerald-200 rounded-xl flex items-start gap-3 text-emerald-800">
-                                        <CheckCircle2 size={16} className="shrink-0 mt-0.5" />
-                                        <div>
-                                            <p className="text-xs font-bold">SIT ulang lulus — verifikasi perbaikan Mayor</p>
-                                            <p className="text-[11px] mt-1 leading-relaxed">User hanya perlu memeriksa kembali item Mayor di bagian verifikasi. Skenario dan request lain tetap memakai hasil UAT sebelumnya.</p>
+                                            <p className="text-xs font-bold">UAT di-hold — akan dijalankan ulang dari Tahap 1</p>
+                                            <p className="text-[11px] mt-1 leading-relaxed">Hasil UAT putaran ini sudah diarsipkan sebagai jejak audit dan tidak dilanjutkan. Developer menyelesaikan item Mayor, seluruh task menjalani SIT ulang, lalu UAT dimulai lagi dari persiapan skenario — setiap skenario dieksekusi ulang, diikuti putaran persetujuan baru. Daftar penanda tangan tetap terpakai.</p>
                                         </div>
                                     </div>
                                 )}
@@ -3425,116 +3967,6 @@ export default function SITUATWizard({ project, updateProject, addNotification, 
                                     )}
                                 </section>
 
-                                {uat2VerificationMode && (
-                                    <section className="rounded-2xl border-2 border-emerald-300 bg-emerald-50/40 p-4 space-y-3">
-                                        <div>
-                                            <div className="flex items-center gap-2">
-                                                <UserCheck size={15} className="text-emerald-700" />
-                                                <h6 className="text-xs font-bold text-emerald-900">Verifikasi Ulang Item Mayor oleh User</h6>
-                                            </div>
-                                            <p className="text-[11px] text-emerald-700 mt-1 leading-relaxed">
-                                                Nilai hanya perbaikan Mayor yang sudah diselesaikan developer dan dinyatakan lulus SIT ulang. Setiap item wajib memiliki bukti verifikasi baru. Jika satu item masih revisi, UAT kembali di-hold untuk siklus perbaikan berikutnya.
-                                            </p>
-                                        </div>
-
-                                        {uatMajorVerificationItems.map((item, index) => (
-                                            <div key={`${item.source}_${item.id}`} className="rounded-xl border border-emerald-200 bg-white p-4">
-                                                <div className="flex flex-col lg:flex-row lg:items-start gap-3">
-                                                    <div className="flex-1 min-w-0">
-                                                        <div className="flex items-start gap-2">
-                                                            <span className="w-6 h-6 rounded-lg bg-emerald-100 text-emerald-700 font-black text-[10px] flex items-center justify-center shrink-0">{index + 1}</span>
-                                                            <div>
-                                                                <p className="text-[10px] font-bold uppercase text-emerald-600">{item.source === 'scenario' ? 'Revisi Skenario UAT' : 'Request Tambahan User'}</p>
-                                                                <p className="font-bold text-xs text-gray-800 mt-0.5">{item.title}</p>
-                                                                <p className="text-[10px] text-gray-500 mt-1">Permintaan awal: {item.source === 'scenario' ? item.request : item.detail}</p>
-                                                                {item.taskId && <p className="text-[10px] text-gray-400 mt-0.5">Task developer #{item.taskId}</p>}
-                                                            </div>
-                                                        </div>
-                                                    </div>
-                                                    <div className="w-full lg:w-56 shrink-0">
-                                                        <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">Hasil Verifikasi *</label>
-                                                        <select
-                                                            value={item.verificationResult || ''}
-                                                            onChange={event => updateUatMajorVerification(item.source, item.id, 'verificationResult', event.target.value)}
-                                                            className="w-full px-3 py-2 border border-gray-300 rounded-xl text-xs font-semibold bg-white focus:outline-none focus:border-emerald-500"
-                                                        >
-                                                            <option value="">Pilih hasil...</option>
-                                                            <option value="accepted">Perbaikan Diterima</option>
-                                                            <option value="revision">Masih Revisi</option>
-                                                        </select>
-                                                    </div>
-                                                </div>
-                                                <div className="mt-3 pt-3 border-t border-gray-100">
-                                                    <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">
-                                                        {item.verificationResult === 'revision' ? 'Alasan Masih Revisi *' : 'Catatan Verifikasi'}
-                                                    </label>
-                                                    <textarea
-                                                        rows={2}
-                                                        value={item.verificationComment || ''}
-                                                        onChange={event => updateUatMajorVerification(item.source, item.id, 'verificationComment', event.target.value)}
-                                                        placeholder={item.verificationResult === 'revision' ? 'Jelaskan bagian yang belum sesuai dan hasil yang diharapkan...' : 'Catatan penerimaan atau hasil demonstrasi ulang...'}
-                                                        className="w-full px-3 py-2 border border-gray-300 rounded-xl text-xs bg-white resize-none focus:outline-none focus:border-emerald-500"
-                                                    />
-                                                </div>
-                                                <div className="mt-3 rounded-xl border border-emerald-200 bg-emerald-50/40 p-3">
-                                                    <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-2">
-                                                        <div>
-                                                            <label className="block text-[10px] font-bold text-emerald-800 uppercase">Lampiran Bukti Verifikasi *</label>
-                                                            <p className="text-[10px] text-emerald-700 mt-0.5">Lampirkan screenshot, berita acara, hasil demonstrasi, atau bukti pendukung lain untuk item ini.</p>
-                                                        </div>
-                                                        <label className={`shrink-0 px-2.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-[10px] font-bold flex items-center justify-center gap-1 cursor-pointer ${uploadingUatScenarioId ? 'opacity-60 pointer-events-none' : ''}`}>
-                                                            {uploadingUatScenarioId === getUatVerificationUploadKey(item.source, item.id)
-                                                                ? <Clock size={11} />
-                                                                : <Paperclip size={11} />}
-                                                            {uploadingUatScenarioId === getUatVerificationUploadKey(item.source, item.id)
-                                                                ? 'Mengunggah...'
-                                                                : 'Upload Bukti'}
-                                                            <input
-                                                                type="file"
-                                                                multiple
-                                                                accept=".pdf,.xls,.xlsx,.jpg,.jpeg,.png,.zip"
-                                                                className="hidden"
-                                                                disabled={Boolean(uploadingUatScenarioId)}
-                                                                onChange={event => {
-                                                                    const files = Array.from(event.target.files || []);
-                                                                    event.target.value = '';
-                                                                    void uploadUatMajorVerificationEvidence(item.source, item.id, files);
-                                                                }}
-                                                            />
-                                                        </label>
-                                                    </div>
-                                                    <DocList
-                                                        docs={item.verificationAttachments || []}
-                                                        onRemove={attachmentIndex => removeUatMajorVerificationEvidence(
-                                                            item.source,
-                                                            item.id,
-                                                            attachmentIndex
-                                                        )}
-                                                        onView={viewDoc}
-                                                        onDownload={downloadDoc}
-                                                        docTypeOptions={[["UAT_EVIDENCE", "Bukti Verifikasi Mayor"]]}
-                                                        readOnly={Boolean(uploadingUatScenarioId)}
-                                                        allowTypeChange={false}
-                                                    />
-                                                </div>
-                                            </div>
-                                        ))}
-
-                                        <div className="flex flex-col items-end gap-1.5 pt-1">
-                                            <button
-                                                type="button"
-                                                onClick={handleSubmitUatMajorVerification}
-                                                disabled={submitting || Boolean(uatMajorVerificationValidation)}
-                                                className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-white text-xs font-bold rounded-xl flex items-center justify-center gap-2 transition-all cursor-pointer"
-                                            >
-                                                {submitting ? <Clock size={14} /> : <CheckCircle2 size={14} />}
-                                                {submitting ? 'Menyimpan Verifikasi...' : 'Simpan Verifikasi Mayor'}
-                                            </button>
-                                            {uatMajorVerificationValidation && <p className="text-[10px] text-amber-700">{uatMajorVerificationValidation}</p>}
-                                        </div>
-                                    </section>
-                                )}
-
                                 <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
                                     {[
                                         { label: 'Dieksekusi', value: uat2Summary.executedCount, color: 'text-slate-700' },
@@ -3559,7 +3991,7 @@ export default function SITUATWizard({ project, updateProject, addNotification, 
                                         </p>
                                         <p className="text-[11px] mt-1 leading-relaxed">
                                             {uat2Summary.majorCount > 0
-                                                ? 'UAT belum dapat disetujui. Saat disimpan, proyek kembali ke developer; setelah perbaikan wajib SIT ulang, lalu user memverifikasi item Mayor di Tab 2 sebelum Persetujuan Final.'
+                                                ? 'UAT belum dapat disetujui. Saat disimpan, hasil putaran ini diarsipkan dan proyek kembali ke developer; setelah perbaikan seluruh task wajib SIT ulang, lalu UAT dijalankan kembali dari Tahap 1.'
                                                 : uat2Summary.minorCount > 0
                                                     ? 'Perbaikan minor dapat dibantu developer tanpa memundurkan status proyek dan tidak memerlukan SIT ulang.'
                                                     : 'Seluruh skenario yang sudah dinilai diterima dan dapat dilanjutkan ke persetujuan final.'}
@@ -3575,25 +4007,40 @@ export default function SITUATWizard({ project, updateProject, addNotification, 
                                         className="w-full px-3 py-2.5 border border-gray-200 rounded-xl text-xs focus:outline-none focus:border-orange-500 bg-gray-50 resize-none disabled:bg-gray-100" />
                                 </div>
 
-                                {uat2IsSubmitted && (
+                                {uat2IsSubmitted && !isUatMinorRevisionPending && (
                                     <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl text-[11px] text-slate-600 flex items-start gap-2">
                                         <Lock size={13} className="shrink-0 mt-0.5" />
-                                        <span>Snapshot hasil UAT telah disimpan dan dikunci untuk menjaga jejak audit. Lampiran tetap dapat dilihat dan diunduh.{uat2VerificationMode ? ' Hanya hasil verifikasi item Mayor yang dapat diubah.' : ''}</span>
+                                        <span>Snapshot hasil UAT telah disimpan dan dikunci untuk menjaga jejak audit. Lampiran tetap dapat dilihat dan diunduh.</span>
                                     </div>
                                 )}
 
-                                {!uat2IsSubmitted && !uat2VerificationMode && status !== 'UAT_REVISION_DEV' && sitUatData.uat2_resume_after_sit !== true && (
+                                {/*
+                                  * Hold revisi Minor: satu-satunya keadaan yang membuka kembali Tahap 2
+                                  * setelah hasilnya final. Unit peminta berhak meminta perbaikan lanjutan
+                                  * atas versi yang sedang dikerjakan, dan putaran lama diarsipkan backend
+                                  * sebelum ditimpa sehingga jejak auditnya tidak hilang.
+                                  */}
+                                {uat2IsSubmitted && isUatMinorRevisionPending && (
+                                    <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-[11px] text-amber-800 flex items-start gap-2">
+                                        <RotateCcw size={13} className="shrink-0 mt-0.5" />
+                                        <span>
+                                            Revisi <strong>Minor</strong> sedang dikerjakan tim pengembangan, sehingga hasil UAT masih dapat diperbarui bila ada permintaan perbaikan lanjutan. Menyimpan hasil final lagi akan mengarsipkan putaran sebelumnya beserta persetujuannya, lalu menerbitkan Change Request baru.
+                                        </span>
+                                    </div>
+                                )}
+
+                                {(!uat2IsSubmitted || isUatMinorRevisionPending) && status !== 'UAT_REVISION_DEV' && !isUatRestartPending && (
                                     <div className="p-3 bg-orange-50 border border-orange-200 rounded-xl text-[11px] text-orange-800 leading-relaxed">
                                         Gunakan <strong>Simpan sebagai Draft</strong> selama hasil pengujian, permintaan perubahan, atau lampiran bukti masih dilengkapi. Draft tidak mengunci data dan tidak menjalankan alur revisi Mayor/Minor. Alur tersebut baru diproses saat hasil UAT disimpan final.
                                     </div>
                                 )}
 
-                                {!uatDone && !uat2VerificationMode && (status === 'UAT_IN_PROGRESS' || UNLOCK_ALL_STAGES) && activeUatStep === 2 && (
+                                {!uatDone && (!uat2IsSubmitted || isUatMinorRevisionPending) && (status === 'UAT_IN_PROGRESS' || UNLOCK_ALL_STAGES) && activeUatStep === 2 && (
                                     <div className="flex flex-col items-end gap-1.5 pt-2">
                                         <div className="w-full flex flex-col-reverse sm:flex-row sm:justify-end gap-2">
                                             <button
                                                 onClick={handleSaveUATDraft}
-                                                disabled={savingUatDraft || submitting || uat2IsSubmitted || uploadingUatScenarioId || (uat2.scenarios || []).length === 0 || status === 'UAT_REVISION_DEV' || sitUatData.uat2_resume_after_sit === true}
+                                                disabled={savingUatDraft || submitting || uploadingUatScenarioId || (uat2.scenarios || []).length === 0 || status === 'UAT_REVISION_DEV' || isUatRestartPending}
                                                 className="px-5 py-2.5 bg-white hover:bg-orange-50 disabled:bg-gray-100 disabled:text-gray-400 disabled:cursor-not-allowed text-orange-700 border border-orange-300 text-xs font-bold rounded-xl flex items-center justify-center gap-2 transition-all cursor-pointer"
                                             >
                                                 {savingUatDraft ? <Clock size={14} /> : <Save size={14} />}
@@ -3601,7 +4048,7 @@ export default function SITUATWizard({ project, updateProject, addNotification, 
                                             </button>
                                             <button
                                                 onClick={handleSubmitUatExecution}
-                                                disabled={Boolean(uat2Validation) || submitting || savingUatDraft || uat2IsSubmitted || status === 'UAT_REVISION_DEV' || sitUatData.uat2_resume_after_sit === true}
+                                                disabled={Boolean(uat2Validation) || submitting || savingUatDraft || status === 'UAT_REVISION_DEV' || isUatRestartPending}
                                                 className="px-5 py-2.5 bg-orange-500 hover:bg-orange-600 disabled:bg-gray-300 disabled:cursor-not-allowed text-white text-xs font-bold rounded-xl flex items-center justify-center gap-2 transition-all cursor-pointer"
                                             >
                                                 {submitting ? <Clock size={14} /> : uat2Summary.majorCount > 0 ? <RotateCcw size={14} /> : <ArrowRight size={14} />}
@@ -3613,6 +4060,24 @@ export default function SITUATWizard({ project, updateProject, addNotification, 
                                             </button>
                                         </div>
                                         {uat2Validation && <p className="text-[10px] text-amber-700">{uat2Validation}</p>}
+                                    </div>
+                                )}
+
+                                {/*
+                                  * Hasil UAT sudah final dan tahap berikutnya pernah dibuka: satu-satunya
+                                  * tindakan yang tersisa di tab ini adalah kembali ke tahap tersebut.
+                                  * Tanpa tombol ini pengguna yang menengok tab 2 hanya melihat dua tombol
+                                  * mati dan harus mengulang submit hasil UAT — yang justru membuat
+                                  * Change Request baru dan menghentikan alur proyeknya.
+                                  */}
+                                {!uatDone && uat2IsSubmitted && activeUatStep === 2 && reachedUatStep > 2 && (
+                                    <div className="flex justify-end pt-2">
+                                        <button
+                                            onClick={() => setActiveUatStep(reachedUatStep)}
+                                            className="px-5 py-2.5 bg-emerald-500 hover:bg-emerald-600 text-white text-xs font-bold rounded-xl flex items-center justify-center gap-2 transition-all cursor-pointer"
+                                        >
+                                            Lanjut ke Tahap {reachedUatStep}: Persetujuan Final <ArrowRight size={14} />
+                                        </button>
                                     </div>
                                 )}
                             </div>
@@ -3635,6 +4100,14 @@ export default function SITUATWizard({ project, updateProject, addNotification, 
                                             { label: 'Skenario UAT', val: `${uatScenarioTasks.length}` },
                                             { label: 'Dieksekusi', val: uat2Summary.executedCount || '-' },
                                             { label: 'Diterima', val: uat2Summary.acceptedCount || '-' },
+                                            // Jumlah permintaan revisi ikut ditampilkan supaya Tahap 3
+                                            // tidak hanya bercerita soal skenario yang lulus. Tanpa
+                                            // angka ini, revisi Minor tidak terlihat sama sekali pada
+                                            // ringkasan dan mudah terlupakan.
+                                            { label: 'Minta Revisi', val: uat2Summary.revisionCount || '-' },
+                                            { label: 'Revisi Minor', val: uat2Summary.minorCount || '-' },
+                                            { label: 'Revisi Mayor', val: uat2Summary.majorCount || '-' },
+                                            { label: 'Revisi Belum Selesai', val: openUatChangeRequests.length || '-' },
                                         ].map(s => (
                                             <div key={s.label} className="bg-white rounded-lg p-2.5 border border-slate-200">
                                                 <p className="text-slate-500 text-[9px] font-bold uppercase">{s.label}</p>
@@ -3644,7 +4117,49 @@ export default function SITUATWizard({ project, updateProject, addNotification, 
                                     </div>
                                 </div>
 
-                                {currentUserUatApprovals.some(item => item.status === 'pending') && !uatDone ? (
+                                <RevisionBanner revisions={revisions} type="UAT_CHANGE_MINOR" />
+
+                                {/*
+                                  * Hold revisi Minor. Tahap 3 tetap terbuka beserta roster
+                                  * penandatangannya — yang ditahan hanya keputusannya, karena berita
+                                  * acara UAT menjadi dasar rilis dan tidak boleh menyatakan lulus atas
+                                  * versi yang perbaikannya belum dikerjakan. Gerbang yang sama
+                                  * ditegakkan backend di `UatApprovalService::assertActiveApprover()`
+                                  * dan `ProjectWorkflowService`, jadi banner ini menjelaskan
+                                  * penolakan yang akan terjadi, bukan menggantikannya.
+                                  */}
+                                {isUatMinorRevisionPending && !uatDone && (
+                                    <div className="rounded-2xl border-2 border-amber-300 bg-amber-50 p-4">
+                                        <p className="flex items-center gap-1.5 text-sm font-bold text-amber-900">
+                                            <RotateCcw size={16} /> Revisi Minor Sedang Dikerjakan Tim Pengembangan
+                                        </p>
+                                        <p className="mt-1 text-[11px] leading-relaxed text-amber-800">
+                                            Persetujuan final dan penetapan DEV_COMPLETED ditahan sampai seluruh Change Request Minor selesai. Siklus UAT tidak diulang dan SIT tidak dijalankan lagi — daftar penanda tangan pada putaran ini tetap berlaku. Penahanannya lepas otomatis begitu developer menyelesaikan task revisinya di Manajemen Task.
+                                        </p>
+                                        {openMinorChangeRequests.length > 0 && (
+                                            <ul className="mt-2 space-y-1">
+                                                {openMinorChangeRequests.map(request => (
+                                                    <li key={request.id} className="flex items-start gap-1.5 text-[11px] text-amber-900">
+                                                        <Clock size={12} className="mt-0.5 shrink-0" />
+                                                        <span>
+                                                            <span className="font-semibold">{request.title}</span>
+                                                            {' — '}
+                                                            {getChangeRequestStatusLabel(request.status).label}
+                                                        </span>
+                                                    </li>
+                                                ))}
+                                            </ul>
+                                        )}
+                                    </div>
+                                )}
+
+                                {/*
+                                  * Kartu keputusan disembunyikan selama hold revisi Minor: backend
+                                  * menolak keputusannya (`UatApprovalService::assertActiveApprover()`),
+                                  * jadi menampilkan tombolnya hanya menjanjikan aksi yang pasti gagal.
+                                  * Alasannya sudah dijelaskan banner hold di atas.
+                                  */}
+                                {currentUserUatApprovals.some(item => item.status === 'pending') && !uatDone && !isUatMinorRevisionPending ? (
                                     <div id="my-uat-approval" className="rounded-2xl border-2 border-blue-300 bg-blue-50 p-4 shadow-sm">
                                         <p className="flex items-center gap-1.5 text-sm font-bold text-blue-900"><UserCheck size={16} /> Keputusan UAT Menunggu Anda</p>
                                         <p className="mt-1 text-[10px] leading-relaxed text-blue-700">Tinjau ringkasan hasil, matrix persetujuan, dan dokumen Persetujuan Final pada halaman ini sebelum mengirim keputusan.</p>
@@ -3653,7 +4168,7 @@ export default function SITUATWizard({ project, updateProject, addNotification, 
                                             <FileText size={12} /> Periksa Dokumen Final
                                         </button>
                                         <textarea rows={2} value={uatApprovalNote} onChange={e => setUatApprovalNote(e.target.value)}
-                                            placeholder="Catatan keputusan (wajib jika menolak / meminta revisi)..."
+                                            placeholder={canRejectUatAsCurrentUser ? 'Catatan keputusan (wajib jika menolak / meminta revisi)...' : 'Catatan persetujuan (opsional)...'}
                                             className="mt-3 w-full resize-none rounded-xl border border-blue-200 bg-white px-3 py-2 text-xs focus:border-blue-500 focus:outline-none" />
                                         <div className="mt-2 space-y-2">
                                             {currentUserUatApprovals.filter(item => item.status === 'pending').map(approver => (
@@ -3664,8 +4179,12 @@ export default function SITUATWizard({ project, updateProject, addNotification, 
                                                     </div>
                                                     <button onClick={() => handleSubmitUatApproval(approver.id, 'approved')} disabled={uatApprovalSubmitting}
                                                         className="rounded-lg bg-emerald-600 px-4 py-2 text-[11px] font-bold text-white hover:bg-emerald-700 disabled:bg-gray-300"><CheckCircle2 size={13} className="mr-1 inline" />Setujui UAT</button>
-                                                    <button onClick={() => handleSubmitUatApproval(approver.id, 'rejected')} disabled={uatApprovalSubmitting}
-                                                        className="rounded-lg bg-red-600 px-4 py-2 text-[11px] font-bold text-white hover:bg-red-700 disabled:bg-gray-300"><X size={13} className="mr-1 inline" />Tolak / Minta Revisi</button>
+                                                    {approver.can_reject !== false ? (
+                                                        <button onClick={() => handleSubmitUatApproval(approver.id, 'rejected')} disabled={uatApprovalSubmitting}
+                                                            className="rounded-lg bg-red-600 px-4 py-2 text-[11px] font-bold text-white hover:bg-red-700 disabled:bg-gray-300"><X size={13} className="mr-1 inline" />Tolak / Minta Revisi</button>
+                                                    ) : (
+                                                        <p className="basis-full text-[9px] leading-relaxed text-blue-600">Posisi ini hanya memberi persetujuan. Penolakan dan permintaan revisi disampaikan pada saat eksekusi UAT.</p>
+                                                    )}
                                                 </div>
                                             ))}
                                         </div>
@@ -3811,32 +4330,57 @@ export default function SITUATWizard({ project, updateProject, addNotification, 
                                             <RotateCcw size={14} className="text-orange-500" />
                                             <h6 className="font-bold text-sm text-gray-800">Riwayat Perubahan UAT</h6>
                                         </div>
+                                        {openUatChangeRequests.length > 0 && (
+                                            <span className="rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[9px] font-bold text-amber-700">
+                                                {openUatChangeRequests.length} belum selesai
+                                            </span>
+                                        )}
                                     </div>
                                     <p className="text-[11px] text-gray-500 mb-2">
-                                        Permintaan perubahan dicatat pada Tahap 2. Revisi minor tidak memundurkan alur; revisi mayor menjadi Change Request dan mewajibkan perbaikan developer serta SIT ulang.
+                                        Permintaan perubahan dicatat pada Tahap 2. Revisi <strong>Minor</strong> tidak memundurkan alur dan tidak mengulang SIT, tetapi tetap menjadi Change Request serta task revisi di Manajemen Task, dan persetujuan final ditahan sampai selesai. Revisi <strong>Mayor</strong> mengembalikan proyek ke developer dan mewajibkan SIT ulang sebelum UAT dijalankan lagi dari Tahap 1.
                                     </p>
                                     {uatChangeRequests.length === 0 ? (
                                         <p className="text-[11px] text-gray-400 italic">Belum ada change request diajukan.</p>
                                     ) : (
                                         <div className="space-y-2">
                                             {uatChangeRequests.map(cr => {
-                                                const stColor = cr.status === 'approved' ? 'bg-emerald-100 text-emerald-700 border-emerald-200' : cr.status === 'rejected' ? 'bg-red-100 text-red-700 border-red-200' : 'bg-amber-100 text-amber-700 border-amber-200';
-                                                const stLabel = cr.status === 'approved' ? 'Disetujui' : cr.status === 'rejected' ? 'Ditolak' : 'Menunggu';
+                                                // Status diambil dari siklus revisi yang sebenarnya
+                                                // (`open` … `superseded`), bukan dari kosakata
+                                                // approve/reject pengajuan manual yang sudah pensiun.
+                                                // Dulu pemetaannya hanya mengenal approved/rejected,
+                                                // sehingga setiap permintaan — termasuk yang sudah
+                                                // dikerjakan developer — selalu tampil "Menunggu".
+                                                const crStatus = getChangeRequestStatusLabel(cr.status);
+                                                const isOpenRequest = CHANGE_REQUEST_OPEN_STATUSES.includes(cr.status);
+                                                const linkedTask = (project?.tasks || []).find(task => Number(task.id) === Number(cr.taskId));
                                                 return (
-                                                    <div key={cr.id} className="p-3 bg-gray-50 rounded-xl border border-gray-100">
+                                                    <div key={cr.id} className={`p-3 rounded-xl border ${crStatus.cardCls}`}>
                                                         <div className="flex items-center justify-between flex-wrap gap-2">
                                                             <div className="flex items-center gap-2">
                                                                 <span className={`px-2 py-0.5 rounded-full text-[9px] font-bold border ${cr.type === 'mayor' ? 'bg-red-50 text-red-700 border-red-200' : 'bg-orange-50 text-orange-700 border-orange-200'}`}>
                                                                     {cr.type === 'mayor' ? 'Mayor' : 'Minor'}
                                                                 </span>
                                                                 <span className="font-bold text-gray-800 text-xs">{cr.title}</span>
+                                                                {cr.cycle ? <span className="text-[9px] font-bold text-gray-400">Siklus {cr.cycle}</span> : null}
                                                             </div>
-                                                            <span className={`px-2 py-0.5 rounded-full text-[9px] font-bold border ${stColor}`}>{stLabel}</span>
+                                                            <span className={`px-2 py-0.5 rounded-full text-[9px] font-bold border ${crStatus.pillCls}`}>{crStatus.label}</span>
                                                         </div>
                                                         <p className="text-[11px] text-gray-600 mt-1.5 leading-relaxed">{cr.detail}</p>
+                                                        {/*
+                                                          * Task revisinya ditunjuk langsung agar pemantau Tahap 3
+                                                          * tahu pekerjaan ini sudah ada pemiliknya di Manajemen Task
+                                                          * — atau justru belum ditugaskan sama sekali.
+                                                          */}
+                                                        {cr.taskId ? (
+                                                            <p className="text-[10px] text-gray-500 mt-1">
+                                                                Task revisi: <span className="font-semibold">{linkedTask?.title || `#${cr.taskId}`}</span>
+                                                                {isOpenRequest && linkedTask && !linkedTask.assignee ? ' • belum ditugaskan ke developer' : ''}
+                                                            </p>
+                                                        ) : null}
                                                         <p className="text-[10px] text-gray-400 mt-1">
                                                             Diajukan oleh: {cr.submittedBy} • {fmtDate(cr.at)}
-                                                            {cr.status !== 'pending' && cr.decisionBy && ` • Keputusan: ${cr.decisionBy}`}
+                                                            {cr.resolvedAt ? ` • Selesai: ${fmtDate(cr.resolvedAt)}` : ''}
+                                                            {cr.supersededReason ? ` • ${cr.supersededReason}` : ''}
                                                         </p>
                                                     </div>
                                                 );
@@ -3885,13 +4429,19 @@ export default function SITUATWizard({ project, updateProject, addNotification, 
                                     <div className="flex flex-col gap-3 pt-2 border-t border-gray-100">
                                         <button
                                             onClick={handleUATPass}
-                                            disabled={submitting || !allUatApproved || sitUatData.uat2_resume_after_sit === true || uat2VerificationMode}
-                                            title={allUatApproved ? '' : 'Seluruh persetujuan wajib dari pihak peminta dan pihak IT harus lengkap terlebih dahulu'}
-                                            className={`w-full px-6 py-3 text-white text-sm font-bold rounded-xl flex items-center justify-center gap-2 transition-all shadow-md active:scale-95 ${allUatApproved ? 'bg-emerald-600 hover:bg-emerald-700 cursor-pointer' : 'bg-gray-300 cursor-not-allowed'}`}
+                                            disabled={submitting || !allUatApproved || isUatRestartPending || isUatMinorRevisionPending}
+                                            title={isUatMinorRevisionPending
+                                                ? 'Selesaikan seluruh Change Request Minor terlebih dahulu'
+                                                : allUatApproved ? '' : 'Seluruh persetujuan wajib dari pihak peminta dan pihak IT harus lengkap terlebih dahulu'}
+                                            className={`w-full px-6 py-3 text-white text-sm font-bold rounded-xl flex items-center justify-center gap-2 transition-all shadow-md active:scale-95 ${allUatApproved && !isUatMinorRevisionPending ? 'bg-emerald-600 hover:bg-emerald-700 cursor-pointer' : 'bg-gray-300 cursor-not-allowed'}`}
                                         >
                                             <Send size={16} /> UAT Lulus — Tetapkan DEV_COMPLETED &amp; Lanjut ke QA / Siber
                                         </button>
-                                        {!allUatApproved && (
+                                        {isUatMinorRevisionPending ? (
+                                            <p className="text-[10px] text-amber-700 text-center">
+                                                Revisi Minor belum selesai. Tombol "UAT Lulus" aktif setelah seluruh Change Request Minor diselesaikan tim pengembangan.
+                                            </p>
+                                        ) : !allUatApproved && (
                                             <p className="text-[10px] text-gray-400 text-center">
                                                 Tombol "UAT Lulus" aktif setelah seluruh approver wajib pada putaran aktif menyetujui.
                                             </p>
@@ -4018,11 +4568,15 @@ export default function SITUATWizard({ project, updateProject, addNotification, 
                         url: previewDoc.blobUrl || previewDoc.url,
                         type: previewDoc.type || 'FILE',
                         size: previewDoc.size,
-                        author: 'Tim SDLC',
+                        // Pengunggah diambil dari data dokumen; modal sudah menampilkan '-'
+                        // bila tidak tercatat, jadi tidak perlu diisi nama tim yang dikarang.
+                        uploadedBy: previewDoc.uploadedBy || previewDoc.uploaded_by_name,
                     }}
                     project={project}
                     onClose={() => {
-                        if (previewDoc.blobUrl?.startsWith('blob:')) URL.revokeObjectURL(previewDoc.blobUrl);
+                        if (previewDoc.ownsBlobUrl && previewDoc.blobUrl?.startsWith('blob:')) {
+                            URL.revokeObjectURL(previewDoc.blobUrl);
+                        }
                         setPreviewDoc(null);
                     }}
                 />

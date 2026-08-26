@@ -11,10 +11,55 @@ const formatDate = (value) => value
     ? new Date(value).toLocaleString('id-ID', { dateStyle: 'long', timeStyle: 'short' })
     : '-';
 
+/**
+ * Format tanggal tanpa jam.
+ *
+ * `uat_date` berasal dari `sit_uat_data.uat1_startDate`, yaitu nilai `<input type="date">`
+ * berformat `YYYY-MM-DD` — bukan timestamp. Sebelumnya nilai itu dicetak apa adanya,
+ * sehingga approver eksternal membaca "2026-08-14" pada halaman resmi persetujuan.
+ * Nilai yang tidak dapat diurai dikembalikan utuh, bukan menjadi "Invalid Date".
+ */
+const formatDateOnly = (value) => {
+    if (!value) return '-';
+    const parsed = new Date(value);
+    return Number.isNaN(parsed.getTime())
+        ? String(value)
+        : parsed.toLocaleDateString('id-ID', { dateStyle: 'long' });
+};
+
 const resultLabel = (value) => value === 'accepted' ? 'Diterima' : value === 'revision' ? 'Revisi' : '-';
+
+/**
+ * Label tipe perubahan. Backend hanya menerima 'minor' atau 'mayor'.
+ *
+ * Kuncinya dibaca dari `changeType`, bukan `change_type`. Payload permintaan memakai
+ * snake_case, tetapi `UatExecutionService` menyimpannya ke `sit_uat_data` sebagai
+ * `changeType` dan respons detail approval meneruskan JSON itu apa adanya.
+ */
+const changeTypeOf = (item) => item?.changeType ?? item?.change_type ?? null;
+
+const changeTypeLabel = (value) => value === 'mayor' ? 'Mayor' : value === 'minor' ? 'Minor' : null;
 
 const canPreviewDocument = (document) => ['pdf', 'jpg', 'jpeg', 'png']
     .includes(String(document?.name || '').split('.').pop()?.toLowerCase());
+
+/**
+ * Picu unduhan berkas.
+ *
+ * Anchor-nya wajib disisipkan ke dokumen sebelum `click()`. Chrome memaafkan anchor
+ * lepas, tetapi Firefox mengabaikan `click()` pada elemen yang tidak berada di dalam
+ * dokumen — tombol Unduh tampak berfungsi, namun tidak ada berkas yang turun sama
+ * sekali. Halaman ini dipakai approver eksternal di luar kendali perangkat kami,
+ * sehingga peramban selain Chrome harus ikut ditangani.
+ */
+const triggerAnchorDownload = (url, fileName) => {
+    const anchor = window.document.createElement('a');
+    anchor.href = url;
+    anchor.download = fileName;
+    window.document.body.appendChild(anchor);
+    anchor.click();
+    window.document.body.removeChild(anchor);
+};
 
 function ApprovalDocumentSection({ title, description, documents, important = false, busyDocumentId, onView, onDownload }) {
     return (
@@ -72,7 +117,6 @@ export default function ExternalUatApproval() {
     const [detail, setDetail] = useState(null);
     const [accessToken, setAccessToken] = useState('');
     const [phone, setPhone] = useState('');
-    const [decision, setDecision] = useState('approved');
     const [note, setNote] = useState('');
     const [identityConfirmed, setIdentityConfirmed] = useState(false);
     const [loading, setLoading] = useState(true);
@@ -95,16 +139,42 @@ export default function ExternalUatApproval() {
         return () => { cancelled = true; };
     }, [token]);
 
+    /**
+     * Ambil detail UAT memakai access token yang sudah dipegang.
+     *
+     * Dipisahkan dari `verify` supaya kegagalan pada langkah ini dapat diulang tanpa
+     * memverifikasi nomor HP lagi. Backend membatasi verifikasi nomor sampai 5 kali
+     * sebelum akses terkunci 15 menit, jadi kegagalan sesaat pada pemuatan detail
+     * tidak boleh ikut memakan kuota percobaan tersebut.
+     */
+    const loadDetail = async (activeAccessToken) => {
+        const response = await externalUatApprovalService.detail(token, activeAccessToken);
+        setDetail(response.data);
+    };
+
     const verify = async (event) => {
         event.preventDefault();
         setSubmitting(true);
         setError('');
         try {
-            const verification = await externalUatApprovalService.verify(token, phone);
-            const nextAccessToken = verification.data.access_token;
-            const response = await externalUatApprovalService.detail(token, nextAccessToken);
-            setAccessToken(nextAccessToken);
-            setDetail(response.data);
+            // Access token disimpan lebih dulu. Bila pemuatan detail gagal, tombol pada
+            // form berubah menjadi "Coba muat ulang" dan verifikasi nomor tidak diulang.
+            let activeAccessToken = accessToken;
+            const reusedAccessToken = Boolean(activeAccessToken);
+            if (!activeAccessToken) {
+                const verification = await externalUatApprovalService.verify(token, phone);
+                activeAccessToken = verification.data.access_token;
+                setAccessToken(activeAccessToken);
+            }
+            try {
+                await loadDetail(activeAccessToken);
+            } catch (detailError) {
+                // Token yang diulang pemakaiannya dan tetap gagal dianggap sudah tidak
+                // berlaku — dibuang supaya percobaan berikutnya memverifikasi nomor lagi
+                // alih-alih terus memakai token mati.
+                if (reusedAccessToken) setAccessToken('');
+                throw detailError;
+            }
         } catch (err) {
             setError(err.message);
         } finally {
@@ -112,21 +182,24 @@ export default function ExternalUatApproval() {
         }
     };
 
+    /**
+     * Kirim persetujuan.
+     *
+     * Link khusus ini dipegang pimpinan grup dan pimpinan divisi unit peminta, dan
+     * posisi tersebut hanya berwenang menyetujui — seluruh penolakan serta permintaan
+     * revisi sudah diaudit saat UAT berlangsung, sehingga tahap ini tinggal pengesahan
+     * hasil yang telah disepakati. Karena itu `decision` ditulis tetap 'approved', bukan
+     * diambil dari pilihan pengguna. Sumber kebenaran aturannya ada di
+     * `UatApprovalRole::canReject()` yang juga menolak permintaan 'rejected' di backend;
+     * kode di sini hanya lapisan keduanya, bukan penentunya.
+     */
     const submitDecision = async () => {
-        if (decision === 'rejected' && !note.trim()) {
-            toast.error('Alasan penolakan atau permintaan revisi wajib diisi.');
-            return;
-        }
-        const confirmed = window.confirm(
-            decision === 'approved'
-                ? 'Anda yakin menyetujui hasil UAT ini? Keputusan tidak dapat diubah melalui link ini.'
-                : 'Anda yakin menolak hasil UAT ini dan meminta revisi?'
-        );
+        const confirmed = window.confirm('Anda yakin menyetujui hasil UAT ini? Keputusan tidak dapat diubah melalui link ini.');
         if (!confirmed) return;
 
         setSubmitting(true);
         try {
-            const response = await externalUatApprovalService.decide(token, accessToken, decision, note.trim());
+            const response = await externalUatApprovalService.decide(token, accessToken, 'approved', note.trim());
             setDetail((current) => ({ ...current, approver: response.data }));
             toast.success(response.message);
         } catch (err) {
@@ -142,10 +215,11 @@ export default function ExternalUatApproval() {
         try {
             const blob = await externalUatApprovalService.downloadDocument(token, accessToken, document.id);
             const url = URL.createObjectURL(blob);
-            const anchor = window.document.createElement('a');
-            anchor.href = url;
-            anchor.download = String(document.name || 'dokumen-uat').replaceAll('/', '-');
-            anchor.click();
+            // Kedua jenis pemisah path dibersihkan. Nama dokumen resmi dibentuk dari
+            // judul proyek, dan judul yang memuat "/" atau "\" membuat sebagian peramban
+            // memotong nama berkasnya.
+            const fileName = String(document.name || 'dokumen-uat').replaceAll('/', '-').replaceAll('\\', '-');
+            triggerAnchorDownload(url, fileName);
             window.setTimeout(() => URL.revokeObjectURL(url), 1000);
         } catch (err) {
             toast.error(err.message);
@@ -163,14 +237,17 @@ export default function ExternalUatApproval() {
             const url = URL.createObjectURL(blob);
             if (previewWindow) {
                 previewWindow.location.href = url;
+                window.setTimeout(() => URL.revokeObjectURL(url), 60000);
             } else {
-                const anchor = window.document.createElement('a');
-                anchor.href = url;
-                anchor.target = '_blank';
-                anchor.rel = 'noopener noreferrer';
-                anchor.click();
+                // Tab baru diblokir peramban. Dokumennya diunduh sebagai jalan keluar,
+                // dan pengguna diberi tahu alasannya — sebelumnya cabang ini memakai
+                // anchor lepas tanpa `download`, yang di Firefox tidak melakukan apa pun
+                // sehingga tombol Lihat tampak macet tanpa keterangan.
+                const fileName = String(document.name || 'dokumen-uat').replaceAll('/', '-').replaceAll('\\', '-');
+                triggerAnchorDownload(url, fileName);
+                window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+                toast('Peramban memblokir tab baru, dokumen diunduh sebagai gantinya.');
             }
-            window.setTimeout(() => URL.revokeObjectURL(url), 60000);
         } catch (err) {
             previewWindow?.close();
             toast.error(err.message);
@@ -237,12 +314,20 @@ export default function ExternalUatApproval() {
                             <div className="relative mt-2">
                                 <Phone size={16} className="absolute left-3 top-3 text-slate-400" />
                                 <input value={phone} onChange={(event) => setPhone(event.target.value)} required autoComplete="tel"
+                                    maxLength={30}
                                     placeholder={`Contoh: 0812••••${preview?.phone_masked?.slice(-4) || '1234'}`}
                                     className="w-full rounded-xl border border-slate-300 py-2.5 pl-10 pr-3 text-sm outline-none focus:border-[#00529C]" />
                             </div>
                             {error ? <p className="mt-2 text-xs text-red-600">{error}</p> : null}
                             <button disabled={submitting} className="mt-4 w-full rounded-xl bg-[#00529C] px-4 py-3 text-sm font-bold text-white disabled:bg-slate-300">
-                                {submitting ? 'Memverifikasi...' : 'Verifikasi dan Lihat Hasil UAT'}
+                                {/*
+                                  * Nomor HP yang sudah terverifikasi tidak diverifikasi ulang; yang
+                                  * gagal hanyalah pemuatan detail, jadi labelnya harus menyebut
+                                  * tindakan yang sebenarnya terjadi.
+                                  */}
+                                {submitting
+                                    ? (accessToken ? 'Memuat ulang...' : 'Memverifikasi...')
+                                    : (accessToken ? 'Coba Muat Ulang Hasil UAT' : 'Verifikasi dan Lihat Hasil UAT')}
                             </button>
                         </form>
                         <p className="mt-4 text-center text-[11px] text-slate-400">Nomor HP hanya dicocokkan dengan data yang didaftarkan PM dan tidak dikirimkan OTP.</p>
@@ -260,7 +345,7 @@ export default function ExternalUatApproval() {
                             </div>
                             <div className="mt-5 grid gap-3 sm:grid-cols-3 text-sm">
                                 <div className="rounded-xl bg-slate-50 p-3"><Building2 size={15} className="text-slate-400" /><p className="mt-2 text-xs text-slate-400">Unit Peminta</p><p className="font-semibold">{detail.project.unit || detail.project.division || '-'}</p></div>
-                                <div className="rounded-xl bg-slate-50 p-3"><ClipboardCheck size={15} className="text-slate-400" /><p className="mt-2 text-xs text-slate-400">Tanggal UAT</p><p className="font-semibold">{detail.project.uat_date || '-'}</p></div>
+                                <div className="rounded-xl bg-slate-50 p-3"><ClipboardCheck size={15} className="text-slate-400" /><p className="mt-2 text-xs text-slate-400">Tanggal UAT</p><p className="font-semibold">{formatDateOnly(detail.project.uat_date)}</p></div>
                                 <div className="rounded-xl bg-slate-50 p-3"><ShieldCheck size={15} className="text-slate-400" /><p className="mt-2 text-xs text-slate-400">Anda menyetujui sebagai</p><p className="font-semibold">{detail.approver.position}</p></div>
                             </div>
                         </section>
@@ -281,15 +366,70 @@ export default function ExternalUatApproval() {
                         <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
                             <h2 className="font-bold">Skenario dan hasil pengujian</h2>
                             <div className="mt-4 space-y-3">
+                                {(detail.scenarios || []).length === 0 ? (
+                                    <p className="rounded-xl border border-dashed border-slate-300 p-4 text-xs text-slate-500">
+                                        Tidak ada skenario pengujian yang tercatat pada putaran ini.
+                                    </p>
+                                ) : null}
                                 {(detail.scenarios || []).map((scenario) => (
                                     <div key={scenario.id} className="rounded-xl border border-slate-200 p-4">
-                                        <div className="flex items-start justify-between gap-3"><p className="font-semibold text-sm">{scenario.scenario}</p><span className={`shrink-0 rounded-full px-2 py-1 text-[10px] font-bold ${scenario.result === 'accepted' ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'}`}>{resultLabel(scenario.result)}</span></div>
+                                        <div className="flex items-start justify-between gap-3">
+                                            <p className="font-semibold text-sm">{scenario.scenario}</p>
+                                            <div className="flex shrink-0 items-center gap-1.5">
+                                                {/*
+                                                  * Tipe perubahan ikut ditampilkan. Ringkasan di atas menghitung
+                                                  * jumlah Minor dan Mayor, tetapi sebelumnya approver tidak dapat
+                                                  * melihat skenario mana yang tergolong Mayor — padahal justru
+                                                  * bobot itulah yang menentukan keputusannya.
+                                                  */}
+                                                {changeTypeLabel(changeTypeOf(scenario)) ? (
+                                                    <span className={`rounded-full px-2 py-1 text-[10px] font-bold ${changeTypeOf(scenario) === 'mayor' ? 'bg-red-50 text-red-700' : 'bg-slate-100 text-slate-600'}`}>
+                                                        {changeTypeLabel(changeTypeOf(scenario))}
+                                                    </span>
+                                                ) : null}
+                                                <span className={`rounded-full px-2 py-1 text-[10px] font-bold ${scenario.result === 'accepted' ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'}`}>{resultLabel(scenario.result)}</span>
+                                            </div>
+                                        </div>
                                         {scenario.request ? <p className="mt-2 text-xs text-slate-600"><strong>Permintaan:</strong> {scenario.request}</p> : null}
                                         {scenario.comment ? <p className="mt-1 text-xs text-slate-500"><strong>Catatan:</strong> {scenario.comment}</p> : null}
                                     </div>
                                 ))}
                             </div>
                         </section>
+
+                        {/*
+                          * Permintaan tambahan user.
+                          *
+                          * Backend sudah mengirim `additional_requests` pada respons detail, tetapi
+                          * halaman ini sebelumnya tidak menampilkannya sama sekali. Akibatnya
+                          * approver eksternal menandatangani hasil UAT tanpa pernah melihat daftar
+                          * permintaan perubahan tambahan — termasuk yang bertipe Mayor — padahal
+                          * permintaan itu bagian dari lingkup yang ia setujui.
+                          */}
+                        {(detail.additional_requests || []).length > 0 ? (
+                            <section className="rounded-2xl border border-amber-200 bg-white p-6 shadow-sm">
+                                <h2 className="font-bold">Permintaan tambahan user</h2>
+                                <p className="mt-0.5 text-xs leading-relaxed text-slate-500">
+                                    Permintaan perubahan di luar skenario pengujian yang diajukan unit peminta pada putaran UAT ini.
+                                </p>
+                                <div className="mt-4 space-y-3">
+                                    {(detail.additional_requests || []).map((item) => (
+                                        <div key={item.id} className="rounded-xl border border-slate-200 p-4">
+                                            <div className="flex items-start justify-between gap-3">
+                                                <p className="font-semibold text-sm">{item.title}</p>
+                                                {changeTypeLabel(changeTypeOf(item)) ? (
+                                                    <span className={`shrink-0 rounded-full px-2 py-1 text-[10px] font-bold ${changeTypeOf(item) === 'mayor' ? 'bg-red-50 text-red-700' : 'bg-slate-100 text-slate-600'}`}>
+                                                        {changeTypeLabel(changeTypeOf(item))}
+                                                    </span>
+                                                ) : null}
+                                            </div>
+                                            {item.detail ? <p className="mt-2 text-xs text-slate-600"><strong>Detail:</strong> {item.detail}</p> : null}
+                                            {item.comment ? <p className="mt-1 text-xs text-slate-500"><strong>Catatan:</strong> {item.comment}</p> : null}
+                                        </div>
+                                    ))}
+                                </div>
+                            </section>
+                        ) : null}
 
                         <ApprovalDocumentSection
                             title="Dokumen Persetujuan Final UAT"
@@ -324,13 +464,18 @@ export default function ExternalUatApproval() {
                                 <>
                                     <h2 className="font-bold">Keputusan Anda</h2>
                                     <p className="mt-1 text-sm text-slate-500">Pastikan seluruh hasil dan dokumen telah diperiksa sebelum mengirim keputusan.</p>
-                                    <div className="mt-4 grid gap-3 sm:grid-cols-2">
-                                        <button onClick={() => setDecision('approved')} className={`rounded-xl border p-4 text-left ${decision === 'approved' ? 'border-emerald-500 bg-emerald-50' : 'border-slate-200'}`}><CheckCircle2 size={20} className="text-emerald-600" /><p className="mt-2 font-bold text-sm">Setujui UAT</p></button>
-                                        <button onClick={() => setDecision('rejected')} className={`rounded-xl border p-4 text-left ${decision === 'rejected' ? 'border-red-500 bg-red-50' : 'border-slate-200'}`}><XCircle size={20} className="text-red-600" /><p className="mt-2 font-bold text-sm">Tolak / Minta Revisi</p></button>
+                                    <div className="mt-4 flex items-start gap-3 rounded-xl border border-emerald-200 bg-emerald-50 p-4">
+                                        <CheckCircle2 size={20} className="mt-0.5 shrink-0 text-emerald-600" />
+                                        <div>
+                                            <p className="text-sm font-bold">Setujui hasil UAT</p>
+                                            <p className="mt-1 text-xs leading-relaxed text-emerald-900">
+                                                Pada tahap ini Anda hanya perlu memeriksa lalu menyetujui. Penolakan dan permintaan revisi tidak lagi tersedia di sini karena seluruhnya sudah diaudit bersama unit peminta saat UAT berlangsung.
+                                            </p>
+                                        </div>
                                     </div>
-                                    <textarea value={note} onChange={(event) => setNote(event.target.value)} rows={4} placeholder={decision === 'rejected' ? 'Jelaskan alasan penolakan atau revisi yang diperlukan *' : 'Catatan persetujuan (opsional)'} className="mt-4 w-full rounded-xl border border-slate-300 p-3 text-sm outline-none focus:border-[#00529C]" />
+                                    <textarea value={note} onChange={(event) => setNote(event.target.value)} rows={4} maxLength={5000} placeholder="Catatan persetujuan (opsional)" className="mt-4 w-full rounded-xl border border-slate-300 p-3 text-sm outline-none focus:border-[#00529C]" />
                                     <label className="mt-3 flex items-start gap-2 text-xs text-slate-600"><input type="checkbox" checked={identityConfirmed} onChange={(event) => setIdentityConfirmed(event.target.checked)} className="mt-0.5" />Saya menyatakan bahwa saya adalah penerima link ini dan bertanggung jawab atas keputusan yang diberikan.</label>
-                                    <button onClick={submitDecision} disabled={submitting || !identityConfirmed} className={`mt-4 w-full rounded-xl px-4 py-3 text-sm font-bold text-white disabled:bg-slate-300 ${decision === 'approved' ? 'bg-emerald-600' : 'bg-red-600'}`}>{submitting ? 'Menyimpan keputusan...' : 'Kirim Keputusan'}</button>
+                                    <button onClick={submitDecision} disabled={submitting || !identityConfirmed} className="mt-4 w-full rounded-xl bg-emerald-600 px-4 py-3 text-sm font-bold text-white disabled:bg-slate-300">{submitting ? 'Menyimpan keputusan...' : 'Setujui Hasil UAT'}</button>
                                 </>
                             )}
                         </section>

@@ -1,13 +1,13 @@
 import { useState, useMemo, useEffect } from 'react';
-import { useAuth } from '../../contexts/AuthContext';
-import { useProjects, getFileFromStore, getProjectRealDocuments } from '../../contexts/ProjectContext';
+import { useProjects } from '../../contexts/ProjectContext';
+import { getFileFromStore, getProjectRealDocuments } from '../../utils/projectDocuments';
 import { useNotifications } from '../../contexts/NotificationContext';
 import { useNavigate } from 'react-router-dom';
 import RBBBadge from '../../components/RBBBadge';
 import ProjectTypeBadge from '../../components/ProjectTypeBadge';
 import LoadingSpinner from '../../components/LoadingSpinner';
 import DocumentViewerModal from '../../components/DocumentViewerModal';
-import SITUATDocumentModal from '../../components/SITUATDocumentModal';
+import { PROJECT_STATUS, PROJECT_STATUS_LABEL } from '../../constants/projectStatus';
 import {
     Inbox,
     Search as SearchIcon,
@@ -17,22 +17,36 @@ import {
     FileText,
     UserCheck,
     Send,
-    AlertCircle,
     X,
-    Calendar,
     Briefcase,
     Check,
-    Building,
     Eye,
     Download,
     FolderOpen,
     Rocket,
-    ShieldCheck
+    ShieldCheck,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { userService } from '../../services/api';
 import { projectService } from '../../services/api';
-import { getDocExtLabel, getDocIconStyle } from '../../utils/documentNaming';
+import { formatDocSizeLabel as docSizeLabel, getDocExtLabel, getDocIconStyle } from '../../utils/documentNaming';
+
+// Label ID proyek yang dipakai di layar. Kartu daftar, panel detail, dan modal harus
+// menampilkan penanda yang sama — `req_id` (mis. "REQ-2026-015") — bukan id numerik
+// baris database, supaya ID yang dibaca pengguna cocok dengan yang bisa dicari.
+const projectRefLabel = (project) => project?.req_id || project?.reqId || project?.id || '—';
+
+// Tanggal panjang bahasa Indonesia, atau null bila nilainya kosong/tidak dapat diurai.
+// Mengembalikan null lebih aman daripada meneruskan hasil `toLocaleDateString` dari
+// tanggal invalid, yang tampil di layar sebagai teks "Invalid Date".
+const longDateLabel = (value) => {
+    if (!value) return null;
+    const parsed = new Date(value);
+    return Number.isNaN(parsed.getTime())
+        ? null
+        : parsed.toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' });
+};
+
 
 const resolveAllProjectDocs = (project) => {
     if (!project) return [];
@@ -49,7 +63,7 @@ const resolveAllProjectDocs = (project) => {
             docsMap.set(key, {
                 ...d,
                 name: docName,
-                size: d.size || d.file_size || '2.0 MB',
+                size: d.size || d.file_size || null,
                 label: isFsdDev
                     ? 'Spesifikasi Arsitektur (Dev)'
                     : isFsd 
@@ -67,7 +81,7 @@ const resolveAllProjectDocs = (project) => {
         docsMap.set(name, {
             ...project.fsdDocument,
             name,
-            size: project.fsdDocument.size || project.fsdDocument.file_size || '1.8 MB',
+            size: project.fsdDocument.size || project.fsdDocument.file_size || null,
             label: 'Hasil Kajian FSD (Perencanaan TI)'
         });
     }
@@ -98,7 +112,7 @@ const resolveAllProjectDocs = (project) => {
             docsMap.set(fa, {
                 id: `FSD-PLN-${project.req_id || project.reqId || project.id}`,
                 name: fa,
-                size: '1.8 MB',
+                size: null,
                 type: 'fsd',
                 url: project.analystResult?.fsdUrl || null,
                 label: 'Hasil Kajian FSD (Perencanaan TI)',
@@ -115,8 +129,94 @@ const resolveAllProjectDocs = (project) => {
     return Array.from(docsMap.values());
 };
 
+/**
+ * Unduh satu berkas dokumen proyek.
+ *
+ * Logika ini sebelumnya ditulis dua kali — di panel detail dan di modal penugasan —
+ * dengan isi identik kecuali nama proyek pada teks salinan. Satu salinan saja
+ * memastikan keduanya berubah bersamaan.
+ *
+ * Bila berkas belum punya URL, tidak ada yang bisa diunduh. Versi sebelumnya di sini
+ * membuat berkas `.txt` berisi ringkasan buatan dan melaporkan "Mengunduh salinan
+ * berkas" — pengguna menerima berkas yang bukan dokumen aslinya, tanpa penjelasan.
+ */
+const downloadProjectDoc = (doc) => {
+    const rawUrl = doc?.url || doc?.fileUrl || doc?.dataUrl || getFileFromStore(doc?.name) || getFileFromStore(doc?.id);
+    const fileName = doc?.name || 'Dokumen_SDLC';
+
+    if (!rawUrl) {
+        toast.error(`Berkas "${fileName}" belum tersedia untuk diunduh.`);
+        return;
+    }
+
+    const link = document.createElement('a');
+    link.href = rawUrl;
+    link.download = fileName;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    toast.success(`Mengunduh file "${fileName}"...`);
+};
+
+/**
+ * Daftar berkas dokumen proyek dengan aksi lihat dan unduh.
+ *
+ * Dipakai di panel detail penunjukan PM dan di modal penugasan Dev Analis. Sebelumnya
+ * keduanya menyalin markup yang sama namun menyimpang: modal memasang lencana "PDF"
+ * merah untuk setiap berkas (berkas .xlsx pun tampil sebagai PDF), memakai ukuran
+ * bawaan yang berbeda, dan tidak ada yang menampilkan keadaan kosong.
+ */
+function ProjectDocumentList({ documents, onPreview, rowClassName }) {
+    if (!Array.isArray(documents) || documents.length === 0) {
+        return (
+            <p className="text-xs text-gray-500 italic bg-white border border-dashed border-gray-300 rounded-xl p-4 text-center">
+                Belum ada berkas dokumen yang terlampir pada proyek ini.
+            </p>
+        );
+    }
+
+    return (
+        <div className="space-y-2">
+            {documents.map((doc, idx) => (
+                <div
+                    key={doc.id ?? doc.name ?? idx}
+                    className={`flex items-center justify-between p-3 border border-gray-200 rounded-xl transition-colors ${rowClassName}`}
+                >
+                    <div className="flex items-center gap-3 overflow-hidden min-w-0">
+                        <div className={`w-9 h-9 rounded-lg flex items-center justify-center shrink-0 font-bold text-[10px] ${getDocIconStyle(doc.name || '')}`}>
+                            {getDocExtLabel(doc.name || '')}
+                        </div>
+                        <div className="truncate min-w-0">
+                            <p className="text-xs font-semibold text-gray-800 truncate">{doc.name}</p>
+                            <p className="text-[11px] text-gray-500">{docSizeLabel(doc)} • {doc.label || 'Dokumen SDLC Terlampir'}</p>
+                        </div>
+                    </div>
+                    <div className="flex items-center gap-1.5 shrink-0">
+                        <button
+                            type="button"
+                            onClick={() => onPreview(doc)}
+                            className="px-3 py-1.5 border border-[#00529C] text-[#00529C] hover:bg-blue-50 rounded-lg text-xs font-bold transition-all flex items-center gap-1 cursor-pointer active:scale-95"
+                            title="View & Baca Dokumen"
+                        >
+                            <Eye size={13} />
+                            <span>View &amp; Baca</span>
+                        </button>
+                        <button
+                            type="button"
+                            onClick={() => downloadProjectDoc(doc)}
+                            className="p-1.5 text-gray-500 hover:text-[#00529C] hover:bg-blue-50 rounded-lg transition-colors cursor-pointer"
+                            title="Unduh Dokumen"
+                        >
+                            <Download size={15} />
+                        </button>
+                    </div>
+                </div>
+            ))}
+        </div>
+    );
+}
+
 export default function WorkspaceDevLead() {
-    const { user } = useAuth();
     const navigate = useNavigate();
     const { addNotification } = useNotifications();
     const { projects, updateProject, isLoading, refreshDataSilent } = useProjects();
@@ -160,25 +260,29 @@ export default function WorkspaceDevLead() {
     const [analysisDeadline, setAnalysisDeadline] = useState('');
     const [leadNote, setLeadNote] = useState('');
     const [previewDoc, setPreviewDoc] = useState(null);
-    const [sitUatModalProject, setSitUatModalProject] = useState(null);
 
     // Form Assign PM State
-    const [selectedPM, setSelectedPM] = useState('');
     const [estimationDays, setEstimationDays] = useState('');
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [analysts, setAnalysts] = useState([]);
-    const [pmCandidates, setPmCandidates] = useState([]);
     const [selectedDeveloperIds, setSelectedDeveloperIds] = useState([]);
     const [developerCandidates, setDeveloperCandidates] = useState([]);
     const [developerSearch, setDeveloperSearch] = useState('');
     const [analystSearch, setAnalystSearch] = useState('');
 
-    // Helper ekstraksi angka durasi
-    const getNumericEstimation = (proj) => {
-        if (!proj) return '30';
-        const raw = proj.devAnalystResult?.estimation || proj.analystResult?.estimation || proj.estimation || '30';
-        const match = String(raw).match(/\d+/);
-        return match ? match[0] : '30';
+    // Nilai awal kolom "Target Deadline Pengembangan".
+    //
+    // Hasil kajian analis menyimpan `estimation` sebagai tanggal ISO. Versi sebelumnya
+    // mengambil angka pertama dari teks itu — `2026-09-30` menjadi `2026` — lalu nilai itu
+    // dimasukkan ke `input type="date"`. Akibatnya kolom tanggal tampak kosong padahal
+    // state-nya terisi, tombol simpan tetap aktif karena nilainya truthy, dan `"2026"`
+    // ikut terkirim sebagai tenggat proyek. Sekarang hanya tanggal ISO yang diterima;
+    // sisanya dikosongkan agar Lead memilih tanggalnya sendiri.
+    const getInitialTargetDate = (proj) => {
+        const raw = proj?.devAnalystResult?.estimation || proj?.analystResult?.estimation || null;
+        if (!raw) return '';
+        const value = String(raw).slice(0, 10);
+        return /^\d{4}-\d{2}-\d{2}$/.test(value) ? value : '';
     };
 
     // Load analysts & PM candidates from API
@@ -189,32 +293,40 @@ export default function WorkspaceDevLead() {
                 const users = res.data || res || [];
                 // Dev Lead "Dev Analis (PM)" dropdown: hanya Project Manager
                 setAnalysts(users.filter(u => (u.role_detail?.name || u.role || '') === 'project_manager').map(u => ({
-                    id: u.id, name: u.name, email: u.email, department: u.division_detail?.name || u.division || 'IT', workload: 0,
-                })));
-                setPmCandidates(users.filter(u => (u.role_detail?.name || u.role || '') === 'project_manager').map(u => ({
-                    id: u.id, name: u.name, email: u.email, department: u.division_detail?.name || u.division || 'IT', workload: 0,
+                    id: u.id, name: u.name, email: u.email, department: u.division_detail?.name || u.division || '', workload: 0,
                 })));
                 // Developer candidates
                 setDeveloperCandidates(users.filter(u => (u.role_detail?.name || u.role || '') === 'developer').map(u => ({
-                    id: u.id, name: u.name, skill: u.division_detail?.name || 'Developer', activeProjects: 0,
+                    id: u.id, name: u.name, skill: u.division_detail?.name || '', activeProjects: 0,
                 })));
             } catch {
                 setAnalysts([]);
-                setPmCandidates([]);
                 setDeveloperCandidates([]);
             }
         };
         loadUsers();
     }, []);
 
-    // Search filter helper
+    // Penyaring pencarian.
+    //
+    // Kartu proyek menampilkan `req_id` (mis. "REQ-2026-015"), bukan id numerik, dan
+    // placeholder kolom pencarian menjanjikan "Cari ID". Versi sebelumnya hanya
+    // mencocokkan `p.id`, sehingga mengetik ID yang terpampang di layar tidak pernah
+    // menemukan apa pun. `p.title` juga diikutkan karena payload backend memakai
+    // `title` sementara UI membaca `name`.
     const applySearch = (list) => {
         if (!searchTerm.trim()) return list;
         const term = searchTerm.toLowerCase();
+        const haystack = (p) => [
+            p.req_id,
+            p.reqId,
+            p.id,
+            p.name,
+            p.title,
+            typeof p.division === 'object' ? p.division?.name : p.division,
+        ];
         return list.filter(p =>
-            String(p.id || '').toLowerCase().includes(term) ||
-            String(p.name || '').toLowerCase().includes(term) ||
-            String(p.division || '').toLowerCase().includes(term)
+            haystack(p).some(value => String(value ?? '').toLowerCase().includes(term))
         );
     };
 
@@ -256,70 +368,44 @@ export default function WorkspaceDevLead() {
         p.status === 'DEV_ANALYSIS_DONE'
     ));
 
-    // 4. Proyek Sedang Dikembangkan & Pengujian (Meliputi Coding, SIT, UAT, QA, Pentest Siber)
+    // 4. Proyek Sedang Dikembangkan & Pengujian (Meliputi Coding, SIT, UAT, QA, Audit Keamanan Siber)
+    //
+    // Daftar status memakai konstanta enum saja. Versi sebelumnya juga menyertakan
+    // 'DEVELOPMENT', 'DEV_IN_PROGRESS', dan 'IN_SPRINT' yang tidak ada pada
+    // App\Enums\ProjectStatus, sehingga tiga entri itu tidak pernah cocok.
     const inDevelopmentProjects = applySearch(projects.filter(p => {
         const st = String(p.status || '').toUpperCase();
         return [
-            'IN_DEVELOPMENT', 'DEVELOPMENT', 'DEV_IN_PROGRESS', 'IN_SPRINT',
-            'SIT_IN_PROGRESS', 'SIT_PASSED', 'SIT_REVISION',
-            'UAT_IN_PROGRESS', 'UAT_REVISION_SIT', 'UAT_REVISION_DEV',
-            'DEV_COMPLETED', 'READY_FOR_QA', 'QA_IN_PROGRESS', 'QA_PASSED',
-            'CYBER_IN_PROGRESS', 'CYBER_PASSED', 'READY_FOR_UAT', 'UAT_PASSED',
-            'RETURN_TO_DEV', 'PENDING_GOLIVE'
+            PROJECT_STATUS.IN_DEVELOPMENT,
+            PROJECT_STATUS.SIT_IN_PROGRESS,
+            PROJECT_STATUS.SIT_PASSED,
+            PROJECT_STATUS.SIT_REVISION,
+            PROJECT_STATUS.UAT_IN_PROGRESS,
+            PROJECT_STATUS.UAT_REVISION_SIT,
+            PROJECT_STATUS.UAT_REVISION_DEV,
+            PROJECT_STATUS.UAT_PASSED,
+            PROJECT_STATUS.DEV_COMPLETED,
+            PROJECT_STATUS.READY_FOR_QA,
+            PROJECT_STATUS.QA_IN_PROGRESS,
+            PROJECT_STATUS.QA_PASSED,
+            PROJECT_STATUS.CYBER_IN_PROGRESS,
+            PROJECT_STATUS.CYBER_PASSED,
+            PROJECT_STATUS.READY_FOR_UAT,
+            PROJECT_STATUS.RETURN_TO_DEV,
+            PROJECT_STATUS.PENDING_GOLIVE,
         ].includes(st);
     }));
 
 
     // 5. Proyek Selesai & Go Live
+    //
+    // Hanya LIVE_PRODUCTION. QA_PASSED dan CYBER_PASSED sebelumnya ikut dihitung di
+    // sini, padahal keduanya masih Fase 3 dan bahkan belum melewati Quality Gate Head
+    // of IT — proyek yang sama juga muncul di kelompok "Sedang Dikembangkan", jadi satu
+    // proyek terhitung dua kali dan panel ini melaporkan go-live yang belum terjadi.
     const completedProjects = applySearch(projects.filter(p =>
-        p.status === 'LIVE_PRODUCTION' || p.status === 'QA_PASSED' || p.status === 'CYBER_PASSED'
+        String(p.status || '').toUpperCase() === PROJECT_STATUS.LIVE_PRODUCTION
     ));
-
-    // 📊 Dynamic Real-Time PM Workload Calculation for Dev Lead Recommendation
-    const pmWorkloadStats = useMemo(() => {
-        const candidates = [
-            { id: 1, name: 'Budi Santoso', email: 'pm1@nagari.co.id', department: 'IT Core & Retail Banking', initial: 'BS' },
-            { id: 2, name: 'Dewi Lestari', email: 'pm2@nagari.co.id', department: 'Digital Banking & Mobile', initial: 'DL' },
-            { id: 3, name: 'Andi Wijaya', email: 'pm3@nagari.co.id', department: 'IT Infrastructure & Security', initial: 'AW' },
-            { id: 4, name: 'Citra Kirana', email: 'pm4@nagari.co.id', department: 'Enterprise Systems & Analytics', initial: 'CK' },
-        ];
-
-        return candidates.map(pm => {
-            const activeProjects = (projects || []).filter(p => {
-                const pmName = typeof p.pm === 'object' ? (p.pm?.name || '') : String(p.pm || '');
-                const assignedPM = String(p.assignedPM || p.pmName || '');
-                const matches = pmName.toLowerCase().includes(pm.name.toLowerCase()) || assignedPM.toLowerCase().includes(pm.name.toLowerCase());
-                const isFinished = p.status === 'LIVE_PRODUCTION' || p.status === 'CANCELLED' || p.status === 'REJECTED';
-                return matches && !isFinished;
-            });
-
-            const count = activeProjects.length;
-            let statusTag = 'Beban Ringan';
-            let badgeColor = 'bg-emerald-100 text-emerald-800 border-emerald-300';
-            let recommended = false;
-
-            if (count <= 1) {
-                statusTag = 'Beban Ringan (Sangat Rekomendasi)';
-                badgeColor = 'bg-emerald-100 text-emerald-800 border-emerald-300';
-                recommended = true;
-            } else if (count === 2) {
-                statusTag = 'Beban Sedang (Ideal)';
-                badgeColor = 'bg-blue-100 text-blue-800 border-blue-300';
-            } else {
-                statusTag = 'Beban Tinggi (Perlu Pertimbangan)';
-                badgeColor = 'bg-amber-100 text-amber-800 border-amber-300';
-            }
-
-            return {
-                ...pm,
-                activeCount: count,
-                statusTag,
-                badgeColor,
-                recommended,
-                activeProjectsList: activeProjects.map(p => p.name || p.title || `Proyek ${p.id}`)
-            };
-        });
-    }, [projects]);
 
 
     // Buka modal tugaskan analyst
@@ -333,6 +419,12 @@ export default function WorkspaceDevLead() {
     };
 
     // Submit penugasan Analyst
+    //
+    // Hasil `updateProject` ditunggu dan kegagalannya ditangani. Versi sebelumnya
+    // membungkus seluruh blok dalam `setTimeout(..., 500)` — jeda buatan tanpa fungsi —
+    // dan memanggil `updateProject` tanpa `.then()`/`.catch()`, sehingga penulisan API
+    // yang gagal tetap memunculkan toast "berhasil ditugaskan", menutup modal, dan
+    // mengirim notifikasi ke analis untuk penugasan yang tidak pernah tersimpan.
     const handleAssignAnalyst = () => {
         if (!selectedAnalystId) {
             toast.error('Pilih Dev Analis (PM)!');
@@ -342,37 +434,49 @@ export default function WorkspaceDevLead() {
         const chosenAnalyst = analysts.find(a => a.id === parseInt(selectedAnalystId));
         if (!chosenAnalyst) return;
 
+        const targetProject = targetProjectForAnalyst;
+        if (!targetProject) return;
+
         setIsSubmitting(true);
 
-        setTimeout(() => {
-            updateProject(targetProjectForAnalyst.id, {
-                status: 'DEV_ANALYSIS',
-                statusColor: 'bg-amber-100 text-amber-700 border-amber-200',
-                assignedAnalyst: chosenAnalyst,
-                analyst: chosenAnalyst.name,
-                analyst_id: chosenAnalyst.id,
-                pm_id: chosenAnalyst.id,
-                pm: chosenAnalyst,
-                devAnalyst: chosenAnalyst,
-                devAnalystName: chosenAnalyst.name,
-                leadNote: leadNote || 'Tolong kaji kelayakan arsitektur teknis dan estimasi mandays.',
-                current_stage_deadline: analysisDeadline || null,
-                deadline: analysisDeadline || null,
-                assignedAnalystAt: new Date().toISOString()
+        // Penugasan Analis Pengembangan hanya menulis `pm_id`.
+        //
+        // PM dan Analis Pengembangan adalah orang yang sama, dan kolom penugasannya
+        // adalah `pm_id`. Kolom `analyst_id` milik System Analyst Fase 1 dan tidak
+        // boleh ikut ditimpa: kalau ditimpa, catatan siapa yang mengerjakan analisis
+        // perencanaan hilang dari baris proyek dan analis itu kehilangan akses ke
+        // proyek yang ia sendiri analisis. Key `analyst` juga tidak dikirim karena
+        // backend memakainya untuk mencari ulang `analyst_id` dari nama.
+        updateProject(targetProject.id, {
+            status: 'DEV_ANALYSIS',
+            statusColor: 'bg-amber-100 text-amber-700 border-amber-200',
+            pm_id: chosenAnalyst.id,
+            pm: chosenAnalyst,
+            devAnalyst: chosenAnalyst,
+            devAnalystName: chosenAnalyst.name,
+            leadNote: leadNote || 'Tolong kaji kelayakan arsitektur teknis dan estimasi mandays.',
+            current_stage_deadline: analysisDeadline || null,
+            deadline: analysisDeadline || null,
+            assignedAnalystAt: new Date().toISOString()
+        })
+            .then(() => {
+                addNotification(
+                    'Tugas Kajian Teknis Baru',
+                    `Anda ditugaskan oleh Ketua Grup Pengembangan untuk mengkaji proyek ${targetProject.name}.`,
+                    'info',
+                    '/workspace/dev-analyst'
+                );
+
+                toast.success(`Analyst ${chosenAnalyst.name} berhasil ditugaskan!`);
+                setIsAnalystModalOpen(false);
+                setTargetProjectForAnalyst(null);
+            })
+            .catch(err => {
+                toast.error('Gagal menugaskan analis: ' + (err?.message || 'Error'));
+            })
+            .finally(() => {
+                setIsSubmitting(false);
             });
-
-            addNotification(
-                'Tugas Kajian Teknis Baru',
-                `Anda ditugaskan oleh Ketua Grup Pengembangan untuk mengkaji proyek ${targetProjectForAnalyst.name}.`,
-                'info',
-                '/workspace/analyst'
-            );
-
-            toast.success(`Analyst ${chosenAnalyst.name} berhasil ditugaskan!`);
-            setIsSubmitting(false);
-            setIsAnalystModalOpen(false);
-            setTargetProjectForAnalyst(null);
-        }, 500);
     };
 
     // Submit Penunjukan PM
@@ -390,30 +494,38 @@ export default function WorkspaceDevLead() {
 
         const deadlineIso = estimationDays;
 
-        const devIds = selectedDeveloperIds.length > 0 ? selectedDeveloperIds : [];
+        const devIds = Array.isArray(selectedDeveloperIds) ? selectedDeveloperIds : [];
 
+        // Alokasi tim dikirim satu kali saja, lewat endpoint alokasi tim.
+        //
+        // Versi sebelumnya mengirim `team_ids` pada PATCH proyek DAN memanggil
+        // `allocateTeam` sesudahnya. Keduanya menghapus lalu membuat ulang seluruh baris
+        // `project_team_members`, jadi tim ditulis dua kali; hanya `allocateTeam` yang
+        // berjalan di dalam transaksi database, sehingga jalur PATCH-lah yang bisa
+        // meninggalkan tim setengah tersimpan bila permintaan gagal di tengah.
         updateProject(selectedProject.id, {
             status: 'IN_DEVELOPMENT',
             deadline: deadlineIso,
             targetDate: deadlineIso,
             current_stage_deadline: deadlineIso,
-            team_ids: devIds.length > 0 ? devIds : undefined,
         }).then(() => {
-            // After project update, also call allocateTeam endpoint if dev selected
             if (devIds.length > 0) {
                 return projectService.allocateTeam(selectedProject.id, devIds.map(id => ({ user_id: id })));
             }
         }).then(() => {
+            const teamMessage = devIds.length > 0
+                ? 'PM telah ditentukan dan tim developer telah dialokasikan.'
+                : 'PM telah ditentukan. Alokasi tim developer dapat dilakukan PM menyusul.';
+
             addNotification(
                 'Proyek Masuk Tahap Pengembangan',
-                `Proyek ${selectedProject.name} telah memasuki tahap pengembangan. PM telah ditentukan dan tim developer telah dialokasikan.`,
+                `Proyek ${selectedProject.name} telah memasuki tahap pengembangan. ${teamMessage}`,
                 'success',
                 '/pm/workspace'
             );
             toast.success(`Proyek "${selectedProject.name}" telah memasuki tahap pengembangan!`);
             setIsSubmitting(false);
             setSelectedProject(null);
-            setSelectedPM('');
             setEstimationDays('');
             setSelectedDeveloperIds([]);
         }).catch(err => {
@@ -425,6 +537,8 @@ export default function WorkspaceDevLead() {
     if (isLoading) {
         return <LoadingSpinner text="Memuat Workspace Ketua Grup..." />;
     }
+
+    const devAnalystTargetLabel = longDateLabel(selectedProject?.devAnalystResult?.estimation);
 
     return (
         <div className="flex-1 overflow-y-auto bg-[#f8f9fb] p-6 md:p-8">
@@ -707,7 +821,7 @@ export default function WorkspaceDevLead() {
                                             <div className="bg-amber-50/60 p-3 rounded-xl border border-amber-100 mb-2">
                                                 <div className="text-xs text-amber-900 font-semibold flex items-center gap-1.5 mb-1.5">
                                                     <Users size={14} className="text-amber-700 shrink-0" />
-                                                    Dev Analis (PM): <span className="font-bold text-amber-950">{project.assignedAnalyst?.name || (typeof project.pm === 'object' ? project.pm?.name : project.pm) || '—'}</span>
+                                                    Dev Analis (PM): <span className="font-bold text-amber-950">{(typeof project.pm === 'object' ? project.pm?.name : project.pm) || '—'}</span>
                                                 </div>
                                                 {(project.deadline || project.current_stage_deadline) && (
                                                     <div className="text-[10px] text-amber-800 flex items-center gap-1 ml-1 mb-1">
@@ -748,7 +862,7 @@ export default function WorkspaceDevLead() {
                                     readyForPMProjects.map(project => (
                                         <div
                                             key={project.req_id || project.reqId || project.id}
-                                            onClick={() => { setSelectedProject(project); setSelectedPM(''); setEstimationDays(getNumericEstimation(project)); }}
+                                            onClick={() => { setSelectedProject(project); setEstimationDays(getInitialTargetDate(project)); }}
                                             className={`p-4 rounded-xl cursor-pointer transition-all border ${
                                                 selectedProject?.id === project.id
                                                     ? 'bg-blue-50 border-[#1a365d] ring-2 ring-[#1a365d]/10'
@@ -780,7 +894,7 @@ export default function WorkspaceDevLead() {
                             ) : (
                                 <div className="flex-1 overflow-y-auto p-6 space-y-6">
                                     <div className="border-b border-gray-100 pb-4">
-                                        <span className="text-xs font-mono font-bold text-blue-600 bg-blue-50 px-2 py-0.5 rounded">{selectedProject.id}</span>
+                                        <span className="text-xs font-mono font-bold text-blue-600 bg-blue-50 px-2 py-0.5 rounded">{projectRefLabel(selectedProject)}</span>
                                         <h2 className="text-xl font-extrabold text-gray-800 mt-1">{selectedProject.name}</h2>
                                         <p className="text-xs text-gray-500">{selectedProject.division} • Target: {selectedProject.targetDate}</p>
                                     </div>
@@ -793,7 +907,7 @@ export default function WorkspaceDevLead() {
                                                 Hasil Kajian Teknis Dev Analis (PM Pengembangan)
                                             </h4>
                                             <span className="text-[11px] font-bold text-emerald-800 bg-emerald-100 px-2.5 py-0.5 rounded-full">
-                                                {selectedProject.devAnalystResult?.analystName || selectedProject.assignedAnalyst?.name || 'Dev Analis (PM)'}
+                                                {selectedProject.devAnalystResult?.analystName || selectedProject.pm?.name || 'Dev Analis (PM)'}
                                             </span>
                                         </div>
 
@@ -801,35 +915,39 @@ export default function WorkspaceDevLead() {
                                             <div className="bg-white p-3 rounded-lg border border-emerald-100">
                                                 <span className="text-[10px] font-bold text-gray-400 uppercase block mb-0.5">Keputusan Review Arsitektur:</span>
                                                 <span className="font-bold text-emerald-900">
-                                                    {selectedProject.devAnalystResult?.decision || selectedProject.devAnalystDecision || 'Disetujui (Layak Develop)'}
+                                                    {selectedProject.devAnalystResult?.decision || selectedProject.devAnalystDecision || 'Belum ada keputusan'}
                                                 </span>
                                             </div>
                                             <div className="bg-white p-3 rounded-lg border border-emerald-100">
                                                 <span className="text-[10px] font-bold text-gray-400 uppercase block mb-0.5">Rekomendasi Tech Stack:</span>
                                                 <span className="font-bold text-blue-900">
-                                                    {selectedProject.devAnalystResult?.techStack || selectedProject.techStack || 'Microservices Java Spring Boot + React JS'}
+                                                    {selectedProject.devAnalystResult?.techStack || selectedProject.techStack || <span className="font-semibold text-gray-400 italic">Belum diisi analis</span>}
                                                 </span>
                                             </div>
                                         </div>
 
+                                        {/* Panel ini adalah dasar Lead menunjuk PM, jadi bagian yang belum
+                                            diisi analis harus terlihat kosong. Sebelumnya tiap kolom di
+                                            sini punya teks cadangan karangan — keputusan "Disetujui
+                                            (Layak Develop)", rekomendasi tech stack, catatan arsitektur
+                                            dalam tanda kutip, dan estimasi "30 Hari Kerja" — sehingga
+                                            proyek yang belum dikaji tetap tampil seperti sudah. */}
                                         <div className="bg-white p-3 rounded-lg border border-emerald-100 text-xs">
                                             <span className="text-[10px] font-bold text-gray-400 uppercase block mb-1">Catatan Spesifikasi Arsitektur Teknis:</span>
+                                            {(selectedProject.devAnalystResult?.notes || selectedProject.devAnalystNotes) ? (
                                                 <p className="text-gray-800 leading-relaxed font-mono whitespace-pre-wrap">
-                                                    "{selectedProject.devAnalystResult?.notes || selectedProject.devAnalystNotes || 'Arsitektur teknis dan integrasi API telah dikaji dan disiapkan untuk tahap pengembangan.'}"
+                                                    &quot;{selectedProject.devAnalystResult?.notes || selectedProject.devAnalystNotes}&quot;
                                                 </p>
-                                            </div>
-                                            {selectedProject.devAnalystResult?.techStack && (
-                                                <div className="bg-white p-3 rounded-lg border border-emerald-100 text-xs">
-                                                    <span className="text-[10px] font-bold text-gray-400 uppercase block mb-1">Rekomendasi Tech Stack:</span>
-                                                    <p className="text-gray-800 leading-relaxed">{selectedProject.devAnalystResult.techStack}</p>
-                                                </div>
+                                            ) : (
+                                                <p className="text-gray-400 italic leading-relaxed">Analis belum memberikan catatan arsitektur.</p>
                                             )}
+                                        </div>
 
                                         <div className="flex items-center justify-between text-xs pt-1 border-t border-emerald-200/60">
                                             <span className="font-semibold text-emerald-900">
-                                                {selectedProject.devAnalystResult?.estimation
-                                                    ? <>Target Selesai IT: <strong className="text-emerald-950">{new Date(selectedProject.devAnalystResult.estimation).toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' })}</strong></>
-                                                    : <>Estimasi Waktu IT: <strong className="text-emerald-950">30 Hari Kerja</strong></>
+                                                {devAnalystTargetLabel
+                                                    ? <>Target Selesai IT: <strong className="text-emerald-950">{devAnalystTargetLabel}</strong></>
+                                                    : <span className="text-gray-400 italic">Target selesai IT belum ditentukan analis</span>
                                                 }
                                             </span>
                                         </div>
@@ -842,62 +960,11 @@ export default function WorkspaceDevLead() {
                                             Daftar Berkas &amp; Dokumen Kelengkapan Proyek (Semua Tahap)
                                         </h4>
                                         <div className="space-y-2">
-                                            {resolveAllProjectDocs(selectedProject).map((doc, idx) => (
-                                                    <div key={idx} className="flex items-center justify-between p-3 border border-gray-200 rounded-xl bg-white hover:border-blue-300 transition-colors shadow-2xs">
-                                                        <div className="flex items-center gap-3 overflow-hidden min-w-0">
-                                                            <div className={`w-9 h-9 rounded-lg flex items-center justify-center shrink-0 font-bold text-[10px] ${getDocIconStyle(doc.name || '')}`}>
-                                                                {getDocExtLabel(doc.name || '')}
-                                                            </div>
-                                                            <div className="truncate min-w-0">
-                                                                <p className="text-xs font-semibold text-gray-800 truncate">{doc.name}</p>
-                                                                <p className="text-[11px] text-gray-500">{doc.size || '2.0 MB'} • {doc.label || 'Dokumen SDLC Terlampir'}</p>
-                                                            </div>
-                                                        </div>
-                                                        <div className="flex items-center gap-1.5 shrink-0">
-                                                            <button
-                                                                type="button"
-                                                                onClick={() => setPreviewDoc(doc)}
-                                                                className="px-3 py-1.5 border border-blue-600 text-blue-600 hover:bg-blue-50 rounded-lg text-xs font-bold transition-all flex items-center gap-1 cursor-pointer active:scale-95"
-                                                                title="View & Baca Dokumen"
-                                                            >
-                                                                <Eye size={13} />
-                                                                <span>View &amp; Baca</span>
-                                                            </button>
-                                                            <button
-                                                                type="button"
-                                                                onClick={() => {
-                                                                    const rawUrl = doc.url || doc.fileUrl || doc.dataUrl || getFileFromStore(doc.name) || getFileFromStore(doc.id);
-                                                                    const fileName = doc.name || 'Dokumen_SDLC.pdf';
-                                                                    if (rawUrl) {
-                                                                        const link = document.createElement('a');
-                                                                        link.href = rawUrl;
-                                                                        link.download = fileName;
-                                                                        document.body.appendChild(link);
-                                                                        link.click();
-                                                                        document.body.removeChild(link);
-                                                                        toast.success(`Mengunduh file "${fileName}"...`);
-                                                                    } else {
-                                                                        const textContent = `PT BANK NAGARI - DOKUMEN SDLC\n===============================\nNama Dokumen: ${fileName}\nProyek: ${selectedProject.name}\nTanggal: ${new Date().toLocaleDateString('id-ID')}`;
-                                                                        const blob = new Blob([textContent], { type: 'text/plain;charset=utf-8' });
-                                                                        const url = URL.createObjectURL(blob);
-                                                                        const link = document.createElement('a');
-                                                                        link.href = url;
-                                                                        link.download = fileName.endsWith('.pdf') ? fileName.replace('.pdf', '_ringkasan.txt') : `${fileName}.txt`;
-                                                                        document.body.appendChild(link);
-                                                                        link.click();
-                                                                        document.body.removeChild(link);
-                                                                        URL.revokeObjectURL(url);
-                                                                        toast.success(`Mengunduh salinan berkas "${fileName}"...`);
-                                                                    }
-                                                                }}
-                                                                className="p-1.5 text-gray-500 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors cursor-pointer"
-                                                                title="Unduh Dokumen"
-                                                            >
-                                                                <Download size={15} />
-                                                            </button>
-                                                        </div>
-                                                    </div>
-                                                ))}
+                                            <ProjectDocumentList
+                                                documents={resolveAllProjectDocs(selectedProject)}
+                                                onPreview={setPreviewDoc}
+                                                rowClassName="bg-white hover:border-blue-300 shadow-2xs"
+                                            />
                                         </div>
                                     </div>
 
@@ -1056,7 +1123,13 @@ export default function WorkspaceDevLead() {
                                                     if (s === 'QA_PASSED') return <span className="px-2.5 py-1 rounded-full text-[11px] font-bold bg-teal-100 text-teal-800 border border-teal-200">✅ QA Lulus</span>;
                                                     if (s === 'CYBER_IN_PROGRESS') return <span className="px-2.5 py-1 rounded-full text-[11px] font-bold bg-purple-100 text-purple-800 border border-purple-200">🛡️ Pentest Siber</span>;
                                                     if (s === 'CYBER_PASSED') return <span className="px-2.5 py-1 rounded-full text-[11px] font-bold bg-purple-100 text-purple-900 border border-purple-300">✅ Siber Lulus</span>;
-                                                    if (s === 'RETURN_TO_DEV') return <span className="px-2.5 py-1 rounded-full text-[11px] font-bold bg-rose-100 text-rose-800 border border-rose-200">🚨 Perbaikan Dev</span>;
+                                                    // Sebutan dan warnanya diambil dari `PROJECT_STATUS_LABEL`, bukan
+                                                    // ditulis ulang: status ini sempat punya tiga sebutan berbeda di
+                                                    // empat layar ("Dikembalikan ke Dev", "Dikembalikan ke Developer",
+                                                    // "Perbaikan Dev") dengan tiga warna berbeda. Oranye
+                                                    // menyeragamkannya dengan "SIT Revisi" di atas — sama-sama
+                                                    // pekerjaan ulang; merah dan rose di layar ini berarti gagal.
+                                                    if (s === 'RETURN_TO_DEV') return <span className="px-2.5 py-1 rounded-full text-[11px] font-bold bg-orange-100 text-orange-800 border border-orange-200">↩️ {PROJECT_STATUS_LABEL[PROJECT_STATUS.RETURN_TO_DEV]}</span>;
                                                     if (s === 'PENDING_GOLIVE') return <span className="px-2.5 py-1 rounded-full text-[11px] font-bold bg-cyan-100 text-cyan-800 border border-cyan-200">🚀 Siap Go Live</span>;
                                                     return <span className="px-2.5 py-1 rounded-full text-[11px] font-bold bg-cyan-100 text-cyan-800 border border-cyan-200">💻 Coding &amp; Dev</span>;
                                                 })()}
@@ -1072,7 +1145,7 @@ export default function WorkspaceDevLead() {
                                             <div className="space-y-2 text-xs text-gray-600 bg-cyan-50/40 p-3 rounded-xl border border-cyan-100">
                                                 <div className="flex justify-between items-center">
                                                     <span className="font-bold text-gray-400 text-[10px] uppercase">Project Manager:</span>
-                                                    <span className="font-semibold text-gray-800">{typeof project.pm === 'object' ? project.pm?.name : (project.pm || 'Budi Santoso')}</span>
+                                                    <span className="font-semibold text-gray-800">{(typeof project.pm === 'object' ? project.pm?.name : project.pm) || 'Belum ditugaskan'}</span>
                                                 </div>
                                                 <div className="flex justify-between items-center">
                                                     <span className="font-bold text-gray-400 text-[10px] uppercase">Divisi:</span>
@@ -1142,7 +1215,7 @@ export default function WorkspaceDevLead() {
                                             <div className="space-y-2 text-xs text-gray-600 bg-emerald-50/40 p-3 rounded-xl border border-emerald-100">
                                                 <div className="flex justify-between items-center">
                                                     <span className="font-bold text-gray-400 text-[10px] uppercase">PM Penanggung Jawab:</span>
-                                                    <span className="font-semibold text-gray-800">{typeof project.pm === 'object' ? project.pm?.name : (project.pm || 'Siti Aminah')}</span>
+                                                    <span className="font-semibold text-gray-800">{(typeof project.pm === 'object' ? project.pm?.name : project.pm) || 'Belum ditugaskan'}</span>
                                                 </div>
                                                 <div className="flex justify-between items-center">
                                                     <span className="font-bold text-gray-400 text-[10px] uppercase">Divisi Pemohon:</span>
@@ -1156,7 +1229,7 @@ export default function WorkspaceDevLead() {
                                         </div>
 
                                         <button
-                                            onClick={() => navigate('/pm/tracker')}
+                                            onClick={() => navigate(`/pm/tracker?projectId=${encodeURIComponent(project.req_id || project.reqId || project.id)}`)}
                                             className="w-full bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-bold py-2.5 px-4 rounded-xl transition-all flex items-center justify-center gap-2 shadow-sm cursor-pointer"
                                         >
                                             <Check size={15} />
@@ -1178,7 +1251,7 @@ export default function WorkspaceDevLead() {
                             <div>
                                 <div className="flex items-center gap-2 mb-1.5 flex-wrap">
                                     <span className="text-[10px] font-extrabold text-[#00529C] uppercase tracking-widest bg-blue-50 px-2.5 py-0.5 rounded border border-blue-100">
-                                        {targetProjectForAnalyst.id}
+                                        {projectRefLabel(targetProjectForAnalyst)}
                                     </span>
                                     <div className="flex items-center gap-1.5 flex-wrap"><RBBBadge type={targetProjectForAnalyst.type} deadline={targetProjectForAnalyst.rbbDeadline} /><ProjectTypeBadge type={targetProjectForAnalyst.project_type} /></div>
                                 </div>
@@ -1236,62 +1309,11 @@ export default function WorkspaceDevLead() {
                                     2. Daftar Berkas &amp; Dokumen SDLC Proyek (Semua Tahap)
                                 </p>
                                 <div className="space-y-2">
-                                    {resolveAllProjectDocs(targetProjectForAnalyst).map((doc, idx) => (
-                                        <div key={idx} className="flex items-center justify-between p-3 border border-gray-200 rounded-xl bg-gray-50 hover:border-gray-300 transition-colors">
-                                            <div className="flex items-center gap-3 overflow-hidden min-w-0">
-                                                <div className="w-9 h-9 bg-red-100 text-red-600 rounded-lg flex items-center justify-center shrink-0 font-bold text-[10px]">
-                                                    PDF
-                                                </div>
-                                                <div className="truncate min-w-0">
-                                                    <p className="text-xs font-semibold text-gray-800 truncate">{doc.name}</p>
-                                                    <p className="text-[11px] text-gray-500">{doc.size || '2.4 MB'} • {doc.label || 'Dokumen SDLC Terlampir'}</p>
-                                                </div>
-                                            </div>
-                                            <div className="flex items-center gap-1.5 shrink-0">
-                                                <button
-                                                    type="button"
-                                                    onClick={() => setPreviewDoc(doc)}
-                                                    className="px-3 py-1.5 border border-[#00529C] text-[#00529C] hover:bg-blue-50 rounded-lg text-xs font-bold transition-all flex items-center gap-1 cursor-pointer active:scale-95"
-                                                    title="View & Baca Dokumen"
-                                                >
-                                                    <Eye size={13} />
-                                                    <span>View &amp; Baca</span>
-                                                </button>
-                                                <button
-                                                    type="button"
-                                                    onClick={() => {
-                                                        const rawUrl = doc.url || doc.fileUrl || doc.dataUrl || getFileFromStore(doc.name) || getFileFromStore(doc.id);
-                                                        const fileName = doc.name || 'Dokumen_SDLC.pdf';
-                                                        if (rawUrl) {
-                                                            const link = document.createElement('a');
-                                                            link.href = rawUrl;
-                                                            link.download = fileName;
-                                                            document.body.appendChild(link);
-                                                            link.click();
-                                                            document.body.removeChild(link);
-                                                            toast.success(`Mengunduh file "${fileName}"...`);
-                                                        } else {
-                                                            const textContent = `PT BANK NAGARI - DOKUMEN SDLC\n===============================\nNama Dokumen: ${fileName}\nProyek: ${targetProjectForAnalyst?.name}\nTanggal: ${new Date().toLocaleDateString('id-ID')}`;
-                                                            const blob = new Blob([textContent], { type: 'text/plain;charset=utf-8' });
-                                                            const url = URL.createObjectURL(blob);
-                                                            const link = document.createElement('a');
-                                                            link.href = url;
-                                                            link.download = fileName.endsWith('.pdf') ? fileName.replace('.pdf', '_ringkasan.txt') : `${fileName}.txt`;
-                                                            document.body.appendChild(link);
-                                                            link.click();
-                                                            document.body.removeChild(link);
-                                                            URL.revokeObjectURL(url);
-                                                            toast.success(`Mengunduh salinan berkas "${fileName}"...`);
-                                                        }
-                                                    }}
-                                                    className="p-1.5 text-gray-500 hover:text-[#00529C] hover:bg-blue-50 rounded-lg transition-colors cursor-pointer"
-                                                    title="Unduh Dokumen"
-                                                >
-                                                    <Download size={15} />
-                                                </button>
-                                            </div>
-                                        </div>
-                                    ))}
+                                    <ProjectDocumentList
+                                        documents={resolveAllProjectDocs(targetProjectForAnalyst)}
+                                        onPreview={setPreviewDoc}
+                                        rowClassName="bg-gray-50 hover:border-gray-300"
+                                    />
                                 </div>
                             </div>
 
@@ -1327,13 +1349,12 @@ export default function WorkspaceDevLead() {
                                             {selectedAnalystId && (() => {
                                                 const sel = analysts.find(a => String(a.id) === String(selectedAnalystId));
                                                 const activeCount = sel ? (projects || []).filter(p => {
-                                                    const assignedId = p.analyst_id || (typeof p.assignedAnalyst === 'object' ? p.assignedAnalyst?.id : null);
+                                                    // Beban seorang Analis Pengembangan diukur dari `pm_id` — kolom
+                                                    // penugasannya. `analyst_id` milik System Analyst Fase 1.
                                                     const pmId = p.pm_id || (typeof p.pm === 'object' ? p.pm?.id : null);
                                                     const terminalStatuses = ['LIVE_PRODUCTION', 'CANCELLED', 'REJECTED'];
                                                     const isFinished = terminalStatuses.includes(p.status);
-                                                    const isMine = (assignedId != null && Number(assignedId) === Number(sel.id))
-                                                        || (pmId != null && Number(pmId) === Number(sel.id));
-                                                    return isMine && !isFinished;
+                                                    return pmId != null && Number(pmId) === Number(sel.id) && !isFinished;
                                                 }).length : 0;
                                                 return (
                                                     <span className="text-[10px] font-bold text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded-full shrink-0">
@@ -1386,13 +1407,10 @@ export default function WorkspaceDevLead() {
                                                     }
                                                     return filtered.map(a => {
                                                         const activeCount = (projects || []).filter(p => {
-                                                            const assignedId = p.analyst_id || (typeof p.assignedAnalyst === 'object' ? p.assignedAnalyst?.id : null);
                                                             const pmId = p.pm_id || (typeof p.pm === 'object' ? p.pm?.id : null);
                                                             const terminalStatuses = ['LIVE_PRODUCTION', 'CANCELLED', 'REJECTED'];
                                                             const isFinished = terminalStatuses.includes(p.status);
-                                                            const isMine = (assignedId != null && Number(assignedId) === Number(a.id))
-                                                                || (pmId != null && Number(pmId) === Number(a.id));
-                                                            return isMine && !isFinished;
+                                                            return pmId != null && Number(pmId) === Number(a.id) && !isFinished;
                                                         }).length;
                                                         return (
                                                             <div
@@ -1456,11 +1474,11 @@ export default function WorkspaceDevLead() {
                             </button>
                             <button
                                 onClick={handleAssignAnalyst}
-                                disabled={isSubmitting}
-                                className="px-6 py-2.5 text-xs font-bold text-white bg-[#1a365d] hover:bg-[#0f2342] rounded-xl transition-all shadow-md flex items-center gap-2 cursor-pointer disabled:opacity-50 active:scale-95"
+                                disabled={isSubmitting || !selectedAnalystId}
+                                className="px-6 py-2.5 text-xs font-bold text-white bg-[#1a365d] hover:bg-[#0f2342] rounded-xl transition-all shadow-md flex items-center gap-2 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed active:scale-95"
                             >
                                 <Send size={14} />
-                                <span>Kirim Tugas ke Analyst</span>
+                                <span>{isSubmitting ? 'Menyimpan...' : 'Kirim Tugas ke Analyst'}</span>
                             </button>
                         </div>
                     </div>

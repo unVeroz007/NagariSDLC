@@ -28,16 +28,24 @@ cd frontend
 npm run dev
 ```
 
-- Test backend: `cd backend && php artisan test` (49 test)
+Environment: salin `backend/.env.example` menjadi `backend/.env` dan
+`frontend/.env.example` menjadi `frontend/.env`. Untuk staging/produksi pakai
+`backend/.env.production.example` dan `frontend/.env.production.example`.
+
+- Test backend: `cd backend && php artisan test` (106 test). `backend/phpunit.xml`
+  memaksa SQLite in-memory, jadi menjalankan test tidak menyentuh database sungguhan.
 - Build frontend: `cd frontend && npm run build`
 
 ## ⚠️ Catatan Penting
 
-1. `UNLOCK_ALL_STAGES = true` di `frontend/src/components/SITUATWizard.jsx`
-   adalah **mode inspeksi/dev** — set `false` untuk alur produksi terkunci.
+1. `UNLOCK_ALL_STAGES = false` di `frontend/src/components/SITUATWizard.jsx` —
+   alur SIT/UAT terkunci mengikuti status proyek (mode produksi). Nilai `true`
+   hanya untuk debug lokal dan tidak boleh di-commit.
 2. Role `dev_analyst` (PM modern) belum ada di enum backend — database memakai
    `project_manager`.
 3. Data SIT/UAT di `projects.sit_uat_data` (JSON) — lihat `DATA_MODEL.md` §3.
+4. CORS backend dibaca dari `CORS_ALLOWED_ORIGINS` (dipisah koma). Setelah
+   mengubah `.env` di server, jalankan `php artisan config:cache` lagi.
 
 ## ℹ️ Tentang `API_CONTRACT.md` (di root repo)
 

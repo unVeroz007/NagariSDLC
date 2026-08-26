@@ -1,76 +1,77 @@
 // src/pages/pm/PMWorkspace.jsx
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import { useProjects } from '../../contexts/ProjectContext';
 import { useNotifications } from '../../contexts/NotificationContext';
 import { useNavigate } from 'react-router-dom';
 import LoadingSpinner from '../../components/LoadingSpinner';
-import EmptyState from '../../components/EmptyState';
 import RBBBadge from '../../components/RBBBadge';
 import ProjectTypeBadge from '../../components/ProjectTypeBadge';
 import { getParallelTestingBadge } from '../../constants/projectStatus';
+import { getTaskReturnRoundTag } from '../../constants/returnRound';
 
 
 import {
     LayoutDashboard,
     Users,
     ClipboardList,
-    Clock,
-    Calendar,
-    CheckCircle,
-    AlertCircle,
-    ArrowRight,
-    Filter,
     Search,
-    User,
     Briefcase,
     Activity,
     Zap,
     Eye,
-    FileText,
     Target,
     Send,
     Shield,
     FileCheck,
     Rocket,
+    Undo2,
 } from 'lucide-react';
-import toast from 'react-hot-toast' ;
+
+// 🔒 Status yang sah tampil di PM Workspace.
+// Proyek baru (PENDING/IN_REVIEW/ANALYSIS_APPROVED/READY_FOR_DEVELOPMENT/DEV_ANALYSIS)
+// belum lolos kajian Analis Pengembangan, jadi tidak boleh muncul di sini.
+// Daftar dan penyaringnya murni, jadi diletakkan di lingkup modul supaya
+// identitasnya stabil dan bisa dipakai langsung di dalam useMemo.
+const PM_ELIGIBLE_STATUSES = new Set([
+    'DEV_ANALYSIS_DONE', 'IN_DEVELOPMENT',
+    'SIT_IN_PROGRESS', 'SIT_PASSED', 'SIT_REVISION',
+    'UAT_IN_PROGRESS', 'UAT_REVISION_SIT', 'UAT_REVISION_DEV',
+    'DEV_COMPLETED', 'READY_FOR_QA', 'QA_IN_PROGRESS', 'QA_PASSED',
+    'RETURN_TO_DEV', 'CYBER_IN_PROGRESS', 'CYBER_PASSED',
+    'READY_FOR_UAT', 'UAT_PASSED', 'PENDING_GOLIVE', 'LIVE_PRODUCTION',
+    'ON_HOLD',
+]);
+
+const isPmEligible = (p) => {
+    const pmId = typeof p.pm === 'object' ? p.pm?.id : null;
+    const pmName = typeof p.pm === 'object' ? p.pm?.name : (p.pm || p.pmName || p.assignedPM);
+    const hasPm = Boolean(pmId || pmName || p.pm_id);
+    return PM_ELIGIBLE_STATUSES.has(String(p.status || '').toUpperCase()) || hasPm;
+};
 
 export default function PMWorkspace() {
     const { user } = useAuth();
     const { projects, isLoading } = useProjects();
-    const { notifications, addNotification } = useNotifications();
+    const { notifications } = useNotifications();
     const navigate = useNavigate();
 
     const [activeTab, setActiveTab] = useState('overview'); // 'overview' | 'projects' | 'tasks'
     const [searchTerm, setSearchTerm] = useState('');
-    const [selectedProject, setSelectedProject] = useState(null);
     const [selectedPMFilter, setSelectedPMFilter] = useState('ALL');
 
-    // 📋 Ekstraksi 4 PM resmi (Budi Santoso, Dewi Lestari, Andi Wijaya, Citra Kirana)
+    // Daftar PM untuk dropdown filter, diturunkan dari PM yang benar-benar melekat
+    // pada data proyek. Daftar nama tetap membuat filter berhenti bekerja begitu
+    // susunan PM berubah, dan menampilkan orang yang tidak ada di sistem.
     const pmList = useMemo(() => {
-        return ['Budi Santoso', 'Dewi Lestari', 'Andi Wijaya', 'Citra Kirana'];
-    }, []);
+        const names = (projects || []).map(project => {
+            const pmName = typeof project.pm === 'object' ? project.pm?.name : project.pm;
+            return pmName || project.pmName || project.assignedPM;
+        });
 
-    // 🔒 Status yang sah tampil di PM Workspace.
-    // Proyek baru (PENDING/IN_REVIEW/ANALYSIS_APPROVED/READY_FOR_DEVELOPMENT/DEV_ANALYSIS)
-    // belum lolos kajian Analis Pengembangan, jadi tidak boleh muncul di sini.
-    const PM_ELIGIBLE_STATUSES = new Set([
-        'DEV_ANALYSIS_DONE', 'IN_DEVELOPMENT',
-        'SIT_IN_PROGRESS', 'SIT_PASSED', 'SIT_REVISION',
-        'UAT_IN_PROGRESS', 'UAT_REVISION_SIT', 'UAT_REVISION_DEV',
-        'DEV_COMPLETED', 'READY_FOR_QA', 'QA_IN_PROGRESS', 'QA_PASSED',
-        'RETURN_TO_DEV', 'CYBER_IN_PROGRESS', 'CYBER_PASSED',
-        'READY_FOR_UAT', 'UAT_PASSED', 'PENDING_GOLIVE', 'LIVE_PRODUCTION',
-        'ON_HOLD',
-    ]);
-
-    const isPmEligible = (p) => {
-        const pmId = typeof p.pm === 'object' ? p.pm?.id : null;
-        const pmName = typeof p.pm === 'object' ? p.pm?.name : (p.pm || p.pmName || p.assignedPM);
-        const hasPm = Boolean(pmId || pmName || p.pm_id);
-        return PM_ELIGIBLE_STATUSES.has(String(p.status || '').toUpperCase()) || hasPm;
-    };
+        return [...new Set(names.filter(Boolean).map(name => String(name).trim()))]
+            .sort((a, b) => a.localeCompare(b, 'id'));
+    }, [projects]);
 
     // 🔍 Filter proyek khusus per akun PM (Strict 4 PM Personalization)
     const myProjects = useMemo(() => {
@@ -133,6 +134,10 @@ export default function PMWorkspace() {
                         projectName: project.name,
                         projectId: project.id,
                         projectStatus: project.status,
+                        // Lencana putaran pengembalian dihitung di sini karena baris hasil
+                        // perataan ini tidak lagi membawa `project.return_rounds`, dan tanpa
+                        // daftar itu `return_round_id` hanya berupa angka tanpa arti.
+                        returnRoundTag: getTaskReturnRoundTag(task, project),
                     });
                 });
             }
@@ -184,13 +189,6 @@ export default function PMWorkspace() {
         );
     }, [myProjects, searchTerm]);
 
-    // 🎯 Ambil proyek untuk ditampilkan di detail
-    useEffect(() => {
-        if (myProjects.length > 0 && !selectedProject) {
-            setSelectedProject(myProjects[0]);
-        }
-    }, [myProjects, selectedProject]);
-
     // 📊 Progress proyek — task Take Down tidak dihitung (konsisten dgn gate SIT/UAT)
     const getProjectProgress = (project) => {
         if (!project || !Array.isArray(project.tasks)) {
@@ -210,53 +208,6 @@ export default function PMWorkspace() {
             return st === 'selesai' || st === 'done';
         }).length;
         return Math.round((doneCount / eligible.length) * 100);
-    };
-
-    // 🎨 Warna status
-    const getStatusColor = (status) => {
-        const colors = {
-            'PENDING': 'bg-gray-100 text-gray-700 border-gray-200',
-            'IN_REVIEW': 'bg-blue-100 text-blue-700 border-blue-200',
-            'ANALYSIS_APPROVED': 'bg-cyan-100 text-cyan-700 border-cyan-200',
-            'IN_DEVELOPMENT': 'bg-indigo-100 text-indigo-700 border-indigo-200',
-            'READY_FOR_QA': 'bg-yellow-100 text-yellow-700 border-yellow-200',
-            'QA_IN_PROGRESS': 'bg-orange-100 text-orange-700 border-orange-200',
-            'RETURN_TO_DEV': 'bg-red-100 text-red-700 border-red-200',
-            'QA_PASSED': 'bg-teal-100 text-teal-700 border-teal-200',
-            'CYBER_IN_PROGRESS': 'bg-purple-100 text-purple-700 border-purple-200',
-            'CYBER_PASSED': 'bg-violet-100 text-violet-700 border-violet-200',
-            'READY_FOR_UAT': 'bg-lime-100 text-lime-700 border-lime-200',
-            'UAT_PASSED': 'bg-green-100 text-green-700 border-green-200',
-            'PENDING_GOLIVE': 'bg-amber-100 text-amber-700 border-amber-200',
-            'LIVE_PRODUCTION': 'bg-emerald-100 text-emerald-700 border-emerald-200',
-            'REJECTED': 'bg-red-200 text-red-800 border-red-200',
-            'ON_HOLD': 'bg-slate-100 text-slate-600 border-slate-200',
-            'CANCELLED': 'bg-gray-200 text-gray-500 border-gray-200',
-        };
-        return colors[status] || 'bg-gray-100 text-gray-700 border-gray-200';
-    };
-
-    const getStatusLabel = (status) => {
-        const labels = {
-            'PENDING': 'Menunggu',
-            'IN_REVIEW': 'Review',
-            'ANALYSIS_APPROVED': 'Siap Dev',
-            'IN_DEVELOPMENT': 'Development',
-            'READY_FOR_QA': 'Siap QA',
-            'QA_IN_PROGRESS': 'QA Progress',
-            'RETURN_TO_DEV': 'Rework',
-            'QA_PASSED': 'QA Lulus',
-            'CYBER_IN_PROGRESS': 'Cyber Progress',
-            'CYBER_PASSED': 'Cyber Lulus',
-            'READY_FOR_UAT': 'Siap UAT',
-            'UAT_PASSED': 'UAT Lulus',
-            'PENDING_GOLIVE': 'Menunggu Go-Live',
-            'LIVE_PRODUCTION': 'Live',
-            'REJECTED': 'Ditolak',
-            'ON_HOLD': 'Ditahan',
-            'CANCELLED': 'Dibatalkan',
-        };
-        return labels[status] || status;
     };
 
     // Badge & label status task (Belum Mulai / Sedang Dikerjakan / Hold / Selesai / Take Down)
@@ -329,8 +280,8 @@ export default function PMWorkspace() {
                                     className="text-xs font-extrabold text-gray-800 bg-transparent outline-none cursor-pointer"
                                 >
                                     <option value="ALL">Semua Proyek PM (Global)</option>
-                                    {pmList.map((pmName, idx) => (
-                                        <option key={idx} value={pmName}>
+                                    {pmList.map(pmName => (
+                                        <option key={pmName} value={pmName}>
                                             {pmName}
                                         </option>
                                     ))}
@@ -665,6 +616,15 @@ export default function PMWorkspace() {
                                         <tr key={idx} className="hover:bg-gray-50 transition-colors group">
                                             <td className="px-6 py-4 cursor-pointer group-hover:bg-blue-50/40" onClick={() => navigate(`/pm/tasks/${task.projectId}`)}>
                                                 <span className="font-semibold text-gray-800 group-hover:text-[#00529C] transition-colors">{task.name || task.title || 'Task'}</span>
+                                                {/* Penanda task perbaikan hasil pengembalian jalur pengujian. Tanpa
+                                                    lencana ini, task yang menahan pengajuan ulang QA atau Keamanan
+                                                    Siber tampak sama saja dengan pekerjaan pengembangan biasa. */}
+                                                {task.returnRoundTag && (
+                                                    <span title={task.returnRoundTag.title}
+                                                        className="inline-flex items-center gap-1 ml-2 px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-amber-500 text-white cursor-help align-middle">
+                                                        <Undo2 size={10} /> {task.returnRoundTag.label}
+                                                    </span>
+                                                )}
                                             </td>
                                             <td className="px-6 py-4 text-gray-600 font-medium cursor-pointer hover:text-[#00529C]" onClick={() => navigate(`/pm/tasks/${task.projectId}`)}>
                                                 {task.projectName || '-'}

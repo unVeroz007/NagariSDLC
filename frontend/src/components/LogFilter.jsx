@@ -1,5 +1,5 @@
 // src/components/LogFilter.jsx
-import { Search, Filter, X, Calendar, User, Folder, Tag } from 'lucide-react';
+import { Search, X, Calendar, User, Folder, Tag } from 'lucide-react';
 
 export default function LogFilter({
     searchTerm,

@@ -74,10 +74,12 @@ Route::prefix('v1')->group(function () {
         // Analitik SDLC adalah agregat lintas seluruh portofolio: distribusi status
         // semua proyek, beban tiap developer, dan komposisi role seluruh akun. Tidak
         // ada penyaringan per pengguna yang masuk akal untuk angka seperti itu, jadi
-        // gerbangnya route. Sebelumnya halaman ini dijaga hanya oleh router frontend
-        // (`ADMIN_ROLES`), sementara endpointnya terbuka bagi setiap akun yang login.
+        // gerbangnya route. Dibuka untuk super_admin dan head_of_it (keputusan tata
+        // kelola 26 Agustus 2026: Head of IT memegang pengawasan rilis lintas
+        // portofolio). Guard route frontend `/analytics` harus memuat daftar role yang
+        // sama agar server dan klien tidak berbeda.
         Route::get('/dashboard/analytics', [DashboardController::class, 'analytics'])
-            ->middleware('role:super_admin');
+            ->middleware('role:super_admin,head_of_it');
 
         // ----- REFERENCE DATA (Groups, Roles & Divisions) — Admin Only (write) -----
         Route::middleware('role:super_admin')->group(function () {

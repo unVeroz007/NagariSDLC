@@ -20,13 +20,22 @@
 //
 // Gate kelulusan: lanjut Review & Sign-Off hanya jika seluruh task dalam scope
 // SIT saat ini memiliki approved === true.
-import { useState, useMemo, useEffect, useRef } from 'react';
+import { useState, useMemo, useRef } from 'react';
 import toast from 'react-hot-toast';
 import {
-    Check, AlertCircle, RotateCcw, MessageSquare, User, Paperclip,
-    X, Eye, Download, ShieldCheck, FileText, Clock, CalendarCheck, Trash2
+    Check,
+    AlertCircle,
+    RotateCcw,
+    User,
+    Paperclip,
+    Eye,
+    Download,
+    CalendarCheck,
+    Trash2,
 } from 'lucide-react';
 import { documentService } from '../services/api';
+import { formatDocSizeLabel } from '../utils/documentNaming';
+import DocumentViewerModal from './DocumentViewerModal';
 
 const TASK_STATUS_LABEL = {
     todo: 'Belum Mulai',
@@ -59,9 +68,12 @@ export default function SITTaskExecution({
         [taskIds]
     );
     // SIT awal menampilkan seluruh task aktif; SIT ulang hanya task dalam scope.
+    // Daftar task diambil ke variabel lokal supaya dependency useMemo persis sama
+    // dengan nilai yang dibaca di dalamnya (bukan objek `project` seutuhnya).
+    const projectTasks = project?.tasks;
     const tasks = useMemo(() => {
-        if (!Array.isArray(project?.tasks)) return [];
-        return project.tasks
+        if (!Array.isArray(projectTasks)) return [];
+        return projectTasks
             .map(t => ({
                 id: t.id,
                 title: t.title || t.name || 'Task',
@@ -72,11 +84,14 @@ export default function SITTaskExecution({
             }))
             .filter(t => t.status !== 'take_down'
                 && (!taskIdSet || taskIdSet.has(Number(t.id))));
-    }, [project?.tasks, taskIdSet]);
+    }, [projectTasks, taskIdSet]);
 
-    // State komentar & lampiran per task (sementara sebelum disimpan)
-    const [comments, setComments] = useState({});
-    const [draftAttachments, setDraftAttachments] = useState({}); // taskId -> File[]
+    // Draf komentar per task. Nilai tersimpan ada di `approvals`; state ini hanya
+    // menampung ketikan yang belum disimpan (blur yang menyimpannya). Sebelumnya
+    // sebuah effect menimpa seluruh isi state ini setiap kali `approvals` berubah
+    // (misalnya saat tombol OK ditekan atau bukti diunggah), sehingga komentar
+    // yang sedang diketik ikut terhapus.
+    const [commentDrafts, setCommentDrafts] = useState({});
     const fileInputRefs = useRef({});
 
     const approvedCount = tasks.filter(t => {
@@ -84,17 +99,6 @@ export default function SITTaskExecution({
         return typeof a === 'object' ? a.approved === true : a === true;
     }).length;
     const allApproved = tasks.length > 0 && approvedCount === tasks.length;
-
-    // Inisialisasi komentar dari approvals tersimpan
-    useEffect(() => {
-        const init = {};
-        tasks.forEach(t => {
-            const a = approvals?.[t.id];
-            const comment = typeof a === 'object' ? (a.comment || '') : '';
-            if (comment) init[t.id] = comment;
-        });
-        setComments(init);
-    }, [approvals, tasks]);
 
     const getApproval = (taskId) => {
         const key = String(taskId);
@@ -132,13 +136,26 @@ export default function SITTaskExecution({
         }
     };
 
+    // Isi textarea: draf bila ada, jika tidak nilai yang sudah tersimpan.
+    const commentValue = (taskId) => {
+        const key = String(taskId);
+        return key in commentDrafts ? commentDrafts[key] : (getApproval(key).comment || '');
+    };
+
     const handleCommentChange = (taskId, val) => {
-        setComments(prev => ({ ...prev, [taskId]: val }));
+        setCommentDrafts(prev => ({ ...prev, [String(taskId)]: val }));
     };
 
     const handleSaveComment = (taskId) => {
-        const comment = (comments[taskId] || '').trim();
-        patchApproval(taskId, { comment });
+        const key = String(taskId);
+        if (!(key in commentDrafts)) return; // tidak ada perubahan yang perlu disimpan
+        const comment = commentDrafts[key].trim();
+        patchApproval(key, { comment });
+        setCommentDrafts(prev => {
+            const next = { ...prev };
+            delete next[key];
+            return next;
+        });
         toast.success('Komentar / temuan task disimpan.');
     };
 
@@ -224,7 +241,7 @@ export default function SITTaskExecution({
                 a.download = doc.originalName || doc.name || 'bukti';
                 a.click();
             } else {
-                toast.info('Berkas belum tersedia untuk diunduh.');
+                toast('Berkas belum tersedia untuk diunduh.');
             }
         } catch (err) {
             toast.error(`Gagal mengunduh bukti: ${err.message}`);
@@ -242,13 +259,13 @@ export default function SITTaskExecution({
                 const loadingId = toast.loading('Membuka berkas...');
                 const blob = await documentService.download(doc.docId);
                 const url = URL.createObjectURL(blob);
-                setViewingDoc({ doc, blobUrl: url });
+                setViewingDoc({ doc, blobUrl: url, ownsBlobUrl: true });
                 toast.dismiss(loadingId);
                 setViewLoading(false);
             } else if (doc?.url?.startsWith('blob:')) {
-                setViewingDoc({ doc, blobUrl: doc.url });
+                setViewingDoc({ doc, blobUrl: doc.url, ownsBlobUrl: false });
             } else {
-                toast.info('Berkas belum tersedia untuk dilihat.');
+                toast('Berkas belum tersedia untuk dilihat.');
             }
         } catch (err) {
             setViewLoading(false);
@@ -256,8 +273,19 @@ export default function SITTaskExecution({
         }
     };
 
+    /**
+     * Tutup pratinjau dan lepaskan blob URL yang dibuat di sini.
+     *
+     * URL hasil `createObjectURL` menahan isi berkas di memori sampai dicabut, dan
+     * sebelumnya tidak pernah dicabut sehingga setiap bukti yang dibuka menumpuk
+     * salinannya sepanjang sesi. URL milik pemanggil lain (`doc.url`) dibiarkan,
+     * karena masih dipakai di luar modal ini.
+     */
     const closeViewer = () => {
-        setViewingDoc(null);
+        setViewingDoc((current) => {
+            if (current?.ownsBlobUrl && current.blobUrl) URL.revokeObjectURL(current.blobUrl);
+            return null;
+        });
     };
 
     // ── Alur MUNDUR: Revisi ────────────────────────────────────────────────
@@ -379,7 +407,7 @@ export default function SITTaskExecution({
                                     <td className="p-3 w-64">
                                         <textarea
                                             rows={2}
-                                            value={comments[task.id] || ''}
+                                            value={commentValue(task.id)}
                                             onChange={e => handleCommentChange(task.id, e.target.value)}
                                             onBlur={() => handleSaveComment(task.id)}
                                             disabled={readOnly}
@@ -434,7 +462,7 @@ export default function SITTaskExecution({
                                                         </div>
                                                         <div className="flex-1 min-w-0">
                                                             <p className="text-[10px] font-semibold text-gray-700 truncate">{doc.originalName || doc.name}</p>
-                                                            <p className="text-[9px] text-gray-400">{doc.size}</p>
+                                                            <p className="text-[9px] text-gray-400">{formatDocSizeLabel(doc)}</p>
                                                         </div>
                                                         <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-all">
                                                             {doc.url && (
@@ -492,39 +520,27 @@ export default function SITTaskExecution({
             </div>
 
             {/* ── Modal Pratinjau Berkas (in-app) ── */}
+            {/*
+              * Memakai `DocumentViewerModal` yang sama dengan halaman dokumen lain.
+              * Modal sebelumnya di sini menampilkan semua jenis berkas melalui satu
+              * `<iframe className="w-full h-[60vh]">`, sehingga gambar tampil pada
+              * resolusi aslinya di dalam kotak berukuran tetap: bukti pengujian yang
+              * lebar hanya terlihat sebagian dan harus digeser ke kanan-kiri serta
+              * atas-bawah. Viewer bersama memilih penyaji sesuai jenis berkas dan
+              * menyediakan mode layar penuh.
+              */}
             {viewingDoc && (
-                <div className="fixed inset-0 z-[99997] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
-                    <div className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl max-h-[90vh] flex flex-col overflow-hidden">
-                        <div className="flex items-center justify-between px-5 py-3.5 border-b border-gray-200 bg-gray-50/70">
-                            <div className="flex items-center gap-2.5 min-w-0">
-                                <div className="w-8 h-8 bg-blue-100 text-blue-600 rounded-lg flex items-center justify-center font-bold text-[9px] shrink-0">
-                                    {(viewingDoc.doc?.type || 'FILE')}
-                                </div>
-                                <div className="min-w-0">
-                                    <p className="text-xs font-bold text-gray-800 truncate">{viewingDoc.doc?.originalName || viewingDoc.doc?.name}</p>
-                                    <p className="text-[10px] text-gray-400">{viewingDoc.doc?.size}</p>
-                                </div>
-                            </div>
-                            <button onClick={closeViewer} className="p-2 text-gray-400 hover:text-gray-700 hover:bg-gray-100 rounded-lg transition-colors cursor-pointer">
-                                <X size={18} />
-                            </button>
-                        </div>
-                        <div className="flex-1 overflow-auto bg-gray-100 p-4">
-                            {viewingDoc.blobUrl && (
-                                <iframe
-                                    src={viewingDoc.blobUrl}
-                                    title="Pratinjau Berkas"
-                                    className="w-full h-[60vh] rounded-xl bg-white border border-gray-200"
-                                />
-                            )}
-                        </div>
-                        <div className="flex justify-end gap-2 px-5 py-3 border-t border-gray-200 bg-gray-50/70">
-                            <button onClick={() => downloadFile(viewingDoc.doc)} className="px-4 py-2 bg-[#00529C] hover:bg-[#004080] text-white rounded-xl text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer">
-                                <Download size={13} /> Unduh Berkas
-                            </button>
-                        </div>
-                    </div>
-                </div>
+                <DocumentViewerModal
+                    doc={{
+                        id: viewingDoc.doc?.docId ?? null,
+                        name: viewingDoc.doc?.originalName || viewingDoc.doc?.name,
+                        type: viewingDoc.doc?.doc_type || viewingDoc.doc?.type || 'BUKTI SIT',
+                        url: viewingDoc.blobUrl,
+                        file_size: viewingDoc.doc?.fileSize ?? viewingDoc.doc?.file_size ?? null,
+                        size: viewingDoc.doc?.size ?? null,
+                    }}
+                    onClose={closeViewer}
+                />
             )}
         </div>
     );

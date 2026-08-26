@@ -1,12 +1,11 @@
 import { useState, useEffect, useCallback } from 'react';
-import { useAuth } from '../../contexts/AuthContext';
 import { useMasterData } from '../../contexts/MasterDataContext';
 import { userService } from '../../services/api';
+import { getPasswordError, PASSWORD_REQUIREMENT_HINT } from '../../constants/passwordPolicy';
 import toast from 'react-hot-toast';
 import {
     Users,
     Search,
-    Filter,
     Edit,
     Trash2,
     UserPlus,
@@ -14,21 +13,12 @@ import {
     Building,
     ChevronLeft,
     ChevronRight,
-    CheckCircle,
-    XCircle,
     X,
-    User,
-    Mail,
-    Shield,
-    Briefcase,
-    AlertCircle,
-    Check,
     Loader2,
     RefreshCw,
 } from 'lucide-react';
 
 export default function UsersManagement() {
-    const { user: currentUser } = useAuth();
     const { roles: masterRoles, divisions: masterDivisions } = useMasterData();
 
     const [searchTerm, setSearchTerm] = useState('');
@@ -70,7 +60,10 @@ export default function UsersManagement() {
         }
     }, []);
 
+    // Pemuatan pertama daftar pengguna. setState sinkron di effect dilarang aturan
+    // react-hooks, tetapi di sini pemicunya pengambilan data awal dari API.
     useEffect(() => {
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- pemuatan awal dari API, lihat catatan di atas
         fetchUsers();
     }, [fetchUsers]);
 
@@ -126,8 +119,9 @@ export default function UsersManagement() {
             toast.error('Nama dan Email wajib diisi!');
             return;
         }
-        if (!formData.password || formData.password.length < 8) {
-            toast.error('Password minimal 8 karakter!');
+        const passwordError = getPasswordError(formData.password);
+        if (passwordError) {
+            toast.error(passwordError);
             return;
         }
 
@@ -160,6 +154,16 @@ export default function UsersManagement() {
             return;
         }
 
+        // Password kosong berarti "tidak diubah". Bila diisi, syaratnya sama dengan
+        // saat pembuatan akun — dulu di sini password yang tidak memenuhi syarat
+        // hanya dibuang tanpa pesan, sehingga administrator mengira password sudah
+        // diganti padahal tidak.
+        const passwordError = formData.password ? getPasswordError(formData.password) : null;
+        if (passwordError) {
+            toast.error(passwordError);
+            return;
+        }
+
         setIsSaving(true);
         try {
             const payload = {
@@ -169,7 +173,7 @@ export default function UsersManagement() {
                 phone_number: formData.phone_number || null,
                 is_active: formData.is_active,
             };
-            if (formData.password && formData.password.length >= 8) {
+            if (formData.password) {
                 payload.password = formData.password;
             }
             await userService.update(editingUser.id, payload);
@@ -503,9 +507,10 @@ export default function UsersManagement() {
                                     type="password"
                                     value={formData.password}
                                     onChange={(e) => setFormData({ ...formData, password: e.target.value })}
-                                    placeholder="Minimal 8 karakter..."
+                                    placeholder="Kosongkan jika tidak diubah"
                                     className="w-full px-3.5 py-2 rounded-xl border border-gray-200 text-xs font-medium focus:ring-2 focus:ring-blue-100 focus:border-[#003a73] outline-none"
                                 />
+                                <p className="mt-1 text-[10px] text-gray-500">{PASSWORD_REQUIREMENT_HINT}</p>
                             </div>
 
                             <div>
@@ -602,7 +607,7 @@ export default function UsersManagement() {
                                     type="text"
                                     value={formData.name}
                                     onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                                    placeholder="Contoh: Budi Santoso"
+                                    placeholder="Nama lengkap sesuai data kepegawaian"
                                     className="w-full px-3.5 py-2 rounded-xl border border-gray-200 text-xs font-medium focus:ring-2 focus:ring-blue-100 focus:border-[#003a73] outline-none"
                                     required
                                 />
@@ -626,10 +631,11 @@ export default function UsersManagement() {
                                     type="password"
                                     value={formData.password}
                                     onChange={(e) => setFormData({ ...formData, password: e.target.value })}
-                                    placeholder="Minimal 8 karakter"
+                                    placeholder="Password akun baru"
                                     className="w-full px-3.5 py-2 rounded-xl border border-gray-200 text-xs font-medium focus:ring-2 focus:ring-blue-100 focus:border-[#003a73] outline-none"
                                     required
                                 />
+                                <p className="mt-1 text-[10px] text-gray-500">{PASSWORD_REQUIREMENT_HINT}</p>
                             </div>
 
                             <div>

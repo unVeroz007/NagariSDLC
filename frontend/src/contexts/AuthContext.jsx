@@ -1,10 +1,9 @@
 // src/contexts/AuthContext.jsx
 import { createContext, useState, useContext, useEffect, useCallback } from 'react';
-import { authService } from '../services/api';
+import { authService, sessionStore } from '../services/api';
 import toast from 'react-hot-toast';
 
 const AuthContext = createContext();
-const SESSION_KEY = 'nagari_sdlc_session';
 // Module-level flag agar toast "Sesi berakhir" tidak spam saat banyak request 401 bersamaan.
 let unauthorizedToastShown = false;
 
@@ -17,7 +16,7 @@ export function AuthProvider({ children }) {
     const handleUnauthorized = useCallback(({ showToast = true } = {}) => {
         setUser(null);
         setIsLoggedIn(false);
-        localStorage.removeItem(SESSION_KEY);
+        sessionStore.clear();
 
         if (showToast && !unauthorizedToastShown) {
             unauthorizedToastShown = true;
@@ -35,41 +34,48 @@ export function AuthProvider({ children }) {
 
     useEffect(() => {
         const initAuth = async () => {
-            const savedSession = localStorage.getItem(SESSION_KEY);
-            if (!savedSession) {
+            /*
+             * Sesi tersimpan tidak lagi memuat token — tokennya ada di cookie
+             * `HttpOnly` yang dilampirkan peramban sendiri. Isi `localStorage` di
+             * sini hanya penanda "peramban ini pernah masuk" beserta salinan profil
+             * pengguna, dan keabsahan sesinya tetap ditentukan server lewat
+             * `GET /auth/me`.
+             *
+             * Penanda itu sengaja tetap dipakai sebagai syarat: tanpanya setiap
+             * pengunjung anonim ikut memanggil `/auth/me` pada tiap muat halaman,
+             * hanya untuk dijawab 401.
+             */
+            const parsed = sessionStore.read();
+            if (!parsed?.user) {
+                sessionStore.clear();
                 setIsLoading(false);
                 return;
             }
 
+            // Jangan set isLoggedIn dulu — tunggu verifikasi ke server agar
+            // komponen lain (ProjectContext dll) tidak memicu request 401
+            // saat sesi sudah berakhir (menyebabkan toast "Sesi berakhir" spam).
             try {
-                const parsed = JSON.parse(savedSession);
-
-                if (parsed.token && parsed.user) {
-                    // Jangan set isLoggedIn dulu — tunggu verifikasi token agar
-                    // komponen lain (ProjectContext dll) tidak memicu request 401
-                    // saat token sudah expire (menyebabkan toast "Sesi berakhir" spam).
-                    try {
-                        const meRes = await authService.getCurrentUser();
-                        if (meRes && meRes.data) {
-                            setUser(meRes.data);
-                            setIsLoggedIn(true);
-                            localStorage.setItem(SESSION_KEY, JSON.stringify({
-                                token: parsed.token,
-                                user: meRes.data,
-                                issuedAt: parsed.issuedAt || Date.now()
-                            }));
-                        } else {
-                            localStorage.removeItem(SESSION_KEY);
-                        }
-                    } catch (err) {
-                        // Token expire/invalid → bersihkan sesi diam-diam (tanpa toast)
-                        localStorage.removeItem(SESSION_KEY);
-                    }
+                const meRes = await authService.getCurrentUser();
+                if (meRes && meRes.data) {
+                    setUser(meRes.data);
+                    setIsLoggedIn(true);
+                    sessionStore.save({
+                        user: meRes.data,
+                        // Waktu terbit dipertahankan: penjadwalan penyegaran dihitung
+                        // dari kapan token benar-benar diterbitkan, bukan dari kapan
+                        // tab terakhir dibuka. Menimpanya dengan `Date.now()` membuat
+                        // penyegaran tidak pernah terpicu bila pengguna rutin memuat
+                        // ulang halaman, sampai tokennya kedaluwarsa mendadak.
+                        issuedAt: parsed.issuedAt || Date.now(),
+                        expiresInMinutes: parsed.expiresInMinutes,
+                    });
                 } else {
-                    localStorage.removeItem(SESSION_KEY);
+                    sessionStore.clear();
                 }
             } catch {
-                localStorage.removeItem(SESSION_KEY);
+                // Sesi berakhir/tidak valid → bersihkan diam-diam (tanpa toast)
+                sessionStore.clear();
             } finally {
                 setIsLoading(false);
             }
@@ -83,17 +89,30 @@ export function AuthProvider({ children }) {
     const login = async (email, password) => {
         try {
             const res = await authService.login(email, password);
-            if (res && res.data && res.data.token) {
+            /*
+             * Keberhasilan diukur dari adanya `data.user`, bukan `data.token`.
+             * Tokennya dilekatkan sebagai cookie `HttpOnly` dan sengaja dapat
+             * dihilangkan dari body lewat `AUTH_COOKIE_EXPOSE_TOKEN=false` di
+             * produksi — memeriksa `data.token` akan membuat setiap login gagal
+             * begitu pengerasan itu diaktifkan.
+             */
+            if (res && res.data && res.data.user) {
                 const userData = res.data.user;
-                const token = res.data.token;
 
                 // Reset flag agar toast sesi expire dapat muncul lagi di masa depan
                 unauthorizedToastShown = false;
 
                 setUser(userData);
                 setIsLoggedIn(true);
-                localStorage.setItem(SESSION_KEY, JSON.stringify({ user: userData, token, issuedAt: Date.now() }));
-                return { success: true };
+                sessionStore.save({
+                    user: userData,
+                    expiresInMinutes: res.data.token_expires_in_minutes,
+                });
+                // Data pengguna ikut dikembalikan. Halaman login menentukan tujuan
+                // pengalihan dari `result.user.role`, dan sebelumnya kunci itu tidak
+                // pernah ada di nilai kembalian — jadi setiap peran diarahkan ke rute
+                // bawaan `/dashboard`, lalu ditolak di sana dan dialihkan sekali lagi.
+                return { success: true, user: userData };
             }
             return { success: false, message: 'Invalid response format from server.' };
         } catch (err) {
@@ -101,28 +120,65 @@ export function AuthProvider({ children }) {
         }
     };
 
+    /**
+     * Akhiri sesi.
+     *
+     * Pencabutan token di server dicoba lebih dulu, tetapi kegagalannya tidak boleh
+     * menghalangi pembersihan sesi lokal. Sebelumnya `await authService.logout()`
+     * berada di luar try: bila permintaannya gagal — jaringan mati, atau tokennya
+     * memang sudah kedaluwarsa sehingga server menjawab 401 — pengecualiannya
+     * membatalkan seluruh sisa fungsi ini, dan pengguna tetap tampak masuk dengan
+     * token yang tidak lagi berlaku sampai tab-nya ditutup.
+     */
     const logout = async () => {
-        await authService.logout();
-        setUser(null);
-        setIsLoggedIn(false);
-        localStorage.removeItem(SESSION_KEY);
+        try {
+            await authService.logout();
+        } catch {
+            // Token mungkin sudah tidak berlaku di server; sesi lokal tetap dibersihkan.
+        } finally {
+            setUser(null);
+            setIsLoggedIn(false);
+            sessionStore.clear();
+        }
     };
 
+    /**
+     * Simpan perubahan profil ke backend, lalu segarkan user di context dan
+     * di localStorage supaya seluruh halaman langsung melihat data terbaru.
+     * Hasilnya dikembalikan agar pemanggil dapat memutuskan sendiri, misalnya
+     * menutup mode edit hanya bila penyimpanan benar-benar berhasil.
+     */
     const updateProfile = async (updates) => {
         try {
             const res = await authService.updateProfile(updates.name, updates.phone_number);
-            if (res && res.data) {
-                const updatedUser = res.data;
-                setUser(updatedUser);
-                const raw = localStorage.getItem(SESSION_KEY);
-                if (raw) {
-                    const session = JSON.parse(raw);
-                    localStorage.setItem(SESSION_KEY, JSON.stringify({ ...session, user: updatedUser }));
-                }
-                toast.success('Profil berhasil diperbarui');
+
+            if (!res || !res.data) {
+                const message = res?.message || 'Format respons profil tidak dikenali.';
+                toast.error(`Gagal update profil: ${message}`);
+                return { success: false, message };
             }
+
+            const updatedUser = res.data;
+            setUser(updatedUser);
+            // Sesi tersimpan hanya diperbarui bila memang masih ada. `sessionStore`
+            // sudah menelan isi localStorage yang rusak, jadi kegagalan membacanya
+            // tidak lagi dapat membatalkan pembaruan profil yang sebenarnya sudah
+            // tersimpan di server.
+            const stored = sessionStore.read();
+            if (stored) {
+                sessionStore.save({
+                    user: updatedUser,
+                    issuedAt: stored.issuedAt,
+                    expiresInMinutes: stored.expiresInMinutes,
+                });
+            }
+            toast.success('Profil berhasil diperbarui');
+
+            return { success: true, user: updatedUser };
         } catch (err) {
-            toast.error(`Gagal update profil: ${err.message}`);
+            const message = err.message || 'Terjadi kesalahan tidak terduga.';
+            toast.error(`Gagal update profil: ${message}`);
+            return { success: false, message };
         }
     };
 

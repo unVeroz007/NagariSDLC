@@ -2,18 +2,10 @@
 import { useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { X } from 'lucide-react';
-
-/**
- * Gaya badge prioritas. Sengaja dimiliki komponen ini sendiri supaya modal bisa
- * dipakai halaman mana pun tanpa harus disuntik helper dari pemanggilnya.
- */
-const PRIORITY_STYLE = {
-    High: { label: '🔴 High Priority', className: 'bg-red-500/10 text-red-600 border-red-200' },
-    Medium: { label: '🟡 Medium', className: 'bg-yellow-500/10 text-yellow-600 border-yellow-200' },
-    Low: { label: '🟢 Low', className: 'bg-green-500/10 text-green-600 border-green-200' },
-};
-
-const FALLBACK_PRIORITY = { label: 'Tanpa Prioritas', className: 'bg-gray-100 text-gray-600 border-gray-200' };
+import {
+    getProjectPriorityBadgeLabel,
+    getProjectPriorityClass,
+} from '../constants/projectPriority';
 
 /**
  * Pratinjau ringkas detail proyek.
@@ -50,10 +42,8 @@ export default function ProjectDetailModal({ project, onClose }) {
 
     if (!project) return null;
 
-    const priority = PRIORITY_STYLE[project.priority] || {
-        ...FALLBACK_PRIORITY,
-        label: project.priority || FALLBACK_PRIORITY.label,
-    };
+    const priorityLabel = getProjectPriorityBadgeLabel(project.priority);
+    const priorityClass = getProjectPriorityClass(project.priority);
     const reqId = project.reqId || project.req_id || project.id;
     const requester = typeof project.creator === 'object'
         ? (project.creator?.name || '—')
@@ -81,8 +71,8 @@ export default function ProjectDetailModal({ project, onClose }) {
                             <span className="text-xs font-bold text-[#00529C] bg-blue-50 px-2 py-0.5 rounded border border-blue-100">
                                 {reqId}
                             </span>
-                            <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold border ${priority.className}`}>
-                                {priority.label}
+                            <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold border ${priorityClass}`}>
+                                {priorityLabel}
                             </span>
                         </div>
                         <h3 id="project-detail-title" className="text-lg font-bold text-gray-800 leading-snug">

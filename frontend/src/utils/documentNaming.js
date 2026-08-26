@@ -76,8 +76,10 @@ export const DOCUMENT_TYPES = {
 
     // Fase 3 — QA & Cyber
     QA_REPORT: { code: 'QA_REPORT', label: 'Laporan QA Testing', color: 'bg-indigo-50 text-indigo-700 border-indigo-200' },
+    QA_EVIDENCE: { code: 'QA_EVIDENCE', label: 'Bukti Pengujian QA', color: 'bg-orange-50 text-orange-700 border-orange-200' },
     QA_SIGNOFF: { code: 'QA_SIGNOFF', label: 'QA Sign-Off Report', color: 'bg-indigo-50 text-indigo-700 border-indigo-200' },
     CYBER_REPORT: { code: 'CYBER_REPORT', label: 'Laporan Pentest Siber', color: 'bg-purple-50 text-purple-700 border-purple-200' },
+    CYBER_EVIDENCE: { code: 'CYBER_EVIDENCE', label: 'Bukti Audit Keamanan Siber', color: 'bg-orange-50 text-orange-700 border-orange-200' },
     CYBER_SIGNOFF: { code: 'CYBER_SIGNOFF', label: 'Cyber Sign-Off Report', color: 'bg-purple-50 text-purple-700 border-purple-200' },
 
     // Fase 4 — Rilis
@@ -95,17 +97,21 @@ export const DOCUMENT_TYPES = {
 export const INITIATION_DOC_TYPES = ['BRD', 'MEMO', 'LAMPIRAN', 'LAINNYA'];
 
 /**
- * Tipe dokumen lampiran BUKTI per task / per skenario pada SIT & UAT.
+ * Tipe dokumen lampiran BUKTI per item pengujian (task SIT, skenario UAT,
+ * skenario QA, temuan Audit Keamanan Siber).
  *
- * Lampiran ini hanya bermakna pada konteks task/skenario tempat ia diunggah
- * (panel eksekusi SIT per task & wizard SIT/UAT), bukan sebagai dokumen
- * prasyarat per fase. Karena itu dikecualikan dari daftar dokumen umum yang
- * dibaca lintas fase — mis. prasyarat pengajuan QA & Cyber.
+ * Lampiran ini hanya bermakna pada konteks item tempat ia diunggah — panel eksekusi
+ * SIT per task, wizard SIT/UAT, atau kartu laporan pengujian pada layar review Lead —
+ * bukan sebagai dokumen prasyarat per fase. Karena itu dikecualikan dari daftar
+ * dokumen umum yang dibaca lintas fase, mis. prasyarat pengajuan QA & Siber.
+ *
+ * ⚠️  Daftar ini harus sejalan dengan `DocumentVault::EVIDENCE_TYPES` di backend,
+ * yang juga menentukan tipe mana yang namanya diberi penanda unik saat diunggah.
  */
-export const EVIDENCE_DOCUMENT_TYPES = ['SIT_TASK_EVIDENCE', 'UAT_EVIDENCE'];
+export const EVIDENCE_DOCUMENT_TYPES = ['SIT_TASK_EVIDENCE', 'UAT_EVIDENCE', 'QA_EVIDENCE', 'CYBER_EVIDENCE'];
 
 /**
- * Cek apakah sebuah kode tipe dokumen termasuk lampiran bukti SIT/UAT.
+ * Cek apakah sebuah kode tipe dokumen termasuk lampiran bukti pengujian.
  */
 export function isEvidenceDocumentType(code) {
     return EVIDENCE_DOCUMENT_TYPES.includes(String(code || '').toUpperCase());
@@ -125,6 +131,24 @@ export function formatFileSize(bytes) {
     if (!bytes || bytes === 0) return '0 KB';
     if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
     return (bytes / (1024 * 1024)).toFixed(2) + ' MB';
+}
+
+/**
+ * Label ukuran satu berkas dokumen, atau keterangan bahwa ukurannya tidak tercatat.
+ *
+ * Backend menyimpan ukuran sebagai jumlah byte (`documents.file_size`). Beberapa layar
+ * sebelumnya memakai string tetap ('2.0 MB', '2.4 MB', '1.8 MB') sebagai nilai bawaan,
+ * yang tampil di layar seolah data sungguhan. Berkas tanpa catatan ukuran sekarang
+ * menyatakan keadaannya apa adanya.
+ */
+export function formatDocSizeLabel(doc) {
+    const raw = doc?.size ?? doc?.file_size ?? null;
+    if (raw === null || raw === undefined || raw === '') return 'Ukuran tidak tercatat';
+    if (typeof raw === 'number') return formatFileSize(raw);
+
+    // Nilai yang sudah berbentuk label (mis. "1.2 MB") dibiarkan apa adanya.
+    const numeric = Number(raw);
+    return Number.isFinite(numeric) && String(raw).trim() !== '' ? formatFileSize(numeric) : String(raw);
 }
 
 /**

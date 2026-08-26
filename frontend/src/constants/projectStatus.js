@@ -4,24 +4,68 @@
  *
  * ⚠️  PENTING: Nilai string di sini HARUS cocok 100% dengan enum ProjectStatus.php di Backend!
  *
- * Alur status (sesuai Blueprint BE):
- * PENDING → IN_REVIEW → ANALYSIS_APPROVED / REJECTED
- *   → READY_FOR_DEVELOPMENT → DEV_ANALYSIS → DEV_ANALYSIS_DONE
- *   → IN_DEVELOPMENT → READY_FOR_QA → QA_IN_PROGRESS
- *   → QA_PASSED / RETURN_TO_DEV
- *   → CYBER_IN_PROGRESS → CYBER_PASSED
- *   → READY_FOR_UAT → UAT_PASSED → PENDING_GOLIVE → LIVE_PRODUCTION
- * Special: ON_HOLD, CANCELLED (bisa dari status manapun kecuali LIVE_PRODUCTION)
+ * Bentuk alur menurut state machine backend (ProjectWorkflowService::$allowedTransitions):
+ *
+ *   PENDING → IN_REVIEW → ANALYSIS_APPROVED → READY_FOR_DEVELOPMENT
+ *     → DEV_ANALYSIS → DEV_ANALYSIS_DONE → IN_DEVELOPMENT
+ *     → SIT_IN_PROGRESS → SIT_PASSED → UAT_IN_PROGRESS → UAT_PASSED → DEV_COMPLETED
+ *
+ *   DEV_COMPLETED ─┬→ READY_FOR_QA → QA_IN_PROGRESS → QA_PASSED ─┬→ PENDING_GOLIVE
+ *                  └→ CYBER_IN_PROGRESS → CYBER_PASSED ──────────┘   → LIVE_PRODUCTION
+ *
+ * DEV_COMPLETED adalah titik cabang, bukan sambungan ke satu antrean berikutnya: backend
+ * membuka READY_FOR_QA, QA_IN_PROGRESS, DAN CYBER_IN_PROGRESS sekaligus dari sana. Kedua
+ * jalur pengujian berjalan paralel, dan QA_PASSED serta CYBER_PASSED sengaja dibuat
+ * simetris supaya jalur mana pun yang sign-off lebih dulu tetap dapat menerima sign-off
+ * jalur lain. Karena itu status utama tidak pernah cukup untuk menyimpulkan berapa jalur
+ * yang sudah lulus — pakai kolom jalurnya lewat canRequestGoLive() di bawah. Syarat "kedua
+ * jalur wajib lulus" dijaga di titik gabungnya, oleh
+ * ProjectWorkflowService::validateTransitionPrerequisites() pada transisi menuju
+ * PENDING_GOLIVE, bukan oleh bentuk matriks transisinya.
+ *
+ * Cabangnya bisa berbalik: sign-off TIDAK LULUS seorang Lead pada salah satu jalur
+ * memindahkan status utama ke RETURN_TO_DEV dan membuka satu putaran pengembalian
+ * (`project_return_rounds`) pada jalur yang menolak. Jalur itu baru boleh diajukan ulang
+ * setelah setiap task perbaikan bertanda putaran tersebut punya penerima dan selesai —
+ * gerbang ProjectReturnRoundService::assertResubmitAllowed(), dipasang di
+ * TestingTrackService::submitRequest(). Rinciannya ada di `docs/WORKFLOW.md` bagian 5.
+ *
+ * Simpangan fase pengembangan tidak digambar di atas agar bentuk alurnya tetap terbaca,
+ * tetapi statusnya ada dan terpakai: SIT_REVISION, UAT_REVISION_SIT (menuntut SIT dijalankan
+ * ulang), dan UAT_REVISION_DEV (kembali ke pengembangan). UAT_PASSED sendiri hanya keluaran
+ * opsional UAT internal, bukan gerbang rilis. Daftar lengkap seluruh anggota enum ada pada
+ * peta di bawah, bukan pada header ini.
+ *
+ * Tidak ada UAT final setelah QA & Siber. Begitu kedua jalur pengujian lulus, PM langsung
+ * mengajukan go-live ke Grup Infrastruktur. READY_FOR_UAT masih menjadi anggota enum backend
+ * namun sudah tidak punya satu pun transisi masuk maupun keluar — hanya tersisa untuk
+ * membaca riwayat lama.
+ *
+ * Special: ON_HOLD hanya dapat dimasuki dari IN_DEVELOPMENT, dan CANCELLED hanya dari
+ * PENDING. Keduanya BUKAN "dari status mana pun" seperti yang tertulis pada header ini
+ * sebelumnya — matriks backend memberi masing-masing satu pintu masuk saja.
  */
 
+/**
+ * Nomor fase pada komentar blok di bawah mengikuti PHASE_KEY_BY_STATUS — peta itulah yang
+ * benar-benar dibaca layar. Alurnya EMPAT fase: QA dan Keamanan Siber duduk bersama di
+ * Fase 3 karena keduanya paralel, dan rilis produksi ada di Fase 4. Sebelumnya blok-blok
+ * ini memecah QA (Fase 3), Siber (Fase 4), dan rilis (Fase 5), sehingga satu berkas
+ * menomori fasenya sendiri dengan dua cara yang berbeda.
+ *
+ * Urutan key di sini bukan detail internal: `pages/pm/Tasks.jsx` memakai
+ * Object.values(PROJECT_STATUS) sebagai urutan tampil dropdown filter status. Karena itu
+ * ada dua key yang tetap duduk di blok fase yang bukan fasenya, masing-masing dengan
+ * catatan di tempatnya.
+ */
 export const PROJECT_STATUS = {
-    // Fase 1: Inisiasi & Review
+    // Fase 1: inisiasi & analisis perencanaan
     PENDING: 'PENDING',
     IN_REVIEW: 'IN_REVIEW',
     ANALYSIS_APPROVED: 'ANALYSIS_APPROVED',
     REJECTED: 'REJECTED',
 
-    // Fase 2: Pengembangan & Testing Internal
+    // Fase 2: pengembangan, termasuk siklus SIT & UAT internal
     READY_FOR_DEVELOPMENT: 'READY_FOR_DEVELOPMENT',
     DEV_ANALYSIS: 'DEV_ANALYSIS',
     DEV_ANALYSIS_DONE: 'DEV_ANALYSIS_DONE',
@@ -32,25 +76,36 @@ export const PROJECT_STATUS = {
     UAT_IN_PROGRESS: 'UAT_IN_PROGRESS',
     UAT_REVISION_SIT: 'UAT_REVISION_SIT',
     UAT_REVISION_DEV: 'UAT_REVISION_DEV',
+    // Penanda selesainya seluruh pekerjaan pengembangan, jadi masih Fase 2 — bukan status
+    // pertama Fase 3. Backend memperlakukannya sama: DEV_COMPLETED adalah gerbang masuk
+    // pengujian (TestingTrackService::SUBMITTABLE_MAIN_STATUSES), bukan pengujian itu sendiri.
     DEV_COMPLETED: 'DEV_COMPLETED',
 
-    // Fase 3: QA Testing
+    // Fase 3: dua jalur pengujian paralel — QA & Keamanan Siber
     READY_FOR_QA: 'READY_FOR_QA',
     QA_IN_PROGRESS: 'QA_IN_PROGRESS',
+    // Dipetakan ke Fase 2 oleh PHASE_KEY_BY_STATUS, bukan Fase 3: proyek yang dikembalikan
+    // sedang berada di pengembangan, bukan di antrean pengujian. Key-nya tetap di sini
+    // karena urutan deklarasi ikut menentukan urutan dropdown filter — lihat catatan pada
+    // docblock di atas.
     RETURN_TO_DEV: 'RETURN_TO_DEV',
     QA_PASSED: 'QA_PASSED',
-
-    // Fase 4: Cyber Security
     CYBER_IN_PROGRESS: 'CYBER_IN_PROGRESS',
     CYBER_PASSED: 'CYBER_PASSED',
 
-    // Fase 5: UAT & Rilis
+    // Fase 4: rilis produksi
+    //
+    // READY_FOR_UAT & UAT_PASSED tidak lagi menjadi gerbang rilis. READY_FOR_UAT sudah
+    // tidak punya transisi apa pun di backend (legacy, hanya untuk riwayat) dan karena itu
+    // dipetakan ke fase rilis. UAT_PASSED adalah keluaran opsional UAT internal, sehingga
+    // PHASE_KEY_BY_STATUS memetakannya ke Fase 2 — key-nya tetap di blok ini dengan alasan
+    // urutan yang sama seperti RETURN_TO_DEV di atas.
     READY_FOR_UAT: 'READY_FOR_UAT',
     UAT_PASSED: 'UAT_PASSED',
     PENDING_GOLIVE: 'PENDING_GOLIVE',
     LIVE_PRODUCTION: 'LIVE_PRODUCTION',
 
-    // Special
+    // Special: di luar alur maju. PHASE_KEY_BY_STATUS memetakan keduanya ke Fase 1.
     ON_HOLD: 'ON_HOLD',
     CANCELLED: 'CANCELLED',
 };
@@ -72,17 +127,28 @@ export const PROJECT_STATUS_LABEL = {
     [PROJECT_STATUS.SIT_REVISION]: 'Revisi SIT → Dev',
     [PROJECT_STATUS.UAT_IN_PROGRESS]: 'UAT Internal Berlangsung',
     [PROJECT_STATUS.UAT_PASSED]: 'UAT Internal Lulus',
-    [PROJECT_STATUS.UAT_REVISION_SIT]: 'Revisi UAT → Ulang SIT (Legacy)',
+    // Bukan legacy, walau namanya mirip dengan READY_FOR_UAT di bawah. Statusnya hidup:
+    // dapat dicapai dari UAT_IN_PROGRESS, punya transisi keluar ke SIT_IN_PROGRESS dan
+    // UAT_IN_PROGRESS, punya entri rolePermissions, serta punya layarnya sendiri di
+    // `components/SITUATWizard.jsx`. Inilah status revisi UAT mayor yang mengulang siklus
+    // SIT lalu UAT dari awal, jadi menandainya "(Legacy)" membuat pengguna bank menyangka
+    // proyeknya nyangkut di alur usang.
+    [PROJECT_STATUS.UAT_REVISION_SIT]: 'Revisi UAT → Ulang SIT',
     [PROJECT_STATUS.UAT_REVISION_DEV]: 'Revisi UAT → Kembali Dev',
     [PROJECT_STATUS.DEV_COMPLETED]: 'Dev Selesai — Siap QA & Siber',
     [PROJECT_STATUS.READY_FOR_QA]: 'Siap QA Testing',
     [PROJECT_STATUS.QA_IN_PROGRESS]: 'Sedang QA Testing',
-    [PROJECT_STATUS.RETURN_TO_DEV]: 'Dikembalikan ke Dev',
+    // Sebutan lengkap "Developer", bukan singkatan "Dev". Statusnya dibaca juga oleh
+    // pemohon di halaman Lacak Status Proyek, dan label ini adalah satu-satunya sebutan
+    // yang dipakai seluruh layar — lihat `constants/projectJourney.js` serta peta warna
+    // di `pages/Track.jsx`, keduanya mengacu ke sini.
+    [PROJECT_STATUS.RETURN_TO_DEV]: 'Dikembalikan ke Developer',
     [PROJECT_STATUS.QA_PASSED]: 'QA Lulus',
     [PROJECT_STATUS.CYBER_IN_PROGRESS]: 'Sedang Pentest',
     [PROJECT_STATUS.CYBER_PASSED]: 'Cyber Lulus',
-    [PROJECT_STATUS.READY_FOR_UAT]: 'Siap UAT Final',
-    [PROJECT_STATUS.UAT_PASSED]: 'UAT Final Lulus',
+    // Legacy: UAT final setelah QA & Siber sudah dihapus dari alur. Label tetap ada
+    // supaya riwayat status lama tidak tampil sebagai kode mentah.
+    [PROJECT_STATUS.READY_FOR_UAT]: 'Siap UAT Final (Legacy)',
     [PROJECT_STATUS.PENDING_GOLIVE]: 'Menunggu Go-Live',
     [PROJECT_STATUS.LIVE_PRODUCTION]: 'Live Production',
     [PROJECT_STATUS.ON_HOLD]: 'Ditunda',
@@ -111,12 +177,16 @@ export const PROJECT_STATUS_COLOR = {
     [PROJECT_STATUS.DEV_COMPLETED]: 'bg-blue-100 text-blue-800 border-blue-300 font-bold',
     [PROJECT_STATUS.READY_FOR_QA]: 'bg-purple-50 text-purple-600 border-purple-200',
     [PROJECT_STATUS.QA_IN_PROGRESS]: 'bg-purple-100 text-purple-700 border-purple-200',
+    // Oranye, sekelompok dengan SIT_REVISION dan UAT_REVISION_SIT: pengembalian dari
+    // jalur pengujian adalah pekerjaan ulang, bukan kegagalan. Merah di peta ini
+    // menandakan penolakan atau penghentian (REJECTED, CANCELLED), dan kuning-amber
+    // menandakan menunggu atau sedang berjalan.
     [PROJECT_STATUS.RETURN_TO_DEV]: 'bg-orange-100 text-orange-700 border-orange-200',
     [PROJECT_STATUS.QA_PASSED]: 'bg-teal-100 text-teal-700 border-teal-200',
     [PROJECT_STATUS.CYBER_IN_PROGRESS]: 'bg-orange-100 text-orange-700 border-orange-200',
     [PROJECT_STATUS.CYBER_PASSED]: 'bg-teal-100 text-teal-700 border-teal-200',
-    [PROJECT_STATUS.READY_FOR_UAT]: 'bg-blue-100 text-blue-700 border-blue-200',
-    [PROJECT_STATUS.UAT_PASSED]: 'bg-teal-100 text-teal-700 border-teal-200',
+    // Legacy — lihat catatan pada PROJECT_STATUS_LABEL.
+    [PROJECT_STATUS.READY_FOR_UAT]: 'bg-gray-100 text-gray-600 border-gray-200',
     [PROJECT_STATUS.PENDING_GOLIVE]: 'bg-amber-100 text-amber-700 border-amber-200',
     [PROJECT_STATUS.LIVE_PRODUCTION]: 'bg-emerald-100 text-emerald-700 border-emerald-200',
     [PROJECT_STATUS.ON_HOLD]: 'bg-gray-100 text-gray-500 border-gray-200',
@@ -124,66 +194,52 @@ export const PROJECT_STATUS_COLOR = {
 };
 
 /**
- * Urutan fase untuk timeline tracker.
- * Digunakan di halaman Lacak Status Proyek.
+ * Pemetaan status ke nomor fase, satu entri per anggota App\Enums\ProjectStatus.
+ *
+ * Daftarnya sengaja hanya memuat nilai enum. Versi sebelumnya juga mencocokkan
+ * status karangan seperti 'IN_SPRINT', 'CODING', atau 'UAT_INTERNAL' dan menutupnya
+ * dengan pencocokan potongan kata (mis. semua status ber-'DEV' jadi Fase 2). Tidak
+ * satu pun nilai itu bisa muncul karena kolom `projects.status` dibatasi enum, dan
+ * pencocokan potongan kata itu justru menyembunyikan salah pemetaan: 'DEV_COMPLETED'
+ * dan 'RETURN_TO_DEV' ikut tertangkap kata 'DEV' walau nomor fasenya harus eksplisit.
+ *
+ * Status yang tidak dikenal jatuh ke Fase 1 lewat getProjectPhaseKey.
  */
-export const PHASE_TIMELINE = [
-    {
-        phase: 'Fase 1: Inisiasi & Review',
-        statuses: [
-            PROJECT_STATUS.PENDING,
-            PROJECT_STATUS.IN_REVIEW,
-            PROJECT_STATUS.ANALYSIS_APPROVED,
-        ],
-        description: 'Pengajuan, review Lead Group, dan analisis proyek.',
-    },
-    {
-        phase: 'Fase 2: Pengembangan IT',
-        statuses: [
-            PROJECT_STATUS.READY_FOR_DEVELOPMENT,
-            PROJECT_STATUS.DEV_ANALYSIS,
-            PROJECT_STATUS.DEV_ANALYSIS_DONE,
-            PROJECT_STATUS.IN_DEVELOPMENT,
-        ],
-        description: 'Alokasi tim, analisis teknis, development, dan manajemen task.',
-    },
-    {
-        phase: 'Fase 3: QA Testing',
-        statuses: [
-            PROJECT_STATUS.READY_FOR_QA,
-            PROJECT_STATUS.QA_IN_PROGRESS,
-            PROJECT_STATUS.QA_PASSED,
-        ],
-        description: 'Pengujian fungsional dan non-fungsional oleh tim QA.',
-    },
-    {
-        phase: 'Fase 4: Cyber Security',
-        statuses: [
-            PROJECT_STATUS.CYBER_IN_PROGRESS,
-            PROJECT_STATUS.CYBER_PASSED,
-        ],
-        description: 'Audit keamanan dan penetration testing.',
-    },
-    {
-        phase: 'Fase 5: UAT & Rilis',
-        statuses: [
-            PROJECT_STATUS.READY_FOR_UAT,
-            PROJECT_STATUS.UAT_PASSED,
-            PROJECT_STATUS.PENDING_GOLIVE,
-            PROJECT_STATUS.LIVE_PRODUCTION,
-        ],
-        description: 'User Acceptance Test, Quality Gate oleh Head of IT, dan deployment ke production.',
-    },
-];
+const PHASE_KEY_BY_STATUS = {
+    // Fase 1: perencanaan & analisis
+    [PROJECT_STATUS.PENDING]: 1,
+    [PROJECT_STATUS.IN_REVIEW]: 1,
+    [PROJECT_STATUS.ANALYSIS_APPROVED]: 1,
+    [PROJECT_STATUS.REJECTED]: 1,
+    [PROJECT_STATUS.ON_HOLD]: 1,
+    [PROJECT_STATUS.CANCELLED]: 1,
 
-/**
- * Helper: Cek apakah proyek sudah melewati fase tertentu.
- */
-export const isStatusPassed = (currentStatus, targetStatus) => {
-    const allStatuses = Object.values(PROJECT_STATUS);
-    const currentIdx = allStatuses.indexOf(currentStatus);
-    const targetIdx = allStatuses.indexOf(targetStatus);
-    return currentIdx >= targetIdx;
+    // Fase 2: pengembangan, termasuk siklus SIT & UAT internal
+    [PROJECT_STATUS.READY_FOR_DEVELOPMENT]: 2,
+    [PROJECT_STATUS.DEV_ANALYSIS]: 2,
+    [PROJECT_STATUS.DEV_ANALYSIS_DONE]: 2,
+    [PROJECT_STATUS.IN_DEVELOPMENT]: 2,
+    [PROJECT_STATUS.SIT_IN_PROGRESS]: 2,
+    [PROJECT_STATUS.SIT_PASSED]: 2,
+    [PROJECT_STATUS.SIT_REVISION]: 2,
+    [PROJECT_STATUS.UAT_IN_PROGRESS]: 2,
+    [PROJECT_STATUS.UAT_PASSED]: 2,
+    [PROJECT_STATUS.UAT_REVISION_SIT]: 2,
+    [PROJECT_STATUS.UAT_REVISION_DEV]: 2,
+    [PROJECT_STATUS.DEV_COMPLETED]: 2,
+    [PROJECT_STATUS.RETURN_TO_DEV]: 2,
+
+    // Fase 3: dua jalur pengujian independen QA & Keamanan Siber
+    [PROJECT_STATUS.READY_FOR_QA]: 3,
+    [PROJECT_STATUS.QA_IN_PROGRESS]: 3,
+    [PROJECT_STATUS.QA_PASSED]: 3,
+    [PROJECT_STATUS.CYBER_IN_PROGRESS]: 3,
+    [PROJECT_STATUS.CYBER_PASSED]: 3,
+
+    // Fase 4: rilis. READY_FOR_UAT hanya sisa riwayat lama, dipetakan ke fase rilis.
+    [PROJECT_STATUS.READY_FOR_UAT]: 4,
+    [PROJECT_STATUS.PENDING_GOLIVE]: 4,
+    [PROJECT_STATUS.LIVE_PRODUCTION]: 4,
 };
 
 /**
@@ -193,63 +249,7 @@ export const isStatusPassed = (currentStatus, targetStatus) => {
 export const getProjectPhaseKey = (status) => {
     if (!status) return 1;
     const st = String(status).trim().toUpperCase();
-
-    if ([
-        PROJECT_STATUS.PENDING,
-        PROJECT_STATUS.IN_REVIEW,
-        PROJECT_STATUS.ANALYSIS_APPROVED,
-        PROJECT_STATUS.REJECTED,
-        'DRAFT', 'SUBMITTED', 'NEW', 'PLANNING_ANALYSIS', 'ANALYSIS', 'ANALYSIS_IN_PROGRESS', 'ANALYST_SUBMITTED', 'VERIFICATION_PENDING'
-    ].includes(st)) {
-        return 1;
-    }
-
-    if ([
-        PROJECT_STATUS.READY_FOR_DEVELOPMENT,
-        PROJECT_STATUS.DEV_ANALYSIS,
-        PROJECT_STATUS.DEV_ANALYSIS_DONE,
-        PROJECT_STATUS.IN_DEVELOPMENT,
-        PROJECT_STATUS.SIT_IN_PROGRESS,
-        PROJECT_STATUS.SIT_PASSED,
-        PROJECT_STATUS.SIT_REVISION,
-        PROJECT_STATUS.UAT_IN_PROGRESS,
-        PROJECT_STATUS.UAT_PASSED,
-        PROJECT_STATUS.UAT_REVISION_SIT,
-        PROJECT_STATUS.UAT_REVISION_DEV,
-        PROJECT_STATUS.DEV_COMPLETED,
-        PROJECT_STATUS.RETURN_TO_DEV,
-        'READY_FOR_DEV', 'FSD_DEV_DONE', 'ARCHITECTURE_REVIEW', 'DEVELOPMENT', 'DEV_IN_PROGRESS', 'IN_SPRINT', 'SPRINT', 'CODING', 'SIT', 'UAT_INTERNAL'
-    ].includes(st)) {
-        return 2;
-    }
-
-    if ([
-        PROJECT_STATUS.READY_FOR_QA,
-        PROJECT_STATUS.QA_IN_PROGRESS,
-        PROJECT_STATUS.QA_PASSED,
-        PROJECT_STATUS.CYBER_IN_PROGRESS,
-        PROJECT_STATUS.CYBER_PASSED,
-        'TESTING', 'QA_CYBER'
-    ].includes(st)) {
-        return 3;
-    }
-
-    if ([
-        PROJECT_STATUS.READY_FOR_UAT,
-        PROJECT_STATUS.UAT_PASSED,
-        PROJECT_STATUS.PENDING_GOLIVE,
-        PROJECT_STATUS.LIVE_PRODUCTION,
-        'UAT_IN_PROGRESS', 'GOLIVE', 'COMPLETED', 'RELEASED'
-    ].includes(st)) {
-        return 4;
-    }
-
-    // Keyword fallback parsing
-    if (st.includes('QA') || st.includes('CYBER') || st.includes('TEST')) return 3;
-    if (st.includes('UAT') || st.includes('LIVE') || st.includes('RELEASE') || st.includes('GOLIVE')) return 4;
-    if (st.includes('DEV') || st.includes('SPRINT') || st.includes('CODE')) return 2;
-
-    return 1; // Default ke Fase 1
+    return PHASE_KEY_BY_STATUS[st] ?? 1;
 };
 
 /**
@@ -298,12 +298,15 @@ export const isTrackActive = (trackStatus) =>
         .includes(String(trackStatus || '').trim().toUpperCase());
 
 /**
- * Gate UAT final: dua jalur pengujian harus lulus.
+ * Gate go-live: dua jalur pengujian harus lulus sebelum PM boleh mengajukan
+ * migrasi & rilis ke Grup Infrastruktur. Tidak ada UAT final setelah QA & Siber.
+ *
  * Sengaja dihitung dari kolom jalur — bukan dari status utama — supaya urutan
  * siapa yang sign-off lebih dulu tidak mengubah hasilnya. Aturan yang sama
- * ditegakkan backend pada ProjectWorkflowService::validateTransitionPrerequisites().
+ * ditegakkan backend pada ProjectWorkflowService::validateTransitionPrerequisites()
+ * untuk transisi menuju PENDING_GOLIVE.
  */
-export const canRequestFinalUat = (project) =>
+export const canRequestGoLive = (project) =>
     isTrackPassed(getQaTrackStatus(project)) && isTrackPassed(getCyberTrackStatus(project));
 
 /**
@@ -316,7 +319,6 @@ export const canRequestFinalUat = (project) =>
  * menghasilkan 422 tanpa menambah informasi apa pun.
  */
 export const STATUSES_ALLOWING_READY_FOR_QA = [
-    PROJECT_STATUS.IN_DEVELOPMENT,
     PROJECT_STATUS.DEV_COMPLETED,
     PROJECT_STATUS.RETURN_TO_DEV,
 ];
@@ -327,17 +329,26 @@ export const canAdvanceStatusToReadyForQa = (status) =>
 /**
  * Status utama tempat fase pengujian QA masih bisa dimulai atau dilanjutkan.
  *
- * Daftar ini adalah gabungan status yang menurut matriks transisi backend boleh naik
- * ke READY_FOR_QA atau langsung ke QA_IN_PROGRESS. Artinya: seluruh proyek yang lolos
- * filter ini pasti bisa diajukan PM, didisposisi QA Lead, lalu di-sign-off tanpa
- * ditolak state machine.
+ * Proyek yang lolos filter ini boleh diajukan PM, didisposisi QA Lead, lalu di-sign-off
+ * tanpa ditolak state machine.
  *
- * SIT_PASSED dan UAT_PASSED sengaja tidak masuk. Menurut alur resmi, keluaran UAT
- * Internal adalah DEV_COMPLETED — itulah pintu masuk fase QA/Siber — sedangkan
- * UAT_PASSED adalah UAT final yang justru terjadi SESUDAH kedua jalur lulus.
+ * IN_DEVELOPMENT, SIT_PASSED, dan UAT_PASSED sengaja tidak masuk. Pengujian QA dan
+ * Keamanan Siber baru boleh dimulai setelah seluruh pekerjaan pengembangan — termasuk
+ * SIT dan UAT Internal — dinyatakan selesai, dan penanda selesainya adalah
+ * DEV_COMPLETED. UAT_PASSED hanyalah keluaran opsional UAT internal yang masih harus
+ * melewati DEV_COMPLETED lebih dulu.
+ *
+ * RETURN_TO_DEV tetap masuk atas keputusan pengguna: proyek yang dikembalikan karena
+ * defect boleh diajukan ulang langsung setelah perbaikan, tanpa dipaksa mengulang
+ * seluruh siklus SIT/UAT.
+ *
+ * Status pengujian yang sedang berjalan (READY_FOR_QA sampai CYBER_PASSED) ikut masuk
+ * karena dua jalur berjalan paralel: penunjuk siklus bisa sedang dipegang jalur lain
+ * saat PM mengajukan jalur yang belum berjalan.
+ *
+ * Daftar ini harus tetap cermin `TestingTrackService::SUBMITTABLE_MAIN_STATUSES`.
  */
 export const STATUSES_ALLOWING_QA_TRACK_START = [
-    PROJECT_STATUS.IN_DEVELOPMENT,
     PROJECT_STATUS.DEV_COMPLETED,
     PROJECT_STATUS.RETURN_TO_DEV,
     PROJECT_STATUS.READY_FOR_QA,
@@ -349,7 +360,6 @@ export const STATUSES_ALLOWING_QA_TRACK_START = [
 
 /** Padanan STATUSES_ALLOWING_QA_TRACK_START untuk jalur Keamanan Siber. */
 export const STATUSES_ALLOWING_CYBER_TRACK_START = [
-    PROJECT_STATUS.IN_DEVELOPMENT,
     PROJECT_STATUS.DEV_COMPLETED,
     PROJECT_STATUS.RETURN_TO_DEV,
     PROJECT_STATUS.READY_FOR_QA,

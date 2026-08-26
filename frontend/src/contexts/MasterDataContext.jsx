@@ -1,6 +1,5 @@
 import { createContext, useContext, useState, useEffect, useCallback } from 'react';
-import { INITIAL_DIVISIONS, INITIAL_ROLES } from '../data/masterData';
-import { roleService, divisionService } from '../services/api';
+import { groupService, roleService, divisionService } from '../services/api';
 import toast from 'react-hot-toast';
 
 const MasterDataContext = createContext(null);
@@ -9,35 +8,63 @@ const MODE = 'api';
 export function MasterDataProvider({ children }) {
     const [divisions, setDivisions] = useState([]);
     const [roles, setRoles] = useState([]);
+    const [groups, setGroups] = useState([]);
     const [isLoading, setIsLoading] = useState(true);
 
     // ─────────────────────────────────────────────
     // Load master data from API
+    //
+    // Master data role dan divisi adalah acuan tata kelola: dipakai untuk
+    // penugasan pengguna, penentuan divisi pemohon, dan matriks persetujuan.
+    // Karena itu tidak ada lagi data contoh yang disisipkan saat API gagal atau
+    // mengembalikan daftar kosong. Sebelumnya daftar bawaan dari berkas data statis
+    // tampil di halaman Master Data seolah-olah tersimpan di database, padahal
+    // barisnya tidak ada dan setiap ubah atau hapus pasti gagal. Berkas statis itu
+    // sudah dihapus; kegagalan sekarang dilaporkan lewat toast dan daftar dibiarkan
+    // kosong supaya keadaan sebenarnya terlihat.
+    //
+    // Grup kerja ikut dimuat di sini karena halaman Manajemen Role membutuhkannya
+    // sekaligus: setiap role ditempatkan pada satu grup, dan daftar pilihannya harus
+    // berasal dari tabel `groups`, bukan dari daftar tetap di frontend.
     // ─────────────────────────────────────────────
     const loadMasterData = useCallback(async () => {
         setIsLoading(true);
         try {
-            const [roleRes, divRes] = await Promise.all([
+            const [roleRes, divRes, groupRes] = await Promise.all([
                 roleService.getAll().catch(() => null),
                 divisionService.getAll().catch(() => null),
+                groupService.getAll().catch(() => null),
             ]);
 
-            if (roleRes && roleRes.data && Array.isArray(roleRes.data) && roleRes.data.length > 0) {
+            if (roleRes && Array.isArray(roleRes.data)) {
                 const formattedRoles = roleRes.data.map(r => ({
                     id: r.id,
                     _apiId: r.id,
                     name: r.display_name || r.name,
                     code: r.name,
                     description: r.description || '',
-                    menuAccess: 'Modul Standar',
+
+                    // Grup kerja yang menaungi role. Boleh kosong: role sistem seperti
+                    // `super_admin` tidak mewakili unit kerja mana pun.
+                    groupId: r.group_id ?? null,
+                    groupCode: r.group?.code || null,
+                    groupName: r.group?.name || null,
+
+                    // Daftar path menu yang boleh dilihat role ini. Daftar kosong berarti
+                    // TANPA pembatasan, bukan tanpa menu — lihat `Role::menuAccessPaths()`
+                    // di backend. Sebelum ini nilainya adalah teks tetap "Modul Standar"
+                    // yang tidak pernah dikirim maupun dibaca siapa pun.
+                    menuAccess: Array.isArray(r.menu_access) ? r.menu_access : [],
+
                     usersCount: r.users_count ?? 0,
                 }));
                 setRoles(formattedRoles);
             } else {
-                setRoles(INITIAL_ROLES);
+                setRoles([]);
+                toast.error('Gagal memuat daftar role dari server.');
             }
 
-            if (divRes && divRes.data && Array.isArray(divRes.data) && divRes.data.length > 0) {
+            if (divRes && Array.isArray(divRes.data)) {
                 const formattedDivisions = divRes.data.map(d => ({
                     id: d.id,
                     _apiId: d.id,
@@ -48,18 +75,40 @@ export function MasterDataProvider({ children }) {
                 }));
                 setDivisions(formattedDivisions);
             } else {
-                setDivisions(INITIAL_DIVISIONS);
+                setDivisions([]);
+                toast.error('Gagal memuat daftar divisi dari server.');
+            }
+
+            if (groupRes && Array.isArray(groupRes.data)) {
+                setGroups(groupRes.data.map(g => ({
+                    id: g.id,
+                    _apiId: g.id,
+                    code: g.code,
+                    name: g.name,
+                    description: g.description || '',
+                    rolesCount: g.roles_count ?? 0,
+                    usersCount: g.users_count ?? 0,
+                    roles: Array.isArray(g.roles) ? g.roles : [],
+                })));
+            } else {
+                setGroups([]);
+                toast.error('Gagal memuat daftar grup kerja dari server.');
             }
         } catch {
-            toast.error('Gagal memuat master data dari server. Menampilkan data default.');
-            setRoles(INITIAL_ROLES);
-            setDivisions(INITIAL_DIVISIONS);
+            toast.error('Gagal memuat master data dari server.');
+            setRoles([]);
+            setDivisions([]);
+            setGroups([]);
         } finally {
             setIsLoading(false);
         }
     }, []);
 
+    // Pemuatan pertama saat provider dipasang. setState sinkron di effect memang
+    // dilarang aturan react-hooks, tetapi di sini pemicunya adalah pengambilan
+    // data awal dari API (bukan turunan state yang bisa dihitung saat render).
     useEffect(() => {
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- pemuatan awal dari API, lihat catatan di atas
         loadMasterData();
     }, [loadMasterData]);
 
@@ -134,13 +183,23 @@ export function MasterDataProvider({ children }) {
     // ─────────────────────────────────────────────
     // Role CRUD — synced with API
     // ─────────────────────────────────────────────
+    // Penempatan grup dan pembatasan menu selalu dikirim apa adanya, termasuk saat
+    // nilainya kosong: `group_id: null` berarti role dikeluarkan dari grup, dan
+    // `menu_access: []` berarti pembatasan dicabut. Menghilangkan key-nya ketika kosong
+    // akan membuat kedua tindakan itu tidak pernah tersimpan.
+    const roleWritePayload = (role) => ({
+        display_name: role.name,
+        description: role.description || '',
+        group_id: role.groupId ? Number(role.groupId) : null,
+        menu_access: Array.isArray(role.menuAccess) ? role.menuAccess : [],
+    });
+
     const addRole = async (newRole) => {
         try {
             if (MODE === 'api') {
                 const res = await roleService.create({
                     name: newRole.code || newRole.name.toLowerCase().replace(/\s+/g, '_'),
-                    display_name: newRole.name,
-                    description: newRole.description || '',
+                    ...roleWritePayload(newRole),
                 });
                 if (res && res.data) {
                     await loadMasterData();
@@ -153,7 +212,8 @@ export function MasterDataProvider({ children }) {
                 id, name: newRole.name,
                 code: newRole.code || newRole.name.toLowerCase().replace(/\s+/g, '_'),
                 description: newRole.description || '',
-                menuAccess: newRole.menuAccess || 'Modul Standar',
+                groupId: newRole.groupId ?? null,
+                menuAccess: Array.isArray(newRole.menuAccess) ? newRole.menuAccess : [],
             };
             setRoles(prev => [...prev, createdObj]);
             toast.success(`Role "${newRole.name}" berhasil ditambahkan!`);
@@ -168,8 +228,7 @@ export function MasterDataProvider({ children }) {
             if (MODE === 'api' && typeof apiId === 'number') {
                 await roleService.update(apiId, {
                     name: updatedRole.code,
-                    display_name: updatedRole.name,
-                    description: updatedRole.description,
+                    ...roleWritePayload(updatedRole),
                 });
                 await loadMasterData();
                 toast.success(`Role "${updatedRole.name}" berhasil diperbarui di database!`);
@@ -205,10 +264,68 @@ export function MasterDataProvider({ children }) {
         }
     };
 
+    // ─────────────────────────────────────────────
+    // Group CRUD — synced with API
+    //
+    // Grup adalah pengelompokan role, bukan gerbang otorisasi: memindahkan role antar
+    // grup mengubah pengelompokan dan tampilan, bukan hak transisi status. Hak itu tetap
+    // ditentukan nama role di backend.
+    // ─────────────────────────────────────────────
+    const addGroup = async (newGroup) => {
+        try {
+            const res = await groupService.create({
+                code: newGroup.code,
+                name: newGroup.name,
+                description: newGroup.description || '',
+            });
+            if (res && res.data) {
+                await loadMasterData();
+                toast.success(`Grup "${newGroup.name}" berhasil ditambahkan & tersimpan ke database!`);
+                return true;
+            }
+            return false;
+        } catch (err) {
+            toast.error(`Gagal menambahkan grup: ${err.message}`);
+            return false;
+        }
+    };
+
+    const editGroup = async (id, updatedGroup) => {
+        try {
+            await groupService.update(id, {
+                code: updatedGroup.code,
+                name: updatedGroup.name,
+                description: updatedGroup.description || '',
+            });
+            await loadMasterData();
+            toast.success(`Grup "${updatedGroup.name}" berhasil diperbarui di database!`);
+            return true;
+        } catch (err) {
+            toast.error(`Gagal memperbarui grup: ${err.message}`);
+            return false;
+        }
+    };
+
+    const deleteGroup = async (id) => {
+        try {
+            const target = groups.find(g => g.id === id);
+            await groupService.delete(id);
+            await loadMasterData();
+            toast.success(`Grup "${target ? target.name : id}" berhasil dihapus dari database!`);
+            return true;
+        } catch (err) {
+            // Backend menolak penghapusan grup yang masih berisi role, dan pesannya sudah
+            // menyebutkan berapa role yang harus dipindahkan lebih dulu.
+            toast.error(`Gagal menghapus grup: ${err.message}`);
+            return false;
+        }
+    };
+
     return (
         <MasterDataContext.Provider value={{
             divisions,
             roles,
+            groups,
             isLoading,
             addDivision,
             editDivision,
@@ -216,6 +333,9 @@ export function MasterDataProvider({ children }) {
             addRole,
             editRole,
             deleteRole,
+            addGroup,
+            editGroup,
+            deleteGroup,
             refreshMasterData: loadMasterData,
         }}>
             {children}

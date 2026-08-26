@@ -1,126 +1,155 @@
-import { useState, useEffect, useMemo } from 'react';
-import RBBBadge from '../../components/RBBBadge';
-import ProjectTypeBadge from '../../components/ProjectTypeBadge';
+import { useState, useMemo } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import { useProjects } from '../../contexts/ProjectContext';
-import { taskService } from '../../services/api';
+import {
+    PROJECT_STATUS,
+    PROJECT_STATUS_COLOR,
+    PROJECT_STATUS_LABEL,
+} from '../../constants/projectStatus';
 import { useNavigate } from 'react-router-dom';
-import toast from 'react-hot-toast';
 import {
     Search,
     List,
     Filter,
 } from 'lucide-react';
 
-const getInitials = (name) => {
-    if (!name) return 'U';
-    const parts = name.split(' ');
-    if (parts.length === 1) return parts[0].charAt(0).toUpperCase();
-    return (parts[0].charAt(0) + parts[parts.length - 1].charAt(0)).toUpperCase();
+/**
+ * Identitas PM sebuah proyek.
+ *
+ * `pm_id` selalu ada pada respons daftar proyek, sedangkan relasi `pm` hanya terisi
+ * bila ikut dimuat — jadi ID dibaca dari relasinya lebih dulu, lalu dari kolomnya.
+ * Mengembalikan null bila proyek memang belum punya PM.
+ */
+const getProjectPmId = (project) => {
+    const id = Number(project?.pm?.id ?? project?.pm_id);
+    return Number.isFinite(id) && id > 0 ? id : null;
 };
 
-const getStatusBadgeStyle = (status) => {
-    switch (status) {
-        case 'PENDING': return 'bg-amber-100 text-amber-800 border-amber-200';
-        case 'IN_REVIEW': return 'bg-blue-100 text-blue-800 border-blue-200';
-        case 'ANALYSIS_APPROVED': return 'bg-indigo-100 text-indigo-800 border-indigo-200';
-        case 'DEV_ANALYSIS': return 'bg-purple-100 text-purple-800 border-purple-200';
-        case 'DEV_ANALYSIS_DONE': return 'bg-purple-100 text-purple-800 border-purple-200';
-        case 'READY_FOR_DEVELOPMENT': return 'bg-cyan-100 text-cyan-800 border-cyan-200';
-        case 'IN_DEVELOPMENT': return 'bg-blue-100 text-blue-800 border-blue-200 font-bold';
-        case 'RETURN_TO_DEV': return 'bg-red-100 text-red-800 border-red-200 font-bold animate-pulse';
-        case 'READY_FOR_QA': return 'bg-purple-100 text-purple-800 border-purple-200';
-        case 'QA_IN_PROGRESS': return 'bg-purple-100 text-purple-800 border-purple-200';
-        case 'QA_PASSED': return 'bg-emerald-100 text-emerald-800 border-emerald-200';
-        case 'CYBER_IN_PROGRESS': return 'bg-orange-100 text-orange-800 border-orange-200';
-        case 'CYBER_PASSED': return 'bg-teal-100 text-teal-800 border-teal-200';
-        case 'PENDING_GOLIVE': return 'bg-orange-100 text-orange-800 border-orange-200 font-bold';
-        case 'LIVE_PRODUCTION': return 'bg-emerald-100 text-emerald-800 border-emerald-200 font-bold';
-        default: return 'bg-gray-100 text-gray-700 border-gray-200';
-    }
-};
+/** Nama PM untuk ditampilkan; relasi `pm` adalah satu-satunya sumber namanya. */
+const getProjectPmName = (project) => project?.pm?.name || null;
 
 export default function Kanban() {
     const { user } = useAuth();
-    const { projects } = useProjects();
+    const { projects, isLoading } = useProjects();
     const navigate = useNavigate();
 
-    const [viewMode, setViewMode] = useState('project'); // 'project' | 'task'
-    const [selectedProjectId, setSelectedProjectId] = useState('');
-    const [selectedPmFilter, setSelectedPmFilter] = useState(() => {
-        if (user?.role === 'super_admin' || user?.role === 'lead_group' || user?.role === 'head_of_it' || user?.role === 'development_lead') return 'ALL';
-        if (user?.role === 'project_manager') return user?.name || 'MY_PROJECTS';
-        return 'ALL';
-    });
+    // Nilai awal filter memakai penanda 'MY_PROJECTS', bukan nama pengguna.
+    // Sebelumnya nilai awalnya adalah `user.name`, yang membuat filter jatuh ke cabang
+    // "filter per PM tertentu" dan mencocokkan proyek berdasarkan nama — sehingga PM
+    // dengan nama kosong melihat seluruh proyek, dan PM yang namanya merupakan
+    // potongan nama rekannya melihat proyek rekannya juga.
+    const [selectedPmFilter, setSelectedPmFilter] = useState(() => (
+        user?.role === 'project_manager' ? 'MY_PROJECTS' : 'ALL'
+    ));
     const [searchTerm, setSearchTerm] = useState('');
-    const [divisionFilter, setDivisionFilter] = useState('All');
-    const [tasks, setTasks] = useState([]);
 
-    // SDLC Project Columns with Comprehensive Status Lists
+    // Kolom papan Kanban SDLC.
+    //
+    // Setiap daftar hanya memuat anggota App\Enums\ProjectStatus dan bersifat lengkap:
+    // seluruh 27 status enum terpetakan ke tepat satu kolom. Versi sebelumnya memuat
+    // status karangan ('DRAFT', 'IN_SPRINT', 'CODING', 'QA_CYBER', 'RELEASED', dsb.)
+    // yang tidak pernah cocok, sekaligus melewatkan status nyata SIT_REVISION,
+    // UAT_REVISION_SIT, dan UAT_REVISION_DEV sehingga proyek revisi terlempar ke
+    // Fase 1 oleh pencocokan potongan kata di bawahnya.
+    //
+    // Lima kolom ini adalah pemecahan yang lebih halus dari empat fase
+    // `getProjectPhaseKey`: kolom Fase 2 dan Fase 3 di sini sama-sama berada di
+    // fase 2 pemetaan tersebut. Urutannya tetap sama, jadi keduanya tidak saling
+    // bertentangan — tetapi jumlah fase pada layar lain tidak boleh disalin dari sini.
     const sdlcColumns = [
         {
             id: 'phase1',
             title: 'Fase 1: Inisiasi & Review',
             color: 'border-blue-500 bg-blue-50/30',
-            statuses: ['PENDING', 'DRAFT', 'SUBMITTED', 'NEW', 'IN_REVIEW', 'PLANNING_ANALYSIS', 'ANALYSIS', 'ANALYSIS_APPROVED', 'DISPOSITION', 'VERIFICATION_PENDING', 'ANALYST_SUBMITTED'],
+            statuses: [
+                PROJECT_STATUS.PENDING,
+                PROJECT_STATUS.IN_REVIEW,
+                PROJECT_STATUS.ANALYSIS_APPROVED,
+                PROJECT_STATUS.REJECTED,
+                PROJECT_STATUS.ON_HOLD,
+                PROJECT_STATUS.CANCELLED,
+            ],
         },
         {
             id: 'phase2',
             title: 'Fase 2: Analisis & Desain',
             color: 'border-indigo-500 bg-indigo-50/30',
-            statuses: ['DEV_ANALYSIS', 'DEV_ANALYSIS_DONE', 'READY_FOR_DEVELOPMENT', 'READY_FOR_DEV', 'FSD_DEV_DONE', 'ARCHITECTURE_REVIEW'],
+            statuses: [
+                PROJECT_STATUS.READY_FOR_DEVELOPMENT,
+                PROJECT_STATUS.DEV_ANALYSIS,
+                PROJECT_STATUS.DEV_ANALYSIS_DONE,
+            ],
         },
         {
             id: 'phase3',
             title: 'Fase 3: Development & SIT/UAT Internal',
             color: 'border-amber-500 bg-amber-50/30',
-            statuses: ['IN_DEVELOPMENT', 'DEVELOPMENT', 'DEV_IN_PROGRESS', 'IN_SPRINT', 'RETURN_TO_DEV', 'SPRINT', 'CODING', 'SIT_IN_PROGRESS', 'SIT_PASSED', 'UAT_IN_PROGRESS', 'UAT_PASSED', 'DEV_COMPLETED'],
+            statuses: [
+                PROJECT_STATUS.IN_DEVELOPMENT,
+                PROJECT_STATUS.RETURN_TO_DEV,
+                PROJECT_STATUS.SIT_IN_PROGRESS,
+                PROJECT_STATUS.SIT_PASSED,
+                PROJECT_STATUS.SIT_REVISION,
+                PROJECT_STATUS.UAT_IN_PROGRESS,
+                PROJECT_STATUS.UAT_REVISION_SIT,
+                PROJECT_STATUS.UAT_REVISION_DEV,
+                PROJECT_STATUS.UAT_PASSED,
+                PROJECT_STATUS.DEV_COMPLETED,
+            ],
         },
         {
             id: 'phase4',
             title: 'Fase 4: Pengujian QA & Cyber',
             color: 'border-purple-500 bg-purple-50/30',
-            statuses: ['READY_FOR_QA', 'QA_IN_PROGRESS', 'QA_PASSED', 'CYBER_IN_PROGRESS', 'CYBER_PASSED', 'TESTING', 'QA_CYBER'],
+            statuses: [
+                PROJECT_STATUS.READY_FOR_QA,
+                PROJECT_STATUS.QA_IN_PROGRESS,
+                PROJECT_STATUS.QA_PASSED,
+                PROJECT_STATUS.CYBER_IN_PROGRESS,
+                PROJECT_STATUS.CYBER_PASSED,
+            ],
         },
         {
             id: 'phase5',
             title: 'Fase 5: Rilis & Quality Gate',
             color: 'border-emerald-500 bg-emerald-50/30',
-            statuses: ['READY_FOR_UAT', 'UAT_PASSED', 'PENDING_GOLIVE', 'GOLIVE', 'LIVE_PRODUCTION', 'COMPLETED', 'RELEASED'],
+            statuses: [
+                PROJECT_STATUS.READY_FOR_UAT,
+                PROJECT_STATUS.PENDING_GOLIVE,
+                PROJECT_STATUS.LIVE_PRODUCTION,
+            ],
         },
     ];
 
-    // Intelligent Phase Fallback Mapping Helper
+    // Status di luar enum tidak bisa datang dari API, jadi tidak ada penebakan
+    // potongan kata: nilai tak dikenal ditaruh di kolom pertama agar tetap terlihat.
     const getProjectPhaseId = (projectStatus) => {
         const statusUpper = String(projectStatus || '').toUpperCase();
-        for (const col of sdlcColumns) {
-            if (col.statuses.includes(statusUpper)) {
-                return col.id;
-            }
-        }
-        if (statusUpper.includes('DEV') || statusUpper.includes('SPRINT') || statusUpper.includes('CODE')) return 'phase3';
-        if (statusUpper.includes('QA') || statusUpper.includes('TEST') || statusUpper.includes('CYBER')) return 'phase4';
-        if (statusUpper.includes('UAT') || statusUpper.includes('LIVE') || statusUpper.includes('RELEASE')) return 'phase5';
-        if (statusUpper.includes('DESAIN') || statusUpper.includes('ARCH')) return 'phase2';
-        return 'phase1';
+        const column = sdlcColumns.find((col) => col.statuses.includes(statusUpper));
+        return column ? column.id : 'phase1';
     };
 
     // Filter projects for Project SDLC view
     const filteredProjects = useMemo(() => {
         let result = [...(projects || [])];
 
-        // Filter per PM
+        // Penyaringan per PM memakai `pm_id`, bukan pencocokan nama.
+        //
+        // Versi sebelumnya membandingkan nama PM dengan `String.includes()`. Pola itu
+        // salah dalam dua arah sekaligus: nama kosong menghasilkan `includes('')` yang
+        // selalu benar sehingga seluruh proyek lolos, dan nama yang merupakan potongan
+        // nama orang lain ("Budi" di dalam "Budi Santoso") menarik proyek milik PM lain.
+        // Nama juga bukan identitas — dua pegawai boleh bernama sama.
         if (selectedPmFilter === 'MY_PROJECTS') {
-            const myName = user?.name || '';
-            result = result.filter(p => {
-                const pmName = typeof p.pm === 'object' ? (p.pm?.name || '') : String(p.pmName || p.pm || p.assignedPM || '');
-                return pmName.toLowerCase().includes(myName.toLowerCase());
-            });
+            const myId = Number(user?.id);
+            result = Number.isFinite(myId) && myId > 0
+                ? result.filter((p) => getProjectPmId(p) === myId)
+                : [];
         } else if (selectedPmFilter !== 'ALL') {
-            result = result.filter(p => {
-                const pmName = typeof p.pm === 'object' ? (p.pm?.name || '') : String(p.pmName || p.pm || p.assignedPM || '');
-                return pmName.toLowerCase().includes(selectedPmFilter.toLowerCase());
-            });
+            const pmId = Number(selectedPmFilter);
+            result = Number.isFinite(pmId) && pmId > 0
+                ? result.filter((p) => getProjectPmId(p) === pmId)
+                : result;
         }
 
         if (searchTerm) {
@@ -132,40 +161,32 @@ export default function Kanban() {
             );
         }
 
-        if (divisionFilter !== 'All') {
-            result = result.filter(p => {
-                const divStr = typeof p.division === 'object' ? p.division?.name : p.division;
-                return divStr === divisionFilter;
-            });
-        }
-
         return result;
-    }, [projects, selectedPmFilter, user, searchTerm, divisionFilter]);
+    }, [projects, selectedPmFilter, user, searchTerm]);
 
-    // Fetch tasks if in task view
-    useEffect(() => {
-        if (viewMode === 'task' && selectedProjectId) {
-            const fetchTasks = async () => {
-                try {
-                    const res = await taskService.getByProject(selectedProjectId);
-                    const taskList = res?.data ?? [];
-                    setTasks(taskList.map(t => ({
-                        id: t.id,
-                        stage: t.status || 'todo',
-                        code: `TSK-${t.id}`,
-                        title: t.title,
-                        description: t.description,
-                        assignee: t.assignee?.name || 'Belum Dialokasi',
-                        assigneeAvatar: getInitials(t.assignee?.name),
-                        deadline: t.due_date || 'TBD',
-                    })));
-                } catch {
-                    setTasks([]);
-                }
-            };
-            fetchTasks();
-        }
-    }, [viewMode, selectedProjectId]);
+    // Pilihan filter PM diturunkan dari data proyek yang ada, bukan daftar nama tetap:
+    // daftar tetap ikut usang setiap kali susunan PM berubah dan menampilkan orang yang
+    // tidak ada di sistem. Sengaja memakai `projects`, bukan `filteredProjects`, agar
+    // pilihannya tidak menyusut karena filter yang sedang aktif. Nilai pilihannya adalah
+    // ID PM supaya penyaringannya tidak bergantung pada nama.
+    const pmFilterOptions = useMemo(() => {
+        const nameById = new Map();
+
+        (projects || []).forEach((project) => {
+            const pmId = getProjectPmId(project);
+            if (pmId === null || nameById.has(pmId)) return;
+            nameById.set(pmId, getProjectPmName(project) || `PM #${pmId}`);
+        });
+
+        return [...nameById.entries()]
+            .map(([id, name]) => ({ id, name }))
+            .sort((a, b) => a.name.localeCompare(b.name, 'id'));
+    }, [projects]);
+
+    // Muat pertama dibedakan dari papan yang memang kosong: tanpa pemisahan ini setiap
+    // kolom menyatakan "Tidak ada proyek di fase ini" selagi permintaannya masih jalan.
+    const totalProjects = (projects || []).length;
+    const isFirstLoad = isLoading && totalProjects === 0;
 
     return (
         <div className="flex-1 overflow-y-auto px-6 py-4 md:px-8 md:py-5 bg-[#f8f9fb] animate-slide-up">
@@ -207,7 +228,7 @@ export default function Kanban() {
                                 : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
                         }`}
                     >
-                        🌐 Semua Proyek SDLC ({projects.length})
+                        🌐 Semua Proyek SDLC ({totalProjects})
                     </button>
 
                     {user?.role === 'project_manager' && (
@@ -227,12 +248,16 @@ export default function Kanban() {
                         value={['ALL', 'MY_PROJECTS'].includes(selectedPmFilter) ? '' : selectedPmFilter}
                         onChange={(e) => setSelectedPmFilter(e.target.value || 'ALL')}
                         className="px-3 py-1.5 rounded-xl text-xs font-semibold border border-gray-200 bg-white text-gray-700 outline-none focus:border-[#00529C]"
+                        disabled={pmFilterOptions.length === 0}
                     >
-                        <option value="">-- Filter Per Project Manager --</option>
-                        <option value="Budi Santoso">Budi Santoso</option>
-                        <option value="Dewi Lestari">Dewi Lestari</option>
-                        <option value="Andi Wijaya">Andi Wijaya</option>
-                        <option value="Citra Kirana">Citra Kirana</option>
+                        <option value="">
+                            {pmFilterOptions.length === 0
+                                ? '-- Belum ada PM pada data proyek --'
+                                : '-- Filter Per Project Manager --'}
+                        </option>
+                        {pmFilterOptions.map(pm => (
+                            <option key={pm.id} value={pm.id}>{pm.name}</option>
+                        ))}
                     </select>
                 </div>
             </div>
@@ -259,7 +284,7 @@ export default function Kanban() {
                             <div className="flex-1 space-y-3">
                                 {colProjects.length === 0 ? (
                                     <div className="h-36 border-2 border-dashed border-gray-200 rounded-xl flex items-center justify-center text-gray-400 text-xs font-medium text-center p-3">
-                                        Tidak ada proyek di fase ini
+                                        {isFirstLoad ? 'Memuat data proyek...' : 'Tidak ada proyek di fase ini'}
                                     </div>
                                 ) : (
                                     colProjects.map(p => (
@@ -271,8 +296,13 @@ export default function Kanban() {
                                                 <span className="text-[11px] font-mono font-bold text-[#00529C]">
                                                     {p.reqId || p.req_id || `REQ-${p.id}`}
                                                 </span>
-                                                <span className={`text-[10px] px-2 py-0.5 font-bold rounded-md border ${getStatusBadgeStyle(p.status)}`}>
-                                                    {p.status}
+                                                {/* Warna dan label diambil dari peta status bersama. Peta warna
+                                                    lokal sebelumnya hanya mengenali 15 dari 27 status, jadi 12
+                                                    status sisanya — termasuk seluruh siklus SIT/UAT dan
+                                                    DITOLAK/DIBATALKAN — tampil abu-abu seragam dengan kode
+                                                    enum mentah sebagai teksnya. */}
+                                                <span className={`text-[10px] px-2 py-0.5 font-bold rounded-md border ${PROJECT_STATUS_COLOR[p.status] || 'bg-gray-100 text-gray-700 border-gray-200'}`}>
+                                                    {PROJECT_STATUS_LABEL[p.status] || p.status}
                                                 </span>
                                             </div>
 
@@ -283,12 +313,18 @@ export default function Kanban() {
                                             <div className="text-[11px] text-gray-500 space-y-1 mb-3 pt-2 border-t border-gray-100">
                                                 <div className="flex items-center justify-between">
                                                     <span>Divisi:</span>
-                                                    <span className="font-medium text-gray-700">{p.division?.name || p.division}</span>
+                                                    {/* `ProjectContext.normalizeProject` sudah meratakan divisi
+                                                        menjadi string, jadi tidak ada lagi pembacaan `.name`
+                                                        di sini — cabang itu selalu undefined. */}
+                                                    <span className="font-medium text-gray-700">{p.division || 'Tidak Diketahui'}</span>
                                                 </div>
                                                 <div className="flex items-center justify-between">
                                                     <span>PM:</span>
+                                                    {/* Nama PM hanya berasal dari relasi `pm`. Kunci `pmName` dan
+                                                        `assignedPM` yang dibaca sebelumnya tidak ada pada
+                                                        `ProjectResource` maupun hasil normalisasi konteks. */}
                                                     <span className="font-semibold text-gray-800">
-                                                        {typeof p.pm === 'object' ? (p.pm?.name || 'Belum Dialokasi') : (p.pmName || p.pm || p.assignedPM || 'Belum Dialokasi')}
+                                                        {getProjectPmName(p) || 'Belum Dialokasi'}
                                                     </span>
                                                 </div>
                                             </div>

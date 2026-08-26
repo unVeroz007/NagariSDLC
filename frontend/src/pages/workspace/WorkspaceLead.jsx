@@ -1,20 +1,14 @@
 import RBBBadge from '../../components/RBBBadge';
 import ProjectTypeBadge from '../../components/ProjectTypeBadge';
 import { useState, useMemo, useRef, useEffect, useCallback } from 'react';
-import { useAuth } from '../../contexts/AuthContext';
 import {
     User,
     Download,
-    FileText,
-    Calendar,
     Clock,
-    Filter,
     Eye,
     Check,
     X,
     AlertCircle,
-    ChevronRight,
-    Plus,
     Send,
     Search,
     Users,
@@ -23,24 +17,56 @@ import {
     UserCheck,
     CheckCircle2,
 } from 'lucide-react';
-import { useProjects, getFileFromStore, getProjectRealDocuments } from '../../contexts/ProjectContext';
+import { useProjects } from '../../contexts/ProjectContext';
+import { getProjectRealDocuments } from '../../utils/projectDocuments';
 import { userService } from '../../services/api';
 import { documentService } from '../../services/api';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useSearchParams } from 'react-router-dom';
 import { useNotifications } from '../../contexts/NotificationContext';
 import LoadingSpinner from '../../components/LoadingSpinner';
 import EmptyState from '../../components/EmptyState';
 import DocumentViewerModal from '../../components/DocumentViewerModal';
 import ProjectDetailModal from '../../components/ProjectDetailModal';
 import toast from 'react-hot-toast';
-import { getDocExtLabel, getDocIconStyle } from '../../utils/documentNaming';
+import { formatDocSizeLabel as docSizeLabel, getDocExtLabel, getDocIconStyle } from '../../utils/documentNaming';
+import {
+    getProjectPriorityBadgeLabel,
+    getProjectPriorityClass,
+} from '../../constants/projectPriority';
+import { useNow } from '../../hooks/useNow';
+import { isPlanningQaAnalyst } from '../../constants/roles';
+
+/**
+ * Format tanggal unggah berkas menjadi "3 Sep".
+ *
+ * Tanggal unggah adalah bagian jejak audit dokumen, jadi bila API tidak
+ * mengirimkannya yang ditampilkan adalah tanda kosong — bukan tanggal hari ini,
+ * yang akan terbaca sebagai fakta padahal karangan.
+ */
+const formatUploadDate = (value) => {
+    if (!value) return '-';
+    const parsed = new Date(value);
+    if (Number.isNaN(parsed.getTime())) return '-';
+    return parsed.toLocaleDateString('id-ID', { day: 'numeric', month: 'short' });
+};
+
+// Tanggal panjang, atau null bila nilainya kosong atau bukan tanggal yang sah.
+const longDateLabel = (value) => {
+    if (!value) return null;
+    const parsed = new Date(value);
+    return Number.isNaN(parsed.getTime())
+        ? null
+        : parsed.toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' });
+};
 
 export default function WorkspaceLead() {
-    const { user } = useAuth();
-    const navigate = useNavigate();
     const [searchParams] = useSearchParams();
     const { addNotification } = useNotifications();
     const { projects, updateProject, isLoading } = useProjects();
+
+    // Perkiraan tanggal selesai kajian bergantung pada waktu sekarang. Nilainya
+    // diambil lewat hook agar render tetap idempoten.
+    const nowMs = useNow();
 
     const initialTab = searchParams.get('tab') === 'verification' ? 'verification' : 'disposition';
     const [activeTab, setActiveTab] = useState(initialTab);
@@ -49,14 +75,24 @@ export default function WorkspaceLead() {
     const [projectSearch, setProjectSearch] = useState('');
     const [analysts, setAnalysts] = useState([]);
 
-    // Search filter helper untuk antrean
+    // Penyaring pencarian antrean.
+    //
+    // Kartu antrean menampilkan `req_id` (mis. "REQ-2026-015") dan placeholder kolom
+    // pencarian menjanjikan "Cari ID". Versi sebelumnya hanya mencocokkan `p.id`,
+    // sehingga mengetik ID yang terpampang di layar tidak pernah menemukan apa pun.
     const applyProjectSearch = (list) => {
         if (!projectSearch.trim()) return list;
         const term = projectSearch.toLowerCase();
+        const haystack = (p) => [
+            p.req_id,
+            p.reqId,
+            p.id,
+            p.title,
+            p.name,
+            typeof p.division === 'object' ? p.division?.name : p.division,
+        ];
         return list.filter(p =>
-            String(p.id || '').toLowerCase().includes(term) ||
-            String(p.title || p.name || '').toLowerCase().includes(term) ||
-            String(p.division || '').toLowerCase().includes(term)
+            haystack(p).some(value => String(value ?? '').toLowerCase().includes(term))
         );
     };
 
@@ -99,53 +135,16 @@ export default function WorkspaceLead() {
                 ? analyzingQueue 
                 : verificationQueue
     );
-    const [selectedProject, setSelectedProject] = useState(null);
-
-    // Re-sync selectedProject to latest project data after each loadProjects refresh
-    useEffect(() => {
-        if (!selectedProject) return;
-        const fresh = (projects || []).find(p => String(p.id) === String(selectedProject.id)
-            || String(p.reqId || p.req_id) === String(selectedProject.reqId || selectedProject.req_id));
-        if (fresh) setSelectedProject(fresh);
-    }, [projects]);
-
-    // Set default selected project
-    const currentSelected = selectedProject || activeQueue[0] || null;
-
-    const currentFsdDoc = useMemo(() => {
-        if (!currentSelected) return null;
-        if (currentSelected.fsdDocument?.name || currentSelected.fsdDocument?.file_name) {
-            return {
-                name: currentSelected.fsdDocument.name || currentSelected.fsdDocument.file_name,
-                size: currentSelected.fsdDocument.size || currentSelected.fsdDocument.file_size || '1.8 MB',
-                url: currentSelected.fsdDocument.url || currentSelected.fsdDocument.fileUrl || null
-            };
-        }
-        if (Array.isArray(currentSelected.documents) && currentSelected.documents.length > 0) {
-            const found = currentSelected.documents.find(d => 
-                d.type === 'fsd' || d.doc_type === 'fsd' || (d.name && d.name.toLowerCase().includes('fsd'))
-            ) || currentSelected.documents[0];
-            if (found) {
-                return {
-                    name: found.name || found.file_name,
-                    size: found.size || found.file_size || '1.8 MB',
-                    url: found.url || found.fileUrl || null
-                };
-            }
-        }
-        if (currentSelected.analystResult?.fsdFile) {
-            return {
-                name: currentSelected.analystResult.fsdFile,
-                size: '1.8 MB',
-                url: currentSelected.analystResult.fsdUrl || null
-            };
-        }
-        return {
-            name: currentSelected.documents?.[0]?.name || 'Dokumen_SDLC.pdf',
-            size: '1.8 MB',
-            url: null
-        };
-    }, [currentSelected]);
+    // Proyek yang dibuka: state hanya menyimpan id-nya. Objeknya dicari ulang dari
+    // daftar proyek terbaru pada setiap render, sehingga panel detail otomatis ikut
+    // terbarui setelah refresh/polling. Sebelumnya objek proyek disimpan di state dan
+    // sebuah effect harus menyalin ulang versi terbarunya setiap kali data berubah.
+    const [selectedProjectId, setSelectedProjectId] = useState(null);
+    const pickedProject = selectedProjectId
+        ? (projects || []).find(p => String(p.id) === String(selectedProjectId))
+        : null;
+    const currentSelected = pickedProject || activeQueue[0] || null;
+    const analystTargetLabel = longDateLabel(currentSelected?.analystResult?.estimation);
 
     const [selectedAnalyst, setSelectedAnalyst] = useState('');
     const [deadline, setDeadline] = useState('');
@@ -180,22 +179,23 @@ export default function WorkspaceLead() {
     const [isAnalystLoading, setIsAnalystLoading] = useState(false);
     const analystSearchRef = useRef(null);
 
-    // Load analysts from API (users with analyst roles)
+    // Load analysts from API.
+    //
+    // Kumpulan analisnya adalah seluruh analis Grup Perencanaan dan Quality Assurance
+    // (`constants/roles.js`), bukan hanya role `analyst`. Perencanaan dan QA satu grup
+    // dengan orang yang sama, jadi anggota bernama role `qa_tester` pun sah menerima
+    // disposisi analisis Fase 1 — cerminan penyaring backend di `ProjectController@update`.
     useEffect(() => {
         const loadAnalysts = async () => {
             setIsAnalystLoading(true);
             try {
                 const res = await userService.getAll();
                 const users = res.data || res || [];
-                const analystRoles = ['analyst'];
-                const filtered = users.filter(u => {
-                    const roleName = u.role_detail?.name || u.role || '';
-                    return analystRoles.includes(roleName);
-                }).map(u => ({
+                const filtered = users.filter(isPlanningQaAnalyst).map(u => ({
                     id: u.id,
                     name: u.name,
                     email: u.email,
-                    department: u.division_detail?.name || u.division || 'IT',
+                    department: u.division_detail?.name || u.division || '',
                     workload: 0,
                 }));
                 setAnalysts(filtered);
@@ -300,9 +300,9 @@ export default function WorkspaceLead() {
 
             const nextQueue = verificationQueue.filter(p => p.id !== currentSelected.id);
             if (nextQueue.length > 0) {
-                setSelectedProject(nextQueue[0]);
+                setSelectedProjectId(nextQueue[0].id);
             } else {
-                setSelectedProject(null);
+                setSelectedProjectId(null);
             }
         } catch (err) {
             toast.error('Gagal verifikasi: ' + (err.message || 'Terjadi kesalahan'));
@@ -339,9 +339,9 @@ export default function WorkspaceLead() {
             setRejectNotes('');
             const nextQueue = verificationQueue.filter(p => p.id !== currentSelected.id);
             if (nextQueue.length > 0) {
-                setSelectedProject(nextQueue[0]);
+                setSelectedProjectId(nextQueue[0].id);
             } else {
-                setSelectedProject(null);
+                setSelectedProjectId(null);
             }
         } catch (err) {
             toast.error('Gagal menolak: ' + (err.message || 'Terjadi kesalahan'));
@@ -378,9 +378,9 @@ export default function WorkspaceLead() {
             setRevisionNotes('');
             const nextQueue = verificationQueue.filter(p => p.id !== currentSelected.id);
             if (nextQueue.length > 0) {
-                setSelectedProject(nextQueue[0]);
+                setSelectedProjectId(nextQueue[0].id);
             } else {
-                setSelectedProject(null);
+                setSelectedProjectId(null);
             }
         } catch (err) {
             toast.error('Gagal mengembalikan: ' + (err.message || 'Terjadi kesalahan'));
@@ -389,55 +389,50 @@ export default function WorkspaceLead() {
         }
     };
 
-    const handleAssign = () => {
+    // Disposisi proyek baru ke System Analyst.
+    //
+    // Hasil `updateProject` ditunggu dan kegagalannya ditangani, sama seperti
+    // `handleVerify`/`handleReject`/`handleRevision` di file ini. Versi sebelumnya
+    // memanggil `updateProject` tanpa `await` maupun `.catch()`, sehingga penulisan API
+    // yang gagal tetap memunculkan toast "berhasil ditugaskan", mengirim notifikasi ke
+    // analis, dan memajukan antrean untuk disposisi yang tidak pernah tersimpan.
+    const handleAssign = async () => {
         if (!currentSelected) return;
         if (!selectedAnalyst) {
             toast.error('Pilih analyst terlebih dahulu!');
             return;
         }
         setIsSubmitting(true);
-        
+
         const assignedNote = notes && notes.trim() !== '' ? notes.trim() : null;
 
-        updateProject(currentSelected.id, {
-            analyst: selectedAnalyst,
-            assignedAnalyst: selectedAnalyst,
-            status: 'IN_REVIEW',
-            deadline: deadline || null,
-            leadNote: assignedNote,
-            leadNotes: assignedNote,
-            notes: assignedNote,
-            assignmentNote: assignedNote,
-            dispositionNotes: assignedNote
-        });
+        try {
+            await updateProject(currentSelected.id, {
+                analyst: selectedAnalyst,
+                assignedAnalyst: selectedAnalyst,
+                status: 'IN_REVIEW',
+                deadline: deadline || null,
+                leadNote: assignedNote,
+                notes: assignedNote,
+            });
 
-        addNotification(
-            'Disposisi Berhasil',
-            `Proyek ${currentSelected.title || currentSelected.name} telah ditugaskan ke ${selectedAnalyst}`,
-            'info',
-            '/workspace/analyst'
-        );
-        
-        toast.success(`Proyek "${currentSelected?.title || currentSelected?.name}" berhasil ditugaskan ke System Analyst ${selectedAnalyst}!`);
-        setIsSubmitting(false);
+            addNotification(
+                'Disposisi Berhasil',
+                `Proyek ${currentSelected.title || currentSelected.name} telah ditugaskan ke ${selectedAnalyst}`,
+                'info',
+                '/workspace/analyst'
+            );
 
-        const nextQueue = dispositionQueue.filter(p => p.id !== currentSelected.id);
-        if (nextQueue.length > 0) {
-            setSelectedProject(nextQueue[0]);
+            toast.success(`Proyek "${currentSelected?.title || currentSelected?.name}" berhasil ditugaskan ke System Analyst ${selectedAnalyst}!`);
+
+            const nextQueue = dispositionQueue.filter(p => p.id !== currentSelected.id);
+            setSelectedProjectId(nextQueue.length > 0 ? nextQueue[0].id : null);
             setSelectedAnalyst('');
             setNotes('');
-        } else {
-            setSelectedProject(null);
-            setSelectedAnalyst('');
-            setNotes('');
-        }
-    };
-    const getPriorityColor = (priority) => {
-        switch (priority) {
-            case 'High': return 'bg-red-500/10 text-red-600 border-red-200';
-            case 'Medium': return 'bg-yellow-500/10 text-yellow-600 border-yellow-200';
-            case 'Low': return 'bg-green-500/10 text-green-600 border-green-200';
-            default: return 'bg-gray-100 text-gray-600';
+        } catch (err) {
+            toast.error('Gagal menugaskan analis: ' + (err.message || 'Terjadi kesalahan'));
+        } finally {
+            setIsSubmitting(false);
         }
     };
 
@@ -445,25 +440,6 @@ export default function WorkspaceLead() {
     // effect (Escape + lock scroll body), jadi callback inline akan memasang ulang
     // listener setiap render induk.
     const handleClosePreviewModal = useCallback(() => setIsPreviewModalOpen(false), []);
-
-    const getFileIcon = (type) => {
-        if (!type) return 'bg-gray-100 text-gray-600';
-        const icons = {
-            pdf: 'bg-red-100 text-red-600',
-            docx: 'bg-blue-100 text-blue-600',
-            xlsx: 'bg-green-100 text-green-600',
-            pptx: 'bg-orange-100 text-orange-600',
-            zip: 'bg-purple-100 text-purple-600',
-        };
-        return icons[String(type).toLowerCase()] || 'bg-gray-100 text-gray-600';
-    };
-
-    const getFileLabel = (type) => {
-        if (!type) return 'DOC';
-        const labels = { pdf: 'PDF', docx: 'DOCX', xlsx: 'XLSX', pptx: 'PPTX', zip: 'ZIP' };
-        const key = String(type).toLowerCase();
-        return labels[key] || String(type).toUpperCase();
-    };
 
     // Teks empty state daftar antrean. Kata kunci pencarian diprioritaskan supaya
     // hasil nol tidak terbaca sebagai "antrean memang kosong".
@@ -502,13 +478,13 @@ export default function WorkspaceLead() {
                     </div>
                     <div className="flex bg-white p-1 rounded-xl border border-gray-200 shadow-sm flex-wrap gap-1">
                         <button
-                            onClick={() => { setActiveTab('disposition'); setSelectedProject(null); }}
+                            onClick={() => { setActiveTab('disposition'); setSelectedProjectId(null); }}
                             className={`px-3.5 py-2 rounded-lg text-xs md:text-sm font-semibold transition-all cursor-pointer ${activeTab === 'disposition' ? 'bg-[#00529C] text-white shadow-md' : 'text-gray-600 hover:text-gray-800 hover:bg-gray-50'}`}
                         >
                             Disposisi Proyek Baru
                         </button>
                         <button
-                            onClick={() => { setActiveTab('analyzing'); setSelectedProject(null); }}
+                            onClick={() => { setActiveTab('analyzing'); setSelectedProjectId(null); }}
                             className={`px-3.5 py-2 rounded-lg text-xs md:text-sm font-semibold transition-all cursor-pointer flex items-center gap-1.5 ${activeTab === 'analyzing' ? 'bg-[#00529C] text-white shadow-md' : 'text-gray-600 hover:text-gray-800 hover:bg-gray-50'}`}
                         >
                             <span>Sedang Dikaji Analyst</span>
@@ -519,7 +495,7 @@ export default function WorkspaceLead() {
                             )}
                         </button>
                         <button
-                            onClick={() => { setActiveTab('verification'); setSelectedProject(null); }}
+                            onClick={() => { setActiveTab('verification'); setSelectedProjectId(null); }}
                             className={`px-3.5 py-2 rounded-lg text-xs md:text-sm font-semibold transition-all cursor-pointer flex items-center gap-1.5 ${activeTab === 'verification' ? 'bg-[#00529C] text-white shadow-md' : 'text-gray-600 hover:text-gray-800 hover:bg-gray-50'}`}
                         >
                             <span>Verifikasi Hasil Analisis</span>
@@ -592,7 +568,7 @@ export default function WorkspaceLead() {
                                         <div
                                             key={project.id}
                                             onClick={() => {
-                                                setSelectedProject(project);
+                                                setSelectedProjectId(project.id);
                                                 // Reset deadline: gunakan nilai dari proyek jika ada, jika tidak kosongkan
                                                 if (project.deadline || project.current_stage_deadline) {
                                                     setDeadline((project.deadline || project.current_stage_deadline).split('T')[0]);
@@ -604,17 +580,17 @@ export default function WorkspaceLead() {
                                                 setAnalystSearch('');
                                             }}
                                             className={`p-4 rounded-xl cursor-pointer transition-all relative overflow-hidden group ${
-                                                selectedProject?.id === project.id
+                                                currentSelected?.id === project.id
                                                     ? 'bg-white border-2 border-[#00529C] shadow-md'
                                                     : 'bg-white border border-gray-200 hover:border-[#00529C]/40 hover:shadow-md'
                                             }`}
                                         >
-                                            {selectedProject?.id === project.id && (
+                                            {currentSelected?.id === project.id && (
                                                 <div className="absolute left-0 top-0 w-1 h-full bg-[#00529C] rounded-l-xl" />
                                             )}
                                             <div className="flex justify-between items-start mb-2">
-                                                <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold border ${getPriorityColor(project.priority)}`}>
-                                                    {project.priority === 'High' ? '🔴 Tinggi' : project.priority === 'Medium' ? '🟡 Sedang' : '🟢 Rendah'}
+                                                <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold border ${getProjectPriorityClass(project.priority)}`}>
+                                                    {getProjectPriorityBadgeLabel(project.priority)}
                                                 </span>
                                                 <span className="text-[10px] text-gray-400">
                                                     {new Date(project.submittedAt).toLocaleDateString('id-ID', { day: 'numeric', month: 'short' })}
@@ -687,8 +663,8 @@ export default function WorkspaceLead() {
                         <div className="flex justify-between items-start mb-5">
                             <div>
                                 <div className="flex items-center gap-2.5 mb-1.5">
-                                    <span className={`px-2.5 py-0.5 rounded-full text-xs font-bold border ${getPriorityColor(currentSelected.priority)}`}>
-                                        {currentSelected.priority === 'High' ? '🔴 High Priority' : currentSelected.priority === 'Medium' ? '🟡 Medium' : '🟢 Low'}
+                                    <span className={`px-2.5 py-0.5 rounded-full text-xs font-bold border ${getProjectPriorityClass(currentSelected.priority)}`}>
+                                        {getProjectPriorityBadgeLabel(currentSelected.priority)}
                                     </span>
                                     <span className="text-xs font-bold text-gray-400 bg-gray-100 px-2 py-0.5 rounded">{currentSelected.reqId || currentSelected.req_id || currentSelected.id}</span>
                                 </div>
@@ -746,14 +722,14 @@ export default function WorkspaceLead() {
                                         </div>
                                     );
                                     return docs.map((doc, idx) => (
-                                    <div key={idx} className="flex items-center justify-between p-3 border border-gray-200 rounded-lg bg-gray-50 hover:border-gray-300 transition-colors group">
+                                    <div key={doc.id ?? doc.name ?? idx} className="flex items-center justify-between p-3 border border-gray-200 rounded-lg bg-gray-50 hover:border-gray-300 transition-colors group">
                                         <div className="flex items-center gap-3 overflow-hidden min-w-0">
                                             <div className={`w-10 h-10 rounded flex items-center justify-center shrink-0 font-bold text-[10px] ${getDocIconStyle(doc.name || doc.file_name || doc.type || '')}`}>
                                                 {getDocExtLabel(doc.name || doc.file_name || doc.type || '')}
                                             </div>
                                             <div className="truncate min-w-0">
                                                 <p className="text-sm font-semibold text-gray-800 truncate">{doc.name}</p>
-                                                <p className="text-xs text-gray-500">{doc.size || '2.4 MB'}</p>
+                                                <p className="text-xs text-gray-500">{docSizeLabel(doc)}</p>
                                             </div>
                                         </div>
                                         <div className="flex items-center gap-1.5 shrink-0">
@@ -768,31 +744,7 @@ export default function WorkspaceLead() {
                                             </button>
                                             <button
                                                 type="button"
-                                                onClick={() => {
-                                                    const rawUrl = doc.url || doc.fileUrl || doc.dataUrl || getFileFromStore(doc.name) || getFileFromStore(doc.id);
-                                                    const fileName = doc.name || 'Dokumen_SDLC.pdf';
-                                                    if (rawUrl) {
-                                                        const link = document.createElement('a');
-                                                        link.href = rawUrl;
-                                                        link.download = fileName;
-                                                        document.body.appendChild(link);
-                                                        link.click();
-                                                        document.body.removeChild(link);
-                                                        toast.success(`Mengunduh file "${fileName}"...`);
-                                                    } else {
-                                                        const textContent = `PT BANK NAGARI - DOKUMEN SDLC\n===============================\nNama Dokumen: ${fileName}\nProyek: ${currentSelected?.title || currentSelected?.name || 'Proyek SDLC'}\nTanggal: ${new Date().toLocaleDateString('id-ID')}`;
-                                                        const blob = new Blob([textContent], { type: 'text/plain;charset=utf-8' });
-                                                        const url = URL.createObjectURL(blob);
-                                                        const link = document.createElement('a');
-                                                        link.href = url;
-                                                        link.download = fileName.endsWith('.pdf') ? fileName.replace('.pdf', '_ringkasan.txt') : `${fileName}.txt`;
-                                                        document.body.appendChild(link);
-                                                        link.click();
-                                                        document.body.removeChild(link);
-                                                        URL.revokeObjectURL(url);
-                                                        toast.success(`Mengunduh salinan berkas "${fileName}"...`);
-                                                    }
-                                                }}
+                                                onClick={() => handleDownloadDoc(doc)}
                                                 className="p-2 text-gray-500 hover:text-[#00529C] hover:bg-blue-50 rounded-lg transition-colors cursor-pointer"
                                                 title="Unduh Dokumen"
                                             >
@@ -951,7 +903,7 @@ export default function WorkspaceLead() {
                                                     }).length
                                                 } Proyek Aktif</strong></span>
                                                 <span>Perkiraan Selesai Kajian: <strong className="text-emerald-700 font-bold">{(() => {
-                                                    const targetD = deadline ? new Date(deadline) : new Date(Date.now() + 14 * 24 * 60 * 60 * 1000);
+                                                    const targetD = deadline ? new Date(deadline) : new Date(nowMs + 14 * 24 * 60 * 60 * 1000);
                                                     return targetD.toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' });
                                                 })()}</strong></span>
                                             </div>
@@ -1029,7 +981,7 @@ export default function WorkspaceLead() {
                                                 Analis belum melampirkan dokumen kajian.
                                             </div>);
                                         return analystDocs.map((doc, idx) => (
-                                            <div key={idx} className="bg-white p-4 rounded-xl border border-emerald-200 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                                            <div key={doc.id ?? doc.name ?? idx} className="bg-white p-4 rounded-xl border border-emerald-200 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                                                 <div className="flex items-center gap-3 min-w-0">
                                                     <div className={`w-10 h-10 rounded-xl flex items-center justify-center font-bold text-xs shrink-0 border ${getDocIconStyle(doc.name || doc.file_name || '')}`}>
                                                         {getDocExtLabel(doc.name || doc.file_name || '')}
@@ -1037,7 +989,7 @@ export default function WorkspaceLead() {
                                                     <div className="min-w-0">
                                                         <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">BERKAS KAJIAN TEKNIS</p>
                                                         <p className="font-bold text-gray-800 text-sm truncate">{doc.name}</p>
-                                                        <p className="text-[11px] text-gray-500">{doc.size || 'N/A'} • {new Date(doc.created_at || doc.uploadedAt || Date.now()).toLocaleDateString('id-ID', {day:'numeric',month:'short'})}</p>
+                                                        <p className="text-[11px] text-gray-500">{docSizeLabel(doc)} • {formatUploadDate(doc.created_at || doc.uploadedAt)}</p>
                                                     </div>
                                                 </div>
                                                 <div className="flex items-center gap-2 shrink-0">
@@ -1075,8 +1027,14 @@ export default function WorkspaceLead() {
                                     </div>
                                     {currentSelected.analystResult?.estimation && (
                                         <div className="bg-white p-4 rounded-xl border border-emerald-100 shadow-xs">
-                                            <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-1">Estimasi Pengerjaan</p>
-                                            <p className="font-semibold text-gray-800 text-sm">{currentSelected.analystResult.estimation}</p>
+                                            <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-1">Target Selesai Pengerjaan</p>
+                                            {/* Analis mengisinya lewat `input type="date"`, jadi isinya
+                                                tanggal ISO. Sebelumnya dicetak apa adanya sehingga tampil
+                                                sebagai "2026-09-30". Data lama yang berisi teks bebas
+                                                tetap ditampilkan mentah agar tidak hilang. */}
+                                            <p className="font-semibold text-gray-800 text-sm">
+                                                {analystTargetLabel || currentSelected.analystResult.estimation}
+                                            </p>
                                         </div>
                                     )}
                                     <div className="pt-2 space-y-3">

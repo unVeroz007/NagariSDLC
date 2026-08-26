@@ -3,7 +3,12 @@ import { useAuth } from '../../contexts/AuthContext';
 import { useNavigate } from 'react-router-dom';
 import { useNotifications } from '../../contexts/NotificationContext';
 import { useProjects } from '../../contexts/ProjectContext';
-import { divisionService, projectService } from '../../services/api';
+import { projectService } from '../../services/api';
+import {
+    DEFAULT_PROJECT_PRIORITY,
+    PROJECT_PRIORITY_ACTIVE_CLASS,
+    PROJECT_PRIORITY_OPTIONS,
+} from '../../constants/projectPriority';
 import toast from 'react-hot-toast';
 import DocumentViewerModal from '../../components/DocumentViewerModal';
 import {
@@ -23,8 +28,6 @@ import {
 } from 'lucide-react';
 import {
     generateDocumentName,
-    INITIATION_DOC_TYPES,
-    DOCUMENT_TYPES,
     getDocumentTypeInfo,
     formatFileSize,
 } from '../../utils/documentNaming';
@@ -36,44 +39,20 @@ export default function ProjectNew() {
     const { addProject } = useProjects();
     const fileInputRef = useRef(null);
 
-    const defaultDivisions = [
-        'Divisi Pengembangan TI',
-        'Divisi Operasional & Infra TI',
-        'Divisi Cyber Security',
-        'Divisi Quality Assurance TI',
-        'Divisi Strategi Perbankan Digital',
-        'Divisi Kredit',
-        'Divisi Dana & Jasa',
-        'Divisi Kepatuhan',
-        'Divisi Manajemen Risiko',
-        'Divisi Audit Internal',
-        'Divisi SDM',
-    ];
+    // Divisi pemohon tidak dipilih manual: nilainya selalu divisi akun yang
+    // login (lihat getUserDivision dan input non-editable di bagian PIC).
+    // Daftar divisi hardcoded sebelumnya di sini sudah dihapus karena tidak
+    // pernah dirender dan berisiko menawarkan divisi yang tidak ada di master data.
 
-    const [divisionList, setDivisionList] = useState(defaultDivisions);
-
-    useEffect(() => {
-        const fetchDivisions = async () => {
-            try {
-                const res = await divisionService.getAll();
-                if (res && res.data && Array.isArray(res.data) && res.data.length > 0) {
-                    const apiNames = res.data.map(d => d.name || d.code);
-                    // Merge API divisions with default divisions cleanly
-                    const merged = Array.from(new Set([...apiNames, ...defaultDivisions]));
-                    setDivisionList(merged);
-                }
-            } catch {
-            }
-        };
-        fetchDivisions();
-    }, []);
-
+    // Divisi pemohon murni diturunkan dari akun. Bila akun belum punya divisi,
+    // yang dikembalikan adalah string kosong, bukan label karangan seperti
+    // "Divisi Pemohon" yang sebelumnya ikut tersimpan ke kolom division proyek.
     const getUserDivision = (u) => {
-        if (!u) return 'Divisi Pemohon';
+        if (!u) return '';
         if (typeof u.division === 'object' && u.division?.name) return u.division.name;
         if (typeof u.division === 'string' && u.division) return u.division;
         if (u.department) return u.department;
-        return 'Divisi Pemohon';
+        return '';
     };
 
     const currentUserDivision = getUserDivision(user);
@@ -82,21 +61,27 @@ export default function ProjectNew() {
     const [formData, setFormData] = useState({
         projectName: '',
         division: currentUserDivision,
-        priority: 'Medium',
+        priority: DEFAULT_PROJECT_PRIORITY,
         type: 'RBB',
         project_type: 'baru', // Tipe Proyek: baru / perbaikan / update
         targetDate: '',
+        // Tenggat RBB berdiri sendiri dari `targetDate`. `targetDate` adalah estimasi
+        // selesai pengerjaan, sedangkan tenggat RBB adalah komitmen Rencana Bisnis Bank
+        // yang hanya bermakna untuk proyek bertipe RBB — dan itulah tanggal yang dipakai
+        // panel "Proyek RBB mendekati deadline" pada dasbor.
+        rbbDeadline: '',
         description: '',
         contactPhone: '',
     });
 
-    useEffect(() => {
-        const divName = getUserDivision(user);
-        setFormData((prev) => ({
-            ...prev,
-            division: divName,
-        }));
-    }, [user]);
+    // Divisi pemohon mengikuti data sesi. Penyesuaian dilakukan pada render yang sama
+    // saat nilai divisinya benar-benar berubah (mis. sesi baru selesai dimuat), bukan
+    // lewat effect yang menyalin ulang setiap objek user berganti identitas.
+    const [syncedDivision, setSyncedDivision] = useState(currentUserDivision);
+    if (currentUserDivision !== syncedDivision) {
+        setSyncedDivision(currentUserDivision);
+        setFormData((prev) => ({ ...prev, division: currentUserDivision }));
+    }
 
     const [uploadedFiles, setUploadedFiles] = useState([]);
     const [isSubmitting, setIsSubmitting] = useState(false);
@@ -121,10 +106,32 @@ export default function ProjectNew() {
         fetchReqId();
     }, []);
 
+    /**
+     * Bebaskan URL pratinjau berkas yang sudah tidak dipakai.
+     *
+     * `URL.createObjectURL` menahan berkasnya di memori sampai URL-nya dicabut.
+     * Tanpa ini, setiap berkas yang pernah dipilih — termasuk yang dihapus lagi dan
+     * yang sudah selesai diajukan — tetap tertahan sepanjang tab dibuka; pada form
+     * yang dipakai berulang untuk lampiran berukuran megabyte, jejaknya menumpuk.
+     */
+    const releaseFilePreviews = (files) => {
+        files.forEach((file) => {
+            if (file?.url) URL.revokeObjectURL(file.url);
+        });
+    };
+
+    const errorTimerRef = useRef(null);
+
     const showError = (msg) => {
         setErrorMessage(msg);
-        setTimeout(() => setErrorMessage(''), 4000);
+        if (errorTimerRef.current) clearTimeout(errorTimerRef.current);
+        errorTimerRef.current = setTimeout(() => setErrorMessage(''), 4000);
     };
+
+    // Timer pesan galat tidak boleh menyentuh state setelah komponen dilepas.
+    useEffect(() => () => {
+        if (errorTimerRef.current) clearTimeout(errorTimerRef.current);
+    }, []);
 
     const handleCloseModal = () => {
         isSubmittingRef.current = false;
@@ -133,14 +140,18 @@ export default function ProjectNew() {
         setFormData({
             projectName: '',
             division: getUserDivision(user),
-            priority: 'Medium',
+            priority: DEFAULT_PROJECT_PRIORITY,
             type: 'RBB',
             project_type: 'baru',
             targetDate: '',
+            rbbDeadline: '',
             description: '',
             contactPhone: '',
         });
-        setUploadedFiles([]);
+        setUploadedFiles((prev) => {
+            releaseFilePreviews(prev);
+            return [];
+        });
         window.scrollTo({ top: 0, behavior: 'smooth' });
     };
 
@@ -264,7 +275,10 @@ export default function ProjectNew() {
 
     // Handle delete file
     const handleDeleteFile = (index) => {
-        setUploadedFiles((prev) => prev.filter((_, i) => i !== index));
+        setUploadedFiles((prev) => {
+            releaseFilePreviews(prev.filter((_, i) => i === index));
+            return prev.filter((_, i) => i !== index);
+        });
     };
 
     // Handle drag & drop
@@ -317,6 +331,10 @@ export default function ProjectNew() {
                 division: userDivision,
                 priority: formData.priority,
                 targetDate: formData.targetDate || 'TBD',
+                // Hanya proyek RBB yang memiliki tenggat Rencana Bisnis Bank. Untuk
+                // Non-RBB nilainya sengaja dikirim null supaya tidak ada komitmen bank
+                // yang tercatat pada proyek yang memang tidak berada di dalam RBB.
+                rbb_deadline: formData.type === 'RBB' ? (formData.rbbDeadline || null) : null,
                 status: 'PENDING',
                 type: formData.type || 'RBB',
                 project_type: formData.project_type || 'baru',
@@ -324,9 +342,12 @@ export default function ProjectNew() {
             };
 
             const res = await addProject(newProject);
+            const createdProject = res?.data;
 
-            // Pop-up Toast Notification
-            toast.success(`Pengajuan proyek "${submittedName}" berhasil diajukan!`);
+            // `addProject` sudah melaporkan hasilnya sendiri — termasuk ketika sebagian
+            // atau seluruh dokumen gagal diunggah. Toast kedua di sini dahulu selalu
+            // berbunyi "berhasil diajukan", sehingga pesan galat unggahan tertutup pesan
+            // sukses yang muncul sesudahnya.
 
             // Notifikasi Sistem
             addNotification(
@@ -339,7 +360,13 @@ export default function ProjectNew() {
             // Tampilkan Modal Popup Sukses Enterprise
             setSubmittedProject({
                 ...newProject,
-                id: res?.data?.id || `PRJ-${Date.now()}`,
+                // Id sebenarnya dari server. Sebelumnya ada cadangan
+                // `PRJ-${Date.now()}` di sini, dan tombol "Lacak Status Proyek" pada
+                // modal membawa nomor karangan itu ke halaman tracker — yang tentu
+                // tidak menemukan proyek apa pun.
+                id: createdProject.id,
+                reqId: createdProject.req_id,
+                documentUpload: res?.documentUpload ?? null,
                 isDraft: false,
             });
 
@@ -347,14 +374,20 @@ export default function ProjectNew() {
             setFormData({
                 projectName: '',
                 division: userDivision,
-                priority: 'Medium',
+                priority: DEFAULT_PROJECT_PRIORITY,
                 type: 'RBB',
                 project_type: 'baru',
                 targetDate: '',
+                rbbDeadline: '',
                 description: '',
                 contactPhone: '',
             });
-            setUploadedFiles([]);
+            // Pratinjau dibebaskan, tetapi daftar dokumen pada modal sukses memakai
+            // salinan di `submittedProject` sehingga tetap dapat ditampilkan.
+            setUploadedFiles((prev) => {
+                releaseFilePreviews(prev);
+                return [];
+            });
             setIsSubmitting(false);
             isSubmittingRef.current = false;
         } catch (err) {
@@ -374,65 +407,7 @@ export default function ProjectNew() {
         }
     };
 
-    // Get file icon based on type
-    const getFileIcon = (type) => {
-        if (!type) return 'bg-gray-100 text-gray-600';
-        const icons = {
-            pdf: 'bg-red-100 text-red-600',
-            docx: 'bg-blue-100 text-blue-600',
-            xlsx: 'bg-green-100 text-green-600',
-            pptx: 'bg-orange-100 text-orange-600',
-            zip: 'bg-purple-100 text-purple-600',
-            image: 'bg-yellow-100 text-yellow-700',
-            spreadsheet: 'bg-green-100 text-green-600',
-            presentation: 'bg-orange-100 text-orange-600',
-            data: 'bg-gray-100 text-gray-600',
-            archive: 'bg-purple-100 text-purple-600',
-            text: 'bg-slate-100 text-slate-600',
-        };
-        return icons[String(type).toLowerCase()] || 'bg-gray-100 text-gray-600';
-    };
-
-    const getFileLabel = (type) => {
-        if (!type) return 'DOC';
-        const labels = {
-            pdf: 'PDF',
-            docx: 'DOCX',
-            xlsx: 'XLSX',
-            pptx: 'PPTX',
-            zip: 'ZIP',
-            image: 'IMG',
-            spreadsheet: 'XLSX',
-            presentation: 'PPTX',
-            data: 'DATA',
-            archive: 'ZIP',
-            text: 'TXT',
-            brd: 'BRD',
-            fsd: 'FSD',
-            qa_report: 'QA',
-            uat_doc: 'UAT',
-            legal: 'LGL',
-            attachment: 'FILE',
-        };
-        const key = String(type).toLowerCase();
-        return labels[key] || String(type).toUpperCase();
-    };
-
-    const divisions = [
-        'Divisi Kredit',
-        'Divisi Dana & Jasa',
-        'Divisi TI',
-        'Divisi Operasional',
-        'Divisi Kepatuhan',
-        'Divisi Manajemen Risiko',
-        'Divisi SDM',
-        'Divisi Digital Banking',
-        'Divisi Perencanaan & Strategi',
-        'Divisi Audit Internal',
-        'Divisi Treasury & International',
-    ];
-
-    const priorities = ['Rendah', 'Medium', 'Urgent'];
+    const priorities = PROJECT_PRIORITY_OPTIONS;
 
     return (
         <div className="flex-1 overflow-y-auto overflow-x-hidden px-6 py-4 md:px-8 md:py-5 relative bg-[#f8f9fb]">
@@ -473,7 +448,7 @@ export default function ProjectNew() {
                                     className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-lg text-sm text-gray-500 cursor-not-allowed"
                                     disabled
                                     type="text"
-                                    value={user?.name || 'Ahmad Fauzi'}
+                                    value={user?.name || ''}
                                 />
                             </div>
                             <div className="space-y-2">
@@ -484,6 +459,7 @@ export default function ProjectNew() {
                                     readOnly
                                     type="text"
                                     value={getUserDivision(user)}
+                                    placeholder="Divisi belum diatur admin"
                                 />
                             </div>
                             <div className="space-y-2 md:col-span-2">
@@ -492,7 +468,7 @@ export default function ProjectNew() {
                                     className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-lg text-sm text-gray-500 cursor-not-allowed"
                                     disabled
                                     type="email"
-                                    value={user?.email || 'ahmad.fauzi@banknagari.co.id'}
+                                    value={user?.email || ''}
                                 />
                             </div>
                         </div>
@@ -640,24 +616,20 @@ export default function ProjectNew() {
                                 <label className="text-sm font-semibold text-gray-600">Prioritas Proyek</label>
                                 <div className="flex gap-2">
                                     {priorities.map((p) => (
-                                        <label key={p} className="flex-1 cursor-pointer">
+                                        <label key={p.value} className="flex-1 cursor-pointer">
                                             <input
                                                 type="radio"
                                                 name="priority"
-                                                value={p}
-                                                checked={formData.priority === p}
+                                                value={p.value}
+                                                checked={formData.priority === p.value}
                                                 onChange={handleChange}
                                                 className="sr-only peer"
                                             />
-                                            <div className={`text-center py-2.5 rounded-lg border transition-all text-xs font-bold ${formData.priority === p
-                                                ? p === 'Urgent'
-                                                    ? 'bg-red-600 text-white border-red-600'
-                                                    : p === 'Medium'
-                                                        ? 'bg-[#00529C] text-white border-[#00529C]'
-                                                        : 'bg-gray-200 text-gray-700 border-gray-300'
+                                            <div className={`text-center py-2.5 rounded-lg border transition-all text-xs font-bold ${formData.priority === p.value
+                                                ? PROJECT_PRIORITY_ACTIVE_CLASS[p.value]
                                                 : 'border-gray-200 text-gray-600 hover:bg-gray-50'
                                                 }`}>
-                                                {p}
+                                                {p.label}
                                             </div>
                                         </label>
                                     ))}
@@ -700,6 +672,30 @@ export default function ProjectNew() {
                                     value={new Date().toLocaleDateString('id-ID', { day: '2-digit', month: '2-digit', year: 'numeric' })}
                                 />
                             </div>
+                            {/*
+                              * Tenggat RBB hanya ditanyakan untuk proyek bertipe RBB.
+                              * Nilainya opsional: tidak setiap pengaju mengetahui tanggal
+                              * komitmennya saat mengisi formulir, dan menebaknya dari
+                              * target selesai akan melahirkan komitmen bank yang tidak
+                              * pernah disepakati.
+                              */}
+                            {formData.type === 'RBB' && (
+                                <div className="space-y-2">
+                                    <label className="text-sm font-semibold text-gray-600">Tenggat RBB</label>
+                                    <input
+                                        name="rbbDeadline"
+                                        value={formData.rbbDeadline}
+                                        onChange={handleChange}
+                                        className="w-full px-4 py-3 bg-white border border-gray-200 rounded-lg focus:ring-2 focus:ring-[#00529C] focus:border-[#00529C] transition-all text-sm cursor-pointer"
+                                        type="date"
+                                    />
+                                    <p className="text-[11px] text-gray-400">
+                                        Tenggat komitmen Rencana Bisnis Bank. Berbeda dari target selesai, dan dipakai
+                                        dasbor untuk menandai proyek RBB yang mendekati tenggat. Boleh dikosongkan bila
+                                        belum ditetapkan.
+                                    </p>
+                                </div>
+                            )}
                             <div className="space-y-2 md:col-span-2">
                                 <label className="text-sm font-semibold text-gray-600">Deskripsi Ringkas Proyek</label>
                                 <textarea
@@ -894,6 +890,15 @@ export default function ProjectNew() {
                                 <span className="text-gray-400 font-semibold">NAMA PROYEK</span>
                                 <span className="font-bold text-gray-800 text-sm truncate max-w-[180px]">{submittedProject.name}</span>
                             </div>
+                            {/* Nomor pengajuan adalah kunci penelusuran yang dipakai di
+                                seluruh aplikasi, tetapi sebelumnya tidak pernah
+                                ditampilkan kepada pengaju setelah pengajuan tercatat. */}
+                            {submittedProject.reqId && (
+                                <div className="flex justify-between items-center py-1">
+                                    <span className="text-gray-400 font-semibold">NOMOR PENGAJUAN</span>
+                                    <span className="font-mono font-bold text-[#00529C]">{submittedProject.reqId}</span>
+                                </div>
+                            )}
                             <div className="flex justify-between items-center py-1">
                                 <span className="text-gray-400 font-semibold">DIVISI</span>
                                 <span className="font-semibold text-gray-700">{submittedProject.division}</span>
@@ -927,6 +932,30 @@ export default function ProjectNew() {
                                 </div>
                             )}
                         </div>
+
+                        {/* Dokumen yang gagal diunggah. Proyeknya sendiri tetap tercatat,
+                            jadi modal ini memang modal sukses — tetapi pengaju harus tahu
+                            lampiran mana yang belum sampai, karena dahulu kegagalan itu
+                            hanya lewat sebagai toast dan modal tetap menghitungnya
+                            sebagai "File Terlampir". */}
+                        {submittedProject.documentUpload?.failed?.length > 0 && (
+                            <div className="mb-6 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-left">
+                                <div className="flex items-center gap-2 mb-1.5">
+                                    <AlertCircle size={15} className="text-amber-600 shrink-0" />
+                                    <span className="text-xs font-bold text-amber-800">
+                                        {submittedProject.documentUpload.failed.length} dari {submittedProject.documentUpload.total} dokumen gagal diunggah
+                                    </span>
+                                </div>
+                                <ul className="text-[11px] text-amber-800/90 list-disc pl-6 space-y-0.5">
+                                    {submittedProject.documentUpload.failed.map((name, i) => (
+                                        <li key={i} className="truncate">{name}</li>
+                                    ))}
+                                </ul>
+                                <p className="text-[11px] text-amber-700 mt-2">
+                                    Unggah ulang lewat menu Manajemen Dokumen agar review Lead Group tidak tertunda.
+                                </p>
+                            </div>
+                        )}
 
                         {/* Navigation Actions */}
                         <div className="flex flex-col gap-2.5">
