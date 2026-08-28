@@ -121,7 +121,7 @@ export const menuSections = {
             items: [
                 { label: 'Workspace Lead', path: '/workspace/lead', icon: 'UserCheck' },
                 { label: 'Antrean Review', path: '/queue', icon: 'Clock' },
-                { label: 'Persetujuan Saya', path: '/approvals', icon: 'ShieldCheck' },
+                // { label: 'Persetujuan Saya', path: '/approvals', icon: 'ShieldCheck' },
                 { label: 'Workspace Analyst', path: '/workspace/analyst', icon: 'FileText' },
                 { label: 'Daftar Semua Proyek', path: '/projects', icon: 'List', end: true },
                 { label: 'Manajemen Dokumen', path: '/documents', icon: 'Folders' },
@@ -143,7 +143,7 @@ export const menuSections = {
             label: 'UTAMA',
             items: [
                 { label: 'Workspace Analyst', path: '/workspace/analyst', icon: 'FileText' },
-                { label: 'Persetujuan Saya', path: '/approvals', icon: 'ShieldCheck' },
+                // { label: 'Persetujuan Saya', path: '/approvals', icon: 'ShieldCheck' },
                 { label: 'Daftar Semua Proyek', path: '/projects', icon: 'List', end: true },
             ],
         },
@@ -255,69 +255,70 @@ export const menuSections = {
             ],
         },
     ],
-    dev_analyst: [
-        {
-            label: 'UTAMA',
-            items: [
-                { label: 'Workspace Analis (Dev)', path: '/workspace/dev-analyst', icon: 'Cpu' },
-                { label: 'Persetujuan Saya', path: '/approvals', icon: 'UserCheck' },
-                { label: 'PM Workspace', path: '/pm/workspace', icon: 'Briefcase' },
-                { label: 'Lacak Status Proyek', path: '/pm/tracker', icon: 'MapPin' },
-                { label: 'Daftar Semua Proyek', path: '/projects', icon: 'List', end: true },
-                { label: 'Manajemen Dokumen', path: '/documents', icon: 'Folders' },
-            ],
-        },
-        {
-            label: 'Fase 2 (Pengembangan IT)',
-            items: [
-                { label: 'Alokasi Tim', path: '/pm/allocation', icon: 'Users' },
-                { label: 'Kanban Board', path: '/pm/kanban', icon: 'Kanban' },
-                { label: 'Tugas Developer Saya', path: '/my-tasks/dev', icon: 'Code' },
-            ],
-        },
-        {
-            label: 'Fase 3 (Pengujian)',
-            items: [
-                { label: 'Pengajuan QA', path: '/pm/qa-request', icon: 'Send' },
-                { label: 'Pengajuan Cyber', path: '/pm/cyber-request', icon: 'Shield' },
-                { label: 'Putaran Pengembalian', path: '/pm/return-rounds', icon: 'Undo2' },
-            ],
-        },
-        {
-            label: 'Fase 4 (Rilis & Kepatuhan)',
-            items: [
-                { label: 'Terima Dok. QA & Cyber', path: '/pm/review-docs', icon: 'FileCheck' },
-                { label: 'Pengajuan Rilis ke INFRA', path: '/pm/release-request', icon: 'Rocket' },
-            ],
-        },
-    ],
-    qa_lead: [
-        {
-            label: 'UTAMA',
-            items: [
-                { label: 'Workspace QA', path: '/workspace/qa', icon: 'Bug' },
-                { label: 'Tugas QA Saya', path: '/my-tasks/qa', icon: 'CheckSquare' },
-                { label: 'Daftar Semua Proyek', path: '/projects', icon: 'List', end: true },
-            ],
-        },
+    // dev_analyst: [
+    //     {
+    //         label: 'UTAMA',
+    //         items: [
+    //             { label: 'Workspace Analis (Dev)', path: '/workspace/dev-analyst', icon: 'Cpu' },
+    //             { label: 'Persetujuan Saya', path: '/approvals', icon: 'UserCheck' },
+    //             { label: 'PM Workspace', path: '/pm/workspace', icon: 'Briefcase' },
+    //             { label: 'Lacak Status Proyek', path: '/pm/tracker', icon: 'MapPin' },
+    //             { label: 'Daftar Semua Proyek', path: '/projects', icon: 'List', end: true },
+    //             { label: 'Manajemen Dokumen', path: '/documents', icon: 'Folders' },
+    //         ],
+    //     },
+    //     {
+    //         label: 'Fase 2 (Pengembangan IT)',
+    //         items: [
+    //             { label: 'Alokasi Tim', path: '/pm/allocation', icon: 'Users' },
+    //             { label: 'Kanban Board', path: '/pm/kanban', icon: 'Kanban' },
+    //             { label: 'Tugas Developer Saya', path: '/my-tasks/dev', icon: 'Code' },
+    //         ],
+    //     },
+    //     {
+    //         label: 'Fase 3 (Pengujian)',
+    //         items: [
+    //             { label: 'Pengajuan QA', path: '/pm/qa-request', icon: 'Send' },
+    //             { label: 'Pengajuan Cyber', path: '/pm/cyber-request', icon: 'Shield' },
+    //             { label: 'Putaran Pengembalian', path: '/pm/return-rounds', icon: 'Undo2' },
+    //         ],
+    //     },
+    //     {
+    //         label: 'Fase 4 (Rilis & Kepatuhan)',
+    //         items: [
+    //             { label: 'Terima Dok. QA & Cyber', path: '/pm/review-docs', icon: 'FileCheck' },
+    //             { label: 'Pengajuan Rilis ke INFRA', path: '/pm/release-request', icon: 'Rocket' },
+    //         ],
+    //     },
+    // ],
+
+    // qa_lead: [
+    //     {
+    //         label: 'UTAMA',
+    //         items: [
+    //             { label: 'Workspace QA', path: '/workspace/qa', icon: 'Bug' },
+    //             { label: 'Tugas QA Saya', path: '/my-tasks/qa', icon: 'CheckSquare' },
+    //             { label: 'Daftar Semua Proyek', path: '/projects', icon: 'List', end: true },
+    //         ],
+    //     },
         // Sisi Perencanaan dari grup yang sama. QA Lead perlu melihat hasil analisis
         // Fase 1 karena pengujian QA dinilai terhadap kajian itu.
-        {
-            label: 'Fase 1 (Perencanaan)',
-            items: [
-                { label: 'Workspace Analyst', path: '/workspace/analyst', icon: 'FileText' },
-            ],
-        },
+        // {
+        //     label: 'Fase 1 (Perencanaan)',
+        //     items: [
+        //         { label: 'Workspace Analyst', path: '/workspace/analyst', icon: 'FileText' },
+        //     ],
+        // },
         // Putaran yang lahir dari sign-off TIDAK LULUS miliknya sendiri. Lead QA
         // membacanya untuk menelusuri perbaikan atas temuannya, tanpa hak menindaknya —
         // aksinya milik Analis Pengembangan pemegang proyek (dibatasi `pm_id` di halaman).
-        {
-            label: 'Fase 3 (Pengujian)',
-            items: [
-                { label: 'Putaran Pengembalian', path: '/pm/return-rounds', icon: 'Undo2' },
-            ],
-        },
-    ],
+    //     {
+    //         label: 'Fase 3 (Pengujian)',
+    //         items: [
+    //             { label: 'Putaran Pengembalian', path: '/pm/return-rounds', icon: 'Undo2' },
+    //         ],
+    //     },
+    // ],
     qa_tester: [
         {
             label: 'UTAMA',
@@ -327,8 +328,6 @@ export const menuSections = {
                 { label: 'Daftar Semua Proyek', path: '/projects', icon: 'List', end: true },
             ],
         },
-        // Kebalikan dari menu `analyst`: analis QA juga anggota sisi Perencanaan, jadi
-        // proyek Fase 1 yang didisposisikan kepadanya punya halaman kerja sendiri.
         {
             label: 'Fase 1 (Perencanaan)',
             items: [
@@ -354,16 +353,16 @@ export const menuSections = {
             ],
         },
     ],
-    cyber_team: [
-        {
-            label: 'UTAMA',
-            items: [
-                { label: 'Workspace Cyber', path: '/workspace/cyber', icon: 'ShieldCheck' },
-                { label: 'Tugas Siber Saya', path: '/my-tasks/cyber', icon: 'Lock' },
-                { label: 'Daftar Semua Proyek', path: '/projects', icon: 'List', end: true },
-            ],
-        },
-    ],
+    // cyber_team: [
+    //     {
+    //         label: 'UTAMA',
+    //         items: [
+    //             { label: 'Workspace Cyber', path: '/workspace/cyber', icon: 'ShieldCheck' },
+    //             { label: 'Tugas Siber Saya', path: '/my-tasks/cyber', icon: 'Lock' },
+    //             { label: 'Daftar Semua Proyek', path: '/projects', icon: 'List', end: true },
+    //         ],
+    //     },
+    // ],
     pentester: [
         {
             label: 'UTAMA',
