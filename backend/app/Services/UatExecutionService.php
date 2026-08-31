@@ -22,8 +22,8 @@ class UatExecutionService
     ) {}
 
     /**
-     * Simpan snapshot lengkap hasil UAT dan tentukan alur berikutnya dari data
-     * per skenario. Ringkasan tidak pernah dipercaya dari client.
+     * Simpan snapshot lengkap hasil UAT & tentukan alur berikutnya dari data per skenario;
+     * ringkasan tak pernah dipercaya dari client.
      */
     public function submit(Project $project, User $actor, array $payload): Project
     {
@@ -46,13 +46,9 @@ class UatExecutionService
                 ]);
             }
 
-            // Snapshot hasil UAT dikunci supaya satu putaran tidak pernah punya dua
-            // versi hasil. Pengecualiannya tepat satu: putaran yang berkesimpulan
-            // revisi Minor masih menahan persetujuan, dan unit peminta berhak
-            // mengajukan permintaan revisi berikutnya pada proyek yang sama. Putaran
-            // lama diarsipkan ke `uat_cycles` sebelum ditimpa, jadi snapshot auditnya
-            // tetap utuh. Revisi Mayor tidak lewat sini: `holdForMajorRevision()`
-            // sudah mengosongkan `uat2_summary` sehingga kunci ini tidak aktif.
+            // Snapshot dikunci: satu putaran satu versi hasil. Pengecualian: hold revisi Minor boleh
+            // re-eksekusi (putaran lama diarsipkan ke `uat_cycles` dulu, audit utuh). Mayor tak lewat
+            // sini: `holdForMajorRevision()` sudah mengosongkan `uat2_summary`.
             $isMinorReexecution = filled($sitUatData['uat2_summary']['submittedAt'] ?? null)
                 && ($sitUatData['uat_hold']['reason'] ?? null) === 'minor_revision';
 
@@ -62,11 +58,9 @@ class UatExecutionService
                 ]);
             }
 
-            // Permintaan Tambahan yang sudah tersimpan pada putaran sebelumnya, dikunci
-            // pada `id` yang stabil dari wizard. Dipakai dua hal: memakai ulang task CR
-            // yang sudah dibuat, dan mempertahankan kemajuan verifikasinya. Dibaca dari
-            // data tersimpan — bukan dari payload — karena Form Request eksekusi UAT
-            // tidak menerima `task_id`, jadi klien tidak dapat mengarang kepemilikan task.
+            // Permintaan Tambahan tersimpan, di-key pada `id` stabil wizard: dipakai memakai ulang
+            // task CR & mempertahankan progres verifikasi. Dibaca dari data tersimpan (bukan payload)
+            // karena Form Request UAT tak terima `task_id`, jadi klien tak bisa mengarang kepemilikan task.
             $savedRequests = collect($sitUatData['uat2_additional_requests'] ?? [])
                 ->filter(fn ($request): bool => is_array($request) && filled($request['id'] ?? null))
                 ->keyBy(fn (array $request): string => (string) $request['id']);
@@ -75,11 +69,9 @@ class UatExecutionService
                 ->where('status', '!=', TaskStatus::TAKE_DOWN->value)
                 ->get()
                 ->keyBy('id');
-            // Task CR milik Permintaan Tambahan tidak pernah memperoleh baris skenario:
-            // ia sudah diwakili barisnya sendiri pada daftar Permintaan Tambahan, dan
-            // wizard mengecualikannya di sisi klien. Hanya id yang benar-benar menunjuk
-            // task aktif proyek ini yang dikecualikan, supaya id sisa dari data lama
-            // tidak menghapus kewajiban menguji satu task nyata.
+            // Task CR Permintaan Tambahan tak dapat baris skenario (sudah diwakili barisnya sendiri;
+            // wizard kecualikan di klien). Hanya id yang menunjuk task aktif nyata yang dikecualikan,
+            // agar id sisa data lama tak menghapus kewajiban menguji task nyata.
             $requestTaskIdSet = $savedRequests
                 ->pluck('taskId')
                 ->filter(fn ($taskId): bool => is_numeric($taskId) && $eligibleTasks->has((int) $taskId))
@@ -137,9 +129,8 @@ class UatExecutionService
                     'request' => $isRevision ? trim($input['request']) : null,
                     'comment' => filled($input['comment'] ?? null) ? trim($input['comment']) : null,
                     'attachments' => $this->mapAttachments($input['attachments'] ?? [], $documents),
-                    // Setiap permintaan revisi — Minor maupun Mayor — menunggu tim
-                    // pengembangan. Sebelumnya hanya Mayor yang ditandai, sehingga
-                    // perbaikan Minor tidak pernah terlihat sedang dikerjakan siapa pun.
+                    // Setiap revisi (Minor & Mayor) menunggu tim dev; dulu hanya Mayor ditandai
+                    // sehingga perbaikan Minor tak pernah terlihat dikerjakan siapa pun.
                     'verificationStatus' => $isRevision ? 'waiting_development' : null,
                 ];
             })->values();
@@ -155,30 +146,22 @@ class UatExecutionService
                     'detail' => trim($input['detail']),
                     'comment' => filled($input['comment'] ?? null) ? trim($input['comment']) : null,
                     'attachments' => $this->mapAttachments($input['attachments'] ?? [], $documents),
-                    // Task CR yang sudah pernah dibuat untuk permintaan ini dipakai ulang,
-                    // supaya pengiriman ulang pada hold revisi Minor tidak melahirkan task
-                    // kembar untuk satu permintaan yang sama.
+                    // Task CR lama dipakai ulang agar re-submit pada hold revisi Minor tak
+                    // melahirkan task kembar untuk permintaan yang sama.
                     'taskId' => $savedTaskId,
-                    // Kemajuan verifikasi permintaan lama dipertahankan: penandanya
-                    // digerakkan penyelesaian task oleh developer, bukan oleh pengiriman
-                    // ulang hasil UAT. Menyetelnya ulang akan memundurkan perbaikan yang
-                    // sudah selesai menjadi seolah belum dikerjakan.
+                    // Progres verifikasi lama dipertahankan: digerakkan penyelesaian task oleh
+                    // developer, bukan re-submit UAT; reset memundurkan perbaikan selesai jadi seolah belum.
                     'verificationStatus' => $savedTaskId !== null
                         ? ($saved['verificationStatus'] ?? 'waiting_development')
                         : 'waiting_development',
                 ];
             })->values();
 
-            // Setiap Permintaan Tambahan menjadi task CR tersendiri, baik Minor maupun
-            // Mayor: keduanya pekerjaan pengembangan yang harus terlihat di Manajemen
-            // Task. Task sengaja belum memiliki assignee agar PM tetap menentukan
-            // developer yang tepat. Bedanya hanya penanda tingkat perubahan pada judul
-            // dan prioritasnya — Mayor menahan rilis sampai SIT ulang, Minor hanya
-            // menahan persetujuan final.
-            //
-            // `$createdRequestTaskIds` mencatat task yang benar-benar baru dibuat pada
-            // permintaan ini. Permintaan yang memakai ulang task lama tidak masuk, sebab
-            // task lamanya justru harus dibuka kembali oleh jalur hold.
+            // Tiap Permintaan Tambahan jadi task CR tersendiri (Minor & Mayor) agar terlihat di
+            // Manajemen Task; sengaja belum ada assignee agar PM tentukan developer. Beda hanya penanda
+            // tingkat di judul & prioritas: Mayor tahan rilis sampai SIT ulang, Minor tahan persetujuan final.
+            // `$createdRequestTaskIds` mencatat task yang benar-benar baru; yang reuse task lama tak
+            // masuk sebab task lamanya justru harus dibuka kembali oleh jalur hold.
             $createdRequestTaskIds = [];
             $additionalRequests = $additionalRequests->map(function (array $request) use ($project, $actor, &$createdRequestTaskIds): array {
                 if (filled($request['taskId'])) {
@@ -225,9 +208,8 @@ class UatExecutionService
                 'submittedAt' => $submittedAt,
             ];
 
-            // Putaran yang sedang di-hold revisi Minor diarsipkan lebih dulu, sebelum
-            // satu kunci `uat2_*` pun ditimpa. Tanpa langkah ini, permintaan revisi
-            // kedua akan menghapus hasil dan persetujuan putaran pertama tanpa jejak.
+            // Arsipkan putaran hold revisi Minor sebelum satu kunci `uat2_*` pun ditimpa; tanpa ini
+            // revisi kedua menghapus hasil & persetujuan putaran pertama tanpa jejak.
             if ($isMinorReexecution) {
                 $sitUatData = $this->archiveUatRoundForMinorReexecution($sitUatData, $actor, $submittedAt);
             }
@@ -239,11 +221,9 @@ class UatExecutionService
             $sitUatData['uat2_passedCount'] = $summary['acceptedCount'];
             $sitUatData['uat2_findings'] = $summary['revisionCount'];
             $sitUatData['uat2_execNotes'] = $summary['notes'];
-            // Revisi Mayor mengembalikan UAT ke Tahap 1: seluruh siklus diulang,
-            // bukan hanya item Mayor-nya, karena perbaikannya dapat meregresi
-            // skenario lain yang sudah lulus. Revisi Minor tidak memundurkan tahap:
-            // perbaikannya sempit, jadi Tahap 3 tetap terbuka dan hanya keputusan
-            // penanda tangan yang ditahan.
+            // Mayor → Tahap 1: seluruh siklus diulang (bukan hanya item Mayor) karena bisa meregresi
+            // skenario lain yang sudah lulus. Minor tak memundurkan tahap: perbaikannya sempit, Tahap 3
+            // tetap terbuka dan hanya keputusan penanda tangan yang ditahan.
             $sitUatData['activeUatStep'] = $majorCount > 0 ? 1 : 3;
 
             if ($majorCount > 0) {
@@ -264,9 +244,8 @@ class UatExecutionService
                     $submittedAt
                 );
             } else {
-                // UAT tidak di-hold, jadi tidak ada pengulangan yang menunggu SIT.
-                // Sisa penanda siklus lama sekaligus dibuang agar baris yang pernah
-                // melalui mode verifikasi tidak membawa kunci yang sudah pensiun.
+                // UAT tak di-hold, tak ada pengulangan menunggu SIT. Buang sisa penanda siklus lama
+                // agar baris bekas mode verifikasi tak membawa kunci yang sudah pensiun.
                 $sitUatData['uat_restart_after_sit'] = false;
                 unset(
                     $sitUatData['uat2_resume_after_sit'],
@@ -274,9 +253,8 @@ class UatExecutionService
                     $sitUatData['uat2_major_revision_resolved_at']
                 );
 
-                // Hasil terakhir tidak lagi meminta perubahan apa pun, sehingga hold
-                // revisi Minor beserta permintaan yang belum tuntas tidak boleh
-                // menggantung dan menahan persetujuan selamanya.
+                // Hasil terakhir tak lagi minta perubahan, jadi hold revisi Minor & permintaan belum
+                // tuntas tak boleh menggantung menahan persetujuan selamanya.
                 $sitUatData = $this->supersedeOpenMinorRequests(
                     $sitUatData,
                     $actor,
@@ -286,10 +264,8 @@ class UatExecutionService
                 $sitUatData = $this->closeMinorRevisionHold($sitUatData, $submittedAt, 'no_minor_request');
             }
 
-            // Persetujuan lama tidak boleh tetap berlaku bila hasil UAT diubah.
-            // Pengosongannya menunggu percabangan di atas selesai supaya
-            // `holdForMajorRevision()` masih melihat persetujuan putaran berjalan
-            // dan dapat mengarsipkannya ke `uat_cycles` sebelum hilang.
+            // Persetujuan lama tak boleh berlaku bila hasil UAT diubah. Dikosongkan setelah percabangan
+            // agar `holdForMajorRevision()` masih lihat persetujuan berjalan & mengarsipkannya ke `uat_cycles` dulu.
             $sitUatData['uat3_approvals'] = [];
 
             $project->update(['sit_uat_data' => $sitUatData]);
@@ -355,10 +331,8 @@ class UatExecutionService
                     'project' => 'Selesaikan tahap Persiapan Skenario UAT terlebih dahulu.',
                 ]);
             }
-            // Sama seperti `submit()`, satu-satunya putaran yang masih boleh disunting
-            // setelah difinalkan adalah putaran yang berkesimpulan revisi Minor: unit
-            // peminta berhak menyusun permintaan revisi berikutnya, dan draft adalah
-            // langkah wajar sebelum mengirimnya.
+            // Seperti `submit()`: hanya putaran hold revisi Minor yang boleh disunting setelah final —
+            // unit peminta berhak susun revisi berikutnya, draft langkah wajar sebelum mengirimnya.
             $isMinorReexecution = ($sitUatData['uat_hold']['reason'] ?? null) === 'minor_revision';
 
             if (filled($sitUatData['uat2_summary']['submittedAt'] ?? null) && ! $isMinorReexecution) {
@@ -367,9 +341,8 @@ class UatExecutionService
                 ]);
             }
 
-            // Permintaan Tambahan yang sudah tersimpan beserta task CR-nya. Draft tidak
-            // boleh menghapus tautan task itu: task-nya sudah nyata di Manajemen Task,
-            // dan tanpa tautannya `submit()` berikutnya akan membuat task kembar.
+            // Permintaan Tambahan tersimpan + task CR-nya. Draft tak boleh hapus tautan task itu:
+            // task sudah nyata di Manajemen Task, tanpa tautannya `submit()` berikutnya membuat task kembar.
             $savedRequests = collect($sitUatData['uat2_additional_requests'] ?? [])
                 ->filter(fn ($request): bool => is_array($request) && filled($request['id'] ?? null))
                 ->keyBy(fn (array $request): string => (string) $request['id']);
@@ -378,8 +351,7 @@ class UatExecutionService
                 ->where('status', '!=', TaskStatus::TAKE_DOWN->value)
                 ->pluck('id')
                 ->map(fn ($id) => (int) $id);
-            // Task CR milik Permintaan Tambahan tidak memperoleh baris skenario, persis
-            // seperti pada `submit()` dan pada wizard di sisi klien.
+            // Task CR Permintaan Tambahan tak dapat baris skenario, seperti `submit()` & wizard klien.
             $requestTaskIdSet = $savedRequests
                 ->pluck('taskId')
                 ->filter(fn ($taskId): bool => is_numeric($taskId) && $activeTaskIds->contains((int) $taskId))
@@ -422,8 +394,7 @@ class UatExecutionService
                 ]);
             }
 
-            // Kemajuan verifikasi per skenario juga dipertahankan lewat pemetaan `id`,
-            // dengan alasan yang sama seperti Permintaan Tambahan di bawah.
+            // Progres verifikasi per skenario dipertahankan lewat pemetaan `id`, alasan sama seperti Permintaan Tambahan di bawah.
             $savedScenarios = collect($sitUatData['uat2_scenarios'] ?? [])
                 ->filter(fn ($scenario): bool => is_array($scenario) && filled($scenario['id'] ?? null))
                 ->keyBy(fn (array $scenario): string => (string) $scenario['id']);
@@ -450,9 +421,8 @@ class UatExecutionService
                         'detail' => filled($input['detail'] ?? null) ? trim($input['detail']) : '',
                         'comment' => filled($input['comment'] ?? null) ? trim($input['comment']) : '',
                         'attachments' => $this->mapAttachments($input['attachments'] ?? [], $documents),
-                        // Tautan task CR dan kemajuan verifikasinya dipertahankan: keduanya
-                        // milik jalur pengembangan, bukan milik draft yang sedang disusun
-                        // unit peminta.
+                        // Tautan task CR & progres verifikasinya dipertahankan: milik jalur
+                        // pengembangan, bukan draft yang sedang disusun unit peminta.
                         'taskId' => is_numeric($saved['taskId'] ?? null) ? (int) $saved['taskId'] : null,
                         'verificationStatus' => $saved['verificationStatus'] ?? null,
                     ];
@@ -482,13 +452,10 @@ class UatExecutionService
     }
 
     /**
-     * Tahan UAT karena revisi Mayor: pekerjaan kembali ke developer, SIT diulang
-     * menyeluruh, lalu UAT dimulai lagi dari Tahap 1.
+     * Tahan UAT karena revisi Mayor: kembali ke developer, SIT diulang menyeluruh, UAT dari Tahap 1.
      *
-     * Publik karena keputusan Change Request Mayor di `ProjectController` menahan
-     * UAT dengan konsekuensi yang persis sama; menyalin logikanya ke sana berarti
-     * dua jalur bisa menulis bentuk `sit_uat_data` yang berbeda untuk peristiwa
-     * yang sama.
+     * Publik karena keputusan CR Mayor di `ProjectController` berkonsekuensi persis sama; menyalin
+     * logikanya berarti dua jalur menulis bentuk `sit_uat_data` berbeda untuk peristiwa yang sama.
      *
      * @param  list<array{id:string,source:string,title:?string,detail:?string,taskId:?int,attachments:array,newTask:bool}>  $majorWorkItems
      */
@@ -502,10 +469,8 @@ class UatExecutionService
         $revisionCycles = (array) ($sitUatData['uat_revision_cycles'] ?? []);
         $cycleNumber = count($revisionCycles) + 1;
 
-        // Putaran UAT yang sedang berjalan diarsipkan lebih dulu ke `uat_cycles`,
-        // sebelum satu kunci pun disentuh. Pengulangan penuh mengosongkan hasil
-        // eksekusi beserta persetujuannya, dan data persetujuan tidak boleh hilang:
-        // arsip inilah satu-satunya bukti bahwa putaran itu pernah dijalankan.
+        // Arsipkan putaran berjalan ke `uat_cycles` sebelum satu kunci pun disentuh. Pengulangan
+        // penuh mengosongkan hasil & persetujuannya; arsip ini satu-satunya bukti putaran pernah dijalankan.
         $uatCycles = (array) ($sitUatData['uat_cycles'] ?? []);
         $uatCycles[] = [
             'cycle' => $cycleNumber,
@@ -526,10 +491,8 @@ class UatExecutionService
         ];
         $sitUatData['uat_cycles'] = $uatCycles;
 
-        // Permintaan Minor yang belum tuntas ikut dibatalkan keberlakuannya. Revisi
-        // Mayor mengulang seluruh siklus dari SIT, jadi daftar perbaikan Minor lama
-        // tidak lagi mewakili apa pun; bila dibiarkan `open`, Tahap 3 akan menampilkan
-        // permintaan yang tidak pernah dapat diselesaikan lagi.
+        // Permintaan Minor belum tuntas ikut di-supersede: Mayor mengulang seluruh siklus dari SIT,
+        // jadi Minor lama tak mewakili apa pun; bila dibiarkan `open`, Tahap 3 menampilkan permintaan yang tak bisa diselesaikan lagi.
         $sitUatData = $this->supersedeOpenMinorRequests(
             $sitUatData,
             $actor,
@@ -620,10 +583,8 @@ class UatExecutionService
         $sitUatData['uat_change_requests'] = $requests;
         $sitUatData['uat_revision_cycles'] = $revisionCycles;
         $sitUatData['revisions'] = $revisions;
-        // SIT ulang menguji seluruh task aktif, bukan hanya yang direvisi:
-        // perbaikan Mayor menyentuh kode bersama sehingga dapat meregresi fungsi
-        // yang tidak diminta berubah. `affectedItems` tetap disimpan sebagai
-        // penjelasan asal-usul siklus, bukan sebagai pembatas scope.
+        // SIT ulang menguji seluruh task aktif, bukan hanya yang direvisi: Mayor menyentuh kode
+        // bersama sehingga dapat meregresi fungsi yang tak diminta berubah. `affectedItems` tetap disimpan sebagai penjelasan asal-usul, bukan pembatas scope.
         $sitUatData['sit_retest_scope'] = [
             'mode' => 'full',
             'cycle' => $cycleNumber,
@@ -653,9 +614,8 @@ class UatExecutionService
         $sitUatData['sit3_approvals'] = [];
         $sitUatData['uat3_approvals'] = [];
 
-        // Hasil eksekusi baru dikosongkan setelah arsip putaran ini tersimpan, agar
-        // UAT benar-benar dimulai ulang dari Tahap 1 — termasuk melepas kunci
-        // snapshot `uat2_summary.submittedAt` yang menahan penyimpanan berikutnya.
+        // Hasil dikosongkan setelah arsip putaran tersimpan agar UAT benar-benar dimulai ulang dari
+        // Tahap 1 — termasuk melepas kunci snapshot `uat2_summary.submittedAt` yang menahan penyimpanan berikutnya.
         $sitUatData['uat2_summary'] = [];
         $sitUatData['uat2_scenarios'] = [];
         $sitUatData['uat2_additional_requests'] = [];
@@ -663,9 +623,8 @@ class UatExecutionService
         $sitUatData['uat2_passedCount'] = 0;
         $sitUatData['uat2_findings'] = 0;
         $sitUatData['uat2_execNotes'] = null;
-        // Sisa jejak draft dan mode verifikasi yang sudah pensiun ikut dibuang:
-        // isinya milik putaran yang baru saja diarsipkan, sehingga bila terbaca
-        // oleh putaran baru justru menyesatkan.
+        // Buang sisa jejak draft & mode verifikasi yang sudah pensiun: isinya milik putaran yang
+        // baru diarsipkan, sehingga menyesatkan bila terbaca putaran baru.
         unset(
             $sitUatData['uat2_draft_saved_at'],
             $sitUatData['uat2_draft_saved_by'],
@@ -676,10 +635,8 @@ class UatExecutionService
             $sitUatData['uat2_resume_after_sit']
         );
 
-        // `uat1_participants` dan `uat1_docs` sengaja tidak disentuh. Daftar
-        // penanda tangan UAT dan dokumen persiapannya adalah hasil kesepakatan
-        // orang, bukan hasil eksekusi; mengosongkannya memaksa PM menyusun ulang
-        // roster yang sama pada setiap pengulangan.
+        // `uat1_participants` & `uat1_docs` sengaja tak disentuh: roster penanda tangan & dokumen
+        // persiapan = kesepakatan orang, bukan hasil eksekusi; mengosongkannya memaksa PM menyusun ulang roster sama tiap pengulangan.
         $sitUatData['activeUatStep'] = 1;
 
         return $sitUatData;
@@ -688,23 +645,15 @@ class UatExecutionService
     /**
      * Tahan persetujuan final UAT karena revisi Minor, tanpa memundurkan proyek.
      *
-     * Ini kebalikan dari `holdForMajorRevision()`. Revisi Minor tidak mengulang
-     * siklus: status proyek tetap `UAT_IN_PROGRESS`, Tahap 3 tetap terbuka, SIT
-     * tidak diulang, dan peserta UAT tidak berubah. Yang ditahan hanya keputusan
-     * penanda tangan, sebab berita acara UAT menjadi dasar rilis — menandatanganinya
-     * sebelum perbaikan dikerjakan berarti menyetujui versi aplikasi yang sudah
-     * diketahui salah.
+     * Kebalikan `holdForMajorRevision()`: Minor tak mengulang siklus — status tetap `UAT_IN_PROGRESS`,
+     * Tahap 3 terbuka, SIT tak diulang, peserta tak berubah. Yang ditahan hanya keputusan penanda
+     * tangan: berita acara UAT dasar rilis, tanda tangan sebelum perbaikan = setujui versi yang diketahui salah.
      *
-     * Efek yang benar-benar dikerjakan:
-     *
-     *   1. Permintaan Minor yang belum tuntas dari siklus sebelumnya di-supersede,
-     *      supaya hasil eksekusi terbaru menjadi satu-satunya daftar pekerjaan aktif.
-     *   2. Setiap item Minor memperoleh satu Change Request bertipe `minor` sehingga
-     *      terlihat pada Tahap 3 dan pada layar Manajemen Task.
-     *   3. Task yang menjadi sumber item dibuka kembali dengan catatan revisi, agar
-     *      pekerjaannya tidak tampak "belum dikerjakan" pada daftar task.
-     *   4. `uat_hold` dipasang dengan `reason = 'minor_revision'` sebagai satu-satunya
-     *      penanda penahanan, dibaca lewat `Project::isUatMinorRevisionPending()`.
+     * Efeknya:
+     *   1. Permintaan Minor belum tuntas dari siklus lama di-supersede (hasil terbaru jadi satu-satunya daftar aktif).
+     *   2. Tiap item Minor memperoleh CR `minor` agar terlihat di Tahap 3 & Manajemen Task.
+     *   3. Task sumber item dibuka kembali dengan catatan revisi agar tak tampak "belum dikerjakan".
+     *   4. `uat_hold` dipasang `reason = 'minor_revision'` sebagai satu-satunya penanda, dibaca `Project::isUatMinorRevisionPending()`.
      *
      * @param  list<array{id:string,source:string,title:?string,detail:?string,taskId:?int,attachments:array,newTask:bool}>  $minorWorkItems
      */
@@ -715,9 +664,8 @@ class UatExecutionService
         array $minorWorkItems,
         string $submittedAt
     ): array {
-        // Daftar pekerjaan Minor yang lama tidak lagi berlaku: hasil eksekusi terbaru
-        // adalah pernyataan resmi tentang apa yang masih perlu diperbaiki. Item yang
-        // masih diminta akan memperoleh Change Request baru pada siklus ini.
+        // Daftar pekerjaan Minor lama tak lagi berlaku: hasil eksekusi terbaru adalah pernyataan
+        // resmi apa yang masih perlu diperbaiki. Item yang masih diminta memperoleh CR baru pada siklus ini.
         $sitUatData = $this->supersedeOpenMinorRequests(
             $sitUatData,
             $actor,
@@ -749,9 +697,8 @@ class UatExecutionService
                 'attachments' => $workItem['attachments'],
                 'submittedBy' => $actor->name,
                 'submittedById' => $actor->id,
-                // Task baru belum punya penerima, jadi statusnya `open` sampai PM
-                // menugaskannya. Task lama yang dibuka kembali sudah punya penerima
-                // dan langsung berjalan.
+                // Task baru belum punya penerima → `open` sampai PM menugaskannya; task lama yang
+                // dibuka kembali sudah punya penerima dan langsung berjalan.
                 'status' => ($workItem['newTask'] ?? false) ? 'open' : 'in_progress',
                 'origin' => 'uat_execution',
                 'at' => $submittedAt,
@@ -760,10 +707,8 @@ class UatExecutionService
                 'decisionNote' => 'Ditetapkan otomatis dari kesimpulan eksekusi UAT.',
             ];
 
-            // Task Permintaan Tambahan sudah dibuat lengkap dengan catatan revisinya
-            // di `submit()`; yang perlu dibuka kembali hanyalah task lama sumber
-            // skenario, termasuk task yang perbaikan siklus sebelumnya sudah tuntas
-            // lalu diminta revisi lagi.
+            // Task Permintaan Tambahan sudah dibuat lengkap dengan catatan revisinya di `submit()`;
+            // yang perlu dibuka kembali hanya task lama sumber skenario, termasuk yang siklus lalu tuntas lalu diminta revisi lagi.
             if (! ($workItem['newTask'] ?? false) && filled($workItem['taskId'])) {
                 $project->tasks()->whereKey($workItem['taskId'])->update([
                     'status' => TaskStatus::IN_PROGRESS->value,
@@ -805,14 +750,12 @@ class UatExecutionService
             'cycle' => $cycleNumber,
             'heldAt' => $submittedAt,
             'heldBy' => $actor->name,
-            // Tahap yang dilanjutkan setelah hold lepas tetap Tahap 3: hanya
-            // persetujuannya yang tertunda, bukan eksekusinya.
+            // Resume setelah hold lepas tetap Tahap 3: hanya persetujuannya yang tertunda, bukan eksekusinya.
             'resumeStep' => 3,
         ];
 
-        // SIT tidak diulang oleh revisi Minor, jadi penanda pengulangan justru harus
-        // ditegaskan mati agar `Project::isSitRetestCycle()` tidak salah membaca
-        // siklus ini sebagai SIT ulang.
+        // SIT tak diulang oleh revisi Minor, jadi penanda pengulangan ditegaskan mati agar
+        // `Project::isSitRetestCycle()` tak salah membaca siklus ini sebagai SIT ulang.
         $sitUatData['uat_restart_after_sit'] = false;
         unset(
             $sitUatData['uat2_resume_after_sit'],
@@ -828,16 +771,11 @@ class UatExecutionService
     /**
      * Beri tahu tim pengembangan bahwa ada revisi Minor yang harus dikerjakan.
      *
-     * Revisi Minor sengaja tidak mengubah status proyek — proyeknya tetap
-     * `UAT_IN_PROGRESS` karena tahapnya tidak mundur. Konsekuensinya, notifikasi
-     * berbasis transisi status di `ProjectWorkflowService` tidak pernah terpicu, dan
-     * tanpa pemberitahuan ini permintaan revisi Minor hanya terlihat bagi orang yang
-     * kebetulan membuka wizard SIT/UAT sehingga mudah terlewat.
+     * Minor sengaja tak mengubah status proyek (tetap `UAT_IN_PROGRESS`), jadi notifikasi berbasis
+     * transisi status di `ProjectWorkflowService` tak terpicu; tanpa ini revisi Minor hanya terlihat bagi yang kebetulan buka wizard SIT/UAT.
      *
-     * Penerimanya adalah pihak yang harus bertindak: assignee task yang dibuka
-     * kembali, PM proyek yang menugaskan task revisi baru, serta pemegang wewenang
-     * penugasan task lintas proyek (`development_lead` dan `super_admin`, sama seperti
-     * daftar pada `TaskController::canModifyTask()`).
+     * Penerima = pihak yang harus bertindak: assignee task yang dibuka kembali, PM yang menugaskan
+     * task revisi baru, serta wewenang penugasan lintas proyek (`development_lead` & `super_admin`, sama seperti `TaskController::canModifyTask()`).
      *
      * @param  list<array{id:string,source:string,title:?string,detail:?string,taskId:?int,attachments:array,newTask:bool}>  $minorWorkItems
      */
@@ -878,10 +816,8 @@ class UatExecutionService
     /**
      * Beri tahu penanda tangan bahwa penahanan persetujuan revisi Minor sudah lepas.
      *
-     * Dipanggil dari jalur pembaruan task setelah `releaseMinorRevisionHold()`
-     * benar-benar melepas hold. Tanpa pemberitahuan ini penanda tangan tidak punya
-     * cara mengetahui bahwa keputusannya kembali terbuka, sebab pelepasan hold juga
-     * tidak mengubah status proyek.
+     * Dipanggil dari jalur pembaruan task setelah `releaseMinorRevisionHold()` melepas hold. Tanpa
+     * ini penanda tangan tak tahu keputusannya kembali terbuka, sebab pelepasan hold tak mengubah status proyek.
      */
     public function notifyMinorRevisionHoldReleased(Project $project, User $actor): void
     {
@@ -897,9 +833,7 @@ class UatExecutionService
     /**
      * Tulis notifikasi untuk sekumpulan user sekaligus, tanpa duplikat.
      *
-     * Tabel `notifications` hanya memiliki kolom `user_id`, `title`, `message`,
-     * `type`, dan `is_read` — tidak ada kolom tautan — jadi seluruh konteks harus
-     * termuat di dalam pesannya.
+     * Tabel `notifications` tak punya kolom tautan, jadi seluruh konteks harus termuat di dalam pesannya.
      *
      * @param  array<int, int|string|null>  $userIds
      */
@@ -940,13 +874,10 @@ class UatExecutionService
     /**
      * Lepas hold revisi Minor setelah seluruh Change Request Minor tuntas.
      *
-     * Dipanggil dari jalur pembaruan task (`TaskController`) begitu satu task revisi
-     * dinyatakan selesai. Pelepasannya tidak boleh disimpulkan dari satu task itu
-     * saja: satu siklus revisi Minor dapat berisi beberapa permintaan, dan
-     * persetujuan hanya boleh dibuka bila tidak ada lagi permintaan yang menggantung.
+     * Dipanggil dari `TaskController` begitu satu task revisi selesai. Tak boleh disimpulkan dari satu
+     * task: satu siklus bisa berisi beberapa permintaan, hold dibuka hanya bila tak ada lagi yang menggantung.
      *
-     * Mengembalikan `sit_uat_data` yang sudah diperbarui — pemanggil yang menyimpan,
-     * supaya seluruh perubahan satu permintaan HTTP tetap satu kali tulis.
+     * Mengembalikan `sit_uat_data` terbarui — pemanggil yang menyimpan agar seluruh perubahan satu permintaan HTTP tetap satu kali tulis.
      */
     public function releaseMinorRevisionHold(array $sitUatData, string $releasedAt): array
     {
@@ -970,10 +901,8 @@ class UatExecutionService
     /**
      * Tandai hold revisi Minor sebagai lepas, beserta alasan pelepasannya.
      *
-     * `uat_hold` tidak dihapus melainkan ditandai: baris ini satu-satunya jejak bahwa
-     * persetujuan pernah ditahan, dan hilangnya membuat riwayat penahanan tidak dapat
-     * ditelusuri. Siklus terkait pada `uat_revision_cycles` ikut ditutup agar kedua
-     * catatan tidak saling bertentangan.
+     * `uat_hold` ditandai, bukan dihapus: baris ini satu-satunya jejak persetujuan pernah ditahan,
+     * hilangnya membuat riwayat penahanan tak tertelusuri. Siklus terkait di `uat_revision_cycles` ikut ditutup agar kedua catatan tak bertentangan.
      */
     private function closeMinorRevisionHold(array $sitUatData, string $releasedAt, string $reason): array
     {
@@ -1009,10 +938,8 @@ class UatExecutionService
     /**
      * Batalkan keberlakuan Change Request Minor yang belum tuntas.
      *
-     * Dipakai saat hasil eksekusi UAT ditulis ulang: daftar permintaan Minor yang
-     * lama tidak lagi mewakili apa yang diminta unit peminta. Barisnya tidak dihapus
-     * — audit trail persetujuan dan permintaan perubahan wajib utuh — melainkan
-     * ditandai `superseded` beserta alasannya.
+     * Dipakai saat hasil eksekusi UAT ditulis ulang: Minor lama tak lagi mewakili apa yang diminta
+     * unit peminta. Baris tak dihapus (audit trail wajib utuh), melainkan ditandai `superseded` beserta alasannya.
      */
     private function supersedeOpenMinorRequests(
         array $sitUatData,
@@ -1045,11 +972,9 @@ class UatExecutionService
     /**
      * Arsipkan putaran UAT yang sedang di-hold revisi Minor sebelum hasilnya ditimpa.
      *
-     * Permintaan revisi kedua menulis ulang seluruh kunci `uat2_*` dan mengosongkan
-     * `uat3_approvals`. Tanpa arsip ini, putaran pertama beserta persetujuan yang
-     * sudah masuk akan hilang tanpa jejak — padahal berita acara UAT adalah dokumen
-     * tata kelola. Nomor siklusnya diambil dari `uat_hold.cycle`, yaitu siklus yang
-     * memang menghasilkan putaran tersebut.
+     * Revisi kedua menulis ulang seluruh `uat2_*` & mengosongkan `uat3_approvals`; tanpa arsip ini
+     * putaran pertama + persetujuannya hilang tanpa jejak (berita acara UAT = dokumen tata kelola).
+     * Nomor siklus dari `uat_hold.cycle`, yaitu siklus yang memang menghasilkan putaran tersebut.
      */
     private function archiveUatRoundForMinorReexecution(array $sitUatData, User $actor, string $archivedAt): array
     {
@@ -1077,13 +1002,11 @@ class UatExecutionService
     }
 
     /**
-     * Susun daftar pekerjaan satu tingkat perubahan dari skenario dan Permintaan
-     * Tambahan, dalam bentuk yang dipahami kedua jalur hold.
+     * Susun daftar pekerjaan satu tingkat perubahan dari skenario & Permintaan Tambahan,
+     * dalam bentuk yang dipahami kedua jalur hold.
      *
-     * `newTask` menandai item yang task-nya baru dibuat pada permintaan ini, sehingga
-     * jalur hold tahu ia tidak perlu (dan tidak boleh) membuka kembali task lama.
-     * Permintaan Tambahan yang memakai ulang task siklus sebelumnya karena itu bernilai
-     * `false`: task lamanya justru wajib dibuka kembali.
+     * `newTask` menandai item yang task-nya baru dibuat, jadi jalur hold tahu ia tak perlu (dan tak
+     * boleh) membuka kembali task lama; yang reuse task siklus lama bernilai `false` karena task lamanya wajib dibuka kembali.
      *
      * @param  \Illuminate\Support\Collection<int, array>  $scenarios
      * @param  \Illuminate\Support\Collection<int, array>  $additionalRequests

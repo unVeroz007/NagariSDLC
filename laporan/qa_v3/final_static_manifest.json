@@ -1,0 +1,992 @@
+[
+  {
+    "category": "toc",
+    "title": "ABSTRAK",
+    "target": "ABSTRAK",
+    "level": 1
+  },
+  {
+    "category": "toc",
+    "title": "KATA PENGANTAR",
+    "target": "KATA PENGANTAR",
+    "level": 1
+  },
+  {
+    "category": "toc",
+    "title": "DAFTAR ISI",
+    "target": "DAFTAR ISI",
+    "level": 1
+  },
+  {
+    "category": "toc",
+    "title": "DAFTAR TABEL",
+    "target": "DAFTAR TABEL",
+    "level": 1
+  },
+  {
+    "category": "toc",
+    "title": "DAFTAR GAMBAR",
+    "target": "DAFTAR GAMBAR",
+    "level": 1
+  },
+  {
+    "category": "toc",
+    "title": "DAFTAR LAMPIRAN",
+    "target": "DAFTAR LAMPIRAN",
+    "level": 1
+  },
+  {
+    "category": "toc",
+    "title": "BAB I PENDAHULUAN",
+    "target": "BAB I PENDAHULUAN",
+    "level": 1
+  },
+  {
+    "category": "toc",
+    "title": "1.1 Latar Belakang",
+    "target": "1.1 Latar Belakang",
+    "level": 2
+  },
+  {
+    "category": "toc",
+    "title": "1.2 Rumusan Masalah",
+    "target": "1.2 Rumusan Masalah",
+    "level": 2
+  },
+  {
+    "category": "toc",
+    "title": "1.3 Tujuan",
+    "target": "1.3 Tujuan",
+    "level": 2
+  },
+  {
+    "category": "toc",
+    "title": "1.4 Manfaat Kerja Praktek",
+    "target": "1.4 Manfaat Kerja Praktek",
+    "level": 2
+  },
+  {
+    "category": "toc",
+    "title": "1.4.1 Manfaat bagi Mahasiswa",
+    "target": "1.4.1 Manfaat bagi Mahasiswa",
+    "level": 3
+  },
+  {
+    "category": "toc",
+    "title": "1.4.2 Manfaat bagi Instansi",
+    "target": "1.4.2 Manfaat bagi Instansi",
+    "level": 3
+  },
+  {
+    "category": "toc",
+    "title": "1.4.3 Manfaat bagi Perguruan Tinggi",
+    "target": "1.4.3 Manfaat bagi Perguruan Tinggi",
+    "level": 3
+  },
+  {
+    "category": "toc",
+    "title": "1.5 Batasan Masalah",
+    "target": "1.5 Batasan Masalah",
+    "level": 2
+  },
+  {
+    "category": "toc",
+    "title": "1.6 Metode Pelaksanaan",
+    "target": "1.6 Metode Pelaksanaan",
+    "level": 2
+  },
+  {
+    "category": "toc",
+    "title": "1.7 Sistematika Penulisan",
+    "target": "1.7 Sistematika Penulisan",
+    "level": 2
+  },
+  {
+    "category": "toc",
+    "title": "BAB II PROFIL INSTANSI DAN PELAKSANAAN KERJA PRAKTEK",
+    "target": "BAB II PROFIL INSTANSI DAN PELAKSANAAN KERJA PRAKTEK",
+    "level": 1
+  },
+  {
+    "category": "toc",
+    "title": "2.1 Profil Instansi",
+    "target": "2.1 Profil Instansi",
+    "level": 2
+  },
+  {
+    "category": "toc",
+    "title": "2.1.1 Identitas Instansi",
+    "target": "2.1.1 Identitas Instansi",
+    "level": 3
+  },
+  {
+    "category": "toc",
+    "title": "2.1.2 Sejarah Singkat",
+    "target": "2.1.2 Sejarah Singkat",
+    "level": 3
+  },
+  {
+    "category": "toc",
+    "title": "2.1.3 Visi dan Misi",
+    "target": "2.1.3 Visi dan Misi",
+    "level": 3
+  },
+  {
+    "category": "toc",
+    "title": "2.1.4 Logo dan Lokasi",
+    "target": "2.1.4 Logo dan Lokasi",
+    "level": 3
+  },
+  {
+    "category": "toc",
+    "title": "2.2 Struktur Organisasi",
+    "target": "2.2 Struktur Organisasi",
+    "level": 2
+  },
+  {
+    "category": "toc",
+    "title": "2.3 Unit Kerja dan Posisi Mahasiswa",
+    "target": "2.3 Unit Kerja dan Posisi Mahasiswa",
+    "level": 2
+  },
+  {
+    "category": "toc",
+    "title": "2.3.1 Unit Kerja",
+    "target": "2.3.1 Unit Kerja",
+    "level": 3
+  },
+  {
+    "category": "toc",
+    "title": "2.3.2 Posisi sebagai Pengembang Fullstack",
+    "target": "2.3.2 Posisi sebagai Pengembang Fullstack",
+    "level": 3
+  },
+  {
+    "category": "toc",
+    "title": "2.3.3 Uraian Tugas",
+    "target": "2.3.3 Uraian Tugas",
+    "level": 3
+  },
+  {
+    "category": "toc",
+    "title": "2.4 Jadwal dan Kegiatan Kerja Praktek",
+    "target": "2.4 Jadwal dan Kegiatan Kerja Praktek",
+    "level": 2
+  },
+  {
+    "category": "toc",
+    "title": "2.4.1 Kegiatan Mingguan",
+    "target": "2.4.1 Kegiatan Mingguan",
+    "level": 3
+  },
+  {
+    "category": "toc",
+    "title": "2.4.2 Hasil Kegiatan",
+    "target": "2.4.2 Hasil Kegiatan",
+    "level": 3
+  },
+  {
+    "category": "toc",
+    "title": "BAB III TINJAUAN PUSTAKA",
+    "target": "BAB III TINJAUAN PUSTAKA",
+    "level": 1
+  },
+  {
+    "category": "toc",
+    "title": "3.1 Sistem Informasi dan Tata Kelola Teknologi Informasi",
+    "target": "3.1 Sistem Informasi dan Tata Kelola Teknologi Informasi",
+    "level": 2
+  },
+  {
+    "category": "toc",
+    "title": "3.2 Software Development Life Cycle",
+    "target": "3.2 Software Development Life Cycle",
+    "level": 2
+  },
+  {
+    "category": "toc",
+    "title": "3.3 Model Pengembangan Perangkat Lunak",
+    "target": "3.3 Model Pengembangan Perangkat Lunak",
+    "level": 2
+  },
+  {
+    "category": "toc",
+    "title": "3.4 Agile, Continuous Software Engineering, dan DevOps",
+    "target": "3.4 Agile, Continuous Software Engineering, dan DevOps",
+    "level": 2
+  },
+  {
+    "category": "toc",
+    "title": "3.5 Workflow, State Machine, dan Quality Gate",
+    "target": "3.5 Workflow, State Machine, dan Quality Gate",
+    "level": 2
+  },
+  {
+    "category": "toc",
+    "title": "3.6 Arsitektur Perangkat Lunak dan Pemisahan Tanggung Jawab",
+    "target": "3.6 Arsitektur Perangkat Lunak dan Pemisahan Tanggung Jawab",
+    "level": 2
+  },
+  {
+    "category": "toc",
+    "title": "3.7 REST, HTTP, dan Desain API",
+    "target": "3.7 REST, HTTP, dan Desain API",
+    "level": 2
+  },
+  {
+    "category": "toc",
+    "title": "3.8 Laravel sebagai Kerangka Back End",
+    "target": "3.8 Laravel sebagai Kerangka Back End",
+    "level": 2
+  },
+  {
+    "category": "toc",
+    "title": "3.9 React, Vite, Tailwind CSS, dan Usability",
+    "target": "3.9 React, Vite, Tailwind CSS, dan Usability",
+    "level": 2
+  },
+  {
+    "category": "toc",
+    "title": "3.10 Role-Based Access Control, Least Privilege, dan Separation of Duties",
+    "target": "3.10 Role-Based Access Control, Least Privilege, dan Separation of Duties",
+    "level": 2
+  },
+  {
+    "category": "toc",
+    "title": "3.11 Autentikasi, Sesi, Cookie, CSRF, dan CORS",
+    "target": "3.11 Autentikasi, Sesi, Cookie, CSRF, dan CORS",
+    "level": 2
+  },
+  {
+    "category": "toc",
+    "title": "3.12 Basis Data Relasional, ORM, dan Integritas Transaksi",
+    "target": "3.12 Basis Data Relasional, ORM, dan Integritas Transaksi",
+    "level": 2
+  },
+  {
+    "category": "toc",
+    "title": "3.13 Konsep dan Tingkatan Pengujian Perangkat Lunak",
+    "target": "3.13 Konsep dan Tingkatan Pengujian Perangkat Lunak",
+    "level": 2
+  },
+  {
+    "category": "toc",
+    "title": "3.14 System Integration Test dan User Acceptance Test",
+    "target": "3.14 System Integration Test dan User Acceptance Test",
+    "level": 2
+  },
+  {
+    "category": "toc",
+    "title": "3.15 Quality Assurance dan Model Kualitas Produk",
+    "target": "3.15 Quality Assurance dan Model Kualitas Produk",
+    "level": 2
+  },
+  {
+    "category": "toc",
+    "title": "3.16 Secure SDLC dan Pengujian Keamanan Siber",
+    "target": "3.16 Secure SDLC dan Pengujian Keamanan Siber",
+    "level": 2
+  },
+  {
+    "category": "toc",
+    "title": "3.17 Audit Trail, Traceability, dan Tata Kelola Dokumen",
+    "target": "3.17 Audit Trail, Traceability, dan Tata Kelola Dokumen",
+    "level": 2
+  },
+  {
+    "category": "toc",
+    "title": "3.18 Pemodelan UML dan ERD",
+    "target": "3.18 Pemodelan UML dan ERD",
+    "level": 2
+  },
+  {
+    "category": "toc",
+    "title": "3.19 Notifikasi, Realtime, Queue, dan Operasional",
+    "target": "3.19 Notifikasi, Realtime, Queue, dan Operasional",
+    "level": 2
+  },
+  {
+    "category": "toc",
+    "title": "3.20 Sintesis Literatur dan Posisi NagariSDLC",
+    "target": "3.20 Sintesis Literatur dan Posisi NagariSDLC",
+    "level": 2
+  },
+  {
+    "category": "toc",
+    "title": "3.21 Perbandingan Model Pengembangan",
+    "target": "3.21 Perbandingan Model Pengembangan",
+    "level": 2
+  },
+  {
+    "category": "toc",
+    "title": "3.22 Pemetaan Karakteristik Kualitas",
+    "target": "3.22 Pemetaan Karakteristik Kualitas",
+    "level": 2
+  },
+  {
+    "category": "toc",
+    "title": "3.23 Ringkasan Landasan Teori",
+    "target": "3.23 Ringkasan Landasan Teori",
+    "level": 2
+  },
+  {
+    "category": "toc",
+    "title": "3.24 Matriks Literatur dan Relevansi Penelitian",
+    "target": "3.24 Matriks Literatur dan Relevansi Penelitian",
+    "level": 2
+  },
+  {
+    "category": "toc",
+    "title": "BAB IV HASIL DAN PEMBAHASAN",
+    "target": "BAB IV HASIL DAN PEMBAHASAN",
+    "level": 1
+  },
+  {
+    "category": "toc",
+    "title": "4.1 Hasil",
+    "target": "4.1 Hasil",
+    "level": 2
+  },
+  {
+    "category": "toc",
+    "title": "4.1.1 Analisis Proses Bisnis",
+    "target": "4.1.1 Analisis Proses Bisnis",
+    "level": 3
+  },
+  {
+    "category": "toc",
+    "title": "4.1.2 Aktor dan Lingkup Sistem",
+    "target": "4.1.2 Aktor dan Lingkup Sistem",
+    "level": 3
+  },
+  {
+    "category": "toc",
+    "title": "4.1.3 Kebutuhan Fungsional",
+    "target": "4.1.3 Kebutuhan Fungsional",
+    "level": 3
+  },
+  {
+    "category": "toc",
+    "title": "4.1.4 Kebutuhan Nonfungsional",
+    "target": "4.1.4 Kebutuhan Nonfungsional",
+    "level": 3
+  },
+  {
+    "category": "toc",
+    "title": "4.1.5 Arsitektur Sistem",
+    "target": "4.1.5 Arsitektur Sistem",
+    "level": 3
+  },
+  {
+    "category": "toc",
+    "title": "4.1.6 Model Peran dan Use Case",
+    "target": "4.1.6 Model Peran dan Use Case",
+    "level": 3
+  },
+  {
+    "category": "toc",
+    "title": "4.1.7 Mesin Status Proyek",
+    "target": "4.1.7 Mesin Status Proyek",
+    "level": 3
+  },
+  {
+    "category": "toc",
+    "title": "4.1.8 Alur System Integration Test",
+    "target": "4.1.8 Alur System Integration Test",
+    "level": 3
+  },
+  {
+    "category": "toc",
+    "title": "4.1.9 Alur User Acceptance Test",
+    "target": "4.1.9 Alur User Acceptance Test",
+    "level": 3
+  },
+  {
+    "category": "toc",
+    "title": "4.1.10 Matriks Persetujuan UAT",
+    "target": "4.1.10 Matriks Persetujuan UAT",
+    "level": 3
+  },
+  {
+    "category": "toc",
+    "title": "4.1.11 Jalur QA dan Keamanan Siber",
+    "target": "4.1.11 Jalur QA dan Keamanan Siber",
+    "level": 3
+  },
+  {
+    "category": "toc",
+    "title": "4.1.12 Gerbang Rilis",
+    "target": "4.1.12 Gerbang Rilis",
+    "level": 3
+  },
+  {
+    "category": "toc",
+    "title": "4.1.13 Model Data dan Relationship",
+    "target": "4.1.13 Model Data dan Relationship",
+    "level": 3
+  },
+  {
+    "category": "toc",
+    "title": "4.1.14 Desain API dan Sequence",
+    "target": "4.1.14 Desain API dan Sequence",
+    "level": 3
+  },
+  {
+    "category": "toc",
+    "title": "4.1.15 Perancangan Navigasi dan Antarmuka",
+    "target": "4.1.15 Perancangan Navigasi dan Antarmuka",
+    "level": 3
+  },
+  {
+    "category": "toc",
+    "title": "4.1.16 Implementasi Back End",
+    "target": "4.1.16 Implementasi Back End",
+    "level": 3
+  },
+  {
+    "category": "toc",
+    "title": "4.1.17 Implementasi Front End",
+    "target": "4.1.17 Implementasi Front End",
+    "level": 3
+  },
+  {
+    "category": "toc",
+    "title": "4.1.18 Keamanan dan Audit Trail",
+    "target": "4.1.18 Keamanan dan Audit Trail",
+    "level": 3
+  },
+  {
+    "category": "toc",
+    "title": "4.1.19 Pengujian dan Verifikasi",
+    "target": "4.1.19 Pengujian dan Verifikasi",
+    "level": 3
+  },
+  {
+    "category": "toc",
+    "title": "4.1.20 Matriks Keterlacakan Kebutuhan",
+    "target": "4.1.20 Matriks Keterlacakan Kebutuhan",
+    "level": 3
+  },
+  {
+    "category": "toc",
+    "title": "4.1.21 Pemetaan Kontrol Keamanan",
+    "target": "4.1.21 Pemetaan Kontrol Keamanan",
+    "level": 3
+  },
+  {
+    "category": "toc",
+    "title": "4.1.22 Evaluasi Kualitas Produk",
+    "target": "4.1.22 Evaluasi Kualitas Produk",
+    "level": 3
+  },
+  {
+    "category": "toc",
+    "title": "4.1.23 Keputusan Arsitektur dan Trade-off",
+    "target": "4.1.23 Keputusan Arsitektur dan Trade-off",
+    "level": 3
+  },
+  {
+    "category": "toc",
+    "title": "4.2 Pembahasan",
+    "target": "4.2 Pembahasan",
+    "level": 2
+  },
+  {
+    "category": "toc",
+    "title": "4.2.1 Kesesuaian terhadap Tujuan",
+    "target": "4.2.1 Kesesuaian terhadap Tujuan",
+    "level": 3
+  },
+  {
+    "category": "toc",
+    "title": "4.2.2 Kesesuaian dengan SDLC dan Literatur",
+    "target": "4.2.2 Kesesuaian dengan SDLC dan Literatur",
+    "level": 3
+  },
+  {
+    "category": "toc",
+    "title": "4.2.3 Analisis Workflow dan State Machine",
+    "target": "4.2.3 Analisis Workflow dan State Machine",
+    "level": 3
+  },
+  {
+    "category": "toc",
+    "title": "4.2.4 Analisis Kontrol Akses dan Separation of Duties",
+    "target": "4.2.4 Analisis Kontrol Akses dan Separation of Duties",
+    "level": 3
+  },
+  {
+    "category": "toc",
+    "title": "4.2.5 Analisis SIT, UAT, QA, dan Keamanan Siber",
+    "target": "4.2.5 Analisis SIT, UAT, QA, dan Keamanan Siber",
+    "level": 3
+  },
+  {
+    "category": "toc",
+    "title": "4.2.6 Analisis Keamanan Aplikasi dan Audit Trail",
+    "target": "4.2.6 Analisis Keamanan Aplikasi dan Audit Trail",
+    "level": 3
+  },
+  {
+    "category": "toc",
+    "title": "4.2.7 Analisis Data, Transaksi, dan Kompatibilitas",
+    "target": "4.2.7 Analisis Data, Transaksi, dan Kompatibilitas",
+    "level": 3
+  },
+  {
+    "category": "toc",
+    "title": "4.2.8 Analisis Antarmuka dan Pengalaman Pengguna",
+    "target": "4.2.8 Analisis Antarmuka dan Pengalaman Pengguna",
+    "level": 3
+  },
+  {
+    "category": "toc",
+    "title": "4.2.9 Kelebihan Sistem",
+    "target": "4.2.9 Kelebihan Sistem",
+    "level": 3
+  },
+  {
+    "category": "toc",
+    "title": "4.2.10 Kekurangan dan Batasan",
+    "target": "4.2.10 Kekurangan dan Batasan",
+    "level": 3
+  },
+  {
+    "category": "toc",
+    "title": "4.2.11 Kendala dan Solusi",
+    "target": "4.2.11 Kendala dan Solusi",
+    "level": 3
+  },
+  {
+    "category": "toc",
+    "title": "4.2.12 Potensi Pengembangan",
+    "target": "4.2.12 Potensi Pengembangan",
+    "level": 3
+  },
+  {
+    "category": "toc",
+    "title": "4.2.13 Kontribusi Mahasiswa",
+    "target": "4.2.13 Kontribusi Mahasiswa",
+    "level": 3
+  },
+  {
+    "category": "toc",
+    "title": "BAB V PENUTUP",
+    "target": "BAB V PENUTUP",
+    "level": 1
+  },
+  {
+    "category": "toc",
+    "title": "5.1 Kesimpulan",
+    "target": "5.1 Kesimpulan",
+    "level": 2
+  },
+  {
+    "category": "toc",
+    "title": "5.2 Saran",
+    "target": "5.2 Saran",
+    "level": 2
+  },
+  {
+    "category": "toc",
+    "title": "DAFTAR PUSTAKA",
+    "target": "DAFTAR PUSTAKA",
+    "level": 1
+  },
+  {
+    "category": "toc",
+    "title": "LAMPIRAN",
+    "target": "LAMPIRAN",
+    "level": 1
+  },
+  {
+    "category": "toc",
+    "title": "Lampiran A Endpoint API",
+    "target": "Lampiran A Endpoint API",
+    "level": 2
+  },
+  {
+    "category": "toc",
+    "title": "Lampiran B Kamus Data Ringkas",
+    "target": "Lampiran B Kamus Data Ringkas",
+    "level": 2
+  },
+  {
+    "category": "toc",
+    "title": "Lampiran C Tampilan Lengkap",
+    "target": "Lampiran C Tampilan Lengkap",
+    "level": 2
+  },
+  {
+    "category": "tables",
+    "title": "Tabel 2.1 Identitas pelaksanaan Kerja Praktek",
+    "target": "Tabel 2.1 Identitas pelaksanaan Kerja Praktek",
+    "level": 1
+  },
+  {
+    "category": "tables",
+    "title": "Tabel 2.2 Jadwal kegiatan Kerja Praktek",
+    "target": "Tabel 2.2 Jadwal kegiatan Kerja Praktek",
+    "level": 1
+  },
+  {
+    "category": "tables",
+    "title": "Tabel 3.1 Perbandingan model pengembangan",
+    "target": "Tabel 3.1 Perbandingan model pengembangan",
+    "level": 1
+  },
+  {
+    "category": "tables",
+    "title": "Tabel 3.2 Pemetaan model kualitas ISO/IEC 25010:2023",
+    "target": "Tabel 3.2 Pemetaan model kualitas ISO/IEC 25010:2023",
+    "level": 1
+  },
+  {
+    "category": "tables",
+    "title": "Tabel 3.3 Sintesis landasan teori",
+    "target": "Tabel 3.3 Sintesis landasan teori",
+    "level": 1
+  },
+  {
+    "category": "tables",
+    "title": "Tabel 3.4 Matriks literatur dan relevansi NagariSDLC",
+    "target": "Tabel 3.4 Matriks literatur dan relevansi NagariSDLC",
+    "level": 1
+  },
+  {
+    "category": "tables",
+    "title": "Tabel 4.1 Aktor dan tanggung jawab sistem",
+    "target": "Tabel 4.1 Aktor dan tanggung jawab sistem",
+    "level": 1
+  },
+  {
+    "category": "tables",
+    "title": "Tabel 4.2 Kebutuhan fungsional",
+    "target": "Tabel 4.2 Kebutuhan fungsional",
+    "level": 1
+  },
+  {
+    "category": "tables",
+    "title": "Tabel 4.3 Kebutuhan nonfungsional",
+    "target": "Tabel 4.3 Kebutuhan nonfungsional",
+    "level": 1
+  },
+  {
+    "category": "tables",
+    "title": "Tabel 4.4 Daftar 12 peran pengguna",
+    "target": "Tabel 4.4 Daftar 12 peran pengguna",
+    "level": 1
+  },
+  {
+    "category": "tables",
+    "title": "Tabel 4.5 Daftar 27 status proyek",
+    "target": "Tabel 4.5 Daftar 27 status proyek",
+    "level": 1
+  },
+  {
+    "category": "tables",
+    "title": "Tabel 4.6 Matriks approver UAT",
+    "target": "Tabel 4.6 Matriks approver UAT",
+    "level": 1
+  },
+  {
+    "category": "tables",
+    "title": "Tabel 4.7 Domain utama",
+    "target": "Tabel 4.7 Domain utama",
+    "level": 1
+  },
+  {
+    "category": "tables",
+    "title": "Tabel 4.8 Endpoint API representatif",
+    "target": "Tabel 4.8 Endpoint API representatif",
+    "level": 1
+  },
+  {
+    "category": "tables",
+    "title": "Tabel 4.9 Ringkasan hasil verifikasi",
+    "target": "Tabel 4.9 Ringkasan hasil verifikasi",
+    "level": 1
+  },
+  {
+    "category": "tables",
+    "title": "Tabel 4.10 Matriks keterlacakan kebutuhan",
+    "target": "Tabel 4.10 Matriks keterlacakan kebutuhan",
+    "level": 1
+  },
+  {
+    "category": "tables",
+    "title": "Tabel 4.11 Pemetaan kontrol dan risiko keamanan",
+    "target": "Tabel 4.11 Pemetaan kontrol dan risiko keamanan",
+    "level": 1
+  },
+  {
+    "category": "tables",
+    "title": "Tabel 4.12 Evaluasi kualitatif berdasarkan ISO/IEC 25010:2023",
+    "target": "Tabel 4.12 Evaluasi kualitatif berdasarkan ISO/IEC 25010:2023",
+    "level": 1
+  },
+  {
+    "category": "tables",
+    "title": "Tabel 4.13 Ringkasan keputusan arsitektur",
+    "target": "Tabel 4.13 Ringkasan keputusan arsitektur",
+    "level": 1
+  },
+  {
+    "category": "tables",
+    "title": "Tabel 4.14 Kendala dan solusi",
+    "target": "Tabel 4.14 Kendala dan solusi",
+    "level": 1
+  },
+  {
+    "category": "tables",
+    "title": "Tabel 4.15 Roadmap pengembangan",
+    "target": "Tabel 4.15 Roadmap pengembangan",
+    "level": 1
+  },
+  {
+    "category": "tables",
+    "title": "Tabel A.1 Daftar endpoint API",
+    "target": "Tabel A.1 Daftar endpoint API",
+    "level": 1
+  },
+  {
+    "category": "tables",
+    "title": "Tabel B.1 Kamus data ringkas",
+    "target": "Tabel B.1 Kamus data ringkas",
+    "level": 1
+  },
+  {
+    "category": "figures",
+    "title": "Gambar 2.1 Logo Bank Nagari",
+    "target": "Gambar 2.1 Logo Bank Nagari",
+    "level": 1
+  },
+  {
+    "category": "figures",
+    "title": "Gambar 2.2 Gedung/lokasi Kerja Praktek",
+    "target": "Gambar 2.2 Gedung/lokasi Kerja Praktek",
+    "level": 1
+  },
+  {
+    "category": "figures",
+    "title": "Gambar 2.3 Struktur organisasi instansi",
+    "target": "Gambar 2.3 Struktur organisasi instansi",
+    "level": 1
+  },
+  {
+    "category": "figures",
+    "title": "Gambar 2.4 Struktur unit Teknologi Informasi",
+    "target": "Gambar 2.4 Struktur unit Teknologi Informasi",
+    "level": 1
+  },
+  {
+    "category": "figures",
+    "title": "Gambar 4.1 Proses bisnis sebelum sistem terpusat",
+    "target": "Gambar 4.1 Proses bisnis sebelum sistem terpusat",
+    "level": 1
+  },
+  {
+    "category": "figures",
+    "title": "Gambar 4.2 Proses bisnis yang diusulkan",
+    "target": "Gambar 4.2 Proses bisnis yang diusulkan",
+    "level": 1
+  },
+  {
+    "category": "figures",
+    "title": "Gambar 4.3 Arsitektur sistem",
+    "target": "Gambar 4.3 Arsitektur sistem",
+    "level": 1
+  },
+  {
+    "category": "figures",
+    "title": "Gambar 4.4 Use case aktor utama",
+    "target": "Gambar 4.4 Use case aktor utama",
+    "level": 1
+  },
+  {
+    "category": "figures",
+    "title": "Gambar 4.5 Mesin status proyek",
+    "target": "Gambar 4.5 Mesin status proyek",
+    "level": 1
+  },
+  {
+    "category": "figures",
+    "title": "Gambar 4.6 Alur SIT",
+    "target": "Gambar 4.6 Alur SIT",
+    "level": 1
+  },
+  {
+    "category": "figures",
+    "title": "Gambar 4.7 Alur UAT",
+    "target": "Gambar 4.7 Alur UAT",
+    "level": 1
+  },
+  {
+    "category": "figures",
+    "title": "Gambar 4.8 Relasi approver UAT",
+    "target": "Gambar 4.8 Relasi approver UAT",
+    "level": 1
+  },
+  {
+    "category": "figures",
+    "title": "Gambar 4.9 Jalur QA dan keamanan siber",
+    "target": "Gambar 4.9 Jalur QA dan keamanan siber",
+    "level": 1
+  },
+  {
+    "category": "figures",
+    "title": "Gambar 4.10 Putaran pengembalian pengujian",
+    "target": "Gambar 4.10 Putaran pengembalian pengujian",
+    "level": 1
+  },
+  {
+    "category": "figures",
+    "title": "Gambar 4.11 ERD NagariSDLC",
+    "target": "Gambar 4.11 ERD NagariSDLC",
+    "level": 1
+  },
+  {
+    "category": "figures",
+    "title": "Gambar 4.12 Class relationship inti",
+    "target": "Gambar 4.12 Class relationship inti",
+    "level": 1
+  },
+  {
+    "category": "figures",
+    "title": "Gambar 4.13 Sequence login",
+    "target": "Gambar 4.13 Sequence login",
+    "level": 1
+  },
+  {
+    "category": "figures",
+    "title": "Gambar 4.14 Sequence persetujuan UAT eksternal",
+    "target": "Gambar 4.14 Sequence persetujuan UAT eksternal",
+    "level": 1
+  },
+  {
+    "category": "figures",
+    "title": "Gambar 4.15 Peta navigasi halaman",
+    "target": "Gambar 4.15 Peta navigasi halaman",
+    "level": 1
+  },
+  {
+    "category": "figures",
+    "title": "Gambar 4.16 Antarmuka login",
+    "target": "Gambar 4.16 Antarmuka login",
+    "level": 1
+  },
+  {
+    "category": "figures",
+    "title": "Gambar 4.17 Antarmuka dashboard Admin",
+    "target": "Gambar 4.17 Antarmuka dashboard Admin",
+    "level": 1
+  },
+  {
+    "category": "figures",
+    "title": "Gambar 4.18 Daftar proyek",
+    "target": "Gambar 4.18 Daftar proyek",
+    "level": 1
+  },
+  {
+    "category": "figures",
+    "title": "Gambar 4.19 Detail proyek",
+    "target": "Gambar 4.19 Detail proyek",
+    "level": 1
+  },
+  {
+    "category": "figures",
+    "title": "Gambar 4.20 Papan Kanban",
+    "target": "Gambar 4.20 Papan Kanban",
+    "level": 1
+  },
+  {
+    "category": "figures",
+    "title": "Gambar 4.21 Detail task",
+    "target": "Gambar 4.21 Detail task",
+    "level": 1
+  },
+  {
+    "category": "figures",
+    "title": "Gambar 4.22 Wizard SIT",
+    "target": "Gambar 4.22 Wizard SIT",
+    "level": 1
+  },
+  {
+    "category": "figures",
+    "title": "Gambar 4.23 Wizard UAT",
+    "target": "Gambar 4.23 Wizard UAT",
+    "level": 1
+  },
+  {
+    "category": "figures",
+    "title": "Gambar 4.24 Tugas QA",
+    "target": "Gambar 4.24 Tugas QA",
+    "level": 1
+  },
+  {
+    "category": "figures",
+    "title": "Gambar 4.25 Tugas keamanan siber",
+    "target": "Gambar 4.25 Tugas keamanan siber",
+    "level": 1
+  },
+  {
+    "category": "figures",
+    "title": "Gambar 4.26 Matriks persetujuan UAT",
+    "target": "Gambar 4.26 Matriks persetujuan UAT",
+    "level": 1
+  },
+  {
+    "category": "figures",
+    "title": "Gambar 4.27 Quality Gate",
+    "target": "Gambar 4.27 Quality Gate",
+    "level": 1
+  },
+  {
+    "category": "figures",
+    "title": "Gambar 4.28 Manajemen pengguna",
+    "target": "Gambar 4.28 Manajemen pengguna",
+    "level": 1
+  },
+  {
+    "category": "figures",
+    "title": "Gambar 4.29 Manajemen grup",
+    "target": "Gambar 4.29 Manajemen grup",
+    "level": 1
+  },
+  {
+    "category": "figures",
+    "title": "Gambar 4.30 Manajemen role",
+    "target": "Gambar 4.30 Manajemen role",
+    "level": 1
+  },
+  {
+    "category": "figures",
+    "title": "Gambar 4.31 Document Vault",
+    "target": "Gambar 4.31 Document Vault",
+    "level": 1
+  },
+  {
+    "category": "figures",
+    "title": "Gambar 4.32 Activity Log",
+    "target": "Gambar 4.32 Activity Log",
+    "level": 1
+  },
+  {
+    "category": "appendices",
+    "title": "Lampiran A - Endpoint API",
+    "target": "Lampiran A Endpoint API",
+    "level": 1
+  },
+  {
+    "category": "appendices",
+    "title": "Lampiran B - Kamus Data Ringkas",
+    "target": "Lampiran B Kamus Data Ringkas",
+    "level": 1
+  },
+  {
+    "category": "appendices",
+    "title": "Lampiran C - Tampilan Lengkap",
+    "target": "Lampiran C Tampilan Lengkap",
+    "level": 1
+  }
+]

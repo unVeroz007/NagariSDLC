@@ -10,41 +10,19 @@ use App\Models\User;
 use Illuminate\Database\Eloquent\Builder;
 
 /**
- * Satu sumber kebenaran untuk isolasi data proyek per role.
- *
- * Sebelumnya aturan visibilitas hanya hidup sebagai rangkaian `elseif` di dalam
- * `ProjectController@index`, sementara `show()` dan `update()` tidak memeriksa apa pun.
- * Akibatnya daftar proyek bisa disaring rapi tetapi pengguna masih dapat membaca dan
- * menimpa proyek milik orang lain dengan menebak ID lewat endpoint langsung.
- *
- * Service ini memusatkan aturan tersebut sehingga satu definisi dipakai bersama oleh
- * penyaring query (untuk daftar) dan pemeriksa akses tunggal (untuk baca/tulis satu
- * proyek). Menambah role baru cukup dilakukan di satu tempat, dan daftar tidak akan
- * pernah lagi mengembangkan lebih banyak proyek daripada yang boleh dibuka.
+ * Sumber kebenaran isolasi data proyek per role: satu definisi dipakai penyaring
+ * daftar (index) dan pemeriksa akses tunggal (show/update) agar keduanya tak pernah beda.
  */
 class ProjectAccessService
 {
-    /**
-     * Role pengawas: berwenang melihat seluruh portofolio proyek lintas fase.
-     *
-     * Super Admin (administrasi sistem), Head of IT (persetujuan go-live), dan
-     * Lead Group / Kadiv (disposisi & verifikasi Fase 1) memang membutuhkan
-     * pandangan menyeluruh untuk menjalankan tugasnya.
-     */
+    /** Role pengawas: lihat seluruh portofolio (admin sistem, go-live, disposisi Fase 1). */
     public const OVERSIGHT_ROLES = [
         'super_admin',
         'head_of_it',
         'lead_group',
     ];
 
-    /**
-     * Status yang berada dalam wewenang Development Lead.
-     *
-     * Development Lead mengalokasikan tim dan mengawasi seluruh proyek pada fase
-     * pengembangan, sehingga isolasinya berbasis fase — bukan penugasan personal.
-     * Tabel `projects` tidak punya kolom `dev_lead_id`, jadi tidak ada penugasan
-     * per-orang yang bisa disaring untuk role ini.
-     */
+    /** Wewenang Development Lead: berbasis fase, bukan personal (tak ada kolom `dev_lead_id`). */
     private const DEVELOPMENT_PHASE_STATUSES = [
         ProjectStatus::ANALYSIS_APPROVED->value,
         ProjectStatus::READY_FOR_DEVELOPMENT->value,
@@ -69,11 +47,7 @@ class ProjectAccessService
         ProjectStatus::LIVE_PRODUCTION->value,
     ];
 
-    /**
-     * Status yang berada dalam wewenang jalur QA.
-     *
-     * Dimulai dari READY_FOR_QA — proyek yang belum diserahkan ke QA bukan urusan QA.
-     */
+    /** Wewenang jalur QA. Mulai READY_FOR_QA — sebelum itu bukan urusan QA. */
     private const QA_PHASE_STATUSES = [
         ProjectStatus::READY_FOR_QA->value,
         ProjectStatus::QA_IN_PROGRESS->value,
@@ -86,11 +60,7 @@ class ProjectAccessService
         ProjectStatus::LIVE_PRODUCTION->value,
     ];
 
-    /**
-     * Status yang berada dalam wewenang jalur Keamanan Siber.
-     *
-     * Dimulai dari DEV_COMPLETED karena audit siber dapat berjalan paralel dengan QA.
-     */
+    /** Wewenang jalur Keamanan Siber. Mulai DEV_COMPLETED (bisa paralel dengan QA). */
     private const CYBER_PHASE_STATUSES = [
         ProjectStatus::DEV_COMPLETED->value,
         ProjectStatus::READY_FOR_QA->value,
@@ -105,13 +75,8 @@ class ProjectAccessService
     ];
 
     /**
-     * Nilai kolom jalur yang berarti jalur itu sudah menjadi urusan tim pengujiannya.
-     *
-     * Daftar fase di atas dihitung dari `projects.status`, yang hanyalah satu penunjuk
-     * siklus dipegang bergiliran oleh kedua jalur pengujian. Akibatnya sebuah proyek
-     * bisa sudah diajukan ke Audit Keamanan Siber sementara penunjuknya masih berada di
-     * fase pengembangan — dan tanpa pemeriksaan kolom jalur, pengajuan itu tidak terlihat
-     * sama sekali oleh tim yang harus mengerjakannya.
+     * Kolom jalur sudah bergerak = jalur jadi urusan timnya. `projects.status` cuma penunjuk
+     * siklus bergiliran, jadi tanpa cek kolom jalur, pengajuan bisa tak terlihat oleh tim.
      */
     private const TRACK_ENGAGED_STATUSES = [
         TrackStatus::SUBMITTED->value,
@@ -122,13 +87,8 @@ class ProjectAccessService
     ];
 
     /**
-     * Role yang berwenang menetapkan penanggung jawab proyek.
-     *
-     * Penetapan PM dan analis adalah keputusan disposisi, bukan penyuntingan biasa:
-     * Kadiv mendisposisikan analis pada Fase 1, dan Development Lead menetapkan
-     * Analis Pengembangan (PM) sebelum pengembangan dimulai. Karena itu daftar ini
-     * lebih sempit daripada `canUpdate()`, yang memang harus meloloskan PM dan
-     * analis proyek agar mereka bisa mengisi hasil kerjanya sendiri.
+     * Role penetap penanggung jawab (disposisi, bukan edit biasa). Lebih sempit dari
+     * `canUpdate()` yang harus meloloskan PM/analis proyek untuk mengisi hasil kerjanya.
      */
     public const PERSONNEL_ASSIGNER_ROLES = [
         'super_admin',
@@ -137,21 +97,15 @@ class ProjectAccessService
         'development_lead',
     ];
 
-    /**
-     * Apakah role ini berwenang melihat seluruh proyek tanpa penyaringan?
-     */
+    /** Role boleh lihat seluruh proyek tanpa penyaringan? */
     public function hasOversightAccess(?User $user): bool
     {
         return in_array($user?->role?->name, self::OVERSIGHT_ROLES, true);
     }
 
     /**
-     * Apakah pengguna berwenang mengganti PM atau analis penanggung jawab?
-     *
-     * Tanpa gerbang ini, PM proyek — yang lolos `canUpdate()` karena keterlibatan
-     * personalnya — dapat mengalihkan proyeknya sendiri ke orang lain tanpa melalui
-     * Development Lead maupun Kadiv, sehingga rantai disposisi pada jejak audit
-     * menjadi tidak dapat dipercaya.
+     * Boleh ganti PM/analis penanggung jawab? Tanpa gerbang ini, PM bisa mengalihkan
+     * proyeknya sendiri tanpa lewat Dev Lead/Kadiv, merusak rantai disposisi pada audit.
      */
     public function canAssignPersonnel(?User $user): bool
     {
@@ -159,17 +113,9 @@ class ProjectAccessService
     }
 
     /**
-     * Apakah pengguna boleh menulis ulang alokasi tim proyek ini?
-     *
-     * Alokasi tim menghapus lalu membuat ulang seluruh baris `project_team_members`,
-     * jadi wewenangnya disamakan dengan disposisi personel: Super Admin, Head of IT,
-     * Kadiv, dan Development Lead. Analis Pengembangan (PM) ikut diloloskan, tetapi
-     * hanya untuk proyek yang memang dipegangnya — dua layar yang memanggil endpoint
-     * ini adalah halaman Alokasi milik PM dan Workspace Development Lead.
-     *
-     * `canUpdate()` sengaja tidak dipakai sendirian di sini. Aturan itu meloloskan
-     * jalur pengujian untuk setiap proyek yang masuk fasenya, sehingga QA Tester atau
-     * Pentester dapat menimpa susunan tim pengembang yang bukan wewenangnya.
+     * Boleh tulis ulang alokasi tim? Disamakan dengan disposisi personel; PM diloloskan
+     * hanya untuk proyeknya sendiri. `canUpdate()` tak dipakai sendirian di sini karena
+     * ia meloloskan jalur pengujian, sehingga QA/Pentester bisa menimpa susunan tim dev.
      */
     public function canAllocateTeam(?User $user, Project $project): bool
     {
@@ -182,11 +128,8 @@ class ProjectAccessService
     }
 
     /**
-     * Batasi query daftar proyek pada apa yang boleh dilihat pengguna.
-     *
-     * Dipakai `ProjectController@index`. Harus tetap konsisten dengan `canView()`:
-     * setiap proyek yang lolos penyaring ini wajib lolos `canView()` juga, agar
-     * pengguna tidak pernah melihat baris di daftar yang gagal ia buka.
+     * Batasi daftar proyek pada yang boleh dilihat pengguna. Wajib konsisten dengan
+     * `canView()`: setiap baris yang lolos di sini harus lolos `canView()` juga.
      *
      * @param  Builder<Project>  $query
      * @return Builder<Project>
@@ -202,15 +145,11 @@ class ProjectAccessService
         return match ($roleName) {
             'business_user' => $query->where('created_by', $user->id),
 
-            // Grup Perencanaan dan Quality Assurance: `analyst` dan `qa_tester` adalah
-            // kumpulan analis yang sama pada dua fase berbeda, jadi cakupannya digabung.
-            // Lihat `applyPlanningQaGroupScope()`.
+            // Grup Perencanaan & QA: `analyst`/`qa_tester` orang yang sama di dua fase, cakupan digabung.
             'analyst', 'qa_tester' => $this->applyPlanningQaGroupScope($query, $user),
 
-            // Project Manager = Analis Pengembangan (Fase 2). Satu orang, satu role,
-            // satu kolom penugasan: `projects.pm_id`. Nama role `dev_analyst` hanya
-            // hidup di router/menu frontend dan tidak ada di enum backend, tetapi
-            // ikut dicocokkan agar kedua sebutan selalu memberi hasil yang sama.
+            // PM = Analis Pengembangan (Fase 2), penugasan di `projects.pm_id`. `dev_analyst`
+            // (nama role sisi frontend, tak ada di enum backend) ikut dicocokkan agar hasilnya sama.
             'project_manager', 'dev_analyst' => $query->where('pm_id', $user->id),
 
             'development_lead' => $query->where(function (Builder $scoped) use ($user): void {
@@ -228,28 +167,15 @@ class ProjectAccessService
 
             'cyber_lead', 'pentester' => $this->applyTestingTrackScope($query, $user, TestingTrack::CYBER),
 
-            // Role tidak dikenal: tutup total. Lebih baik daftar kosong daripada
-            // membocorkan seluruh portofolio karena satu role belum terdaftar.
+            // Role tak dikenal: fail-closed, jangan bocorkan portofolio.
             default => $query->whereRaw('1 = 0'),
         };
     }
 
     /**
-     * Penyaring daftar proyek untuk anggota Grup Perencanaan dan Quality Assurance.
-     *
-     * Grup ini menaungi dua fase dengan kumpulan analis yang sama
-     * (`UserRole::PLANNING_QA_ANALYST_ROLES`): analisis perencanaan di Fase 1 dan
-     * pengujian QA di Fase 3. Karena orangnya sama, cakupannya adalah gabungan kedua
-     * pekerjaan itu:
-     *
-     *   1. proyek Fase 1 yang didisposisikan kepadanya (`projects.analyst_id`) — tetap
-     *      per-orang, karena hasil analisis satu orang tidak boleh ditimpa yang lain;
-     *   2. seluruh cakupan jalur QA (lihat `applyTestingTrackScope()`) — antrean QA
-     *      memang antrean bersama, dan tanpa ini seorang analis Perencanaan yang
-     *      menerima disposisi QA tidak akan menemukan proyeknya di daftar mana pun.
-     *
-     * Tanpa penggabungan ini, daftar akan menyembunyikan salah satu dari dua pekerjaan
-     * yang sah dimiliki orang yang sama, tergantung nama role-nya saja.
+     * Penyaring untuk Grup Perencanaan & QA (analis yang sama di dua fase). Gabungan:
+     * (1) proyek Fase 1 yang didisposisikan padanya (`analyst_id`, per-orang); (2) seluruh
+     * cakupan jalur QA (antrean bersama). Tanpa gabungan, satu pekerjaan sahnya hilang dari daftar.
      *
      * @param  Builder<Project>  $query
      * @return Builder<Project>
@@ -263,16 +189,9 @@ class ProjectAccessService
     }
 
     /**
-     * Penyaring daftar proyek untuk satu jalur pengujian.
-     *
-     * Tiga jalan masuk, digabung dengan OR:
-     *
-     *   1. `projects.status` berada di fase jalur ini — proyek yang memang sedang
-     *      dipegang jalur ini pada siklus utama;
-     *   2. kolom jalurnya sendiri sudah bergerak — menutup celah penunjuk siklus
-     *      yang dijelaskan pada `TRACK_ENGAGED_STATUSES`;
-     *   3. pengguna adalah penerima disposisi jalur ini — tugas pribadi tidak boleh
-     *      hilang dari daftarnya hanya karena status proyek sudah bergerak maju.
+     * Penyaring satu jalur pengujian. OR tiga jalan masuk: (1) `status` di fase jalur ini;
+     * (2) kolom jalurnya sudah bergerak (celah di `TRACK_ENGAGED_STATUSES`); (3) pengguna
+     * penerima disposisi jalur ini.
      *
      * @param  Builder<Project>  $query
      * @return Builder<Project>
@@ -283,12 +202,8 @@ class ProjectAccessService
     }
 
     /**
-     * Isi penyaring satu jalur pengujian, tanpa membungkusnya sendiri.
-     *
-     * Dipisahkan dari `applyTestingTrackScope()` supaya predikat yang sama bisa dipasang
-     * sebagai cabang OR di dalam grup lain — dipakai `applyPlanningQaGroupScope()`.
-     * Bila pemanggil memakai `applyTestingTrackScope()` yang membungkus dengan `where()`,
-     * predikatnya selalu ter-AND dan tidak dapat menjadi alternatif.
+     * Isi predikat satu jalur tanpa membungkus, agar bisa jadi cabang OR di grup lain
+     * (`applyPlanningQaGroupScope()`). Versi terbungkus `where()` selalu ter-AND.
      *
      * @param  Builder<Project>  $query
      * @return Builder<Project>
@@ -305,14 +220,9 @@ class ProjectAccessService
     }
 
     /**
-     * Apakah pengguna boleh membaca satu proyek ini?
-     *
-     * Dipakai `ProjectController@show`. Cerminan `applyVisibilityScope()` untuk satu
-     * baris, ditambah keterlibatan personal yang selalu memberi akses baca: pemohon,
-     * PM, analis yang ditugaskan, anggota tim, penerima task, penerima disposisi
-     * pengujian, dan approver UAT. Tanpa jalur personal itu, seseorang bisa kehilangan
-     * akses ke proyek yang sedang menunggu keputusannya hanya karena statusnya sudah
-     * bergerak maju.
+     * Boleh baca satu proyek? Cerminan `applyVisibilityScope()` untuk satu baris, plus
+     * keterlibatan personal yang selalu memberi akses (pemohon, PM, analis, tim, penerima
+     * task/disposisi, approver UAT) agar tak hilang akses saat status bergerak maju.
      */
     public function canView(User $user, Project $project): bool
     {
@@ -329,11 +239,8 @@ class ProjectAccessService
             : (string) $project->status;
 
         return match ($user->role?->name) {
-            // Grup Perencanaan dan Quality Assurance. Pekerjaan Fase 1 sudah tertangkap
-            // `isPersonallyInvolved()` lewat `projects.analyst_id`; baris ini menambahkan
-            // sisi QA-nya, sama seperti yang diberikan `applyPlanningQaGroupScope()` pada
-            // daftar. Tanpa keduanya sejalan, proyek bisa muncul di daftar lalu gagal
-            // dibuka.
+            // Grup Perencanaan & QA: sisi Fase 1 lewat `isPersonallyInvolved()`; baris ini
+            // menambah sisi QA agar sejalan dengan daftar (kalau tidak, muncul tapi gagal dibuka).
             'analyst', 'qa_tester', 'qa_lead' => in_array($status, self::QA_PHASE_STATUSES, true)
                 || $this->isTrackEngaged($project, TestingTrack::QA),
             'development_lead' => in_array($status, self::DEVELOPMENT_PHASE_STATUSES, true),
@@ -344,16 +251,9 @@ class ProjectAccessService
     }
 
     /**
-     * Apakah pengguna boleh mengubah field proyek ini?
-     *
-     * Sengaja lebih ketat daripada `canView()`. Membaca proyek fase QA sebagai
-     * konteks kerja itu wajar; menimpa `analyst_result` proyek yang ditangani
-     * analis lain tidak. Aturan tulis karena itu bertumpu pada keterlibatan
-     * personal, bukan pada fase proyek.
-     *
-     * Pemeriksaan ini melengkapi — bukan mengganti — pemeriksaan wewenang transisi
-     * status di `ProjectWorkflowService`, yang tetap menjadi satu-satunya gerbang
-     * untuk perubahan status.
+     * Boleh ubah field proyek? Sengaja lebih ketat dari `canView()`: baca fase QA wajar,
+     * menimpa `analyst_result` milik analis lain tidak — jadi bertumpu pada keterlibatan
+     * personal. Melengkapi, bukan mengganti, gerbang transisi status di `ProjectWorkflowService`.
      */
     public function canUpdate(User $user, Project $project): bool
     {
@@ -370,17 +270,12 @@ class ProjectAccessService
             : (string) $project->status;
 
         return match ($user->role?->name) {
-            // Development Lead mengalokasikan tim untuk proyek fase pengembangan
-            // yang belum punya PM, sehingga butuh tulis tanpa keterlibatan personal.
+            // Dev Lead alokasikan tim proyek fase dev yang belum punya PM: tulis tanpa keterlibatan personal.
             'development_lead' => in_array($status, self::DEVELOPMENT_PHASE_STATUSES, true),
 
-            // Jalur pengujian mencatat hasil pada proyek yang masuk fasenya, atau pada
-            // proyek yang jalurnya sudah diajukan meski penunjuk siklus belum bergerak.
-            //
-            // `analyst` ikut disertakan sebagai anggota Grup Perencanaan dan Quality
-            // Assurance: ia boleh menerima disposisi QA, jadi ia harus bisa menulis hasil
-            // pengujiannya. Wewenang ini hanya berlaku pada proyek fase QA — pekerjaan
-            // Fase 1 milik analis lain tetap tertutup karena statusnya di luar daftar ini.
+            // Jalur pengujian catat hasil pada proyek yang masuk fasenya (atau jalurnya sudah
+            // diajukan). `analyst` ikut (anggota Grup Perencanaan & QA, bisa terima disposisi QA);
+            // terbatas fase QA, kerja Fase 1 milik analis lain tetap tertutup.
             'analyst', 'qa_lead', 'qa_tester' => in_array($status, self::QA_PHASE_STATUSES, true)
                 || $this->isTrackEngaged($project, TestingTrack::QA),
             'cyber_lead', 'pentester' => in_array($status, self::CYBER_PHASE_STATUSES, true)
@@ -390,17 +285,13 @@ class ProjectAccessService
         };
     }
 
-    /**
-     * Jalur pengujian ini sudah diajukan, dikerjakan, atau diputuskan.
-     */
+    /** Jalur ini sudah diajukan, dikerjakan, atau diputuskan. */
     private function isTrackEngaged(Project $project, TestingTrack $track): bool
     {
         return in_array($project->trackStatus($track)->value, self::TRACK_ENGAGED_STATUSES, true);
     }
 
-    /**
-     * Keterlibatan langsung pengguna pada proyek, terlepas dari role dan fase.
-     */
+    /** Keterlibatan langsung pengguna pada proyek, lepas dari role dan fase. */
     private function isPersonallyInvolved(User $user, Project $project): bool
     {
         $userId = (int) $user->id;
@@ -421,8 +312,7 @@ class ProjectAccessService
             return true;
         }
 
-        // Approver UAT internal harus tetap bisa membuka proyek yang menunggu
-        // keputusannya, termasuk ketika ia tidak terlibat lewat jalur lain.
+        // Approver UAT internal harus bisa membuka proyek yang menunggu keputusannya.
         return $project->uatApprovalRounds()
             ->whereHas('approvers', fn (Builder $approver) => $approver->where('user_id', $userId))
             ->exists();
