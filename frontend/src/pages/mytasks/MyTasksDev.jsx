@@ -71,23 +71,8 @@ const findSitApprovalEntry = (approvals, taskId, projectTasks) => {
 /**
  * Kumpulkan seluruh bukti pengujian yang menjadi dasar arahan revisi satu task.
  *
- * Tiga sumber digabung, sebab masing-masing hilang pada kondisi yang berbeda:
- *
- * 1. `sit2_task_approvals` — bukti SIT putaran berjalan.
- * 2. `sit_cycles[].taskApprovals` — arsip bukti SIT putaran sebelumnya.
- *    `UatExecutionService::holdForMajorRevision()` mengosongkan
- *    `sit2_task_approvals` tepat ketika revisi Mayor dimulai dan memindahkannya
- *    ke sini, sehingga developer yang membuka halaman ini setelah revisi Mayor
- *    dibuat justru tidak lagi melihat bukti SIT yang menjadi dasar revisinya.
- * 3. `uat2_scenarios` dan `uat2_additional_requests` — lampiran yang diunggah
- *    penguji pada Eksekusi UAT Internal (Tab 2). Permintaan tambahan Mayor
- *    melahirkan task `[CR UAT Mayor]` tersendiri yang lampirannya hanya tercatat
- *    di `uat2_additional_requests`; tanpa sumber ini task tersebut sampai ke
- *    developer tanpa satu pun lampiran.
- *
- * Lampiran yang sama bisa muncul di lebih dari satu sumber (mis. bukti UAT yang
- * ikut tersalin ke `uat_change_requests`), jadi hasilnya disaring berdasarkan
- * `docId`.
+ * Menggabungkan SIT aktif/arsip dan skenario/permintaan tambahan UAT agar bukti tetap
+ * tersedia setelah revisi mayor. Duplikat dihapus berdasarkan `docId`.
  */
 const collectTaskRevisionAttachments = (sitUatData, taskId, projectTasks) => {
     const collected = [];

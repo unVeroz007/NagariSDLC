@@ -32,8 +32,10 @@ Environment: salin `backend/.env.example` menjadi `backend/.env` dan
 `frontend/.env.example` menjadi `frontend/.env`. Untuk staging/produksi pakai
 `backend/.env.production.example` dan `frontend/.env.production.example`.
 
-- Test backend: `cd backend && php artisan test` (106 test). `backend/phpunit.xml`
-  memaksa SQLite in-memory, jadi menjalankan test tidak menyentuh database sungguhan.
+- Test backend: `cd backend && php artisan test`. Snapshot historis terakhir
+  (26 Agustus 2026) mencatat 236 test / 1.467 assertion lulus.
+  `backend/phpunit.xml` memaksa SQLite in-memory, jadi test tidak menyentuh
+  database sungguhan. Snapshot bukan jaminan perubahan setelah tanggal itu.
 - Build frontend: `cd frontend && npm run build`
 
 ## ⚠️ Catatan Penting
@@ -49,9 +51,7 @@ Environment: salin `backend/.env.example` menjadi `backend/.env` dan
 
 ## ℹ️ Tentang `API_CONTRACT.md` (di root repo)
 
-File `API_CONTRACT.md` di root adalah **dokumen kontrak awal/aspirasi** (berisi
-contoh base URL production `sdlc-api.banknagari.co.id` & JWT). Implementasi
-aktual berbeda:
-- Base URL dev: `http://localhost:8000/api/v1`.
-- Auth: **Sanctum Bearer token** (bukan JWT) + refresh.
-- Sumber kebenaran endpoint aktual ada di `docs/API_REFERENCE.md`.
+File `API_CONTRACT.md` sekarang menjadi ringkasan kontrak aktif: base URL,
+autentikasi, kelompok endpoint, dan invarian utama. Detail payload dan error tetap
+berada di `docs/API_REFERENCE.md`; route yang benar-benar berjalan berada di
+`backend/routes/api.php`.

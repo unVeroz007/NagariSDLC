@@ -58,7 +58,9 @@ yang tidak transparan & sulit dilacak.
 - [x] Tahap 2: eksekusi (skenario dieksekusi/diterima/temuan).
 - [x] Tahap 3: matrix persetujuan individual pihak peminta dan pihak IT; pihak
       peminta memakai link pribadi + pencocokan nomor HP, pihak IT memakai akun.
-- [x] **Change Request UAT** (minor diperbaiki tanpa rollback; mayor → kembali dev → SIT ulang → langsung approval final UAT).
+- [x] **Change Request UAT** (minor diperbaiki tanpa rollback tetapi menahan
+      penutupan UAT; mayor → kembali ke development → SIT ulang menyeluruh → UAT
+      diulang dari Tahap 1 → putaran persetujuan baru).
 
 ### Fase QA & Cyber
 - [x] Pengajuan QA & Cyber, pelaksanaan, sign-off.
@@ -78,7 +80,9 @@ yang tidak transparan & sulit dilacak.
 
 ## 5. Non-Functional Requirements
 
-- **Keamanan**: RBAC, Sanctum token, validasi input, otorisasi download dokumen.
+- **Keamanan**: RBAC, token Sanctum dalam cookie `HttpOnly`, proteksi header
+  `X-Requested-With` untuk request berbasis cookie, validasi input, dan otorisasi
+  download dokumen.
 - **Kinerja**: polling/refresh otomatis; OPCache aktif di server.
 - **Usability**: UI Bahasa Indonesia, brand `#00529C`, responsive.
 - **Reliabilitas**: state machine mencegah transisi ilegal.

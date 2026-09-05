@@ -9,23 +9,8 @@ use Illuminate\Validation\Rule;
 /**
  * Validasi pendaftaran akun mandiri.
  *
- * Endpoint registrasi berada di luar `auth:sanctum`, sehingga setiap field yang
- * diterima di sini dapat dikirim oleh siapa pun di jaringan. Tiga hal karena itu
- * dijaga ketat:
- *
- *   1. `role` DILARANG. Sebelumnya field ini divalidasi sebagai string biasa lalu
- *      dipakai langsung untuk mencari baris `roles`, sehingga satu request tanpa
- *      autentikasi bisa membuat akun `super_admin`. Peran akun hasil pendaftaran
- *      mandiri sekarang dipatok di controller dan tidak bisa dipengaruhi klien.
- *      Penambahan pengguna berperan lain adalah wewenang Super Admin lewat
- *      `POST /users`.
- *   2. Divisi wajib menunjuk baris yang SUDAH ADA. Sebelumnya nama departemen
- *      bebas dari klien otomatis membuat baris `divisions` baru, sehingga master
- *      data bisa dipenuhi divisi karangan. Formulir kini memilih dari daftar
- *      resmi (`GET /auth/divisions`).
- *   3. Kekuatan password sama dengan aturan penggantian password di
- *      `AuthController@updatePassword`, plus konfirmasi ulang. Tanpa ini akun baru
- *      boleh memakai password yang lebih lemah daripada saat menggantinya.
+ * Karena endpoint bersifat publik, klien tidak boleh menentukan role, divisi harus
+ * sudah terdaftar, dan password mengikuti kebijakan perubahan password.
  */
 class RegisterRequest extends FormRequest
 {

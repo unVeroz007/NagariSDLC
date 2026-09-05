@@ -1,22 +1,9 @@
 /**
  * Label dan gaya status Change Request UAT.
  *
- * Backend menulis status ini di beberapa tempat sepanjang siklus revisi:
- * - `open` / `in_progress` saat revisi ditetapkan dari kesimpulan eksekusi UAT
- *   (`UatExecutionService::holdForMajorRevision()` untuk Mayor dan
- *   `UatExecutionService::holdForMinorRevision()` untuk Minor);
- * - `resolved` saat developer menyelesaikan task revisinya (`TaskController::update()`);
- * - `sit_verified` saat SIT ulang lulus (`ProjectWorkflowService`) — hanya berlaku bagi
- *   revisi Mayor, karena revisi Minor tidak mengulang SIT;
- * - `superseded` saat permintaan lama tidak lagi berlaku, yaitu ketika siklus diulang
- *   penuh oleh revisi Mayor atau ketika hasil UAT terbaru tidak lagi meminta perubahan.
- *
- * Nilai `pending` / `approved` / `rejected` berasal dari pengajuan lama lewat endpoint
- * change request manual, sedangkan `uat_verified` hanya tersisa pada data lama:
- * penulisnya adalah alur verifikasi terarah revisi Mayor yang sudah dihapus.
- *
- * Tabelnya dipusatkan di sini supaya halaman pemohon (`Track.jsx`) dan wizard SIT/UAT
- * tidak pernah menampilkan dua label berbeda untuk satu status yang sama.
+ * Status aktif bergerak dari open/in_progress ke resolved atau sit_verified;
+ * superseded menutup permintaan yang tak lagi berlaku. Status pending, approved,
+ * rejected, dan uat_verified dipertahankan untuk data legacy.
  */
 export const CHANGE_REQUEST_STATUS_LABEL = {
     open: {

@@ -1,25 +1,5 @@
-// src/components/SITTaskExecution.jsx
-// Tabel eksekusi/persetujuan TASK-LEVEL untuk tahap SIT "Eksekusi Pengujian".
-//
-// Setiap task developer (kecuali TAKE DOWN) ditampilkan dengan:
-//   a) Tombol OK / Batalkan OK    → tanda task LOLOS SIT (alur MAJU)
-//   b) Komentar / Temuan (textarea)→ catatan hasil uji task tsb
-//   c) Lampiran Bukti per-task    → screenshot / file pendukung tiap task
-//   d) Tombol Revisi              → alur MUNDUR: task dikembalikan ke developer
-//
-// Skema data approvals (tersimpan di sitUatData.sit2_task_approvals):
-//   { [taskId]: {
-//       approved: bool,
-//       comment:  string,
-//       attachments: [{ id, name, originalName, size, type, url, uploadedAt }],
-//       approvedAt: ISO|null,
-//       approvedBy: string|null,
-//       revisedAt:  ISO|null,
-//       revisedBy:  string|null,
-//   } }
-//
-// Gate kelulusan: lanjut Review & Sign-Off hanya jika seluruh task dalam scope
-// SIT saat ini memiliki approved === true.
+// Eksekusi SIT per task aktif: keputusan, temuan, bukti, dan pengembalian revisi.
+// Review & Sign-Off terbuka setelah semua `sit2_task_approvals` bernilai approved.
 import { useState, useMemo, useRef } from 'react';
 import toast from 'react-hot-toast';
 import {

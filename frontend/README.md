@@ -1,16 +1,55 @@
-# React + Vite
+# Frontend NagariSDLC
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+Single Page Application React untuk alur governance SDLC Bank Nagari.
 
-Currently, two official plugins are available:
+## Stack
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+- React 19
+- React Router 7
+- Vite 8
+- Tailwind CSS 4
+- Recharts dan TanStack React Table
 
-## React Compiler
+## Menjalankan secara lokal
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+```bash
+npm install
+copy .env.example .env
+npm run dev
+```
 
-## Expanding the ESLint configuration
+Perintah verifikasi:
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+```bash
+npm run lint
+npm run build
+```
+
+## Struktur utama
+
+- `src/router/index.jsx`: route dan guard role.
+- `src/services/api.js`: satu pintu panggilan backend.
+- `src/contexts`: state global autentikasi, proyek, master data, notifikasi,
+  aktivitas, dan chat.
+- `src/pages`: halaman per fase dan role.
+- `src/components/SITUATWizard.jsx`: alur SIT dan UAT Internal.
+- `src/constants/projectStatus.js`: cermin enum/status backend.
+- `src/data/menuConfig.js`: menu per role dan pembatasan `menu_access`.
+
+## Sesi aplikasi
+
+Token Sanctum berada pada cookie `HttpOnly`; token tidak disimpan di
+`localStorage`. `src/services/api.js` menggunakan `credentials: 'include'` dan
+header `X-Requested-With: XMLHttpRequest`. `localStorage.nagari_sdlc_session`
+hanya menyimpan profil pengguna serta metadata waktu sesi untuk render awal dan
+penjadwalan refresh.
+
+## Konvensi
+
+- Jangan melakukan `fetch` API baru di halaman/komponen; tambahkan ke
+  `src/services/api.js`.
+- Status, role, dan label bersama ditempatkan pada modul `src/constants`.
+- `UNLOCK_ALL_STAGES` pada `SITUATWizard.jsx` harus tetap `false`.
+- Otorisasi sebenarnya tetap ditegakkan backend; guard frontend adalah lapisan UX.
+
+Dokumentasi lengkap tersedia di [`../docs`](../docs/README.md).

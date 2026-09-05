@@ -1,15 +1,7 @@
 import { useEffect, useRef } from 'react';
 
 /**
- * src/hooks/usePolling.js
- *
  * Polling periodik yang berhenti saat tab tidak terlihat.
- *
- * Semua layar sebelumnya menulis pasangan `setInterval` + `clearInterval`
- * sendiri, dan sebagian tidak memeriksa `document.visibilityState` sehingga
- * tetap memukul API meski tab ditinggalkan berjam-jam. Hook ini menyatukan
- * perilakunya: satu timer, berhenti saat tersembunyi, dan opsi menyegarkan
- * data begitu pengguna kembali ke tab.
  *
  * @param {() => void | Promise<void>} callback  Aksi pengambilan data.
  * @param {number} intervalMs                    Selang polling (lihat `constants/polling.js`).
@@ -17,9 +9,7 @@ import { useEffect, useRef } from 'react';
  * @param {boolean} [options.enabled=true]       Matikan saat belum login / data belum siap.
  * @param {boolean} [options.immediate=false]    Jalankan sekali segera saat aktif.
  * @param {boolean} [options.refreshOnReturn=false] Jalankan lagi saat tab kembali terlihat/fokus.
- * @param {*} [options.resetKey]                 Bila nilainya berubah, timer dimulai ulang dan
- *        pengambilan `immediate` dijalankan lagi. Pakai untuk identitas sumber data
- *        (misal id proyek atau id pengguna) supaya data lama tidak ikut tertahan.
+ * @param {*} [options.resetKey]                 Mulai ulang timer saat sumber data berubah.
  */
 export function useVisibilityPolling(callback, intervalMs, options = {}) {
     const { enabled = true, immediate = false, refreshOnReturn = false, resetKey = null } = options;
@@ -38,26 +28,8 @@ export function useVisibilityPolling(callback, intervalMs, options = {}) {
             if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return;
 
             /*
-             * Callback boleh mengembalikan Promise (lihat JSDoc), dan sebelumnya
-             * hasilnya diabaikan begitu saja. Satu penolakan — token kedaluwarsa,
-             * jaringan putus, backend 500 — menjadi unhandled promise rejection pada
-             * SETIAP putaran polling, di setiap layar yang memakai hook ini. Di
-             * peramban hal itu memenuhi konsol dengan galat yang tidak bisa
-             * ditelusuri asalnya, dan pada penampung uji berbasis Node prosesnya
-             * bisa ikut berhenti.
-             *
-             * Galatnya ditangkap, tetapi TIDAK ditelan: menelan diam-diam membuat
-             * kerusakan nyata (endpoint mati, token tidak lagi sah) tampak seperti
-             * layar yang sekadar tidak pernah menyegarkan data. `console.error`
-             * dipilih sebagai jalan tengah — cukup terlihat bagi pengembang dan
-             * terbawa ke pelaporan galat peramban, tanpa memaksa pemanggil
-             * menangani sesuatu yang bersifat latar belakang. Penanganan yang
-             * terlihat pengguna tetap menjadi tanggung jawab callback: ia yang tahu
-             * apakah kegagalan tersebut layak ditampilkan sebagai pesan galat atau
-             * cukup dibiarkan memakai data terakhir yang berhasil dimuat.
-             *
-             * Callback sinkron yang melempar juga ikut tertangkap lewat `try`, jadi
-             * satu galat tidak menghentikan timer untuk putaran-putaran berikutnya.
+             * Tangkap error sinkron maupun Promise agar timer tetap berjalan. Callback
+             * menentukan pesan pengguna; hook mencatat error latar belakang ke konsol.
              */
             try {
                 const result = callbackRef.current();

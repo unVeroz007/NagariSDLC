@@ -101,23 +101,8 @@ class DocumentVault extends Model
     /**
      * Tipe dokumen yang boleh dilihat pemohon proyek (`business_user`).
      *
-     * Pemohon adalah pihak eksternal terhadap pelaksanaan teknis: ia mengajukan
-     * kebutuhan, lalu menerima hasilnya pada pertemuan UAT. Hak bacanya pada
-     * Document Vault karena itu dibatasi pada berkas yang memang menjadi
-     * urusannya — dokumen pengajuannya sendiri (BRD dan memo) serta seluruh
-     * berkas rangkaian UAT yang ia hadiri dan tanda tangani. Dokumen internal
-     * pengembangan dan pengujian (FSD, arsitektur, rencana & bukti SIT, laporan
-     * QA, laporan audit keamanan siber, rencana rilis) tidak termasuk: isinya
-     * memuat rincian teknis, temuan kerentanan, dan langkah rollback yang tidak
-     * seharusnya keluar dari tim IT.
-     *
-     * `UNDANGAN` ikut diizinkan karena merupakan undangan pertemuan UAT — lihat
-     * `UAT_PREPARATION_DOCUMENT_TYPES` di `frontend/src/components/SITUATWizard.jsx`,
-     * tempat berkas tipe ini diunggah — sehingga penerimanya justru pemohon.
-     *
-     * Daftar ini hanya menyaring **tipe**; hak akses proyek tetap diputuskan lebih
-     * dulu oleh `ProjectAccessService`, yang bagi `business_user` sudah membatasi
-     * ke proyek yang ia ajukan sendiri.
+     * Hanya dokumen pengajuan dan rangkaian UAT yang terlihat; dokumen teknis internal
+     * tetap tertutup. Scope proyek tetap diperiksa oleh `ProjectAccessService`.
      *
      * @var list<string>
      */

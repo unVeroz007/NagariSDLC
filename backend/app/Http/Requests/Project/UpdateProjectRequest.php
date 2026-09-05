@@ -8,30 +8,10 @@ use Illuminate\Validation\Rule;
 /**
  * Validasi pembaruan data proyek (`PATCH /projects/{id}`).
  *
- * Wewenangnya tetap diputuskan controller lewat `ProjectAccessService::canUpdate()`
- * dan — untuk perubahan penanggung jawab — `canAssignPersonnel()`. Keduanya
- * memerlukan baris proyek yang tersimpan sebagai pembanding, dan penolakannya
- * memakai pesan spesifik per kasus, jadi tetap di controller. Yang dipindahkan ke
- * sini adalah bentuk masukan beserta normalisasinya, sesuai ketentuan AGENTS.md
- * bahwa validasi write backend memakai Form Request.
- *
- * Endpoint ini juga menerima beberapa kunci yang tidak dipetakan langsung ke kolom
- * proyek dan dibaca controller sesudahnya: `status` (transisi lewat
- * `ProjectWorkflowService`), `notes`/`leadNote`/`lead_note` (catatan transisi),
- * `analyst` (nama analis dari workspace, dipetakan ke `analyst_id`), serta
- * `team`/`team_ids`/`developers` (alokasi tim). Semuanya dicantumkan di sini agar
- * seluruh permukaan masukan endpoint ini terdokumentasi dan tipenya terjaga —
- * sebelumnya kunci-kunci itu dibaca tanpa pernah divalidasi.
- *
- * Kolom jalur pengujian (`qa_status`, `cyber_status`) DILARANG di sini. Kolom itu
- * adalah kebenaran fase pengujian, dan satu-satunya pemiliknya adalah empat endpoint
- * jalur pengujian (`submit`, `assign`, `report`, `sign-off` di TestingTrackService)
- * beserta `ProjectWorkflowService::syncTestingTrackStatuses()`. Termasuk penetapan
- * TIDAK LULUS: keputusan gagal hanya lahir dari `sign-off` Lead, yang sekaligus
- * membuka putaran pengembalian lewat `ProjectReturnRoundService`. Membiarkan kolom
- * ini ditulis dari sini — walau ditahan sampai transisi RETURN_TO_DEV seperti versi
- * sebelumnya — membuka jalur menandai proyek gagal tanpa satu pun putaran terbuka,
- * sehingga sisi pengembangan tak pernah tahu apa yang harus diperbaiki.
+ * Form Request menjaga bentuk input; otorisasi dan pembandingan data tersimpan tetap
+ * dilakukan controller. Field bantu seperti status, catatan, analis, dan tim ikut
+ * divalidasi. `qa_status` serta `cyber_status` dilarang karena hanya boleh ditulis
+ * `TestingTrackService` dan sinkronisasi workflow.
  */
 class UpdateProjectRequest extends FormRequest
 {

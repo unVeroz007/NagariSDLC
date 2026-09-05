@@ -15,21 +15,8 @@ use Tests\TestCase;
  * Kontrak field proyek yang dibaca frontend: `rbbDeadline`, `priority`, dan wewenang
  * pengajuan proyek baru.
  *
- * Tiga cacat yang diuji di sini:
- *
- *   1. `rbbDeadline` dibaca di 17 tempat pada frontend dan didokumentasikan di
- *      `docs/API_CONTRACT.md`, tetapi kolomnya tidak pernah ada. Panel "Proyek RBB
- *      mendekati deadline" pada `Dashboard.jsx` karena itu selalu kosong.
- *
- *   2. `PATCH /projects/{id}` menerima `priority` dengan status 200 lalu membuangnya
- *      diam-diam: kuncinya tidak ada di `UpdateProjectRequest::rules()`, sehingga tidak
- *      pernah masuk ke `validated()` maupun ke payload update. Pengguna melihat
- *      konfirmasi berhasil untuk perubahan yang tidak tersimpan.
- *
- *   3. `StoreProjectRequest::authorize()` mengembalikan true tanpa syarat, dan route
- *      `POST /projects` tidak memasang middleware `role:`. Satu-satunya penjaga
- *      pembuatan proyek adalah router frontend, yang dilewati begitu permintaan dikirim
- *      langsung ke API.
+ * Menjaga persistensi deadline/prioritas dan memastikan otorisasi pembuatan proyek
+ * ditegakkan oleh API, bukan hanya router frontend.
  */
 class ProjectFieldContractTest extends TestCase
 {

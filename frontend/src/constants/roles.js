@@ -1,31 +1,9 @@
 /**
  * Grup Perencanaan dan Quality Assurance — sumber acuan otorisasi untuk grup ini.
  *
- * Grup ini menaungi dua fase kerja yang dijalankan orang yang sama:
- *
- *   - Perencanaan (Fase 1): lead `lead_group` (Kadiv), analis `analyst`;
- *   - Pengujian QA (Fase 3): lead `qa_lead`, analis `qa_tester`.
- *
- * Halamannya sengaja dipisah supaya pembagian pekerjaan per fase tetap jelas, tetapi
- * ORANGNYA satu kumpulan: QA Lead boleh mendisposisikan pengujian ke analis mana pun di
- * grup ini, dan setiap analis punya dua halaman kerja — Workspace Analyst untuk
- * perencanaan dan Tugas QA Saya untuk pengujian.
- *
- * Grup kerja kini JUGA ada sebagai data: tabel `groups` dengan kolom `roles.group_id`,
- * dan Super Admin dapat mengelolanya di halaman Manajemen Grup. Migration
- * `2026_08_25_000001_create_groups_and_role_menu_access` mengisi grup `PERENCANAAN-QA`
- * dengan keempat role di bawah, sehingga keduanya bermula sama.
- *
- * Meskipun demikian, daftar di modul ini tetap acuan OTORISASI, bukan tabel `groups`.
- * Penempatan grup di basis data hanya mengubah pengelompokan dan tampilan; hak melihat
- * halaman, menerima disposisi, dan mengubah status proyek tetap dicocokkan pada nama
- * role. Memindahkan role antar grup lewat halaman Administrasi TIDAK mengubah hak itu —
- * yang harus diubah adalah modul ini beserta cerminannya di backend.
- *
- * Cerminannya di backend ada pada `App\Enums\UserRole`
- * (`PLANNING_QA_GROUP_LABEL`, `PLANNING_QA_ANALYST_ROLES`, `PLANNING_QA_LEAD_ROLES`).
- * Keduanya harus diubah bersamaan: menambah role di sini tanpa menambahkannya di
- * backend membuat pengguna melihat halaman yang setiap aksinya ditolak 403.
+ * Mencakup role Perencanaan dan QA yang dikerjakan kelompok personel yang sama.
+ * Tabel `groups` hanya mengatur tampilan; otorisasi tetap berasal dari daftar ini.
+ * Sinkronkan setiap perubahan dengan konstanta `App\Enums\UserRole` di backend.
  */
 
 /** Nama resmi grup, untuk dipakai apa adanya di teks antarmuka. */

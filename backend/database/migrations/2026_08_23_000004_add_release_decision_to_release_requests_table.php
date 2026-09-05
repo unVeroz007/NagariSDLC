@@ -8,26 +8,9 @@ use Illuminate\Support\Facades\Schema;
 /**
  * Simpan rencana rilis dan keputusan Quality Gate sebagai kolom tersendiri.
  *
- * Dua kekurangan pada `release_requests` diselesaikan bersamaan:
- *
- *   1. Estimasi downtime dan prosedur rollback yang diisi PM digabung menjadi satu
- *      teks `notes` berlabel. Akibatnya layar Quality Gate tidak dapat menampilkan
- *      keduanya secara terpisah, dan sebelumnya kekosongan itu ditutup teks karangan
- *      di frontend ("Restore database snapshot & revert versi deployment.") — Head of
- *      IT menyetujui go-live sambil membaca rencana rollback yang tidak pernah
- *      ditulis siapa pun.
- *   2. Persetujuan hanya menyimpan `approved_at`, tanpa identitas penyetuju, dan
- *      penolakan tidak punya tempat sama sekali. Keduanya adalah bukti tata kelola:
- *      keputusan go-live harus dapat ditelusuri ke orangnya.
- *
- * Isi `notes` lama dipindahkan ke kolom baru dengan membaca label yang memang
- * ditulis `ReleaseRequestController::composeNotes()`, sehingga pengajuan yang sudah
- * ada tidak kehilangan informasi. Kolom `notes` dipertahankan untuk catatan rilis
- * bebas.
- *
- * `approved_by` dan `rejected_by` memakai RESTRICT, bukan SET NULL: identitas
- * pemberi keputusan go-live adalah bukti audit, jadi tidak boleh hilang diam-diam
- * karena penghapusan akun.
+ * Memisahkan downtime/rollback dari catatan bebas dan menyimpan pelaku keputusan.
+ * Data `notes` lama dibackfill berdasarkan label. FK pelaku memakai RESTRICT untuk
+ * mempertahankan jejak audit.
  */
 return new class extends Migration
 {

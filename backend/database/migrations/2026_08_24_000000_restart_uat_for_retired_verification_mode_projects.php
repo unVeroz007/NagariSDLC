@@ -7,35 +7,10 @@ use Illuminate\Support\Facades\Log;
 /**
  * Bebaskan proyek yang tertahan di "mode verifikasi" UAT yang kini dipensiunkan.
  *
- * Aturan revisi Mayor berubah. Sebelumnya UAT di-hold, SIT diuji ulang hanya pada
- * task yang terdampak, lalu UAT *dilanjutkan* di Tahap 2 dalam mode verifikasi —
- * yang dibuka kembali cuma item Mayor-nya. Kesimpulan yang keluar dari cara itu
- * adalah gabungan hasil lama dengan tambalan, bukan penilaian atas aplikasi versi
- * yang benar-benar akan dirilis. Sekarang revisi Mayor mengulang dua siklus penuh:
- * SIT ulang menyeluruh, lalu UAT dari Tahap 1 dengan seluruh skenario dieksekusi
- * ulang dan putaran persetujuan yang baru.
- *
- * Kode mode verifikasi dihapus bersama perubahan aturan itu, dan justru di situ
- * masalahnya: baris yang saat ini berada tepat di keadaan tersebut —
- * `activeUatStep = 2` dengan `uat2_verification_mode = true` — menjadi mati langkah.
- * Wizard-nya merender Tahap 2 baca-saja yang satu-satunya aksinya adalah form
- * verifikasi, sedangkan form, endpoint, dan service method-nya sudah tidak ada.
- * Tanpa perbaikan data, proyek itu tidak punya jalan maju sama sekali.
- *
- * Yang sengaja TIDAK ikut diperbaiki:
- *
- *   - Baris yang masih menunggu SIT ulang dengan penanda lama
- *     `uat2_resume_after_sit` saja. `Project::isUatRestartPending()` membaca nama
- *     lama itu sebagai fallback, jadi baris tersebut sudah tertangani kode dan
- *     akan mendarat di Tahap 1 sendiri begitu SIT ulangnya lulus. Menyentuhnya di
- *     sini hanya menambah risiko tanpa menyelesaikan apa pun.
- *   - `uat_approval_rounds` dan `uat_approvers`. Supersession putaran approval
- *     adalah keputusan alur kerja, dilakukan `UatApprovalService` dengan alasan
- *     yang tercatat. Migration yang diam-diam membalik baris approval justru
- *     merusak jejak audit yang ingin dilindungi.
- *   - `uat1_participants` dan `uat1_docs`. Lihat catatan di `restartUat()`.
- *
- * `down()` sengaja tidak memulihkan apa pun; alasannya ada di method-nya.
+ * Mode lama melanjutkan UAT Tahap 2 setelah SIT tertarget; aturan baru mengulang SIT
+ * penuh dan UAT dari Tahap 1. Migration hanya memindahkan baris yang masih memakai
+ * mode tersebut. Approval, peserta, dokumen, dan fallback legacy tidak disentuh.
+ * `down()` sengaja tidak memulihkan data.
  */
 return new class extends Migration
 {

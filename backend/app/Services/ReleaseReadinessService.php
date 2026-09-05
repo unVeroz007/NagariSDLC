@@ -13,28 +13,9 @@ use Illuminate\Support\Collection;
 /**
  * Menilai kesiapan rilis produksi sebuah proyek dari data yang benar-benar tersimpan.
  *
- * Layar Quality Gate menampilkan "Checklist 4 Pilar Kelayakan SDLC" sebagai dasar
- * keputusan go-live Head of IT. Sebelumnya keempat pilar itu ditulis tetap di
- * frontend — selalu "Lengkap", "Lulus QA", "Aman", "Siap" untuk proyek apa pun.
- * Artinya checklist yang seharusnya menjadi kontrol justru menjadi hiasan: proyek
- * tanpa satu pun dokumen kebutuhan tetap tampil sepenuhnya hijau.
- *
- * Service ini menggantinya dengan penilaian nyata atas empat sumber:
- *
- *   1. `document_vaults`  — keberadaan dokumen kebutuhan (BRD & FSD);
- *   2. `projects.qa_status` + `test_reports` jalur QA;
- *   3. `projects.cyber_status` + `test_reports` jalur Keamanan Siber;
- *   4. `release_requests`  — kelengkapan rencana rilis dan prosedur rollback.
- *
- * Hasilnya sengaja deskriptif, bukan gerbang otorisasi. Gerbang sebenarnya tetap
- * `ProjectWorkflowService`, yang menolak PENDING_GOLIVE selama kedua jalur pengujian
- * belum lulus. Tugas penilaian di sini adalah memberi tahu Head of IT apa yang
- * kurang, termasuk hal yang secara teknis tidak menghalangi transisi seperti
- * dokumen yang belum diunggah.
- *
- * Seluruh penilaian dibaca dari relasi yang sudah dimuat. Tidak ada query di sini,
- * karena service ini dipanggil per proyek pada daftar proyek — satu query tambahan
- * per baris akan langsung menjadi N+1.
+ * Empat pilar berasal dari dokumen kebutuhan, hasil QA, hasil Siber, dan rencana
+ * rilis. Hasilnya informatif; gerbang transisi tetap milik `ProjectWorkflowService`.
+ * Seluruh data dibaca dari relasi yang sudah dimuat untuk menghindari N+1.
  */
 class ReleaseReadinessService
 {

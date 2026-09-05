@@ -11,7 +11,11 @@
 Kamu adalah asisten rekayasa perangkat lunak yang membantu pengembangan proyek NagariSDLC. Sebelum memberi saran, menjelaskan, atau mengubah apa pun:
 
 1. **Pahami dulu, baru bertindak.** Ikuti urutan baca pada Bagian 2. Jangan menyimpulkan arsitektur dari satu berkas.
-2. **Kode adalah sumber kebenaran.** `docs/` berguna untuk konteks, tetapi bisa tertinggal dari implementasi. Jika dokumen dan kode berbeda, percayai kode (route, migration, enum, model cast, service, konsumen frontend), lalu sebutkan selisihnya.
+2. **Ikuti urutan sumber kebenaran.** Keputusan terbaru pengguna dan
+   `AGENTS.md`/`docs/AI_HANDOFF.md` berada di atas implementasi aktif. Untuk klaim
+   teknis yang tidak dikunci keputusan bisnis, cocokkan dokumentasi dengan route,
+   migration, enum, model cast, service, dan konsumen frontend; laporkan setiap
+   selisih dan jangan mengarang.
 3. **Jangan mengarang.** Bila sebuah detail belum kamu verifikasi, katakan "belum diverifikasi" — jangan menebak angka, nama berkas, endpoint, atau perilaku.
 4. **Bahasa Indonesia** untuk seluruh penjelasan, komentar kode, dan pesan bisnis. Istilah teknis asing boleh apa adanya.
 5. **Jaga perubahan tetap kecil dan sesuai permintaan.** Dilarang tanpa izin eksplisit: refactor luas, menambah dependency, menjalankan `migrate`/`db:seed`/`migrate:fresh`, atau mengubah fase kerja lain.
@@ -42,13 +46,13 @@ Setelah membaca berkas ini, konfirmasi singkat pemahamanmu, lalu kerjakan hanya 
 
 ---
 
-## 2. URUTAN BACA DOKUMEN (dan mana yang sudah usang)
+## 2. URUTAN BACA DOKUMEN DAN SUMBER KEBENARAN
 
 Dokumentasi resmi ada di folder `docs/` (root repo juga punya `AGENTS.md`, `API_CONTRACT.md`). Baca dengan urutan ini:
 
-1. **`AGENTS.md`** (root) — panduan agent, stack, struktur direktori, role, aturan kritis, ringkasan state machine.
-2. **`docs/PROJECT_SUMMARY.md`** — ringkasan padat: apa ini, stack, alur inti, role, fitur kunci, aturan kritis, file penting.
-3. **`docs/AI_HANDOFF.md`** — konteks kerja paling rinci: tingkat penyelesaian, alur SIT/UAT yang disepakati, keputusan bisnis, risiko teknis. **Paling kaya, tetapi periksa poin usang di bawah.**
+1. **`AGENTS.md`** (root) — aturan kerja dan urutan sumber kebenaran.
+2. **`docs/AI_HANDOFF.md`** — keputusan serta keadaan proyek paling mutakhir.
+3. **`docs/PROJECT_SUMMARY.md`** — ringkasan padat produk dan file penting.
 4. **Dokumen domain sesuai kebutuhan:**
    - `docs/WORKFLOW.md` — state machine, tabel transisi valid, otorisasi role per transisi, alur SIT/UAT/QA/Cyber, Change Request UAT. **Rujukan utama alur.**
    - `docs/DATA_MODEL.md` — tabel & field, struktur JSON `sit_uat_data`, persetujuan UAT terstruktur, enum, migration, soft-delete.
@@ -57,15 +61,17 @@ Dokumentasi resmi ada di folder `docs/` (root repo juga punya `AGENTS.md`, `API_
    - `docs/PRD.md` — kebutuhan produk, persona, fitur, non-functional, out-of-scope.
    - `docs/README.md` — cara menjalankan (Laragon), daftar dokumen.
 
-### ⚠️ Bagian dokumentasi yang SUDAH USANG (kode sudah berubah)
+### Status sinkronisasi
 
-Autentikasi telah dipindahkan dari "token Bearer di `localStorage`" menjadi **cookie `HttpOnly`** (lihat Bagian 5 untuk detail terverifikasi). Dokumen berikut masih memuat model lama dan **tidak boleh dipercaya pada titik ini** — percayai kode:
+Dokumentasi resmi telah diselaraskan kembali pada 5 September 2026 dengan model
+autentikasi cookie `HttpOnly`, akses analitik `super_admin` + `head_of_it`, alur
+revisi Mayor yang mengulang UAT dari Tahap 1, dan status migration terbaru yang
+tercatat. `API_CONTRACT.md` kini menjadi ringkasan kontrak aktif.
 
-- `docs/ARCHITECTURE.md` — diagram baris 7 & 17 ("fetch + Bearer token"), §4 "Alur Auth & Token" (baris 84–85: token disimpan di `localStorage.nagari_sdlc_session`, tiap request `Authorization: Bearer`), dan §5 baris 131 (CORS `supports_credentials` `false`). **Semua ini terbalik dengan kode saat ini.**
-- `docs/AI_HANDOFF.md` — §7 baris 360–362 dan §9 baris 387–388 ("token sesi masih di `localStorage`, pindah ke cookie belum dikerjakan"). Migrasi cookie **sudah** dikerjakan.
-- `docs/README.md` baris 56 dan `docs/PROJECT_SUMMARY.md` baris 14 ("Bearer token") — tidak salah total (jalur Bearer memang masih didukung sebagai kompatibilitas), tetapi tidak lagi menyebut cookie sebagai jalur utama.
-
-Sumber kebenaran auth ada di: `backend/app/Support/SessionTokenCookie.php`, `backend/app/Http/Middleware/AuthenticateFromSessionCookie.php`, `backend/config/auth_cookie.php`, `backend/config/cors.php`, dan `frontend/src/services/api.js`.
+Nama `backend/docs/nagarisdlc_backend_blueprint_v2.md` dipertahankan untuk menjaga
+tautan lama, tetapi isinya sudah diganti menjadi ringkasan implementasi Laravel 13.
+Jika kelak ada perbedaan baru, ikuti urutan sumber kebenaran pada `AGENTS.md` dan
+verifikasi route, config, enum, model, service, migration, serta consumer frontend.
 
 ---
 
@@ -148,12 +154,12 @@ Token akses Sanctum dikirim **ganda**, dan **cookie adalah jalur utama SPA**:
 Manajemen TI · Perencanaan & QA · Pengembangan · Keamanan Siber · Pemohon. Tabel `groups` + `roles.group_id`/`roles.menu_access` dikelola Super Admin di `/admin/groups`. **Hak transisi status tetap di kode** (`ProjectWorkflowService::$rolePermissions`), cakupan proyek di `ProjectAccessService`, hak pelaksana uji di `TestingTrack::testerRoles()`. `roles.menu_access` bersifat **mengurangi saja & gagal-terbuka** (`null`/kosong = tanpa pembatasan); menyembunyikan menu **tidak** menutup route.
 
 ### 6.3 Mesin Status Proyek — 27 status (`ProjectStatus`)
-- **Fase 1 — Perencanaan & Analisis (5):** `PENDING`, `IN_REVIEW`, `ANALYSIS_APPROVED`, `READY_FOR_DEVELOPMENT`, `REJECTED`.
-- **Fase 2 — Pengembangan → SIT → UAT (10):** `DEV_ANALYSIS`, `DEV_ANALYSIS_DONE`, `IN_DEVELOPMENT`, `SIT_IN_PROGRESS`, `SIT_REVISION`, `SIT_PASSED`, `UAT_IN_PROGRESS`, `UAT_REVISION_SIT`, `UAT_REVISION_DEV`, `DEV_COMPLETED`.
-- **Fase 3 — QA & Keamanan Siber, paralel (6):** `READY_FOR_QA`, `QA_IN_PROGRESS`, `QA_PASSED`, `CYBER_IN_PROGRESS`, `CYBER_PASSED`, `RETURN_TO_DEV`.
+- **Fase 1 — Perencanaan & Analisis (4):** `PENDING`, `IN_REVIEW`, `ANALYSIS_APPROVED`, `REJECTED`.
+- **Fase 2 — Pengembangan → SIT → UAT (13):** `READY_FOR_DEVELOPMENT`, `DEV_ANALYSIS`, `DEV_ANALYSIS_DONE`, `IN_DEVELOPMENT`, `SIT_IN_PROGRESS`, `SIT_REVISION`, `SIT_PASSED`, `UAT_IN_PROGRESS`, `UAT_REVISION_SIT`, `UAT_REVISION_DEV`, `UAT_PASSED`, `DEV_COMPLETED`, `RETURN_TO_DEV`.
+- **Fase 3 — QA & Keamanan Siber, paralel (5):** `READY_FOR_QA`, `QA_IN_PROGRESS`, `QA_PASSED`, `CYBER_IN_PROGRESS`, `CYBER_PASSED`.
 - **Fase 4 — Rilis & Produksi (2):** `PENDING_GOLIVE`, `LIVE_PRODUCTION`.
 - **Non-linear (2):** `ON_HOLD`, `CANCELLED`.
-- **Legacy / tanpa transisi aktif (2):** `READY_FOR_UAT`, `UAT_PASSED`. Dipertahankan agar riwayat lama terbaca; **jangan** dipakai untuk alur baru, **jangan** dihapus dari enum.
+- **Legacy / tanpa transisi aktif (1):** `READY_FOR_UAT`. Dipertahankan agar riwayat lama terbaca; **jangan** dipakai untuk alur baru dan **jangan** dihapus dari enum. `UAT_PASSED` masih memiliki transisi aktif menuju `DEV_COMPLETED`, tetapi hanya sebagai keluaran opsional UAT Internal dan bukan bagian alur rilis utama.
 
 ### 6.4 SIT & UAT
 - **SIT** = 3 tab (persiapan data → eksekusi per task + bukti → review/sign-off). Dokumen Berita Acara SIT wajib sebelum lanjut UAT. Approval SIT: seluruh developer assignee + PM/Analyst Pengembangan + Development Lead.
@@ -228,11 +234,11 @@ Pada setiap perubahan: pastikan otorisasi (role + visibilitas proyek) benar, aud
 
 ## 10. CATATAN LINGKUNGAN & JEBAKAN (rawan salah)
 
-1. **Auth = cookie `HttpOnly` (jalur utama) + Bearer (kompatibilitas).** Jangan menulis "token di `localStorage`". Lihat Bagian 5. Beberapa `docs/` masih usang soal ini.
+1. **Auth = cookie `HttpOnly` (jalur utama) + Bearer (kompatibilitas).** Jangan menulis "token di `localStorage`". Lihat Bagian 5; dokumentasi resmi telah diselaraskan pada 5 September 2026.
 2. **`UNLOCK_ALL_STAGES = false`** di `SITUATWizard.jsx` — **harus tetap `false`** (keputusan pengguna 22 Agustus 2026). Boleh dinyalakan untuk debug lokal, **jangan pernah di-commit** menyala.
 3. **12 role = daftar tetap.** Role baru lewat Administrasi mati by design.
 4. **5 grup = penyajian, bukan otorisasi.** Otorisasi dari peran.
-5. **`READY_FOR_UAT` & `UAT_PASSED` = legacy** (tanpa transisi aktif). Jangan gambarkan sebagai alur utama, jangan hapus dari enum.
+5. **`READY_FOR_UAT` = legacy** tanpa transisi aktif. `UAT_PASSED` tetap aktif sebagai keluaran opsional UAT Internal menuju `DEV_COMPLETED`, bukan gerbang rilis. Jangan hapus keduanya dari enum.
 6. **Tidak ada UAT final** setelah QA/Siber.
 7. **Realtime:** event `ProjectUpdated`/`NotificationCreated` `ShouldBroadcast` (di-*queue*). Pada `.env` saat ini `BROADCAST_CONNECTION=log` — **Reverb belum aktif di environment ini**; default konfigurasi = `reverb`. Realtime nyata butuh `BROADCAST_CONNECTION=reverb` + server Reverb + *queue worker*.
 8. **Driver:** `SESSION_DRIVER=database`, `QUEUE_CONNECTION=database`, `CACHE_STORE=database`.

@@ -13,28 +13,8 @@ use Tests\TestCase;
 /**
  * Grup kerja sebagai data (`/api/v1/groups`) dan pembatasan menu per role.
  *
- * Sebelumnya pengelompokan role hanya hidup sebagai konstanta di frontend, dan kolom
- * "Akses Menu" pada halaman Administrasi menampilkan teks tetap yang tidak pernah
- * dikirim maupun dibaca. Keduanya sekarang tersimpan di basis data: tabel `groups`,
- * kolom `roles.group_id`, dan kolom `roles.menu_access`.
- *
- * Yang dijaga di sini adalah batas-batas yang paling mudah dilanggar perubahan
- * berikutnya:
- *
- *   1. Grup hanya boleh dikelola Super Admin, sementara pembacaannya terbuka bagi
- *      seluruh akun karena dipakai layar pemilihan personel.
- *   2. Grup yang masih berisi role tidak boleh dihapus. `roles.group_id` bersifat
- *      `SET NULL`, jadi tanpa penghalang ini penghapusan berhasil tanpa keluhan dan
- *      meninggalkan role tanpa grup.
- *   3. Akses menu Super Admin tidak boleh dibatasi, karena halaman Administrasi yang
- *      mengatur pembatasan itu sendiri berada di dalam menu.
- *   4. Daftar menu kosong disimpan sebagai `null`, yang berarti "tanpa pembatasan".
- *      Menyimpannya sebagai pembatasan nyata akan mengosongkan seluruh sidebar role
- *      tersebut hanya karena tidak ada yang dicentang.
- *
- * Yang TIDAK diuji di sini karena memang bukan tugas grup: hak transisi status. Grup
- * dan akses menu tidak menyentuh `ProjectWorkflowService::$rolePermissions`,
- * `ProjectAccessService`, maupun middleware `role:`.
+ * Menjaga izin administrasi, larangan menghapus grup berisi role, akses Super Admin,
+ * serta normalisasi daftar menu kosong menjadi null. Hak transisi berada di luar scope.
  */
 class GroupAndMenuAccessTest extends TestCase
 {

@@ -11,45 +11,10 @@ use Illuminate\Support\Facades\Schema;
 /**
  * Jadikan pengembalian proyek dari QA / Keamanan Siber sebagai data yang dapat dibaca.
  *
- * Sebelum ini, sign-off TIDAK LULUS hanya meninggalkan tiga jejak yang tersebar:
- * satu baris `project_status_histories` (`to_status = RETURN_TO_DEV`), satu baris
- * `activity_logs`, dan kolom `test_reports.review_notes`. Akibatnya sisi pengembangan
- * tidak punya satu pun tempat untuk menjawab pertanyaan paling dasar setelah proyeknya
- * dikembalikan: jalur mana yang menolak, apa pesan Lead-nya, task perbaikan apa yang
- * lahir dari pengembalian itu, dan apakah perbaikannya sudah cukup untuk diajukan ulang.
- * Pertanyaan terakhir bahkan tidak dapat dijawab sama sekali, karena pengajuan ulang
- * jalur pengujian tidak memiliki prasyarat bisnis apa pun.
- *
- * Dua perubahan:
- *
- *   1. Tabel `project_return_rounds` — satu baris per peristiwa pengembalian. Berisi
- *      jalur asal, nomor putaran, laporan uji yang menjadi dasarnya, pesan Lead, dan
- *      catatan Project Manager saat mengajukan ulang.
- *   2. `project_tasks.return_round_id` — penanda asal task perbaikan. Sebuah task yang
- *      terisi kolom ini adalah task yang lahir dari pengembalian, dan putarannya
- *      sekaligus memberi tahu jalur mana yang memintanya. Menyimpan penandanya sebagai
- *      relasi, bukan sebagai salinan teks jalur, membuat "task ini milik putaran mana"
- *      hanya punya satu sumber kebenaran.
- *
- * Nomor putaran dihitung per (proyek, jalur), bukan per proyek. Jalur QA dan Keamanan
- * Siber berjalan paralel dan dapat mengembalikan proyek secara terpisah, jadi
- * "Pengembalian QA ke-2" harus tetap terbaca sebagai putaran kedua jalur QA meskipun
- * jalur Siber juga pernah mengembalikan proyek yang sama di antaranya.
- *
- * `lead_notes` dan `severity` disalin dari laporan uji, bukan sekadar dirujuk lewat
- * `test_report_id`. Pesan yang menjadi dasar pengembalian adalah bukti tata kelola:
- * ia harus tetap terbaca apa adanya pada putaran itu meskipun laporan uji berikutnya
- * untuk jalur yang sama sudah menumpuk di atasnya.
- *
- * Backfill menurunkan putaran dari `test_reports` yang `reviewed_result = fail`, karena
- * itulah satu-satunya sumber yang menyebut jalur dan pesan Lead sekaligus.
- * `project_status_histories` tidak dipakai: barisnya tahu proyek berpindah ke
- * `RETURN_TO_DEV` tetapi tidak tahu jalur mana penyebabnya. Putaran hasil backfill
- * ditandai OPEN hanya bila ia laporan terakhir jalurnya DAN kolom jalur proyek masih
- * `FAILED`; sisanya sudah pasti terlewati dan ditandai RESUBMITTED. Tidak ada task
- * perbaikan yang ditautkan mundur — sebelum kolom ini ada, tidak ada data yang
- * menyatakan task mana yang lahir dari pengembalian, dan menebaknya akan memalsukan
- * jejak audit sekaligus mengunci gerbang pengajuan ulang pada putaran lama.
+ * Menambah satu putaran per peristiwa serta relasi task perbaikan. Nomor putaran
+ * dihitung per proyek dan jalur; catatan Lead disalin sebagai snapshot audit.
+ * Backfill berasal dari laporan gagal: hanya kegagalan terakhir pada jalur yang masih
+ * FAILED menjadi OPEN. Task lama tidak ditautkan karena asalnya tidak dapat dibuktikan.
  */
 return new class extends Migration
 {

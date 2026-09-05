@@ -11,7 +11,8 @@ berjenjang.
 ## Stack
 - **Backend**: Laravel 13 (PHP 8.3) + Sanctum + MySQL + Reverb.
 - **Frontend**: React 19 + Vite + Tailwind 4, Bahasa Indonesia, brand `#00529C`.
-- Komunikasi: REST JSON, Bearer token.
+- Komunikasi: REST JSON. SPA memakai cookie Sanctum `HttpOnly` + header penjaga
+  `X-Requested-With`; Bearer token tetap didukung untuk klien kompatibilitas.
 
 ## Alur inti
 ```
@@ -64,17 +65,16 @@ Pengajuan → Review → Analisis → Development → SIT → UAT → QA/Cyber �
 - `frontend/src/router/index.jsx` — routing & role guard.
 
 ## Kondisi saat ini
-- Snapshot pengujian terakhir yang diketahui (25 Agustus 2026): **215 test backend
-  (1228 assertions) pass**, `npx eslint src` bersih, dan `npx vite build` berhasil.
-  Perubahan sesudah snapshot tersebut belum tentu sudah diuji.
-- **Dua migrasi masih Pending** di database pengembangan:
-  `2026_08_25_000000_add_tested_scenarios_to_test_reports_table` dan
-  `2026_08_25_000001_create_groups_and_role_menu_access`. Migrasi terakhir yang sudah
-  Ran adalah `2026_08_24_000002_add_rbb_deadline_to_projects_table`. Test memakai SQLite
-  bermigrasi bersih, jadi cek skema database sungguhan lewat `php artisan migrate:status`,
-  bukan lewat hasil test.
+- Snapshot pengujian terakhir yang tercatat (26 Agustus 2026): **236 test backend
+  (1467 assertions) lulus**, `npx eslint src` bersih, dan `npx vite build` berhasil.
+  Ini snapshot historis; perubahan setelah tanggal tersebut belum tentu sudah diuji.
+- Ketiga migration `2026_08_25_*` tercatat sudah diterapkan pada database
+  pengembangan per pemeriksaan 25 Agustus 2026. Test memakai SQLite in-memory yang
+  selalu bermigrasi bersih, sehingga status database lingkungan aktif tetap harus
+  diperiksa dengan `php artisan migrate:status` sebelum deployment.
 - `UNLOCK_ALL_STAGES = false` — gate SIT/UAT mengikuti status proyek (mode produksi).
 - CORS backend digerakkan environment (`CORS_ALLOWED_ORIGINS`), bukan `*`.
+- Token SPA disimpan dalam cookie `HttpOnly`; `localStorage` tidak menyimpan token.
 - Template environment produksi: `backend/.env.production.example` dan
   `frontend/.env.production.example`.
 

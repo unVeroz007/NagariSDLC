@@ -10,22 +10,9 @@ use Symfony\Component\HttpFoundation\Response;
 /**
  * Terjemahkan cookie sesi `HttpOnly` menjadi header `Authorization`.
  *
- * Guard `auth:sanctum` hanya membaca token dari header `Authorization: Bearer`.
- * Middleware ini mengisi header itu dari cookie ketika permintaannya tidak
- * membawa header sendiri, sehingga seluruh route, kebijakan, dan pengujian yang
- * sudah ada tetap berjalan tanpa perubahan — yang berpindah hanyalah tempat
- * token disimpan di sisi peramban, dari `localStorage` ke cookie `HttpOnly`.
- *
- * Header yang dikirim klien selalu menang. Itu yang membuat jalur lama tetap
- * hidup: klien yang masih memegang tokennya sendiri, pengujian otomatis, dan
- * tautan persetujuan approver eksternal tidak terpengaruh perubahan ini.
- *
- * Catatan pemeliharaan: cookie ini ditulis dan dibaca dalam bentuk mentah karena
- * grup middleware `api` tidak menyertakan `EncryptCookies`. Bila suatu saat
- * `statefulApi()` atau enkripsi cookie diaktifkan pada grup ini, nama cookie
- * `SessionTokenCookie::name()` wajib dimasukkan ke daftar pengecualian enkripsi —
- * kalau tidak, nilainya gagal didekripsi dan dibaca sebagai null, dan setiap
- * pengguna terlempar ke halaman masuk tanpa pesan yang menjelaskan sebabnya.
+ * Header Bearer eksplisit selalu menang agar klien kompatibilitas tetap bekerja.
+ * Cookie saat ini dibaca mentah; bila enkripsi cookie API diaktifkan, kecualikan
+ * `SessionTokenCookie::name()` dari enkripsi.
  */
 class AuthenticateFromSessionCookie
 {

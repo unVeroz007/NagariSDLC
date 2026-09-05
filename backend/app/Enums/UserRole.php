@@ -32,24 +32,8 @@ enum UserRole: string
     public const PLANNING_QA_GROUP_LABEL = 'Grup Perencanaan dan Quality Assurance';
 
     /**
-     * Analis anggota Grup Perencanaan dan Quality Assurance.
-     *
-     * Satu kumpulan orang, dua fase kerja: `analyst` memegang analisis perencanaan
-     * (Fase 1) dan `qa_tester` memegang pengujian QA (Fase 3). Pembedaan role hanya
-     * menandai fase yang biasa dikerjakan, bukan orang yang berbeda — sehingga setiap
-     * anggota berhak menerima penugasan pada kedua fase.
-     *
-     * Satu sumber kebenaran bagi:
-     *   - `TestingTrack::QA->testerRoles()` — siapa yang sah menerima disposisi QA;
-     *   - `ProjectWorkflowService::$rolePermissions` — transisi Fase 1 dan jalur QA;
-     *   - `ProjectAccessService` — cakupan daftar, baca, dan tulis proyek grup ini;
-     *   - `ProjectController@update` — pencarian analis Fase 1 berdasarkan nama.
-     *
-     * Ditulis sebagai konstanta, bukan method, supaya bisa dipakai langsung pada nilai
-     * awal properti (`$rolePermissions`) — PHP tidak mengizinkan panggilan method di
-     * sana. Menambah role di sini tanpa menambahkannya pada matriks transisi akan
-     * membuat pengguna lolos gerbang penugasan lalu ditolak saat status proyek bergerak;
-     * keduanya satu paket.
+     * Role anggota Grup Perencanaan dan QA yang dapat bertugas pada fase analisis
+     * maupun pengujian QA. Sinkronkan daftar ini dengan izin transisi terkait.
      *
      * @var list<string>
      */

@@ -1,24 +1,6 @@
 <?php
 
-/*
-|--------------------------------------------------------------------------
-| Cookie Sesi API
-|--------------------------------------------------------------------------
-|
-| Token akses Sanctum dikirim ganda: sebagai cookie `HttpOnly` (jalur utama)
-| dan sebagai header `Authorization: Bearer` (jalur kompatibilitas). Cookie
-| `HttpOnly` tidak dapat dibaca JavaScript, sehingga satu celah XSS di SPA
-| tidak lagi cukup untuk mencuri token dan memakainya dari mesin lain.
-|
-| Header Bearer sengaja dipertahankan: klien lama, pengujian otomatis, dan
-| alat internal masih memakainya. Middleware `AuthenticateFromSessionCookie`
-| hanya mengisi header itu ketika permintaannya tidak membawa header sendiri,
-| jadi kedua jalur tidak pernah bertabrakan.
-|
-| Catatan: `php artisan config:cache` membekukan hasil `env()`. Setelah nilai
-| di `.env` berubah, jalankan ulang `php artisan config:cache`.
-|
-*/
+// Cookie Sesi API
 
 return [
 

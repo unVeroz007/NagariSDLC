@@ -298,27 +298,9 @@ class UatApprovalService
     /**
      * Verifikasi nomor HP pemilik link approval eksternal.
      *
-     * Link eksternal hanya dijaga oleh nomor HP, jadi rate limit-nya adalah satu-satunya
-     * penghalang percobaan tebak. Sebelumnya percobaan ke-5 menyetel
-     * `verification_attempts` kembali ke 0 sambil memasang masa kunci: begitu kuncinya
-     * habis, penghitungnya sudah bersih sehingga kuota penuh kembali tersedia dan siklus
-     * itu dapat diulang tanpa batas — jumlah percobaan seumur link tidak pernah benar-benar
-     * dibatasi. Selain itu, selama terkunci baris tersebut melaporkan `attempts = 0`,
-     * sehingga tidak ada jejak bahwa kunci sedang berlaku.
-     *
-     * Sekarang penghitungnya monoton: hanya verifikasi yang **berhasil** (atau pembuatan
-     * ulang link oleh PM) yang mengembalikannya ke 0. Setiap kelipatan `max_attempts`
-     * kegagalan memasang masa kunci baru yang durasinya bertambah (15, 30, 45 menit, …),
-     * dibatasi 24 jam, sehingga penebak berulang melambat sendiri sementara approver yang
-     * hanya salah ketik tetap bisa mencoba lagi setelah menunggu.
-     *
-     * Catatan penting tentang transaksinya: `ValidationException` tidak boleh lagi
-     * dilempar dari dalam closure `DB::transaction()`. Dulu justru begitu, dan akibatnya
-     * seluruh rate limit ini tidak pernah bekerja sama sekali — `DB::transaction()`
-     * me-rollback saat closure-nya melempar exception, jadi kenaikan
-     * `verification_attempts` selalu ikut dibatalkan bersama pesan errornya dan setiap
-     * percobaan gagal selalu dimulai dari nol. Karena itu closure hanya mengembalikan
-     * hasil, dan exception dilempar setelah transaksinya commit.
+     * Penghitung kegagalan bersifat monoton; setiap kelipatan batas menambah durasi
+     * penguncian hingga 24 jam. Reset hanya setelah verifikasi berhasil atau link dibuat
+     * ulang. Lempar exception setelah transaksi commit agar kenaikan percobaan tersimpan.
      */
     public function verifyPhone(string $token, string $phone): array
     {

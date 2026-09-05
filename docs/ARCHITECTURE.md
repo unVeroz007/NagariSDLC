@@ -4,7 +4,8 @@
 
 ```
 [ React 19 SPA (Vite 5173) ]
-        │  fetch + Bearer token (Sanctum)
+        │  fetch + cookie HttpOnly Sanctum
+        │  (Bearer tetap didukung untuk klien non-browser/legacy)
         ▼
 [ Laravel 13 REST API (php artisan serve :8000) ]
         │
@@ -14,7 +15,9 @@
 ```
 
 Arsitektur **monolith** sederhana: satu backend Laravel melayani satu frontend
-React. Komunikasi murni REST API (JSON), auth via Bearer token.
+React. Komunikasi menggunakan REST API (JSON). SPA memakai token Sanctum dalam
+cookie `HttpOnly`; header Bearer tetap diterima untuk pengujian, Postman, dan
+klien kompatibilitas.
 
 ## 2. Backend
 
@@ -80,12 +83,21 @@ React. Komunikasi murni REST API (JSON), auth via Bearer token.
 
 ## 4. Alur Auth & Token
 
-1. Login → `authService.login` → simpan session `{ token, user, issuedAt }` di
-   `localStorage.nagari_sdlc_session`.
-2. Setiap request: `Authorization: Bearer <token>`.
-3. `ensureFreshToken()` — refresh otomatis jika token mendekati expire (8 jam).
-4. Response 401 → `handleResponse` dispatch `auth:unauthorized` →
+1. Login → backend membuat token Sanctum dan mengirimkannya sebagai cookie
+   `nagari_sdlc_token` dengan atribut `HttpOnly`.
+2. `localStorage.nagari_sdlc_session` hanya menyimpan profil pengguna,
+   `issuedAt`, dan `expiresInMinutes`; token tidak dapat dibaca JavaScript.
+3. Setiap request SPA memakai `credentials: 'include'` dan header
+   `X-Requested-With: XMLHttpRequest`. Middleware
+   `AuthenticateFromSessionCookie` menerjemahkan cookie menjadi header Bearer
+   sebelum guard `auth:sanctum` dijalankan.
+4. `ensureFreshToken()` merotasi token melalui `/auth/refresh` menjelang
+   kedaluwarsa (default delapan jam).
+5. Response 401 → `handleResponse` dispatch `auth:unauthorized` →
    `AuthContext.handleUnauthorized` → clear session + toast (anti-spam).
+
+Header `Authorization: Bearer <token>` yang dikirim eksplisit selalu menang atas
+cookie. Jalur ini dipertahankan untuk klien non-browser, alat internal, dan test.
 
 ## 5. Keamanan
 
@@ -124,12 +136,15 @@ React. Komunikasi murni REST API (JSON), auth via Bearer token.
 - **Input**: Form Request + `validate()`.
 - **CORS**: `backend/config/cors.php` membaca `CORS_ALLOWED_ORIGINS` (dipisah koma),
   dengan fallback `FRONTEND_URL` lalu `APP_URL`. Saat `APP_ENV=local` origin dev
-  server Vite (5173/4173) otomatis ditambahkan; di luar local nilai `*` dibuang
-  supaya konfigurasi salah tidak membuka API ke semua origin. `allowed_headers`
-  dibatasi pada header yang dipakai frontend (termasuk `X-UAT-Approval-Access`
-  untuk approver eksternal), `exposed_headers` hanya `Content-Disposition`, dan
-  `supports_credentials` tetap `false` karena autentikasi memakai Bearer token,
-  bukan cookie. Ingat `php artisan config:cache` membekukan nilai `env()`.
+  server Vite (5173/4173) otomatis ditambahkan. Nilai `*` selalu dibuang karena
+  credentialed request tidak boleh memakai wildcard origin. `allowed_headers`
+  mencakup `Authorization`, `X-Requested-With`, dan
+  `X-UAT-Approval-Access`; `exposed_headers` hanya `Content-Disposition`, dan
+  `supports_credentials=true` agar cookie sesi dapat dikirim lintas origin.
+  Ingat `php artisan config:cache` membekukan nilai `env()`.
+- **Proteksi CSRF cookie**: permintaan yang mengandalkan cookie wajib membawa
+  `X-Requested-With`. Middleware menjawab 400 bila header tersebut hilang;
+  permintaan dengan Bearer eksplisit tidak terkena syarat ini.
 - **Gate tahapan SIT/UAT di frontend**: `SITUATWizard.jsx` memakai
   `UNLOCK_ALL_STAGES = false` dan daftar status (`SIT_STARTABLE_STATUSES`,
   `SIT_COMPLETED_STATUSES`, `UAT_COMPLETED_STATUSES`) yang mencerminkan

@@ -8,33 +8,9 @@ use Illuminate\Support\Facades\Schema;
 /**
  * Jadikan grup kerja sebagai data, dan jadikan kolom "Akses Menu" nyata.
  *
- * Sebelum ini konsep grup hanya hidup sebagai konstanta di kode
- * (`UserRole::PLANNING_QA_*`) sehingga tidak bisa dilihat maupun diatur dari halaman
- * Administrasi, sementara kolom "Akses Menu" pada daftar role selalu menampilkan
- * "Modul Standar" untuk semua role — nilai yang tidak pernah tersimpan dan tidak
- * pernah dibaca siapa pun.
- *
- * Tiga perubahan:
- *
- *   1. Tabel `groups` — grup kerja yang bisa dibuat dan diubah Super Admin.
- *   2. `roles.group_id` — role ditempatkan pada satu grup. Boleh kosong: role sistem
- *      seperti `super_admin` tidak mewakili unit kerja mana pun.
- *   3. `roles.menu_access` — daftar path menu yang boleh dilihat role tersebut.
- *      Kosong (NULL) berarti "tanpa pembatasan": sidebar memakai seluruh menu bawaan
- *      role itu. Kolom ini hanya MEMBATASI tampilan; gerbang keamanan tetap
- *      `ProtectedRoute` di frontend dan middleware `role:` beserta service otorisasi
- *      di backend, sehingga menyembunyikan menu tidak pernah menjadi satu-satunya
- *      pelindung sebuah halaman.
- *
- * Isi awal grup mengikuti pembagian fase yang sudah berjalan, termasuk keputusan
- * pengguna bahwa Perencanaan (Fase 1) dan Quality Assurance (Fase 3) adalah SATU grup
- * dengan orang yang sama. Backfill memakai nama role, bukan ID, karena ID role berbeda
- * antar lingkungan.
- *
- * Catatan penting: matriks otorisasi fase tetap milik kode
- * (`ProjectWorkflowService::$rolePermissions`, `ProjectAccessService`,
- * `TestingTrack::testerRoles()`). Memindahkan role antar grup di sini mengubah
- * pengelompokan dan tampilan, bukan hak transisi status.
+ * Menambah tabel grup serta `roles.group_id` dan `roles.menu_access`. Nilai menu null
+ * berarti tanpa pembatasan dan hanya memengaruhi tampilan; otorisasi fase tetap di
+ * kode. Backfill memakai nama role agar stabil antarlingkungan.
  */
 return new class extends Migration
 {

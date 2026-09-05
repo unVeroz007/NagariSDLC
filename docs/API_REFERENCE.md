@@ -1,7 +1,10 @@
 # NagariSDLC — Referensi API
 
 Base URL: `http://localhost:8000/api/v1` (dev). Semua route kecuali auth dan
-link approval UAT eksternal dilindungi `auth:sanctum`. Format response standar:
+link approval UAT eksternal dilindungi `auth:sanctum`. SPA mengirim cookie
+Sanctum `HttpOnly` dengan `credentials: 'include'` dan header
+`X-Requested-With: XMLHttpRequest`; Bearer eksplisit tetap diterima untuk klien
+kompatibilitas. Format response standar:
 `{ "status": "success|error", "message": "...", "data": ..., "meta": ...? }`
 
 ## Autentikasi
@@ -9,7 +12,7 @@ link approval UAT eksternal dilindungi `auth:sanctum`. Format response standar:
 |---|---|---|
 | POST | `/auth/register` | Daftar akun mandiri. Body: `name`, `email`, `password`, `password_confirmation`, `division_id` (atau `department` = nama divisi terdaftar, untuk klien lama), `phone_number?` |
 | GET | `/auth/divisions` | Publik, hanya baca. Daftar `{ id, name }` divisi resmi untuk dropdown formulir pendaftaran |
-| POST | `/auth/login` | Login → `{ token, user }` |
+| POST | `/auth/login` | Login → cookie sesi `HttpOnly` + `{ user, token_expires_in_minutes }`; `token` pada body hanya ada bila `AUTH_COOKIE_EXPOSE_TOKEN=true` |
 | POST | `/auth/forgot-password` | Publik. Kirim tautan reset ke email. Body: `email` |
 | POST | `/auth/reset-password` | Publik. Setel password baru. Body: `token`, `email`, `password`, `password_confirmation` |
 | GET | `/auth/me` | User saat ini |
@@ -25,6 +28,20 @@ akun `super_admin`. Penambahan akun berperan lain adalah wewenang Super Admin
 lewat `POST /users`. Divisi wajib menunjuk baris `divisions` yang sudah ada;
 endpoint ini tidak lagi membuat divisi baru dari masukan bebas. Aturan kekuatan
 password sama dengan `PATCH /auth/password`.
+
+### Sesi cookie dan kompatibilitas Bearer
+
+Login dan refresh melekatkan cookie `nagari_sdlc_token` melalui
+`SessionTokenCookie`. Cookie ini `HttpOnly`, sehingga token tidak dapat dibaca
+JavaScript. SPA mengirim cookie dengan `credentials: 'include'` dan wajib membawa
+`X-Requested-With: XMLHttpRequest`; middleware
+`AuthenticateFromSessionCookie` menerjemahkannya menjadi Bearer sebelum guard
+Sanctum berjalan.
+
+Klien non-browser boleh tetap mengirim `Authorization: Bearer <token>`; header
+eksplisit selalu menang atas cookie. Nilai token pada body login/refresh bersifat
+opsional untuk kompatibilitas dan sebaiknya dimatikan di produksi dengan
+`AUTH_COOKIE_EXPOSE_TOKEN=false`.
 
 ### Reset password
 
@@ -164,11 +181,18 @@ sehingga setiap penolakan server adalah tombol yang di layar sudah mati. Penghap
 yang berhasil dicatat sebagai `delete_document`, penolakan sebagai
 `delete_document_blocked` berstatus `error`, keduanya di `activity_logs`.
 
-Bukti per task SIT (`sit2_task_approvals[*].attachments[].docId`) dan bukti per skenario
-UAT (`uat2_scenarios[*].attachments[].docId`) belum ikut dibekukan: keduanya masih boleh
-diganti selama siklus revisi mayor berjalan, dan komponen `SITTaskExecution` dirender
-tanpa prop `readOnly`, jadi pembekuan di server akan menolak aksi yang di layar masih
-aktif.
+Rujukan bukti per task SIT (`sit2_task_approvals[*].attachments[].docId`) dibekukan
+setelah SIT lulus: wizard merender `SITTaskExecution` sebagai read-only dan
+`ProjectController::update()` mempertahankan nilai server pada seluruh
+`SIT_FROZEN_STATUSES`. Hasil UAT final juga server-managed; revisi Mayor
+mengarsipkan snapshot lama sebelum membuka putaran baru.
+
+Namun, pemeriksaan penghapusan berkas pada `DocumentController::auditTrailBlockers()`
+saat ini belum memasukkan rujukan bukti per task SIT maupun bukti per skenario UAT
+sebagai alasan tersendiri. Dengan kata lain, struktur snapshot-nya terkunci, tetapi
+berkas vault yang hanya dirujuk dari dua lokasi itu belum memperoleh proteksi hapus
+yang setara. Ini adalah keterbatasan implementasi aktif, bukan izin bisnis untuk
+menghapus bukti audit.
 
 ## Notifikasi & Aktivitas
 | Method | Endpoint | Fungsi |
@@ -277,7 +301,7 @@ dilangkahi: QA mengembalikan proyek, Cyber Lead secara sah memindahkan status ut
 |---|---|---|
 | GET/POST | `/release-requests` | Pengajuan migrasi & rilis ke Grup Infrastruktur. `POST` membuat baris `release_requests` **dan** memindahkan proyek ke `PENDING_GOLIVE` dalam satu transaksi; ditolak 422 bila jalur QA/Siber belum lulus. Body: `project_id`, `target_release_date`, `downtime_estimate?`, `rollback_plan?`, `notes?`. `GET` hanya menampilkan pengajuan pada proyek yang boleh dilihat pengguna |
 | GET | `/dashboard/summary` | Angka kartu dasbor, **disaring sesuai wewenang pengguna** lewat `ProjectAccessService::applyVisibilityScope()` — sumber kebenaran yang sama dengan `GET /projects`. `total_projects`, `pending_projects`, `in_development`, `in_qa`, `live_production`, dan `total_tasks` hanya menghitung proyek yang boleh dilihat pengguna tersebut; role yang tidak dikenal menerima 0 untuk semuanya. `total_users` berisi jumlah akun hanya untuk role pengawas (`super_admin`, `head_of_it`, `lead_group`) dan `null` untuk role lain |
-| GET | `/dashboard/analytics` | Agregat lintas seluruh portofolio untuk halaman Analitik SDLC: `status_distribution` (objek dengan kunci status), `avg_cycle_time`, `success_rate`, `bug_density`, `velocity`, `release_trend` (6 bulan), `developer_workloads` (`name` + `workload`, tanpa email), `role_distribution`, `total_projects`, `total_users`, `total_tasks`. **Hanya `super_admin`** — angkanya tidak bisa disaring per pengguna, jadi gerbangnya route. `avg_cycle_time` dan `release_trend` dihitung dari `project_status_histories` (transisi pertama ke `LIVE_PRODUCTION`), bukan dari `projects.updated_at` |
+| GET | `/dashboard/analytics` | Agregat lintas seluruh portofolio untuk halaman Analitik SDLC: `status_distribution` (objek dengan kunci status), `avg_cycle_time`, `success_rate`, `bug_density`, `velocity`, `release_trend` (6 bulan), `developer_workloads` (`name` + `workload`, tanpa email), `role_distribution`, `total_projects`, `total_users`, `total_tasks`. **Hanya `super_admin` dan `head_of_it`** sesuai middleware route dan guard frontend. `avg_cycle_time` dan `release_trend` dihitung dari `project_status_histories` (transisi pertama ke `LIVE_PRODUCTION`), bukan dari `projects.updated_at` |
 | GET | `/quality-gate/queue` | Antrean proyek `PENDING_GOLIVE` beserta rencana rilisnya. **Hanya `head_of_it` / `super_admin`** |
 | POST | `/quality-gate/approve` | Setujui rilis; proyek berpindah ke `LIVE_PRODUCTION`. Body: `project_id`, `notes?` |
 | POST | `/quality-gate/reject` | Tolak rilis. Body: `project_id`, `reason` (**wajib, 10–2000 karakter**). Proyek berpindah ke `REJECTED` (bukan `RETURN_TO_DEV` — itu jalur pengembalian milik jalur pengujian), alasannya tersimpan di `projects.rejection_reason` dan pada `release_requests.rejection_notes`/`rejected_by`/`rejected_at` |
@@ -351,8 +375,11 @@ dibaca resource-nya.
 POST /auth/login
 { "email": "user@nagari.co.id", "password": "..." }
 → 200
-{ "status": "success", "data": { "token": "...", "user": { "id": 1, "name": "...", "role": "developer", ... } } }
+{ "status": "success", "data": { "user": { "id": 1, "name": "...", "role": "developer", ... }, "token_expires_in_minutes": 480 } }
 ```
+
+Respons juga melekatkan cookie `HttpOnly`. Field `data.token` hanya disertakan
+bila `AUTH_COOKIE_EXPOSE_TOKEN=true` untuk kompatibilitas klien non-browser.
 
 ### Buat Proyek (dari form request business user)
 ```

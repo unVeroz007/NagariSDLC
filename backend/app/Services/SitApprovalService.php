@@ -88,20 +88,9 @@ class SitApprovalService
     /**
      * Apakah pengguna berada dalam cakupan slot approval SIT proyek ini?
      *
-     * Satu definisi untuk dua pemakai: penyusun inbox di service ini dan gerbang
-     * penerimaan keputusan di `ProjectController@sitApproval`. Selama keduanya
-     * memutuskan sendiri-sendiri, daftar pekerjaan dan yang benar-benar diterima server
-     * pasti menyimpang — dan penyimpangan itulah cacat sebenarnya.
-     *
-     * Catatan untuk slot `development_lead`: skema memang TIDAK memiliki kolom penugasan
-     * per proyek untuk role ini. `projects` tidak punya `dev_lead_id`;
-     * `project_team_members.role_in_project` adalah teks bebas yang hanya pernah diisi
-     * 'Developer'/skill, dan `assigned_by` menyimpan 'lead'/'pm' — bukan identitas orang.
-     * Penyaringan per divisi juga sengaja tidak dipakai: `projects.division_id` adalah
-     * divisi PEMINTA (`ProjectController@store` mengisinya dari divisi pengaju), sedangkan
-     * Pimpinan Grup Pengembangan berada di IT-DEV, sehingga aturan divisi akan menolak
-     * hampir semua persetujuan yang sah. Penautan yang benar-benar ada di data adalah
-     * jejak disposisinya sendiri — lihat `projectDevelopmentLeadIds()`.
+     * Dipakai bersama oleh inbox dan endpoint keputusan. Slot `development_lead`
+     * ditautkan melalui histori disposisi karena skema tidak memiliki `dev_lead_id`;
+     * divisi proyek adalah divisi peminta sehingga tidak boleh dipakai untuk slot ini.
      *
      * @param  list<int>  $requiredDeveloperIds
      */

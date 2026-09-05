@@ -1,49 +1,7 @@
 /**
- * Konstanta status proyek yang terstandarisasi untuk seluruh aplikasi NagariSDLC.
- * Gunakan konstanta ini di SEMUA komponen, jangan hardcode string status langsung.
- *
- * ⚠️  PENTING: Nilai string di sini HARUS cocok 100% dengan enum ProjectStatus.php di Backend!
- *
- * Bentuk alur menurut state machine backend (ProjectWorkflowService::$allowedTransitions):
- *
- *   PENDING → IN_REVIEW → ANALYSIS_APPROVED → READY_FOR_DEVELOPMENT
- *     → DEV_ANALYSIS → DEV_ANALYSIS_DONE → IN_DEVELOPMENT
- *     → SIT_IN_PROGRESS → SIT_PASSED → UAT_IN_PROGRESS → UAT_PASSED → DEV_COMPLETED
- *
- *   DEV_COMPLETED ─┬→ READY_FOR_QA → QA_IN_PROGRESS → QA_PASSED ─┬→ PENDING_GOLIVE
- *                  └→ CYBER_IN_PROGRESS → CYBER_PASSED ──────────┘   → LIVE_PRODUCTION
- *
- * DEV_COMPLETED adalah titik cabang, bukan sambungan ke satu antrean berikutnya: backend
- * membuka READY_FOR_QA, QA_IN_PROGRESS, DAN CYBER_IN_PROGRESS sekaligus dari sana. Kedua
- * jalur pengujian berjalan paralel, dan QA_PASSED serta CYBER_PASSED sengaja dibuat
- * simetris supaya jalur mana pun yang sign-off lebih dulu tetap dapat menerima sign-off
- * jalur lain. Karena itu status utama tidak pernah cukup untuk menyimpulkan berapa jalur
- * yang sudah lulus — pakai kolom jalurnya lewat canRequestGoLive() di bawah. Syarat "kedua
- * jalur wajib lulus" dijaga di titik gabungnya, oleh
- * ProjectWorkflowService::validateTransitionPrerequisites() pada transisi menuju
- * PENDING_GOLIVE, bukan oleh bentuk matriks transisinya.
- *
- * Cabangnya bisa berbalik: sign-off TIDAK LULUS seorang Lead pada salah satu jalur
- * memindahkan status utama ke RETURN_TO_DEV dan membuka satu putaran pengembalian
- * (`project_return_rounds`) pada jalur yang menolak. Jalur itu baru boleh diajukan ulang
- * setelah setiap task perbaikan bertanda putaran tersebut punya penerima dan selesai —
- * gerbang ProjectReturnRoundService::assertResubmitAllowed(), dipasang di
- * TestingTrackService::submitRequest(). Rinciannya ada di `docs/WORKFLOW.md` bagian 5.
- *
- * Simpangan fase pengembangan tidak digambar di atas agar bentuk alurnya tetap terbaca,
- * tetapi statusnya ada dan terpakai: SIT_REVISION, UAT_REVISION_SIT (menuntut SIT dijalankan
- * ulang), dan UAT_REVISION_DEV (kembali ke pengembangan). UAT_PASSED sendiri hanya keluaran
- * opsional UAT internal, bukan gerbang rilis. Daftar lengkap seluruh anggota enum ada pada
- * peta di bawah, bukan pada header ini.
- *
- * Tidak ada UAT final setelah QA & Siber. Begitu kedua jalur pengujian lulus, PM langsung
- * mengajukan go-live ke Grup Infrastruktur. READY_FOR_UAT masih menjadi anggota enum backend
- * namun sudah tidak punya satu pun transisi masuk maupun keluar — hanya tersisa untuk
- * membaca riwayat lama.
- *
- * Special: ON_HOLD hanya dapat dimasuki dari IN_DEVELOPMENT, dan CANCELLED hanya dari
- * PENDING. Keduanya BUKAN "dari status mana pun" seperti yang tertulis pada header ini
- * sebelumnya — matriks backend memberi masing-masing satu pintu masuk saja.
+ * Status proyek frontend; nilainya wajib sama dengan enum dan matriks workflow backend.
+ * QA/Siber berjalan paralel, sehingga gunakan status jalur untuk kelulusan go-live.
+ * `READY_FOR_UAT` hanya legacy; `UAT_PASSED` adalah keluaran opsional UAT internal.
  */
 
 /**
@@ -329,24 +287,9 @@ export const canAdvanceStatusToReadyForQa = (status) =>
 /**
  * Status utama tempat fase pengujian QA masih bisa dimulai atau dilanjutkan.
  *
- * Proyek yang lolos filter ini boleh diajukan PM, didisposisi QA Lead, lalu di-sign-off
- * tanpa ditolak state machine.
- *
- * IN_DEVELOPMENT, SIT_PASSED, dan UAT_PASSED sengaja tidak masuk. Pengujian QA dan
- * Keamanan Siber baru boleh dimulai setelah seluruh pekerjaan pengembangan — termasuk
- * SIT dan UAT Internal — dinyatakan selesai, dan penanda selesainya adalah
- * DEV_COMPLETED. UAT_PASSED hanyalah keluaran opsional UAT internal yang masih harus
- * melewati DEV_COMPLETED lebih dulu.
- *
- * RETURN_TO_DEV tetap masuk atas keputusan pengguna: proyek yang dikembalikan karena
- * defect boleh diajukan ulang langsung setelah perbaikan, tanpa dipaksa mengulang
- * seluruh siklus SIT/UAT.
- *
- * Status pengujian yang sedang berjalan (READY_FOR_QA sampai CYBER_PASSED) ikut masuk
- * karena dua jalur berjalan paralel: penunjuk siklus bisa sedang dipegang jalur lain
- * saat PM mengajukan jalur yang belum berjalan.
- *
- * Daftar ini harus tetap cermin `TestingTrackService::SUBMITTABLE_MAIN_STATUSES`.
+ * Dimulai setelah DEV_COMPLETED; RETURN_TO_DEV boleh diajukan ulang setelah perbaikan.
+ * Status QA/Siber aktif ikut diterima karena kedua jalur paralel. Sinkronkan dengan
+ * `TestingTrackService::SUBMITTABLE_MAIN_STATUSES`.
  */
 export const STATUSES_ALLOWING_QA_TRACK_START = [
     PROJECT_STATUS.DEV_COMPLETED,

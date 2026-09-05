@@ -593,5 +593,11 @@ adalah lapis terakhir:
 | `DELETE /documents/{id}` | 403 bila bukan pengunggah / pemohon / PM proyek / Super Admin / Head of IT. 404 bila proyek pemiliknya sudah dihapus lunak. 422 bila dokumen masih menjadi bukti: dirujuk `test_reports.evidence_document_ids`, `sit3_docs` setelah SIT lulus, `uat1_docs`/`uat3_docs` setelah UAT selesai, `uat3_docs` yang sudah diputuskan approver, atau tersimpan di histori `sit_cycles[].documents`. Alasannya dikirim di `data.reasons`; penolakan dicatat `delete_document_blocked` (status `error`), keberhasilan `delete_document` |
 | `DELETE /groups/{id}` | 403 bila bukan Super Admin. 422 bila grup masih menaungi role — keluarkan role-nya dahulu di Manajemen Role. Penghapusan bersifat keras (`groups` tidak memakai `SoftDeletes`) karena grup hanyalah pengelompokan tampilan, bukan bukti tata kelola. Kunci asing `roles.group_id` bersifat `nullOnDelete`, jadi seandainya penghapusan lolos pemeriksaan pun role dan penggunanya tetap utuh — hanya kehilangan penempatan grupnya |
 
+> Batasan implementasi saat ini: rujukan lampiran pada
+> `sit2_task_approvals[*].attachments` dan bukti skenario UAT dibekukan dalam snapshot,
+> tetapi belum ikut diperiksa oleh `DocumentController::auditTrailBlockers()` saat file
+> dasar dihapus. Tabel di atas menggambarkan perlindungan yang benar-benar aktif, bukan
+> seluruh rujukan dokumen yang secara konseptual seharusnya menjadi jejak audit.
+
 > Perhitungan proyek pada dua pemeriksaan pertama memakai `withTrashed()`: proyek yang
 > sudah dihapus lunak masih menempati tabel, jadi `RESTRICT` tetap berlaku atasnya.

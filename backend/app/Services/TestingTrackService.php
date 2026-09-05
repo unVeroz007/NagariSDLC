@@ -21,33 +21,10 @@ use Illuminate\Support\Facades\DB;
 /**
  * Satu sumber kebenaran untuk dua jalur pengujian paralel: QA dan Keamanan Siber.
  *
- * Alur resmi satu jalur terdiri atas empat langkah, masing-masing milik satu peran:
- *
- *   1. `submitRequest()`   PM mengajukan pengujian          NOT_SUBMITTED → SUBMITTED
- *   2. `assignTester()`    Lead mendisposisikan ke tester   SUBMITTED     → IN_PROGRESS
- *   3. `submitReport()`    Tester mengirim laporan          IN_PROGRESS   → REVIEW
- *   4. `signOff()`         Lead memutuskan                  REVIEW        → PASSED|FAILED
- *
- * Pemisahan langkah 3 dan 4 adalah inti dari service ini. Sebelumnya keduanya
- * dikerjakan satu endpoint: laporan tester langsung memindahkan status utama proyek ke
- * QA_PASSED atau RETURN_TO_DEV, sehingga sign-off Lead hanya formalitas di layar dan
- * tidak pernah tercatat sebagai keputusan tersendiri. Sekarang laporan tester berhenti
- * di REVIEW dan hanya Lead yang dapat menutup jalur.
- *
- * Dua hal yang tidak dilakukan service ini, dan alasannya:
- *
- * - Tidak menulis `projects.status` secara langsung. Semua perpindahan status utama
- *   melewati `ProjectWorkflowService` agar pemeriksaan wewenang, riwayat status,
- *   notifikasi, dan broadcast tetap satu jalur.
- * - Tidak menyimpan berkas. Bukti pengujian diunggah lebih dulu ke document vault
- *   lewat endpoint dokumen, lalu dirujuk di sini melalui ID-nya.
- *
- * Kolom jalur (`qa_status` / `cyber_status`) adalah kebenaran jalurnya masing-masing,
- * sedangkan `projects.status` hanyalah satu penunjuk siklus yang dipegang bergiliran
- * oleh kedua jalur. Karena itu perpindahan status utama di sini bersifat menyusul:
- * bila matriks transisi tidak mengizinkannya saat ini, jalur tetap maju dan penunjuk
- * dibiarkan. Gerbang go-live tidak melemah karenanya — prasyaratnya dihitung dari
- * kolom jalur lewat `Project::hasPassedAllTestingTracks()`.
+ * Alurnya `submitRequest → assignTester → submitReport → signOff`; laporan berhenti
+ * di REVIEW hingga Lead memutuskan. Status utama selalu melalui workflow dan bukti
+ * hanya dirujuk dari document vault. Kolom jalur menjadi sumber kebenaran independen;
+ * sinkronisasi status utama boleh tertunda ketika jalur paralel sedang aktif.
  */
 class TestingTrackService
 {

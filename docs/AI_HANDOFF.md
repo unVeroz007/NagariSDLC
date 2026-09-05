@@ -1,6 +1,6 @@
 # NagariSDLC — Handoff untuk AI Baru
 
-**Terakhir diperbarui:** 26 Agustus 2026  
+**Terakhir diperbarui:** 5 September 2026
 **Status dokumen:** konteks kerja utama bersama `AGENTS.md` di root repository.
 
 ## 1. Saya memahami proyek ini sebagai
@@ -357,9 +357,18 @@ Stack aktual:
   ke nilai tersimpan bila proyek sudah melewati SIT, alih-alih menolaknya — sehingga PATCH
   yang membawa seluruh objek proyek tetap lolos tanpa mengubah berita acara final. Status
   pra-SIT dan SIT aktif tetap dapat menulis. Regresi ada di `ProjectCrudTest`.
-- Token sesi frontend masih disimpan di `localStorage`, sehingga terbaca skrip
-  pihak ketiga bila terjadi XSS. Pindah ke cookie `HttpOnly` menyentuh alur
-  autentikasi ujung ke ujung, jadi ini keputusan pengguna, bukan perbaikan sisipan.
+- Pembekuan rujukan itu belum menjadi perlindungan penghapusan file secara menyeluruh:
+  `DocumentController::auditTrailBlockers()` saat ini belum memeriksa lampiran bukti task
+  SIT maupun bukti skenario UAT. Perlakukan ini sebagai keterbatasan implementasi aktif;
+  jangan menyatakan bahwa file dasarnya sudah terlindungi dari penghapusan.
+- **Autentikasi SPA sudah memakai cookie Sanctum `HttpOnly`.** Token tidak lagi
+  disimpan di `localStorage`; yang tersisa di sana hanya profil pengguna,
+  `issuedAt`, dan masa berlaku untuk render awal/penjadwalan refresh. Setiap fetch
+  bersesi memakai `credentials: 'include'` dan header
+  `X-Requested-With: XMLHttpRequest`. Bearer eksplisit tetap didukung untuk
+  kompatibilitas klien non-browser dan test. Di produksi,
+  `AUTH_COOKIE_EXPOSE_TOKEN=false` diperlukan agar token tidak ikut muncul pada
+  body login/refresh.
 - Dokumentasi bisa tertinggal dari kode. Bila bertentangan, verifikasi route,
   migration, enum, model cast, service, dan frontend consumer sebelum menyimpulkan.
 
@@ -371,10 +380,11 @@ Stack aktual:
 4. Telusuri alur FE → service API → route → request/controller/service → model/DB.
 5. Jelaskan diagnosis singkat sebelum melakukan perubahan material.
 6. Implementasikan hanya scope yang diminta dan pertahankan kompatibilitas data lama.
-7. Pengujian: pengguna sudah mengizinkan AI menjalankan `php vendor/bin/phpunit`,
-   `npx eslint src`, dan `npx vite build` untuk memverifikasi perubahannya. Yang
-   tetap dilarang tanpa izin baru adalah perintah yang menyentuh database sungguhan
-   (`migrate`, `db:seed`, `migrate:fresh`).
+7. Pengujian: jangan menjalankan test suite, lint, build, browser/E2E, migration,
+   atau seeder kecuali permintaan pengguna saat ini memang memintanya. Pemeriksaan
+   read-only dan syntax/static check terarah boleh dilakukan. Perintah yang
+   menyentuh database sungguhan (`migrate`, `db:seed`, `migrate:fresh`) selalu
+   membutuhkan izin eksplisit baru.
 8. Pada handoff, sebutkan perubahan, file terkait, langkah migration bila ada, serta
    hal yang belum terverifikasi.
 
@@ -384,6 +394,6 @@ Stack aktual:
 - Kebijakan retensi, cascade, soft delete, dan status terminal `CANCELLED`.
 - Strategi deployment, CI/CD, environment staging/production, backup, monitoring,
   audit/security hardening, dan SLA.
-- Penyimpanan token sesi frontend (`localStorage` sekarang, cookie `HttpOnly`
-  sebagai alternatif).
-
+- Nilai produksi cookie sesi (`AUTH_COOKIE_DOMAIN`, `AUTH_COOKIE_SAME_SITE`,
+  `AUTH_COOKIE_SECURE`) dan keputusan akhir apakah respons login/refresh tetap
+  mengekspos token untuk klien kompatibilitas (`AUTH_COOKIE_EXPOSE_TOKEN`).

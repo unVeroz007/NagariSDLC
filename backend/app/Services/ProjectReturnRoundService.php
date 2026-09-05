@@ -14,32 +14,9 @@ use Exception;
 /**
  * Satu sumber kebenaran untuk putaran pengembalian proyek dari pengujian ke pengembangan.
  *
- * Service ini memiliki tiga tanggung jawab yang seluruhnya berkisar pada satu tabel,
- * `project_return_rounds`:
- *
- *   1. `open()`                — membuka putaran saat Lead menyatakan TIDAK LULUS.
- *   2. `assertResubmitAllowed()` — gerbang keras pengajuan ulang.
- *   3. `close()`               — menutup putaran saat jalurnya berhasil diajukan ulang.
- *
- * Ketiganya dipanggil `TestingTrackService`, bukan controller. Alasannya: membuka dan
- * menutup putaran harus terjadi pada transaksi yang sama dengan perubahan status jalur
- * yang menyebabkannya. Bila keduanya dipisah ke dua panggilan controller, satu kegagalan
- * di tengah akan meninggalkan proyek berstatus dikembalikan tanpa putaran yang dapat
- * dibaca — atau sebaliknya, putaran terbuka pada jalur yang sudah berjalan lagi.
- *
- * Arah ketergantungannya sengaja satu arah: service ini TIDAK mengenal
- * `TestingTrackService`. Orkestrasi "ajukan ulang jalurnya lalu tutup putarannya" berada
- * di sana, karena pengajuan jalur pengujian memang miliknya. Menaruh orkestrasi itu di
- * sini akan membuat dua service saling menyuntik dan container tidak dapat membangunnya.
- *
- * Yang TIDAK dilakukan service ini:
- *
- * - Tidak memindahkan status jalur maupun status utama proyek. Itu milik
- *   `TestingTrackService` dan `ProjectWorkflowService`.
- * - Tidak menulis activity log sendiri. Peristiwa pembukaan dan penutupan putaran sudah
- *   tercatat pada aliran audit `update_project_track_status` milik
- *   `TestingTrackService::recordTrackAudit()`; menulis baris kedua hanya menggandakan
- *   satu peristiwa menjadi dua di layar riwayat.
+ * Memiliki operasi `open`, gerbang `assertResubmitAllowed`, dan `close`. Seluruhnya
+ * dipanggil `TestingTrackService` dalam transaksi perubahan jalur. Service ini tidak
+ * mengubah status proyek dan tidak menggandakan activity log.
  *
  * @see \App\Services\TestingTrackService
  */
@@ -91,25 +68,8 @@ class ProjectReturnRoundService
     /**
      * Gerbang keras pengajuan ulang satu jalur pengujian.
      *
-     * Dipasang di `TestingTrackService::submitRequest()` sehingga berlaku untuk SEMUA
-     * jalan masuk pengajuan — tombol "Ajukan Ulang" pada halaman Pengembalian maupun
-     * form pengajuan pengujian biasa. Memasangnya hanya pada endpoint pengajuan ulang
-     * akan menyisakan pintu belakang yang justru lebih mudah ditemukan.
-     *
-     * Tiga hal yang ditolak, masing-masing dengan alasannya:
-     *
-     *   1. Putaran terbuka tanpa satu pun task perbaikan. Pengembalian yang tidak
-     *      melahirkan task berarti tidak ada satu pun perbaikan yang tercatat, jadi
-     *      tidak ada yang dapat dinyatakan selesai. Aturan yang sama dipakai gerbang
-     *      SIT ulang terhadap scope yang kosong.
-     *   2. Task perbaikan yang belum selesai. `take_down` dikecualikan: permintaan yang
-     *      dibatalkan secara sadar tidak boleh mengunci proyek selamanya.
-     *   3. Task perbaikan tanpa penerima. Task tanpa penerima tidak punya penanggung
-     *      jawab, sehingga "sudah dikerjakan" tidak dapat dipertanggungjawabkan
-     *      siapa pun — cerminan gerbang `UAT_REVISION_DEV → SIT_IN_PROGRESS`.
-     *
-     * Tidak melakukan apa-apa bila jalur ini tidak punya putaran terbuka: pengajuan
-     * pengujian pertama kali memang bukan pengajuan ulang.
+     * Putaran terbuka wajib memiliki task perbaikan yang sudah ditugaskan dan selesai;
+     * task `take_down` diabaikan. Tanpa putaran terbuka, pengajuan pertama langsung lolos.
      *
      * @throws Exception Bila masih ada perbaikan yang menahan pengajuan ulang.
      */

@@ -1,26 +1,9 @@
 <?php
 
 /*
-|--------------------------------------------------------------------------
-| Cross-Origin Resource Sharing (CORS)
-|--------------------------------------------------------------------------
-|
-| Daftar origin diambil dari environment supaya setiap lingkungan (lokal,
-| staging, produksi) memakai nilai sendiri tanpa mengubah kode.
-|
-|   CORS_ALLOWED_ORIGINS="https://sdlc.banknagari.co.id,https://sdlc-staging.banknagari.co.id"
-|
-| Aturan resolusi:
-|   1. Pakai `CORS_ALLOWED_ORIGINS` (dipisah koma) bila diisi.
-|   2. Bila kosong, pakai `FRONTEND_URL` lalu `APP_URL`.
-|   3. Saat `APP_ENV=local`, origin dev server Vite selalu ditambahkan.
-|
-| Wildcard `*` hanya diizinkan saat `APP_ENV=local`. Di lingkungan lain nilai
-| tersebut dibuang agar konfigurasi salah tidak membuka API ke semua origin.
-|
-| Catatan: `php artisan config:cache` membekukan hasil `env()`. Setelah nilai
-| di `.env` berubah, jalankan ulang `php artisan config:cache`.
-|
+| Origin: CORS_ALLOWED_ORIGINS → FRONTEND_URL → APP_URL.
+| Origin Vite dan wildcard hanya diizinkan pada lingkungan local.
+| Jalankan ulang `config:cache` setelah mengubah environment.
 */
 
 $localDevOrigins = [

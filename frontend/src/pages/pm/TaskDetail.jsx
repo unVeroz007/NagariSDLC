@@ -562,27 +562,8 @@ export default function TaskDetail() {
     /**
      * Rangkuman hasil UAT Internal (Tahap 2) per task, keyed by id task.
      *
-     * Dua sumber digabung karena masing-masing hanya memuat sebagian task:
-     *
-     * 1. `uat2_scenarios` — satu entri per task yang diuji pada UAT Internal.
-     * 2. `uat2_additional_requests` — permintaan tambahan yang muncul di
-     *    pertemuan UAT. Setiap permintaan melahirkan task Change Request
-     *    tersendiri dan `taskId`-nya diisi backend, baik Minor maupun Mayor:
-     *    keduanya pekerjaan pengembangan yang harus terlihat di halaman ini.
-     *
-     * Tanpa penggabungan ini task hasil permintaan tambahan tampil di tabel
-     * tanpa satu pun informasi UAT, padahal justru task itulah yang lahir dari
-     * UAT.
-     *
-     * `verificationStatus` ikut dibawa karena inilah penanda apakah perbaikannya
-     * masih menunggu developer (`waiting_development`), menunggu SIT ulang
-     * (`waiting_sit`, hanya untuk Mayor), atau sudah tuntas (`resolved`).
-     *
-     * `verificationAttachments` tetap dibaca meski alur verifikasi terarah revisi
-     * Mayor sudah dihapus: bukti yang sudah pernah diunggah penguji pada alur lama
-     * masih tersimpan di entri skenario/permintaan, dan sekali revisi mayor terjadi
-     * entri itu diarsipkan ke `uat_cycles` sehingga tidak akan bertambah lagi.
-     * Menghapus pembacaannya hanya akan menyembunyikan bukti yang sah.
+     * Menggabungkan skenario dan permintaan tambahan. Status verifikasi menunjukkan
+     * tahap perbaikan; lampiran verifikasi legacy tetap dibaca sebagai bukti historis.
      */
     const taskUatInfoMap = useMemo(() => {
         const map = {};

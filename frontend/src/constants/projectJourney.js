@@ -1,36 +1,9 @@
 /**
  * Perjalanan proyek: satu sumber kebenaran untuk timeline fase SDLC.
  *
- * Sebelum modul ini ada, setiap halaman menyusun timeline-nya sendiri dan keduanya
- * salah dengan cara yang berbeda: halaman pemohon (`pages/Track.jsx`) memakai tiga
- * fase karangan yang tidak pernah cocok dengan alur sesungguhnya, sedangkan
- * `pages/pm/ProjectTracker.jsx` memakai urutan status yang tidak memuat satu pun
- * status SIT/UAT sehingga proyek yang sedang diuji internal tampil 0% dan seluruh
- * fasenya "belum dimulai". Menaruh urutan, label, dan aturan penilaiannya di satu
- * tempat membuat dua halaman itu tidak mungkin lagi bercerita berbeda.
- *
- * Tiga hal sengaja dipisahkan di sini karena sifatnya memang berbeda:
- *
- * 1. `PROJECT_STATUS_SPINE` — urutan maju `projects.status`. Dipakai hanya untuk
- *    menentukan posisi relatif ("sudah lewat" atau "belum"), bukan untuk ditampilkan.
- *    Semua status maju masuk, termasuk status yang tidak punya titik di timeline,
- *    supaya `indexOf` tidak pernah -1 — itulah cacat yang membuat tracker PM diam.
- *
- * 2. `JOURNEY_PHASES` — titik yang benar-benar ditampilkan, dikelompokkan per fase.
- *    Fase 3A/3B tidak dinilai dari `projects.status` melainkan dari kolom jalur
- *    (`qa_status` / `cyber_status`) karena kedua jalur berjalan paralel: satu
- *    penunjuk siklus tidak bisa mewakili dua jalur yang bisa maju-mundur sendiri.
- *
- * 3. `JOURNEY_DETOURS` — status yang bukan kemajuan, melainkan simpangan (revisi,
- *    penolakan, penundaan). Simpangan tidak menambah titik baru; ia menempel pada
- *    titik tempat pekerjaannya kembali, sehingga pemohon melihat "sedang direvisi"
- *    pada tahap yang tepat alih-alih melihat proyeknya seolah mundur ke nol.
- *
- * Riwayat status (`projects.status_histories`, sudah selalu ikut pada payload proyek
- * lewat `Project::RESOURCE_RELATIONS`) dipakai untuk dua hal: memberi tanggal dan
- * pelaku pada setiap titik, dan menandai titik yang pernah dilewati walau status
- * sekarang sedang berada di simpangan yang posisinya lebih awal. Tanpa riwayat modul
- * ini tetap bekerja, hanya kehilangan tanggal dan jejak siklus yang berulang.
+ * `PROJECT_STATUS_SPINE` menentukan urutan maju, `JOURNEY_PHASES` menentukan titik
+ * tampilan, dan `JOURNEY_DETOURS` menempatkan revisi/penundaan. QA dan Siber dinilai
+ * dari kolom jalurnya karena berjalan paralel. Histori melengkapi tanggal dan siklus.
  */
 
 import {

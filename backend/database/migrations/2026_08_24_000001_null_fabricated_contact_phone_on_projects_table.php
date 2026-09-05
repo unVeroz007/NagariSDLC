@@ -7,56 +7,10 @@ use Illuminate\Support\Facades\Log;
 /**
  * Kosongkan nomor telepon kontak yang dikarang oleh backfill lama.
  *
- * `2026_08_21_000000_add_contact_phone_to_projects_table` dulu tidak berhenti pada
- * penambahan kolom. Sesudah kolomnya ada, ia menyapu seluruh baris yang masih `NULL`
- * dan menuliskan nomor acak:
- *
- *     '08' . str_pad((string) random_int(0, 999999999), 9, '0', STR_PAD_LEFT)
- *
- * Backfill itu sudah dibuang dari file tersebut, tetapi membuangnya tidak menyembuhkan
- * apa pun: migration yang sudah tercatat di tabel `migrations` tidak akan dijalankan
- * ulang. File aslinya kini hanya menjaga instalasi baru; baris yang sudah menerima
- * nomor karangan adalah tugas migration ini.
- *
- * Mengapa ini dianggap cacat dan bukan sekadar kosmetik: nomor karangan berformat
- * sah. Ia lewat validasi, ia tampil di kolom "Nomor Telepon Kontak" pada daftar
- * proyek dan halaman Track dengan ikon telepon hijau yang sama seperti nomor asli,
- * dan cepat atau lambat ia akan ditelepon oleh orang yang mengejar sebuah rilis.
- * Kolom kosong menjawab "belum diketahui"; nomor karangan menjawab "ini nomornya"
- * dan salah. Yang kedua jauh lebih mahal.
- *
- * ─── Predikat pengenal ───────────────────────────────────────────────────────────
- *
- * Keluaran generator itu terkarakterisasi penuh, bukan diperkirakan:
- * `random_int(0, 999999999)` paling panjang sembilan digit dan `str_pad(..., 9)`
- * memaksanya tepat sembilan digit, sehingga setiap nilai yang pernah ditulisnya
- * PASTI `'08'` + 9 digit = tepat 11 karakter, seluruhnya angka. Karena itu:
- *
- *   - Setiap nilai yang TIDAK cocok `^08[0-9]{9}$` terbukti bukan tulisan migration
- *     itu. Arah ini mutlak, tanpa celah. Pada basis data live, 18 dari 20 baris masuk
- *     kategori ini dan karena itu tidak akan disentuh.
- *   - `ProjectSeeder` tidak pernah menyentuh `contact_phone` sama sekali, jadi tidak
- *     ada penulis otomatis lain atas kolom ini. Satu-satunya mesin yang pernah
- *     mengisinya adalah backfill tersebut.
- *
- * Yang TIDAK boleh dilebih-lebihkan: tidak ada validasi format nomor di mana pun —
- * frontend hanya mewajibkan kolom tidak kosong, backend hanya `nullable|string|max:30`
- * — sehingga secara prinsip seseorang bisa mengetik nomor 11 digit berawalan `08` dan
- * nilainya akan cocok dengan sidik generator. Pada data live hal itu tidak terjadi:
- * seluruh 18 nilai yang jelas berasal dari manusia berpanjang 10, 12, atau 13
- * karakter, tidak satu pun 11. Uji "prefiks operator sah" sengaja TIDAK dipakai
- * sebagai pembeda, karena justru terbukti menyesatkan: empat baris buatan manusia di
- * data live berprefiks mustahil (`0809`, `0844`, `0865`, `0874`), sedangkan dua baris
- * yang cocok sidik generator berprefiks yang kebetulan sah. Bentuk nomor di basis data
- * ini tidak berkorelasi dengan keasliannya.
- *
- * Karena sisa risiko itu nyata meski kecil, nilai lama TIDAK dibuang begitu saja: ia
- * diarsipkan ke `activity_logs` sebelum kolomnya dikosongkan. `AGENTS.md` melarang
- * hard-delete data dan histori, dan di sini larangan itu sekaligus menjadi jaring
- * pengaman — bila ternyata ada satu nomor asli yang tersapu, nomor itu masih utuh di
- * jejak audit dan dapat dipulihkan, bukan hilang selamanya.
- *
- * `down()` sengaja tidak memulihkan apa pun; alasannya ada di method-nya.
+ * Generator lama selalu menghasilkan `08` + sembilan digit. Nilai yang cocok pola itu
+ * diarsipkan ke activity log sebelum dikosongkan untuk mengurangi risiko salah deteksi.
+ * Migration awal sudah dibersihkan agar instalasi baru tidak membuat data palsu.
+ * `down()` sengaja tidak memulihkan data.
  */
 return new class extends Migration
 {

@@ -22,7 +22,7 @@ wajib melalui **state machine** yang terpusat.
 | Lapisan | Teknologi |
 |---|---|
 | Backend | Laravel 13 (PHP 8.3), REST API |
-| Auth | Laravel Sanctum (token 8 jam + refresh) |
+| Auth | Laravel Sanctum (cookie `HttpOnly` untuk SPA, Bearer kompatibilitas, refresh) |
 | Database | Mengikuti environment development; target produksi belum diputuskan |
 | Realtime | Laravel Reverb tersedia; arsitektur produksi belum diputuskan |
 | Frontend | React 19 + Vite 8 + Tailwind 4 |
@@ -184,8 +184,10 @@ frontend wizard (`SITUATWizard.jsx`). Struktur penting:
 - Sebelum hasil Tahap 2 dikosongkan, putaran UAT berjalan diarsipkan ke `uat_cycles`
   (append-only) beserta approval-nya. Putaran approval lama ditandai `superseded`; baris
   `approved` dipertahankan untuk audit, baris `pending` menjadi `revoked`.
-- Endpoint Change Request lama tetap ada untuk kompatibilitas: keputusan minor
-  tidak mengubah status, keputusan mayor mengikuti alur di atas.
+- Endpoint **pengajuan** Change Request lama sudah dihapus. Hanya endpoint
+  **keputusan** `POST /projects/{id}/uat-change-request/decision` yang tetap ada
+  untuk kompatibilitas baris lama: keputusan minor tidak mengubah status,
+  keputusan mayor mengikuti alur di atas.
 
 ## 9. Perintah Umum
 

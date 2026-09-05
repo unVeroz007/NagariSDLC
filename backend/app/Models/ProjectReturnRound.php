@@ -15,25 +15,9 @@ use Illuminate\Support\Collection;
 /**
  * Satu peristiwa pengembalian proyek dari jalur pengujian ke pengembangan.
  *
- * Baris ini lahir ketika Lead QA atau Lead Keamanan Siber melakukan sign-off dengan
- * hasil TIDAK LULUS, dan tertutup ketika jalur yang sama berhasil diajukan ulang.
- * Sebelumnya peristiwa itu hanya tersebar sebagai satu baris riwayat status, satu baris
- * activity log, dan catatan review pada laporan uji — tidak ada satu pun tempat yang
- * dapat menjawab "jalur mana yang menolak, apa pesannya, dan perbaikan apa yang
- * dimintanya".
- *
- * Isi barisnya dibagi dua sisi yang ditulis dua orang berbeda:
- *
- * - Sisi pengujian (`track`, `test_report_id`, `returned_by`, `returned_at`,
- *   `lead_notes`, `severity`) ditulis sekali saat pengembalian terjadi dan tidak pernah
- *   berubah lagi.
- * - Sisi pengembangan (`status`, `resubmitted_by`, `resubmitted_at`, `resubmit_notes`)
- *   ditulis saat Project Manager mengajukan jalurnya kembali.
- *
- * `lead_notes` dan `severity` merupakan salinan dari laporan uji, bukan bacaan langsung
- * lewat `test_report_id`. Pesan yang menjadi dasar pengembalian adalah bukti tata
- * kelola: ia harus tetap terbaca apa adanya pada putaran ini meskipun laporan uji
- * berikutnya untuk jalur yang sama sudah menumpuk di atasnya.
+ * Dibuka saat Lead menolak hasil QA/Siber dan ditutup ketika PM mengajukan ulang.
+ * Data pengembalian bersifat tetap; status dan metadata pengajuan ulang ditulis saat
+ * penutupan. Catatan Lead disalin agar bukti tiap putaran tetap utuh.
  *
  * @see \App\Services\ProjectReturnRoundService  Pemilik seluruh penulisan baris ini.
  */

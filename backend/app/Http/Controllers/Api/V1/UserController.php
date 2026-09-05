@@ -40,39 +40,10 @@ class UserController extends Controller
     /**
      * Beban aktif lintas-fase tiap analis/pelaksana, dihitung server-side.
      *
-     * Dropdown disposisi QA dan Audit Keamanan Siber menampilkan beban tiap orang agar
-     * Lead dapat membagi pekerjaan secara merata. Beban itu tidak dapat dihitung di sisi
-     * Lead: `ProjectAccessService::applyVisibilityScope()` membatasi daftar proyek
-     * `qa_lead`/`cyber_lead` pada fase pengujian saja, sehingga proyek Fase 1 (analisis
-     * perencanaan) yang dipegang orang yang sama tidak pernah sampai ke browser Lead dan
-     * bebannya selalu terbaca nol.
-     *
-     * Karena satu orang merangkap analisis perencanaan (Fase 1) dan pengujian QA (Fase 3)
-     * — lihat `UserRole::PLANNING_QA_ANALYST_ROLES` — angka yang berguna adalah TOTAL
-     * proyek aktif yang ia pegang lintas fase, bukan satu jalur saja. Endpoint ini
-     * menghitung gabungan itu dari SELURUH proyek, lepas dari scope pemanggil, lalu
-     * memaparkan hanya jumlah agregat per pengguna — bukan detail proyeknya — sehingga
-     * tidak membocorkan portofolio yang tak boleh dilihat Lead.
-     *
-     * Definisi "beban" mengikuti persis aturan yang dipakai layar QA & Siber, agar angka
-     * di dropdown identik dengan yang akan dihitung klien seandainya datanya tersedia:
-     *
-     *   - Fase 1 aktif : `analyst_id` = pengguna DAN status proyek `IN_REVIEW` (satu-
-     *     satunya status "sedang dianalisis"; setelahnya proyek pindah ke
-     *     ANALYSIS_APPROVED/REJECTED dan bukan lagi beban analis);
-     *   - Jalur QA aktif: `qa_assignee_id` = pengguna DAN `qa_status` belum PASSED/REVIEW
-     *     (REVIEW berarti laporan sudah naik dan bola ada di tangan Lead, bukan lagi
-     *     beban aktif pelaksana);
-     *   - Jalur Siber aktif: `cyber_assignee_id` = pengguna DAN `cyber_status` belum
-     *     PASSED/REVIEW (aturan sama dengan jalur QA).
-     *
-     * Proyek terminal (LIVE_PRODUCTION/CANCELLED/REJECTED) dikecualikan. Satu proyek
-     * dihitung sekali per orang meski ia memegang lebih dari satu peran di dalamnya
-     * (mis. analis sekaligus penerima disposisi QA), sesuai definisi "beban = jumlah
-     * proyek aktif" yang dipakai layar.
-     *
-     * Hanya pengguna yang bebannya lebih dari nol yang dikembalikan; sisanya dianggap 0
-     * oleh pemanggil. Bentuk data: `[{ id, name, active_load }]`.
+     * Menggabungkan penugasan analisis, QA, dan Siber tanpa mengikuti scope proyek
+     * pemanggil, tetapi hanya mengembalikan jumlah agregat. Proyek terminal diabaikan,
+     * REVIEW/PASSED bukan beban pelaksana, dan satu proyek dihitung sekali per orang.
+     * Bentuk data: `[{ id, name, active_load }]`; pengguna tanpa beban dianggap 0.
      */
     public function workload(): JsonResponse
     {
@@ -209,30 +180,9 @@ class UserController extends Controller
     /**
      * Hapus pengguna (penghapusan lunak), setelah dipastikan tidak memutus jejak audit.
      *
-     * `User` memakai `SoftDeletes`, jadi baris pengguna hanya ditandai terhapus dan
-     * setiap catatan yang menunjuk padanya tetap bisa menampilkan nama pelakunya.
-     * Meski begitu penghapusan tetap ditolak bila pengguna masih membawa jejak tata
-     * kelola, karena:
-     *
-     *   1. Enam kunci asing ke `users` bersifat `RESTRICT` (`projects.created_by`,
-     *      `project_status_histories.changed_by`, `project_team_members.user_id`,
-     *      `test_reports.tester_id`, `document_vaults.uploaded_by`,
-     *      `release_requests.requested_by`). Penghapusan permanen di kemudian hari akan
-     *      ditolak database; pemeriksaan di sini memberi alasannya dalam bahasa manusia
-     *      sebelum hal itu terjadi.
-     *   2. Kunci asing penugasan bersifat `SET NULL` (`pm_id`, `analyst_id`,
-     *      `qa_assignee_id`, `cyber_assignee_id`, `project_tasks.assignee_id`, dan
-     *      seterusnya). Penghapusan permanen tidak akan gagal, tetapi atribusinya hilang
-     *      diam-diam — proyek berjalan kehilangan PM-nya tanpa jejak.
-     *
-     * Untuk mencabut akses pengguna yang sudah memiliki jejak, gunakan penonaktifkan
-     * akun (`is_active = false`) lewat `PUT /users/{id}`: aksesnya hilang seketika,
-     * seluruh atribusinya tetap terbaca.
-     *
-     * `activity_logs` sengaja tidak dihitung sebagai penghalang. Setiap pengguna punya
-     * catatan login, sehingga menjadikannya penghalang berarti tidak ada satu akun pun
-     * yang bisa dihapus — termasuk akun yang salah dibuat dan belum pernah dipakai.
-     * Kolomnya `SET NULL`, jadi catatannya tetap ada dengan pelaku "System".
+     * Relasi tata kelola berstatus RESTRICT atau berisiko kehilangan atribusi sehingga
+     * menjadi penghalang. Gunakan `is_active = false` untuk mencabut akses akun yang
+     * memiliki histori. `activity_logs` tidak menghalangi karena relasinya `SET NULL`.
      */
     public function destroy(int $id): JsonResponse
     {

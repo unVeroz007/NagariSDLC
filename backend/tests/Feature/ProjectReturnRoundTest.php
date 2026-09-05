@@ -24,22 +24,8 @@ use Tests\TestCase;
 /**
  * Siklus hidup satu Putaran Pengembalian, dari sign-off TIDAK LULUS sampai tertutup.
  *
- * Yang dikunci pengujian ini adalah hal-hal yang membuat putaran pengembalian bermakna;
- * tanpa salah satunya, "pengembalian ke pengembangan" kembali menjadi sekadar satu baris
- * riwayat status yang tidak menuntut apa pun:
- *
- * 1. Putaran lahir tepat sekali pada sign-off TIDAK LULUS, dan tidak lahir pada LULUS.
- * 2. Nomor putaran diurut per (proyek, jalur) — dua jalur paralel tidak berbagi nomor.
- * 3. Gerbang keras pengajuan ulang menolak tiga hal dengan urutan dan pesannya sendiri:
- *    putaran tanpa task perbaikan, task tanpa penerima, dan task yang belum selesai.
- *    `take_down` sengaja tidak menahan — permintaan yang dibatalkan secara sadar tidak
- *    boleh mengunci proyek selamanya.
- * 4. Gerbang yang sama berlaku pada `PATCH /projects/{id}/status`, sehingga endpoint
- *    status tidak dapat dipakai memintas perbaikan. Penilaiannya per jalur: proyek yang
- *    dikembalikan Keamanan Siber tetap boleh memulai Pengujian QA.
- * 5. Verdikt `can_resubmit` pada `ProjectResource` harus selalu sepakat dengan
- *    `ProjectReturnRoundService::assertResubmitAllowed()`. Tombol "Ajukan Ulang" di layar
- *    mempercayai verdikt itu, jadi perbedaan pendapat di antara keduanya adalah cacat.
+ * Menjaga pembuatan dan penomoran per jalur, prasyarat task pengajuan ulang, penutupan
+ * pintu belakang transisi status, serta kesesuaian `can_resubmit` dengan service.
  *
  * @see \App\Services\ProjectReturnRoundService
  */

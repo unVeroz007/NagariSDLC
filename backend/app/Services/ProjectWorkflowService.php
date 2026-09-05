@@ -730,45 +730,9 @@ class ProjectWorkflowService
             }
         }
 
-        // Gerbang keras pengajuan ulang setelah proyek dikembalikan QA / Keamanan Siber.
-        //
-        // Jalan masuk resminya `TestingTrackService::submitRequest()`, dan gerbang yang
-        // sama sudah dipasang di sana. Gerbang ini menutup jalan masuk kedua:
-        // `PATCH /projects/{id}/status` dapat mendorong status utama langsung ke fase
-        // pengujian tanpa melewati service jalur, sehingga tanpa pemeriksaan di sini
-        // proyek yang perbaikannya belum selesai tetap bisa masuk antrean pengujian.
-        //
-        // Aturannya dinyatakan sebagai invarian atas status TUJUAN, bukan atas status
-        // sekarang. Pembatasan pada `RETURN_TO_DEV` saja tidak cukup karena matriks
-        // transisi juga mengizinkan masuk fase pengujian dari `READY_FOR_QA`,
-        // `QA_IN_PROGRESS`, `QA_PASSED`, `CYBER_IN_PROGRESS`, dan `CYBER_PASSED`.
-        // Contoh nyatanya: QA mengembalikan proyek, lalu Lead Keamanan Siber
-        // mendisposisikan jalurnya sehingga status utama pindah ke `CYBER_IN_PROGRESS`
-        // secara sah — sejak titik itu proyeknya tidak lagi berstatus `RETURN_TO_DEV`,
-        // dan gerbang yang mensyaratkan status tersebut tidak akan pernah menyala lagi
-        // meski perbaikan QA-nya belum satu pun selesai.
-        //
-        // Sengaja dinilai per jalur — dua jalur berjalan paralel, jadi proyek yang
-        // dikembalikan Keamanan Siber tetap boleh memulai Pengujian QA yang belum jalan.
-        // Jalur yang tidak memiliki putaran terbuka selalu lolos tanpa efek samping.
-        // `QA_PASSED` dan `CYBER_PASSED` WAJIB ikut dinilai, bukan hanya status masuk
-        // antrean. `syncTestingTrackStatuses()` menulis kolom jalur menjadi PASSED tanpa
-        // syarat pada kedua status itu, sehingga tanpa keduanya di sini kelulusan dapat
-        // dicetak dalam dua langkah yang masing-masing sah:
-        //
-        //   1. Lead QA sign-off TIDAK LULUS. Proyek RETURN_TO_DEV, qa_status FAILED,
-        //      putaran QA terbuka, nol task perbaikan.
-        //   2. Lead Keamanan Siber pindah ke CYBER_IN_PROGRESS — lolos, karena jalur
-        //      Siber memang tidak punya putaran terbuka.
-        //   3. Lead QA pindah ke QA_PASSED dari CYBER_IN_PROGRESS — matriks
-        //      mengizinkannya, role-nya berwenang, dan sebelumnya gerbang ini tidak
-        //      menyala. qa_status menjadi PASSED sementara putaran QA-nya tetap
-        //      terbuka selamanya (`close()` hanya berjalan dari `submitRequest()`),
-        //      lalu `hasPassedAllTestingTracks()` meloloskan PENDING_GOLIVE.
-        //
-        // Hasilnya kode yang belum pernah diuji ulang naik ke produksi dengan catatan
-        // kegagalannya masih menganga. Rute kebalikannya ada untuk jalur Siber dengan
-        // QA_PASSED sebagai langkah perantara, jadi keduanya ditutup bersamaan.
+        // Tutup pintu belakang transisi langsung ke fase QA/Siber. Gerbang dinilai dari
+        // status tujuan dan per jalur agar putaran terbuka selalu diselesaikan, termasuk
+        // saat status utama telah digerakkan oleh jalur paralel.
         $resubmittedTrack = match ($targetStatus) {
             ProjectStatus::READY_FOR_QA, ProjectStatus::QA_IN_PROGRESS, ProjectStatus::QA_PASSED => TestingTrack::QA,
             ProjectStatus::CYBER_IN_PROGRESS, ProjectStatus::CYBER_PASSED => TestingTrack::CYBER,

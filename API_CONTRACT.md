@@ -1,131 +1,47 @@
-# SPESIFIKASI KONTRAK REST API (BACKEND API CONTRACT)
-## **NagariSDLC - System Governance & SDLC Management**
-**Bank Nagari**
+# Kontrak REST API NagariSDLC
 
-Dokumentasi ini menyajikan kontrak endpoint REST API JSON yang dibutuhkan oleh aplikasi frontend **NagariSDLC** untuk dapat langsung terhubung dengan Backend Service Bank Nagari.
+**Status:** ringkasan aktif. Referensi endpoint lengkap berada di
+[`docs/API_REFERENCE.md`](docs/API_REFERENCE.md), sedangkan route yang benar-benar
+aktif berada di [`backend/routes/api.php`](backend/routes/api.php).
 
----
+Dokumen versi awal menggunakan JWT, endpoint workspace khusus, dan status
+`APPROVED_FOR_RELEASE`. Rancangan tersebut sudah tidak berlaku. Implementasi saat
+ini menggunakan Laravel Sanctum dan state machine `ProjectStatus`.
 
-## 1. BASE CONFIGURATION & AUTHENTICATION
+## Konfigurasi dasar
 
-* **Base URL**: `https://sdlc-api.banknagari.co.id/api/v1`
-* **Authentication Method**: JWT (JSON Web Token) via Bearer Header.
-* **Header Default**:
-  ```http
-  Authorization: Bearer <JWT_TOKEN>
-  Content-Type: application/json
-  ```
+- Base URL development: `http://localhost:8000/api/v1`.
+- Format respons: `{ "status": "success|error", "message": "...", "data": ..., "meta"?: ... }`.
+- SPA memakai cookie Sanctum `HttpOnly` dengan `credentials: 'include'`.
+- Request berbasis cookie wajib menyertakan `X-Requested-With: XMLHttpRequest`.
+- Header `Authorization: Bearer <token>` tetap diterima untuk Postman, test, dan
+  klien non-browser yang kompatibel.
+- Link approval UAT eksternal menggunakan token tautan dan header akses terpisah,
+  bukan sesi aplikasi.
 
----
+## Kelompok endpoint aktif
 
-## 2. MODUL AUTENTIKASI (`/auth`)
+| Modul | Endpoint utama |
+|---|---|
+| Autentikasi | `/auth/register`, `/auth/login`, `/auth/me`, `/auth/refresh`, `/auth/logout`, `/auth/forgot-password`, `/auth/reset-password` |
+| Proyek | `/projects`, `/projects/{id}`, `/projects/{id}/status`, `/projects/{id}/timeline`, `/projects/{id}/team` |
+| Task | `/projects/{projectId}/tasks`, `/tasks/{taskId}`, `/tasks/{taskId}/request-revision` |
+| SIT/UAT | `/projects/{id}/sit-gate`, `/projects/{id}/sit-approval`, `/projects/{id}/uat-execution`, `/projects/{id}/uat-approval-matrix` |
+| QA | `/qa-requests/submit`, `/qa-requests/assign`, `/qa-requests/report`, `/qa-requests/sign-off` |
+| Siber | `/cyber-requests/submit`, `/cyber-requests/assign`, `/cyber-requests/report`, `/cyber-requests/sign-off` |
+| Rilis | `/release-requests`, `/quality-gate/queue`, `/quality-gate/approve`, `/quality-gate/reject` |
+| Dokumen | `/documents`, `/documents/{id}/download` |
+| Administrasi | `/users`, `/roles`, `/groups`, `/divisions`, `/activity-logs` |
+| Dashboard | `/dashboard/summary`, `/dashboard/analytics` |
+| Operasional | `/health` |
 
-### `POST /auth/login`
-Memverifikasi kredensial pengguna dan mengembalikan sesi JWT.
-* **Request Body**:
-  ```json
-  {
-    "email": "user@banknagari.co.id",
-    "password": "password123"
-  }
-  ```
-* **Response 200 OK**:
-  ```json
-  {
-    "success": true,
-    "token": "eyJhbGciOiJIUzI1NiIsInR5cCI...",
-    "user": {
-      "id": 1,
-      "name": "Ahmad Fauzi",
-      "email": "admin@banknagari.co.id",
-      "role": "super_admin",
-      "department": "Divisi TI",
-      "nip": "199001011234"
-    }
-  }
-  ```
+## Aturan kontrak penting
 
-### `GET /auth/me`
-Mendapatkan profil pengguna yang sedang login berdasarkan token.
-
----
-
-## 3. MODUL MANAJEMEN PROYEK (`/projects`)
-
-### `GET /projects`
-Mendapatkan daftar seluruh proyek SDLC.
-* **Query Parameters**: `status`, `type` (RBB/NON_RBB), `division`, `search`.
-* **Response 200 OK**:
-  ```json
-  {
-    "data": [
-      {
-        "id": "PRJ-2026-099",
-        "name": "Modul Pelaporan OJK Terpusat",
-        "type": "RBB",
-        "typeLabel": "RBB (Wajib Selesai)",
-        "rbbDeadline": "2026-08-02",
-        "division": "Divisi Kepatuhan",
-        "phase": "Fase 1: Inisiasi",
-        "status": "READY_FOR_DEVELOPMENT",
-        "targetDate": "30 Mar 2026",
-        "pm": { "id": 2, "name": "Budi Santoso" }
-      }
-    ]
-  }
-  ```
-
-### `POST /projects`
-Inisiasi proyek baru oleh Business User.
-* **Request Body**:
-  ```json
-  {
-    "name": "Aplikasi E-Form KPR",
-    "type": "RBB",
-    "rbbDeadline": "2026-11-30",
-    "division": "Divisi Kredit",
-    "description": "Pengajuan KPR online nasabah.",
-    "targetDate": "2026-10-15"
-  }
-  ```
-
-### `PATCH /projects/:id/status`
-Transisi status fase proyek.
-* **Request Body**:
-  ```json
-  {
-    "status": "APPROVED_FOR_RELEASE",
-    "phase": "Fase 4: Rilis Produksi (Live)",
-    "notes": "Quality Gate lulus 4 pilar."
-  }
-  ```
-
----
-
-## 4. MODUL TASK & KANBAN (`/projects/:id/tasks`)
-
-### `GET /projects/:projectId/tasks`
-Mendapatkan daftar task pada suatu proyek.
-
-### `POST /projects/:projectId/tasks`
-Membuat task pengembang baru.
-
----
-
-## 5. MODUL QUALITY GATE & RELEASE (`/quality-gate`)
-
-### `GET /quality-gate/queue`
-Mendapatkan antrean rilis yang menunggu approval Head of IT.
-
-### `POST /quality-gate/:releaseId/approve`
-Memberikan persetujuan rilis ke lingkungan produksi.
-
----
-
-## 6. MODUL AUDIT LOG (`/admin/activity-log`)
-
-### `GET /admin/activity-log`
-Mendapatkan daftar audit trail sistem.
-
----
-*Kontrak API ini diselaraskan dengan service abstraction layer `frontend/src/services/api.js`.*
+1. Semua perubahan `projects.status` melalui
+   `ProjectWorkflowService::transition()`.
+2. QA dan Siber berjalan paralel menggunakan `qa_status` dan `cyber_status`.
+3. Go-live hanya dapat diajukan setelah kedua jalur berstatus `PASSED`.
+4. Tidak ada UAT final setelah QA/Siber. `READY_FOR_UAT` hanya status legacy.
+5. Validasi write menggunakan Form Request.
+6. Bentuk field aktual harus mengikuti API Resource dan contoh pada
+   `docs/API_REFERENCE.md`, bukan contoh kontrak historis.

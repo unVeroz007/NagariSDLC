@@ -7,43 +7,9 @@ import { POLLING_INTERVAL_MS } from '../constants/polling';
 const NotificationContext = createContext();
 
 /**
- * src/contexts/NotificationContext.jsx
- *
- * Satu sumber notifikasi untuk seluruh aplikasi: kotak masuk `GET /notifications`
- * di backend, ditambah jalur terpisah untuk pemberitahuan yang hanya ada di
- * peramban.
- *
- * Sebelumnya provider ini adalah penyimpanan localStorage murni: seluruh isi
- * lonceng dan blok "Aktivitas Terkini" di dashboard berasal dari
- * `addNotification()` yang dipanggil halaman setelah aksinya sendiri berhasil.
- * Akibatnya notifikasi yang ditulis backend — perpindahan status proyek pada
- * `ProjectWorkflowService`, pergerakan jalur pengujian pada `TestingTrackService`
- * — tidak pernah terlihat oleh siapa pun; `notificationService` di `api.js` ada
- * tetapi tidak punya satu pun pemanggil. Sebaliknya, isi lonceng bergantung pada
- * peramban mana yang dipakai: notifikasi tidak muncul di perangkat lain, dan
- * peristiwa yang terjadi saat pengguna tidak sedang membuka aplikasi hilang sama
- * sekali.
- *
- * Pembagian sekarang:
- *
- *   - `source: 'server'` — baris tabel `notifications`. Inilah sumber kebenaran.
- *     Persisten, lintas perangkat, dan status terbacanya disimpan backend.
- *   - `source: 'local'` — hasil `addNotification()`. Umpan balik seketika atas
- *     aksi pengguna sendiri, sebagian membawa `relatedUrl` sebagai pintasan
- *     navigasi. TIDAK dapat dipersistenkan: API tidak menyediakan endpoint untuk
- *     membuat notifikasi (`routes/api.php` hanya punya GET index, PATCH read, dan
- *     PATCH read-all), jadi jalur ini hidup di memori satu sesi tab saja dan
- *     hilang saat halaman dimuat ulang. Itu dapat diterima karena peristiwa alur
- *     kerja yang mendasarinya tetap dicatat backend dan kembali lewat jalur
- *     server.
- *
- * localStorage sengaja tidak lagi dipakai sama sekali. Menyimpan salinan kedua di
- * peramban berarti dua sumber yang saling bersaing tanpa cara merekonsiliasinya:
- * status terbaca di server tidak bisa dicerminkan ke salinan lokal, notifikasi
- * yang sudah ditandai terbaca di perangkat lain akan kembali muncul sebagai belum
- * dibaca, dan — seperti dicatat versi sebelumnya berkas ini — isinya tidak pernah
- * dibersihkan saat logout sehingga lencana "belum dibaca" milik pengguna
- * sebelumnya masih tampil di komputer kerja bersama.
+ * Menggabungkan notifikasi server yang persisten dengan notifikasi lokal satu sesi.
+ * Server tetap menjadi sumber kebenaran; item lokal hanya memberi umpan balik cepat
+ * dan tidak disimpan di localStorage.
  */
 
 /**

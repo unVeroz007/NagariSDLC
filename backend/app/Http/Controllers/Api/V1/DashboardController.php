@@ -31,24 +31,8 @@ class DashboardController extends Controller
     /**
      * Ringkasan angka untuk kartu dasbor, disaring sesuai wewenang pengguna.
      *
-     * Penyaringannya didelegasikan ke `ProjectAccessService` — sumber kebenaran yang
-     * sama dengan `GET /projects`. Sebelumnya method ini menyimpan salinan aturan
-     * visibilitasnya sendiri sebagai rangkaian `elseif`, dan salinan itu sudah
-     * menyimpang dari aslinya dalam tiga hal:
-     *
-     *   1. role yang tidak tercantum (`development_lead`, `dev_analyst`, `lead_group`)
-     *      jatuh ke luar seluruh cabang tanpa satu pun filter, sehingga menghitung
-     *      seluruh portofolio bank;
-     *   2. cabang `analyst` memakai `where(...)->orWhereIn(...)` tanpa pengelompokan,
-     *      sehingga setiap hitungan turunan menjadi
-     *      `analyst_id = X OR (status IN (...) AND status = 'PENDING')` — angka
-     *      "pending" ikut memuat seluruh proyek analis itu apa pun statusnya;
-     *   3. cabang QA/Siber hanya melihat `projects.status`, padahal kolom jalur
-     *      (`qa_status`/`cyber_status`) adalah kebenaran jalurnya.
-     *
-     * Satu query agregat dipakai untuk kelima angka. Lima `clone` + lima `count()`
-     * sebelumnya menjalankan lima kali penyaring yang sama, termasuk subkueri
-     * `whereHas` milik role developer.
+     * Gunakan `ProjectAccessService`, sama seperti `GET /projects`, agar scope role
+     * dan status jalur QA/Siber konsisten. Kelima nilai dihitung dalam satu agregasi.
      */
     public function summary(Request $request): JsonResponse
     {

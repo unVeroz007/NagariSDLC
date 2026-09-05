@@ -14,7 +14,8 @@ Instruksi root `../AGENTS.md` tetap berlaku dan wajib dibaca lebih dahulu.
 ## Stack aktual
 
 - PHP 8.3 dan Laravel 13.
-- Laravel Sanctum untuk autentikasi token.
+- Laravel Sanctum; SPA memakai cookie token `HttpOnly`, sedangkan Bearer
+  eksplisit tetap didukung untuk test dan klien non-browser.
 - Laravel Reverb tersedia, tetapi rancangan infrastruktur produksi belum final.
 - Database mengikuti konfigurasi environment; target produksi belum diputuskan.
 - PHPUnit/Pest-compatible Laravel test runner tersedia, tetapi test dijalankan hanya
